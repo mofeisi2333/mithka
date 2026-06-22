@@ -26,6 +26,7 @@ const Map<String, IconData> _map = {
   'magnifyingglass': CupertinoIcons.search,
   'line.3.horizontal': Icons.menu,
   'arrow.left': Icons.arrow_back,
+  'arrow.up': CupertinoIcons.arrow_up,
 
   // Tabs
   'message.fill': CupertinoIcons.chat_bubble_2_fill,

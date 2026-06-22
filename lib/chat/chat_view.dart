@@ -6,6 +6,8 @@
 //  input bar. Backed by ChatViewModel. Port of the Swift `ChatView`.
 //
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../components/toast.dart';
 import 'package:flutter/services.dart';
@@ -48,6 +50,9 @@ class _ChatViewState extends State<ChatView> {
   bool _reactionExpanded = false; // full reaction picker vs. quick bar
   String _reactionTab = 'standard'; // 'standard' or a custom-emoji pack id
   int _lastCount = 0;
+  bool _showJumpDown = false; // scrolled up → show jump-to-bottom button
+  bool _bannerDismissed = false; // "N条新消息" banner dismissed / caught up
+  Timer? _bannerTimer; // auto-hides the banner a few seconds after it appears
 
   /// Gap (seconds) between messages that triggers a fresh time separator.
   static const _separatorGap = 300;
@@ -61,7 +66,41 @@ class _ChatViewState extends State<ChatView> {
   }
 
   void _onScroll() {
-    if (_scroll.hasClients && _scroll.position.pixels < 500) _vm.loadOlder();
+    if (!_scroll.hasClients) return;
+    final pos = _scroll.position;
+    if (pos.pixels < 500) _vm.loadOlder();
+    // Show the jump-to-bottom button once scrolled up from the newest message.
+    final show = pos.maxScrollExtent - pos.pixels > 120;
+    if (show != _showJumpDown) setState(() => _showJumpDown = show);
+  }
+
+  void _animateToBottom() {
+    if (!_scroll.hasClients) return;
+    _scroll.animateTo(
+      _scroll.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+  }
+
+  /// Jump to the first unread incoming message (where the "以下为新消息" divider
+  /// sits); fall back to the bottom if none is loaded.
+  void _jumpToFirstUnread() {
+    setState(() => _bannerDismissed = true);
+    final i = _vm.messages.indexWhere(
+      (m) => !m.isOutgoing && !m.isService && m.id > _vm.lastReadInboxId,
+    );
+    if (i < 0 || !_scroll.hasClients) {
+      _animateToBottom();
+      return;
+    }
+    final max = _scroll.position.maxScrollExtent;
+    final target = (max * (i / _vm.messages.length)).clamp(0.0, max);
+    _scroll.animateTo(
+      target,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
   }
 
   void _onModel() {
@@ -73,6 +112,12 @@ class _ChatViewState extends State<ChatView> {
         WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
       }
     }
+    // The "N条新消息" banner shows on entry, then auto-hides after a few seconds.
+    if (_vm.unreadCount > 0 && _bannerTimer == null && !_bannerDismissed) {
+      _bannerTimer = Timer(const Duration(seconds: 6), () {
+        if (mounted) setState(() => _bannerDismissed = true);
+      });
+    }
     setState(() {});
   }
 
@@ -83,6 +128,7 @@ class _ChatViewState extends State<ChatView> {
 
   @override
   void dispose() {
+    _bannerTimer?.cancel();
     _vm.removeListener(_onModel);
     _vm.onDisappear();
     _vm.dispose();
@@ -231,8 +277,89 @@ class _ChatViewState extends State<ChatView> {
               ChatInputBar(vm: _vm, onStartCall: _startCall),
             ],
           ),
+          if (_showJumpDown) _jumpToBottomButton(),
+          if (_vm.unreadCount > 0 && !_bannerDismissed) _newMessagesBanner(),
           if (_actionTarget != null) _actionMenuOverlay(),
         ],
+      ),
+    );
+  }
+
+  /// Small bottom-right button to return to the newest message; shown only when
+  /// the user has scrolled up.
+  Widget _jumpToBottomButton() {
+    final c = context.colors;
+    return Positioned(
+      right: 16,
+      bottom: 84,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _animateToBottom,
+        child: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: c.navBar,
+            shape: BoxShape.circle,
+            border: Border.all(color: c.divider, width: 0.5),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.12),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Icon(sfIcon('chevron.down'), size: 20, color: c.textSecondary),
+        ),
+      ),
+    );
+  }
+
+  /// Top-left "N条新消息" pill; tap jumps up to the first unread message.
+  Widget _newMessagesBanner() {
+    final c = context.colors;
+    final top =
+        MediaQuery.of(context).padding.top +
+        48 +
+        ((_vm.pinnedMessage != null && !_vm.pinnedDismissed) ? 44 : 0) +
+        8;
+    return Positioned(
+      left: 12,
+      top: top,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _jumpToFirstUnread,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            color: c.navBar,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: c.divider, width: 0.5),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.10),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(sfIcon('arrow.up'), size: 14, color: AppTheme.brand),
+              const SizedBox(width: 5),
+              Text(
+                '${_vm.unreadCount}条新消息',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: c.textPrimary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
