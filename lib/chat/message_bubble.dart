@@ -17,6 +17,8 @@ import '../components/photo_avatar.dart';
 import '../components/sf_symbols.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
+import '../tdlib/json_helpers.dart';
+import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import 'animated_sticker_view.dart';
 import 'custom_emoji.dart';
@@ -319,6 +321,7 @@ class _MessageBubbleState extends State<MessageBubble> {
         width: s.width,
         height: s.height,
         child: Stack(
+          fit: StackFit.expand,
           children: [
             if (message.image != null && !_stickerReady)
               TDImage(photo: message.image, cornerRadius: 8),
@@ -778,16 +781,9 @@ class _MessageBubbleState extends State<MessageBubble> {
               ],
             ),
           ),
-          Container(
-            height: 120,
-            color: c.groupedBackground,
-            child: Center(
-              child: Icon(
-                sfIcon('mappin.and.ellipse'),
-                size: 36,
-                color: AppTheme.brand,
-              ),
-            ),
+          _MapThumbnail(
+            latitude: location.latitude,
+            longitude: location.longitude,
           ),
         ],
       ),
@@ -934,5 +930,71 @@ class _MessageBubbleState extends State<MessageBubble> {
       default:
         return ext.length > 4 ? ext.substring(0, 4) : ext;
     }
+  }
+}
+
+/// Static map preview for a location message. Telegram renders the map tile via
+/// getMapThumbnailFile (no marker); we overlay a centre pin.
+class _MapThumbnail extends StatefulWidget {
+  const _MapThumbnail({required this.latitude, required this.longitude});
+  final double latitude;
+  final double longitude;
+
+  @override
+  State<_MapThumbnail> createState() => _MapThumbnailState();
+}
+
+class _MapThumbnailState extends State<_MapThumbnail> {
+  TdFileRef? _ref;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final res = await TdClient.shared.query({
+        '@type': 'getMapThumbnailFile',
+        'location': {
+          '@type': 'location',
+          'latitude': widget.latitude,
+          'longitude': widget.longitude,
+        },
+        'zoom': 16,
+        'width': 220,
+        'height': 120,
+        'scale': 2,
+        'chat_id': 0,
+      });
+      final id = res.integer('id');
+      if (mounted && id != null) setState(() => _ref = TdFileRef(id: id));
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return SizedBox(
+      height: 120,
+      width: double.infinity,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (_ref != null)
+            TDImage(photo: _ref, cornerRadius: 0)
+          else
+            Container(color: c.groupedBackground),
+          Center(
+            child: Icon(
+              sfIcon('mappin.and.ellipse'),
+              size: 32,
+              color: AppTheme.brand,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

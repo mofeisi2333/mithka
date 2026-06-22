@@ -130,7 +130,13 @@ class _ChatInputBarState extends State<ChatInputBar> {
     if (!status.isGranted) return;
     final r = FlutterSoundRecorder();
     await r.openRecorder();
-    _recorder = r;
+    if (!mounted) {
+      await r.closeRecorder();
+      return;
+    }
+    // setState so the panel rebuilds with the recorder ready — otherwise the
+    // press handlers keep seeing a stale `granted == false` and never record.
+    setState(() => _recorder = r);
   }
 
   Future<void> _startRec() async {
@@ -706,7 +712,13 @@ class _ChatInputBarState extends State<ChatInputBar> {
           Listener(
             onPointerDown: (e) {
               _pressStartY = e.position.dy;
-              if (granted) _startRec();
+              // Check the recorder live (not the build-time `granted`) so a press
+              // right after the panel opens still records; otherwise prime it.
+              if (_recorder != null) {
+                _startRec();
+              } else {
+                _prepareRecorder();
+              }
             },
             onPointerMove: (e) {
               if (!_recording) return;
@@ -716,7 +728,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
               }
             },
             onPointerUp: (_) {
-              if (granted) {
+              if (_recorder != null) {
                 _stopRec();
               } else {
                 _prepareRecorder();

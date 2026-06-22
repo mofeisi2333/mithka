@@ -1,4 +1,6 @@
 PODS:
+  - apple_maps_flutter (0.0.1):
+    - Flutter
   - Flutter (1.0.0)
   - flutter_sound (9.30.0):
     - Flutter
@@ -8,6 +10,7 @@ PODS:
     - Flutter
 
 DEPENDENCIES:
+  - apple_maps_flutter (from `.symlinks/plugins/apple_maps_flutter/ios`)
   - Flutter (from `Flutter`)
   - flutter_sound (from `.symlinks/plugins/flutter_sound/ios`)
   - open_filex (from `.symlinks/plugins/open_filex/ios`)
@@ -17,6 +20,8 @@ SPEC REPOS:
     - flutter_sound_core
 
 EXTERNAL SOURCES:
+  apple_maps_flutter:
+    :path: ".symlinks/plugins/apple_maps_flutter/ios"
   Flutter:
     :path: Flutter
   flutter_sound:
@@ -25,6 +30,7 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/open_filex/ios"
 
 SPEC CHECKSUMS:
+  apple_maps_flutter: 2237d66a8e242082a2d88134af372f7b3375d7a6
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   flutter_sound: d95194f6476c9ad211d22b3a414d852c12c7ca44
   flutter_sound_core: 7f2626d249d3a57bfa6da892ef7e22d234482c1a
