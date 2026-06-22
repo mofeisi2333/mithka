@@ -273,92 +273,98 @@ class _ChatViewState extends State<ChatView> {
               _header(),
               if (_vm.pinnedMessage != null && !_vm.pinnedDismissed)
                 _pinnedBar(_vm.pinnedMessage!),
-              Expanded(child: _transcript()),
+              // Both scroll affordances float INSIDE the transcript area, so the
+              // banner sits just below the pinned bar and the jump button just
+              // above the input bar — no overlap, no magic offsets.
+              Expanded(
+                child: Stack(
+                  children: [
+                    _transcript(),
+                    if (_vm.unreadCount > 0 && !_bannerDismissed)
+                      Positioned(
+                        top: 8,
+                        right: 12,
+                        child: _newMessagesBanner(),
+                      ),
+                    if (_showJumpDown)
+                      Positioned(
+                        right: 16,
+                        bottom: 12,
+                        child: _jumpToBottomButton(),
+                      ),
+                  ],
+                ),
+              ),
               ChatInputBar(vm: _vm, onStartCall: _startCall),
             ],
           ),
-          if (_showJumpDown) _jumpToBottomButton(),
-          if (_vm.unreadCount > 0 && !_bannerDismissed) _newMessagesBanner(),
           if (_actionTarget != null) _actionMenuOverlay(),
         ],
       ),
     );
   }
 
-  /// Small bottom-right button to return to the newest message; shown only when
-  /// the user has scrolled up.
+  /// Small button (bottom-right of the transcript) to return to the newest
+  /// message; shown only when the user has scrolled up.
   Widget _jumpToBottomButton() {
     final c = context.colors;
-    return Positioned(
-      right: 16,
-      bottom: 84,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: _animateToBottom,
-        child: Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: c.navBar,
-            shape: BoxShape.circle,
-            border: Border.all(color: c.divider, width: 0.5),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.12),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Icon(sfIcon('chevron.down'), size: 20, color: c.textSecondary),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _animateToBottom,
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: c.navBar,
+          shape: BoxShape.circle,
+          border: Border.all(color: c.divider, width: 0.5),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.12),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
+        child: Icon(sfIcon('chevron.down'), size: 20, color: c.textSecondary),
       ),
     );
   }
 
-  /// Top-left "N条新消息" pill; tap jumps up to the first unread message.
+  /// Top-right "N条新消息" pill; tap jumps up to the first unread message.
   Widget _newMessagesBanner() {
     final c = context.colors;
-    final top =
-        MediaQuery.of(context).padding.top +
-        48 +
-        ((_vm.pinnedMessage != null && !_vm.pinnedDismissed) ? 44 : 0) +
-        8;
-    return Positioned(
-      left: 12,
-      top: top,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: _jumpToFirstUnread,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          decoration: BoxDecoration(
-            color: c.navBar,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: c.divider, width: 0.5),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.10),
-                blurRadius: 6,
-                offset: const Offset(0, 2),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _jumpToFirstUnread,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: c.navBar,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: c.divider, width: 0.5),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.10),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(sfIcon('arrow.up'), size: 14, color: AppTheme.brand),
+            const SizedBox(width: 5),
+            Text(
+              '${_vm.unreadCount}条新消息',
+              style: TextStyle(
+                fontSize: 13,
+                color: c.textPrimary,
+                fontWeight: FontWeight.w500,
               ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(sfIcon('arrow.up'), size: 14, color: AppTheme.brand),
-              const SizedBox(width: 5),
-              Text(
-                '${_vm.unreadCount}条新消息',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: c.textPrimary,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
