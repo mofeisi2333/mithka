@@ -47,6 +47,7 @@ class ChatViewModel extends ChangeNotifier {
   int lastReadOutboxId = 0; // outgoing messages with id <= this are read
   int lastReadInboxId = 0; // incoming messages with id <= this are read
   int unreadCount = 0; // unread incoming messages on entry (for the divider)
+  bool initialLoaded = false; // first history page (+ unread boundary) is in
 
   // 群公告 / pinned message shown in a bar below the header.
   ChatMessage? pinnedMessage;
@@ -114,6 +115,12 @@ class ChatViewModel extends ChangeNotifier {
       await _loadMe();
       await _loadChatHeader();
       await _loadInitialHistory();
+      initialLoaded = true;
+      notifyListeners();
+      // Mark the chat read once positioned, so the badge clears and the next
+      // open lands at the latest message. The unread snapshot for this session's
+      // "以下为新消息" divider was already captured in _loadChatHeader.
+      _markChatRead();
     }();
   }
 
@@ -131,6 +138,19 @@ class ChatViewModel extends ChangeNotifier {
     _sub?.cancel();
     _sub = null;
     _client.send({'@type': 'closeChat', 'chat_id': chatId});
+  }
+
+  /// Marks the chat read up to its latest message (force_read), clearing the
+  /// unread badge. Viewing the newest message advances last_read_inbox_message_id
+  /// past everything older, so a single id suffices.
+  void _markChatRead() {
+    if (messages.isEmpty || unreadCount <= 0) return;
+    _client.send({
+      '@type': 'viewMessages',
+      'chat_id': chatId,
+      'message_ids': [messages.last.id],
+      'force_read': true,
+    });
   }
 
   @override
@@ -667,7 +687,26 @@ class ChatViewModel extends ChangeNotifier {
 
   Future<void> _loadInitialHistory() async {
     await _fetchHistory(0, 0, 40);
-    if (messages.length < 12 && messages.isNotEmpty) {
+    if (messages.isEmpty) return;
+    // Telegram-style entry: open at the first unread message. Page older until
+    // a read message precedes the first unread (so the divider is loaded with
+    // context above it). Bounded so a large backlog can't stall the open — the
+    // view falls back to the bottom if the boundary still isn't reached.
+    if (unreadCount > 0 && lastReadInboxId > 0) {
+      var guard = 0;
+      while (messages.first.id > lastReadInboxId && guard < 6) {
+        final before = messages.first.id;
+        await _fetchHistory(
+          before,
+          0,
+          40,
+          isOlder: true,
+          restorePosition: false,
+        );
+        if (messages.first.id == before) break; // no older messages left
+        guard++;
+      }
+    } else if (messages.length < 12) {
       await _fetchHistory(messages.first.id, 0, 40);
     }
   }
@@ -677,6 +716,7 @@ class ChatViewModel extends ChangeNotifier {
     int offset,
     int limit, {
     bool isOlder = false,
+    bool restorePosition = true,
   }) async {
     final anchor = messages.isNotEmpty ? messages.first.id : null;
     Map<String, dynamic> response;
@@ -701,7 +741,10 @@ class ChatViewModel extends ChangeNotifier {
     if (parsed.isEmpty) return;
 
     _merge(parsed);
-    if (isOlder && anchor != null && messages.first.id != anchor) {
+    if (isOlder &&
+        restorePosition &&
+        anchor != null &&
+        messages.first.id != anchor) {
       _restoreTopId = anchor;
     }
     _resolveSendersIfNeeded(parsed);

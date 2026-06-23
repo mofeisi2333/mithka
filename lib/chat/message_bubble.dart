@@ -43,6 +43,7 @@ class MessageBubble extends StatefulWidget {
     this.onAvatarTap,
     this.onAvatarLongPress,
     this.onOpenImage,
+    this.onPlayVideo,
     this.onToggleReaction,
     this.onRedial,
     this.isRead = false,
@@ -61,6 +62,7 @@ class MessageBubble extends StatefulWidget {
   final ValueChanged<ChatMessage>? onAvatarTap;
   final ValueChanged<ChatMessage>? onAvatarLongPress;
   final ValueChanged<ChatMessage>? onOpenImage;
+  final ValueChanged<ChatMessage>? onPlayVideo;
   final ValueChanged<MessageReaction>? onToggleReaction;
   final ValueChanged<bool>?
   onRedial; // tap a call log to redial (bool = isVideo)
@@ -358,6 +360,7 @@ class _MessageBubbleState extends State<MessageBubble> {
         ),
       );
     }
+    if (message.video != null) return _videoContent(outgoing);
     if (message.image != null) return _imageContent(message.image!, outgoing);
     if (message.location != null) return _locationBubble(message.location!);
     if (message.voice != null) return _voiceBubble(message.voice!, outgoing);
@@ -664,6 +667,86 @@ class _MessageBubbleState extends State<MessageBubble> {
             // Fit (contain) so the whole image shows at its aspect ratio — never
             // cropped. The box is already aspect-correct when dimensions are known.
             child: TDImage(photo: image, cornerRadius: 10, fit: BoxFit.contain),
+          ),
+        ),
+        if (caption != null) ...[
+          const SizedBox(height: 4),
+          _textBubble(caption, outgoing),
+        ],
+      ],
+    );
+  }
+
+  /// A video message: its thumbnail with a play button + duration badge.
+  /// Tapping opens the fullscreen player (which downloads + plays the file).
+  Widget _videoContent(bool outgoing) {
+    final size = _imageDisplaySize();
+    final caption = _caption();
+    final dur = message.videoDuration ?? 0;
+    return Column(
+      crossAxisAlignment: outgoing
+          ? CrossAxisAlignment.end
+          : CrossAxisAlignment.start,
+      children: [
+        GestureDetector(
+          onTap: () => widget.onPlayVideo?.call(message),
+          child: SizedBox(
+            width: size.width,
+            height: size.height,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: message.image != null
+                      ? TDImage(
+                          photo: message.image,
+                          cornerRadius: 10,
+                          fit: BoxFit.cover,
+                        )
+                      : Container(color: Colors.black26),
+                ),
+                // Play button.
+                Center(
+                  child: Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.45),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      sfIcon('play.fill'),
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                  ),
+                ),
+                // Duration badge.
+                if (dur > 0)
+                  Positioned(
+                    left: 6,
+                    bottom: 6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        _durationString(dur),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
         if (caption != null) ...[

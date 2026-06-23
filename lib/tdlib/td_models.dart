@@ -195,6 +195,8 @@ class ChatMessage {
     this.senderTitle,
     this.animatedSticker,
     this.videoSticker,
+    this.video,
+    this.videoDuration,
     this.stickerFileId,
     this.stickerSetId,
     this.isAnimatedEmoji = false,
@@ -231,6 +233,8 @@ class ChatMessage {
   String? senderTitle;
   TdFileRef? animatedSticker; // .tgs (Lottie) sticker file
   TdFileRef? videoSticker; // .webm video sticker file
+  TdFileRef? video; // playable video file (messageVideo)
+  int? videoDuration; // seconds, for the duration badge
   int? stickerFileId; // any sticker's file id (for "add to favorites")
   int? stickerSetId; // the sticker's set id (for 表情详情)
   bool isAnimatedEmoji; // single-emoji message (messageAnimatedEmoji)
@@ -487,6 +491,8 @@ abstract final class TDParse {
         document: media.document,
         animatedSticker: media.animated,
         videoSticker: media.videoSticker,
+        video: media.video,
+        videoDuration: media.videoDuration,
         stickerFileId: media.stickerFileId,
         stickerSetId: media.stickerSetId,
         isAnimatedEmoji: media.isAnimatedEmoji,
@@ -667,6 +673,8 @@ abstract final class TDParse {
               video.obj('thumbnail')?.obj('file'),
               miniThumb: mini,
             ),
+            video: fileRef(video.obj('video')),
+            videoDuration: video.integer('duration'),
             width: video.integer('width'),
             height: video.integer('height'),
           );
@@ -904,6 +912,8 @@ class MediaAttachment {
     this.document,
     this.animated,
     this.videoSticker,
+    this.video,
+    this.videoDuration,
     this.stickerFileId,
     this.stickerSetId,
     this.isAnimatedEmoji = false,
@@ -914,6 +924,8 @@ class MediaAttachment {
   final MessageDocument? document;
   final TdFileRef? animated; // .tgs Lottie sticker
   final TdFileRef? videoSticker; // .webm video sticker
+  final TdFileRef? video; // playable video file (messageVideo)
+  final int? videoDuration; // seconds
   final int? stickerFileId; // any sticker's file id (for "add to favorites")
   final int? stickerSetId; // the sticker's set id (for 表情详情)
   final bool isAnimatedEmoji; // single-emoji message (messageAnimatedEmoji)

@@ -30,6 +30,7 @@ import 'full_image_viewer.dart';
 import 'message_action_menu.dart';
 import 'message_bubble.dart';
 import 'sticker_set_detail_view.dart';
+import 'video_player_view.dart';
 
 class ChatView extends StatefulWidget {
   const ChatView({super.key, required this.chatId, required this.title});
@@ -47,11 +48,13 @@ class _ChatViewState extends State<ChatView> {
   );
   final _scroll = ScrollController();
   final _pinnedKey = GlobalKey(); // the pinned message's row, for scroll-to
+  final _unreadKey = GlobalKey(); // the "以下为新消息" divider, for entry scroll
   ChatMessage? _actionTarget;
   Rect? _actionRect; // global bounds of the long-pressed bubble
   bool _reactionExpanded = false; // full reaction picker vs. quick bar
   String _reactionTab = 'standard'; // 'standard' or a custom-emoji pack id
   int _lastCount = 0;
+  bool _didInitialScroll = false; // one-time entry positioning has run
   bool _showJumpDown = false; // scrolled up → show jump-to-bottom button
   bool _bannerDismissed = false; // "N条新消息" banner dismissed / caught up
   Timer? _bannerTimer; // auto-hides the banner a few seconds after it appears
@@ -113,9 +116,18 @@ class _ChatViewState extends State<ChatView> {
     if (_vm.messages.length != _lastCount) {
       final restore = _vm.consumeRestoreTop();
       _lastCount = _vm.messages.length;
+      // Keep pinned to the bottom while history streams in; the one-time entry
+      // positioning below repositions to the first unread once it's all loaded.
       if (restore == null) {
         WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
       }
+    }
+    // Telegram-style entry: once the initial history (incl. the unread
+    // boundary) is loaded, jump to the first unread message — or stay at the
+    // bottom when caught up. Runs exactly once per chat open.
+    if (!_didInitialScroll && _vm.initialLoaded && _vm.messages.isNotEmpty) {
+      _didInitialScroll = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _initialScroll());
     }
     // The "N条新消息" banner shows on entry, then auto-hides after a few seconds.
     if (_vm.unreadCount > 0 && _bannerTimer == null && !_bannerDismissed) {
@@ -124,6 +136,39 @@ class _ChatViewState extends State<ChatView> {
       });
     }
     setState(() {});
+  }
+
+  int _firstUnreadIndex() => _vm.messages.indexWhere(
+    (m) => !m.isOutgoing && !m.isService && m.id > _vm.lastReadInboxId,
+  );
+
+  /// One-time positioning when a chat opens: land on the first unread message
+  /// (the "以下为新消息" divider near the top), or on the latest message when
+  /// caught up. Because the list is lazily built, the divider's context may not
+  /// exist yet — jump approximately first to build it, then snap precisely.
+  void _initialScroll() {
+    if (!_scroll.hasClients) return;
+    final i = _firstUnreadIndex();
+    final boundaryLoaded =
+        _vm.messages.isNotEmpty && _vm.messages.first.id <= _vm.lastReadInboxId;
+    if (_vm.unreadCount <= 0 || i < 0 || !boundaryLoaded) {
+      _scrollToBottom();
+      return;
+    }
+    final max = _scroll.position.maxScrollExtent;
+    final approx = (max * (i / _vm.messages.length)).clamp(0.0, max);
+    _scroll.jumpTo(approx);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final ctx = _unreadKey.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          alignment: 0.12, // divider just below the top of the viewport
+          duration: const Duration(milliseconds: 180),
+        );
+      }
+    });
   }
 
   void _scrollToBottom() {
@@ -195,9 +240,28 @@ class _ChatViewState extends State<ChatView> {
     return false;
   }
 
+  void _playVideo(ChatMessage message) {
+    final v = message.video;
+    if (v == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => VideoPlayerView(
+          video: v,
+          thumb: message.image,
+          width: message.imageWidth,
+          height: message.imageHeight,
+        ),
+      ),
+    );
+  }
+
   void _openImage(ChatMessage message) {
     final pairs = _vm.messages
-        .where((m) => m.image != null && m.animatedSticker == null)
+        .where(
+          (m) =>
+              m.image != null && m.animatedSticker == null && m.video == null,
+        )
         .toList();
     final items = pairs.map((m) => m.image!).toList();
     final start = pairs.indexWhere((m) => m.id == message.id);
@@ -751,7 +815,8 @@ class _ChatViewState extends State<ChatView> {
             key: message.id == _vm.pinnedMessage?.id ? _pinnedKey : null,
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (_needsUnreadDivider(index)) _unreadDivider(),
+              if (_needsUnreadDivider(index))
+                KeyedSubtree(key: _unreadKey, child: _unreadDivider()),
               if (_needsSeparator(index)) TimeSeparator(unix: message.date),
               if (message.isService)
                 SystemBanner(text: message.text)
@@ -779,6 +844,7 @@ class _ChatViewState extends State<ChatView> {
                     }
                   },
                   onOpenImage: _openImage,
+                  onPlayVideo: _playVideo,
                   isRead: _vm.isRead(message),
                   onToggleReaction: (r) => _vm.toggleReaction(message, r),
                   onRedial: _startCall,
