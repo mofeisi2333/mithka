@@ -33,7 +33,7 @@ On Apple platforms the symbols are resolved from the app binary
 (`DynamicLibrary.process()`), so `tdjson` must be linked into the Runner target.
 
 1. Build (or download) `tdjson.xcframework` for device **and** simulator and place
-   it at `ios/Frameworks/tdjson.xcframework`.
+   it at `ios/tdjson/tdjson.xcframework`.
 2. Add it to the Runner target (drag into Xcode → "Embed & Sign", or vendor it via
    the Podfile). `./scripts/build-tdjson-ios.sh` checks the framework is in place.
 3. `cd ios && pod install` (needs CocoaPods: `brew install cocoapods`).

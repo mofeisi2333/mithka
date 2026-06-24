@@ -9,7 +9,7 @@
 # The simplest, most reliable route is the official prebuilt XCFramework from
 # tdlib/td-ios or building from source per https://tdlib.github.io/td/build.html.
 # This script wires a prebuilt `tdjson.xcframework` (placed at
-# ios/Frameworks/tdjson.xcframework) into the Runner target via the generated
+# ios/tdjson/tdjson.xcframework) into the Runner target via the generated
 # Xcode project; if you build from source, drop the resulting xcframework there.
 #
 # After placing the xcframework, also ensure ios/Podfile links it (see NATIVE.md)
@@ -17,7 +17,7 @@
 #
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEST="$REPO_ROOT/ios/Frameworks"
+DEST="$REPO_ROOT/ios/tdjson"
 
 echo "→ Expected: $DEST/tdjson.xcframework"
 if [[ -d "$DEST/tdjson.xcframework" ]]; then
