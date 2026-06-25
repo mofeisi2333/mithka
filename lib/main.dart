@@ -141,20 +141,22 @@ class _ScaledAppView extends StatelessWidget {
       textScaler: TextScaler.linear(fontScale / scale),
     );
 
-    return ClipRect(
-      child: OverflowBox(
-        alignment: Alignment.topLeft,
-        minWidth: virtualSize.width,
-        maxWidth: virtualSize.width,
-        minHeight: virtualSize.height,
-        maxHeight: virtualSize.height,
-        child: Transform.scale(
-          scale: scale,
+    return _KeyboardDismissOnTap(
+      child: ClipRect(
+        child: OverflowBox(
           alignment: Alignment.topLeft,
-          child: SizedBox(
-            width: virtualSize.width,
-            height: virtualSize.height,
-            child: MediaQuery(data: scaledMedia, child: child),
+          minWidth: virtualSize.width,
+          maxWidth: virtualSize.width,
+          minHeight: virtualSize.height,
+          maxHeight: virtualSize.height,
+          child: Transform.scale(
+            scale: scale,
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: virtualSize.width,
+              height: virtualSize.height,
+              child: MediaQuery(data: scaledMedia, child: child),
+            ),
           ),
         ),
       ),
@@ -167,6 +169,33 @@ class _ScaledAppView extends StatelessWidget {
       insets.top / scale,
       insets.right / scale,
       insets.bottom / scale,
+    );
+  }
+}
+
+class _KeyboardDismissOnTap extends StatelessWidget {
+  const _KeyboardDismissOnTap({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (event) {
+        final focus = FocusManager.instance.primaryFocus;
+        if (focus == null || !focus.hasFocus) return;
+
+        final renderObject = focus.context?.findRenderObject();
+        if (renderObject is RenderBox && renderObject.attached) {
+          final topLeft = renderObject.localToGlobal(Offset.zero);
+          final rect = topLeft & renderObject.size;
+          if (rect.contains(event.position)) return;
+        }
+
+        focus.unfocus();
+      },
+      child: child,
     );
   }
 }
