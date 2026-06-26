@@ -299,8 +299,8 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
   Widget _identityPanel(String status) {
     final c = context.colors;
     final idText = (_username?.isNotEmpty ?? false)
-        ? 'ID：$_username'
-        : (widget.userId > 0 ? 'ID：${widget.userId}' : '');
+        ? 'ID: $_username'
+        : (widget.userId > 0 ? 'ID: ${widget.userId}' : '');
     final subtitle = [
       if (_phone.isNotEmpty) _phone,
       if (idText.isNotEmpty) idText,
@@ -311,7 +311,7 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
         color: c.card,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      padding: const EdgeInsets.fromLTRB(28, 30, 28, 16),
+      padding: const EdgeInsets.fromLTRB(20, 30, 20, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -333,7 +333,7 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                 child: PhotoAvatar(
                   title: _name.isEmpty ? '?' : _name,
                   photo: _photo,
-                  size: 96,
+                  size: 80,
                 ),
               ),
               const SizedBox(width: 16),
@@ -389,7 +389,7 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                           children: [
                             Expanded(
                               child: Text(
-                                _hideIdentity ? 'ID：••••••' : idText,
+                                _hideIdentity ? 'ID: ••••••' : idText,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
@@ -489,16 +489,8 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
 
   String _maskedIdentity({required String phone, required String idText}) {
     final parts = <String>[];
-    if (phone.isNotEmpty) parts.add(_maskPhone(phone));
-    if (idText.isNotEmpty) parts.add('ID：••••••');
+    if (idText.isNotEmpty) parts.add('ID: ••••••');
     return parts.join('  ');
-  }
-
-  String _maskPhone(String value) {
-    final digits = value.replaceAll(RegExp(r'\D'), '');
-    if (digits.length <= 4) return '••••';
-    final prefix = value.trimLeft().startsWith('+') ? '+' : '';
-    return '$prefix•••• ${digits.substring(digits.length - 4)}';
   }
 
   Widget _cover(double h) {
@@ -553,7 +545,7 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
       child: SizedBox(
         height: 56,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(28, 0, 24, 0),
+          padding: const EdgeInsets.fromLTRB(20, 0, 0, 0),
           child: Row(
             children: [
               Icon(sfIcon(icon), size: 22, color: c.textPrimary),
@@ -606,10 +598,6 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
             children: [
               Expanded(
                 child: _barButton('音视频通话', primary: false, onTap: _callMenu),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _barButton('送礼物', primary: false, onTap: _shareCard),
               ),
               const SizedBox(width: 12),
               Expanded(
