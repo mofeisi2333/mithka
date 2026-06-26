@@ -119,7 +119,7 @@ jobs:
           EOF
 
       - name: Build arm64-v8a release APK
-        run: flutter build apk --release --split-per-abi --target-platform "$TARGET_PLATFORM"
+        run: flutter build apk --release --split-per-abi --target-platform "$TARGET_PLATFORM" --dart-define="GIT_COMMIT=${GITHUB_SHA::7}"
 
       - name: Upload APK artifact
         id: upload-apk

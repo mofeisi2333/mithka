@@ -34,6 +34,8 @@ TDJSON_URL="${TDJSON_XCFRAMEWORK_URL:-https://github.com/iebb/mithka-tdjson/rele
 REPO="${CI_PRIMARY_REPOSITORY_PATH:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$REPO"
 echo "▸ repo root: $REPO"
+GIT_COMMIT="$(git rev-parse --short HEAD)"
+echo "▸ git commit: $GIT_COMMIT"
 
 # --- Flutter SDK (pinned) ---------------------------------------------------
 if ! command -v flutter >/dev/null 2>&1; then
@@ -80,7 +82,7 @@ echo "▸ generating Flutter iOS build inputs"
 flutter config --no-enable-swift-package-manager
 flutter precache --ios
 flutter pub get
-flutter build ios --config-only --release
+flutter build ios --config-only --release --dart-define="GIT_COMMIT=$GIT_COMMIT"
 
 # --- CocoaPods --------------------------------------------------------------
 if ! command -v pod >/dev/null 2>&1; then

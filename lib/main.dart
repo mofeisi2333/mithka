@@ -10,12 +10,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:fvp/fvp.dart' as fvp;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app/content_view.dart';
+import 'app/app_version.dart';
 import 'app/app_navigator.dart';
 import 'auth/account_store.dart';
 import 'auth/auth_manager.dart';
@@ -48,6 +50,14 @@ Future<void> main() async {
     DeviceOrientation.portraitDown,
   ]);
   await Firebase.initializeApp();
+  final appVersion = await AppVersion.load();
+  await FirebaseAnalytics.instance.setAnalyticsCollectionEnabled(true);
+  await FirebaseAnalytics.instance.setDefaultEventParameters(
+    appVersion.analyticsParameters,
+  );
+  await FirebaseAnalytics.instance.logAppOpen(
+    parameters: appVersion.analyticsParameters,
+  );
   final prefs = await SharedPreferences.getInstance();
   KeywordBlocker.shared.initialize(prefs);
   runApp(MithkaApp(prefs: prefs));
@@ -144,6 +154,9 @@ class _MithkaAppState extends State<MithkaApp> {
             navigatorKey: appNavigatorKey,
             title: 'Mithka',
             debugShowCheckedModeBanner: false,
+            navigatorObservers: [
+              FirebaseAnalyticsObserver(analytics: FirebaseAnalytics.instance),
+            ],
             theme: _themeData(Brightness.light, theme),
             darkTheme: _themeData(Brightness.dark, theme),
             themeMode: theme.themeMode,

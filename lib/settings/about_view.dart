@@ -7,6 +7,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../app/app_version.dart';
 import '../chat/link_handler.dart';
 import '../components/sf_symbols.dart';
 import '../components/ui_components.dart';
@@ -16,6 +17,7 @@ class AboutView extends StatelessWidget {
   const AboutView({super.key});
 
   static const _channelUrl = 'https://t.me/mithka';
+  static const _githubUrl = 'https://github.com/iebb/mithka';
 
   @override
   Widget build(BuildContext context) {
@@ -53,9 +55,18 @@ class AboutView extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        '版本 1.0.0',
-                        style: TextStyle(fontSize: 13, color: c.textSecondary),
+                      FutureBuilder<AppVersion>(
+                        future: AppVersion.load(),
+                        builder: (context, snapshot) {
+                          final version = snapshot.data?.display ?? '...';
+                          return Text(
+                            '版本 $version',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: c.textSecondary,
+                            ),
+                          );
+                        },
                       ),
                     ],
                   ),
@@ -67,52 +78,79 @@ class AboutView extends StatelessWidget {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   clipBehavior: Clip.antiAlias,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => openLink(context, _channelUrl),
-                    child: SizedBox(
-                      height: 52,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Row(
-                          children: [
-                            Icon(
-                              sfIcon('paperplane.fill'),
-                              size: 20,
-                              color: AppTheme.brand,
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              'Telegram 频道',
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: c.textPrimary,
-                              ),
-                            ),
-                            const Spacer(),
-                            Text(
-                              't.me/mithka',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: c.textSecondary,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Icon(
-                              sfIcon('chevron.right'),
-                              size: 14,
-                              color: c.textTertiary,
-                            ),
-                          ],
-                        ),
+                  child: Column(
+                    children: [
+                      _AboutLinkRow(
+                        icon: sfIcon('paperplane.fill'),
+                        title: 'Telegram 频道',
+                        value: 't.me/mithka',
+                        onTap: () => openLink(context, _channelUrl),
                       ),
-                    ),
+                      Padding(
+                        padding: const EdgeInsets.only(left: 48),
+                        child: Divider(height: 1, color: c.divider),
+                      ),
+                      _AboutLinkRow(
+                        icon: Icons.code_rounded,
+                        title: 'GitHub',
+                        value: 'github.com/iebb/mithka',
+                        onTap: () => openLink(context, _githubUrl),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _AboutLinkRow extends StatelessWidget {
+  const _AboutLinkRow({
+    required this.icon,
+    required this.title,
+    required this.value,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String value;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: SizedBox(
+        height: 52,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              Icon(icon, size: 20, color: AppTheme.brand),
+              const SizedBox(width: 12),
+              Text(title, style: TextStyle(fontSize: 16, color: c.textPrimary)),
+              const Spacer(),
+              Flexible(
+                child: Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(fontSize: 14, color: c.textSecondary),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Icon(sfIcon('chevron.right'), size: 14, color: c.textTertiary),
+            ],
+          ),
+        ),
       ),
     );
   }
