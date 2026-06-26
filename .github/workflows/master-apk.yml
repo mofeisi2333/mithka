@@ -1,4 +1,4 @@
-name: Master APK
+name: 🧪 Master APK
 
 # Every push to master builds a signed arm64-v8a APK and posts it to the
 # configured Telegram CI channel. This is intentionally not a release workflow:
@@ -132,7 +132,7 @@ jobs:
           test -n "$TELEGRAM_BOT_TOKEN"
           test -n "$TELEGRAM_CI_CHANNEL"
 
-          caption="Mithka master ${GITHUB_SHA::7} · arm64-v8a"
+          caption="🧪 Mithka master ${GITHUB_SHA::7} · arm64-v8a"
           response=/tmp/telegram-response.json
 
           upload_document() {
