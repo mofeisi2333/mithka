@@ -59,6 +59,7 @@ enum AppFontChoice {
   pingFangHk('苹方香港 [HK]', 'HK 繁體 門 說 綫 骨 令', cjk: true),
   pingFangTw('苹方繁体 [TW]', 'TW 正體 門 說 線 骨 令', cjk: true),
   hiraginoSansJp('Hiragino [JP]', 'JP 日本語 門 説 線 骨 令', cjk: true),
+  customCjk('Custom Font', '自定义汉字字体 门 門 戸', cjk: true),
   helvetica('Helvetica Neue', 'Message preview Aa 123'),
   avenirNext('Avenir Next', 'Avenir Next Aa 123'),
   avenir('Avenir', 'Avenir Aa 123'),
@@ -74,6 +75,7 @@ enum AppFontChoice {
   americanTypewriter('American Typewriter', 'American Typewriter Aa 123'),
   menlo('Menlo', 'Menlo Aa 123 代码'),
   courierNew('Courier New', 'Courier New Aa 123 代码'),
+  custom('Custom Font', 'Custom Font Aa 123'),
   noteworthy('Noteworthy', 'Noteworthy Aa 123'),
   markerFelt('Marker Felt', 'Marker Felt Aa 123'),
   roboto('Roboto', 'Message preview Aa 123'),
@@ -191,7 +193,7 @@ enum AppFontChoice {
   final bool cjk;
 
   static List<AppFontChoice> get primaryOptions => [
-    ...AppFontChoice.values.where((font) => font.cjk),
+    ...AppFontChoice.values.where((font) => font.cjk && !font.isCustom),
     ...AppFontChoice.values.where((font) => !font.cjk),
   ];
 
@@ -201,6 +203,8 @@ enum AppFontChoice {
 
   bool get isGoogleFont => googleFamily != null;
   bool get isCjk => cjk;
+  bool get isCustom =>
+      this == AppFontChoice.custom || this == AppFontChoice.customCjk;
 
   String get fontFamily {
     return switch (this) {
@@ -210,6 +214,7 @@ enum AppFontChoice {
       AppFontChoice.pingFangHk => 'PingFang HK',
       AppFontChoice.pingFangTw => 'PingFang TC',
       AppFontChoice.hiraginoSansJp => 'Hiragino Sans',
+      AppFontChoice.customCjk => _platformFontFamily(),
       AppFontChoice.helvetica => 'Helvetica Neue',
       AppFontChoice.avenirNext => 'Avenir Next',
       AppFontChoice.avenir => 'Avenir',
@@ -225,6 +230,7 @@ enum AppFontChoice {
       AppFontChoice.americanTypewriter => 'American Typewriter',
       AppFontChoice.menlo => 'Menlo',
       AppFontChoice.courierNew => 'Courier New',
+      AppFontChoice.custom => _platformFontFamily(),
       AppFontChoice.noteworthy => 'Noteworthy',
       AppFontChoice.markerFelt => 'Marker Felt',
       AppFontChoice.roboto => 'Roboto',
@@ -273,6 +279,7 @@ enum AppFontChoice {
         'Helvetica Neue',
         'Arial',
       ],
+      AppFontChoice.customCjk => _platformFontFallback(),
       AppFontChoice.helvetica => const ['PingFang SC', 'PingFang TC', 'Arial'],
       AppFontChoice.avenirNext ||
       AppFontChoice.avenir ||
@@ -288,6 +295,7 @@ enum AppFontChoice {
       AppFontChoice.americanTypewriter ||
       AppFontChoice.menlo ||
       AppFontChoice.courierNew ||
+      AppFontChoice.custom ||
       AppFontChoice.noteworthy ||
       AppFontChoice.markerFelt => const [
         'PingFang SC',
@@ -374,10 +382,16 @@ enum AppFontChoice {
       ]);
     }
     final customCjk = customCjkFamily?.trim();
+    if (cjkFallback.isCustom) {
+      return _dedupe([
+        if (customCjk != null && customCjk.isNotEmpty) customCjk,
+        if (customCjk == null || customCjk.isEmpty)
+          ...AppFontChoice.pingFang.familiesForStyle(base),
+        ..._platformFontFallback(),
+      ]);
+    }
     return _dedupe([
-      if (customCjk != null && customCjk.isNotEmpty) customCjk,
-      if (customCjk == null || customCjk.isEmpty)
-        ...cjkFallback.familiesForStyle(base),
+      ...cjkFallback.familiesForStyle(base),
       ..._platformFontFallback(),
     ]);
   }
@@ -493,7 +507,8 @@ enum AppFontChoice {
     String? customCjkFamily,
   }) {
     final customPrimary = customPrimaryFamily?.trim();
-    final withPrimary = customPrimary != null && customPrimary.isNotEmpty
+    final withPrimary =
+        isCustom && customPrimary != null && customPrimary.isNotEmpty
         ? base.copyWith(fontFamily: customPrimary)
         : isGoogleFont
         ? GoogleFonts.getFont(googleFamily!, textStyle: base)
@@ -574,6 +589,105 @@ enum AppFontChoice {
   }
 }
 
+enum AppMonospaceFontChoice {
+  system('系统等宽', 'final count = 123;'),
+  sfMono('SF Mono', 'final count = 123;'),
+  menlo('Menlo', 'final count = 123;'),
+  monaco('Monaco', 'final count = 123;'),
+  courierNew('Courier New', 'final count = 123;'),
+  googleRobotoMono(
+    'Roboto Mono',
+    'final count = 123;',
+    googleFamily: 'Roboto Mono',
+  ),
+  googleSourceCodePro(
+    'Source Code Pro',
+    'final count = 123;',
+    googleFamily: 'Source Code Pro',
+  ),
+  googleJetBrainsMono(
+    'JetBrains Mono',
+    'final count = 123;',
+    googleFamily: 'JetBrains Mono',
+  ),
+  custom('Custom Font', 'final count = 123;');
+
+  const AppMonospaceFontChoice(
+    this.label,
+    this.previewText, {
+    this.googleFamily,
+  });
+
+  final String label;
+  final String previewText;
+  final String? googleFamily;
+
+  bool get isGoogleFont => googleFamily != null;
+  bool get isCustom => this == AppMonospaceFontChoice.custom;
+
+  String get fontFamily {
+    return switch (this) {
+      AppMonospaceFontChoice.system => _platformMonospaceFontFamily(),
+      AppMonospaceFontChoice.sfMono => 'SF Mono',
+      AppMonospaceFontChoice.menlo => 'Menlo',
+      AppMonospaceFontChoice.monaco => 'Monaco',
+      AppMonospaceFontChoice.courierNew => 'Courier New',
+      AppMonospaceFontChoice.custom => _platformMonospaceFontFamily(),
+      _ => googleFamily!.replaceAll(' ', ''),
+    };
+  }
+
+  TextStyle applyTextStyle(TextStyle base, {String? customFamily}) {
+    final custom = customFamily?.trim();
+    final withFamily = isCustom && custom != null && custom.isNotEmpty
+        ? base.copyWith(fontFamily: custom)
+        : isGoogleFont
+        ? GoogleFonts.getFont(googleFamily!, textStyle: base)
+        : base.copyWith(fontFamily: fontFamily);
+    return withFamily.copyWith(
+      fontFamilyFallback: _dedupe([
+        if (isCustom && custom != null && custom.isNotEmpty) custom,
+        fontFamily,
+        ..._platformMonospaceFontFallback(),
+        ...AppFontChoice._platformFontFallback(),
+      ]),
+    );
+  }
+
+  static List<String> _dedupe(List<String> values) {
+    final seen = <String>{};
+    return [
+      for (final value in values)
+        if (value.isNotEmpty && seen.add(value)) value,
+    ];
+  }
+
+  static String _platformMonospaceFontFamily() {
+    return switch (defaultTargetPlatform) {
+      TargetPlatform.iOS || TargetPlatform.macOS => 'Menlo',
+      TargetPlatform.android => 'monospace',
+      _ => 'monospace',
+    };
+  }
+
+  static List<String> _platformMonospaceFontFallback() {
+    return switch (defaultTargetPlatform) {
+      TargetPlatform.iOS || TargetPlatform.macOS => const [
+        'SF Mono',
+        'Menlo',
+        'Monaco',
+        'Courier New',
+      ],
+      TargetPlatform.android => const [
+        'monospace',
+        'Roboto Mono',
+        'Noto Sans Mono',
+      ],
+      _ => const ['monospace', 'Courier New'],
+    };
+  }
+}
+
 class ThemeController extends ChangeNotifier {
   ThemeController(this._prefs) {
     _mode = AppearanceMode.values.firstWhere(
@@ -595,6 +709,12 @@ class ThemeController extends ChangeNotifier {
         _prefs.getString(_customPrimaryFontFamilyKey)?.trim() ?? '';
     _customCjkFontFamily =
         _prefs.getString(_customCjkFontFamilyKey)?.trim() ?? '';
+    _monospaceFontChoice = AppMonospaceFontChoice.values.firstWhere(
+      (m) => m.name == _prefs.getString(_monospaceFontChoiceKey),
+      orElse: () => AppMonospaceFontChoice.menlo,
+    );
+    _customMonospaceFontFamily =
+        _prefs.getString(_customMonospaceFontFamilyKey)?.trim() ?? '';
     _fontScale = _prefs.getDouble(_fontKey) ?? 1.0;
     _interfaceScale = _prefs.getDouble(_interfaceScaleKey) ?? 1.0;
     _circularGroupAvatars = _prefs.getBool(_groupAvatarCircleKey) ?? true;
@@ -630,6 +750,8 @@ class ThemeController extends ChangeNotifier {
   static const _cjkFontChoiceKey = 'cjkFontChoice';
   static const _customPrimaryFontFamilyKey = 'customPrimaryFontFamily';
   static const _customCjkFontFamilyKey = 'customCjkFontFamily';
+  static const _monospaceFontChoiceKey = 'monospaceFontChoice';
+  static const _customMonospaceFontFamilyKey = 'customMonospaceFontFamily';
   static const _fontKey = 'fontScale';
   static const _interfaceScaleKey = 'interfaceScale';
   static const _groupAvatarCircleKey = 'circularGroupAvatars';
@@ -660,6 +782,8 @@ class ThemeController extends ChangeNotifier {
   late AppFontChoice _cjkFontChoice;
   late String _customPrimaryFontFamily;
   late String _customCjkFontFamily;
+  late AppMonospaceFontChoice _monospaceFontChoice;
+  late String _customMonospaceFontFamily;
   late double _fontScale;
   late double _interfaceScale;
   late bool _circularGroupAvatars;
@@ -685,12 +809,20 @@ class ThemeController extends ChangeNotifier {
   AppFontChoice get cjkFontChoice => _cjkFontChoice;
   String get customPrimaryFontFamily => _customPrimaryFontFamily;
   String get customCjkFontFamily => _customCjkFontFamily;
-  String get effectivePrimaryFontLabel => _customPrimaryFontFamily.isNotEmpty
+  AppMonospaceFontChoice get monospaceFontChoice => _monospaceFontChoice;
+  String get customMonospaceFontFamily => _customMonospaceFontFamily;
+  String get effectivePrimaryFontLabel =>
+      _fontChoice.isCustom && _customPrimaryFontFamily.isNotEmpty
       ? _customPrimaryFontFamily
       : _fontChoice.label;
-  String get effectiveCjkFontLabel => _customCjkFontFamily.isNotEmpty
+  String get effectiveCjkFontLabel =>
+      _cjkFontChoice.isCustom && _customCjkFontFamily.isNotEmpty
       ? _customCjkFontFamily
       : _cjkFontChoice.label;
+  String get effectiveMonospaceFontLabel =>
+      _monospaceFontChoice.isCustom && _customMonospaceFontFamily.isNotEmpty
+      ? _customMonospaceFontFamily
+      : _monospaceFontChoice.label;
   bool get circularGroupAvatars => _circularGroupAvatars;
   bool get showChatFolderFilter => _showChatFolderFilter;
   bool get showChatListSearch => _showChatListSearch;
@@ -715,6 +847,8 @@ class ThemeController extends ChangeNotifier {
   double get avatarSize => AppMetric.avatarSize;
   double get navHeaderHeight => AppMetric.navHeaderHeight;
   double scaled(double base) => base;
+  TextStyle codeTextStyle(TextStyle base) => _monospaceFontChoice
+      .applyTextStyle(base, customFamily: _customMonospaceFontFamily);
 
   set mode(AppearanceMode value) {
     _mode = value;
@@ -752,6 +886,18 @@ class ThemeController extends ChangeNotifier {
   set customCjkFontFamily(String value) {
     _customCjkFontFamily = value.trim();
     _prefs.setString(_customCjkFontFamilyKey, _customCjkFontFamily);
+    notifyListeners();
+  }
+
+  set monospaceFontChoice(AppMonospaceFontChoice value) {
+    _monospaceFontChoice = value;
+    _prefs.setString(_monospaceFontChoiceKey, value.name);
+    notifyListeners();
+  }
+
+  set customMonospaceFontFamily(String value) {
+    _customMonospaceFontFamily = value.trim();
+    _prefs.setString(_customMonospaceFontFamilyKey, _customMonospaceFontFamily);
     notifyListeners();
   }
 

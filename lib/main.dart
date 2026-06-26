@@ -10,6 +10,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:fvp/fvp.dart' as fvp;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -46,6 +47,7 @@ Future<void> main() async {
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
+  await Firebase.initializeApp();
   final prefs = await SharedPreferences.getInstance();
   KeywordBlocker.shared.initialize(prefs);
   runApp(MithkaApp(prefs: prefs));
@@ -88,12 +90,12 @@ class _MithkaAppState extends State<MithkaApp> {
       null,
       customCjk,
     );
+    final useCustomPrimary =
+        fontChoice.isCustom && customPrimary.trim().isNotEmpty;
     final base = ThemeData(
       brightness: brightness,
       useMaterial3: true,
-      fontFamily: customPrimary.isNotEmpty
-          ? customPrimary
-          : fontChoice.fontFamily,
+      fontFamily: useCustomPrimary ? customPrimary : fontChoice.fontFamily,
       fontFamilyFallback: fallback,
       scaffoldBackgroundColor: colors.background,
       colorScheme: ColorScheme.fromSeed(

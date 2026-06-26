@@ -15,6 +15,8 @@
 # Variables):
 #   TELEGRAM_API_ID     integer
 #   TELEGRAM_API_HASH   string   (mark as Secret)
+#   FIREBASE_IOS_GOOGLESERVICE_INFO_PLIST_B64
+#                      base64 of ios/Runner/GoogleService-Info.plist
 # Optional:
 #   TDJSON_XCFRAMEWORK_URL   override the prebuilt-framework download (see default below)
 #
@@ -53,6 +55,12 @@ class Secrets {
   static bool get isConfigured => apiId != 0 && apiHash.isNotEmpty;
 }
 EOF
+
+# --- Firebase config → ios/Runner/GoogleService-Info.plist ------------------
+: "${FIREBASE_IOS_GOOGLESERVICE_INFO_PLIST_B64:?set FIREBASE_IOS_GOOGLESERVICE_INFO_PLIST_B64 in the Xcode Cloud workflow environment}"
+echo "▸ writing ios/Runner/GoogleService-Info.plist"
+mkdir -p ios/Runner
+printf '%s' "$FIREBASE_IOS_GOOGLESERVICE_INFO_PLIST_B64" | base64 -d > ios/Runner/GoogleService-Info.plist
 
 # --- Native TDLib framework (git-ignored; prebuilt on a public release) ------
 if [ ! -d "ios/tdjson/tdjson.xcframework" ]; then

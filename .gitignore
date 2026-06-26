@@ -52,6 +52,11 @@ lib/config/secrets.dart
 # + base64 signing keystore & passwords. Never commit.
 .env
 
+# Firebase client config. These are generated from repository / Xcode Cloud
+# secrets in CI and may exist locally for simulator/device runs.
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
+
 # Native TDLib binaries (large, platform-specific — built via scripts/, see NATIVE.md)
 android/app/src/main/jniLibs/
 **/tdjson.xcframework/

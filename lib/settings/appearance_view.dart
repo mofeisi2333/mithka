@@ -549,6 +549,9 @@ class FontSettingsView extends StatelessWidget {
     final c = context.colors;
     final theme = context.watch<ThemeController>();
     final showCjkFallback = !theme.fontChoice.isCjk;
+    final showPrimaryCustom = theme.fontChoice.isCustom;
+    final showCjkCustom = showCjkFallback && theme.cjkFontChoice.isCustom;
+    final showMonospaceCustom = theme.monospaceFontChoice.isCustom;
     return Scaffold(
       backgroundColor: c.groupedBackground,
       body: Column(
@@ -567,7 +570,7 @@ class FontSettingsView extends StatelessWidget {
                   _settingsRow(
                     context,
                     '主要字体',
-                    theme.fontChoice.label,
+                    theme.effectivePrimaryFontLabel,
                     () => Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => const FontPickerView(
@@ -577,28 +580,29 @@ class FontSettingsView extends StatelessWidget {
                       ),
                     ),
                   ),
-                  _settingsRow(
-                    context,
-                    '自定义主要字体',
-                    theme.customPrimaryFontFamily.isEmpty
-                        ? '未设置'
-                        : theme.customPrimaryFontFamily,
-                    () => _editCustomFont(
+                  if (showPrimaryCustom)
+                    _settingsRow(
                       context,
-                      title: '自定义主要字体',
-                      initial: theme.customPrimaryFontFamily,
-                      onSave: (value) =>
-                          context
-                                  .read<ThemeController>()
-                                  .customPrimaryFontFamily =
-                              value,
+                      '字体名称',
+                      theme.customPrimaryFontFamily.isEmpty
+                          ? '未设置'
+                          : theme.customPrimaryFontFamily,
+                      () => _editCustomFont(
+                        context,
+                        title: '字体名称',
+                        initial: theme.customPrimaryFontFamily,
+                        onSave: (value) =>
+                            context
+                                    .read<ThemeController>()
+                                    .customPrimaryFontFamily =
+                                value,
+                      ),
                     ),
-                  ),
                   if (showCjkFallback)
                     _settingsRow(
                       context,
                       '汉字字体',
-                      theme.cjkFontChoice.label,
+                      theme.effectiveCjkFontLabel,
                       () => Navigator.of(context).push(
                         MaterialPageRoute(
                           builder: (_) => const FontPickerView(
@@ -608,21 +612,49 @@ class FontSettingsView extends StatelessWidget {
                         ),
                       ),
                     ),
-                  if (showCjkFallback)
+                  if (showCjkCustom)
                     _settingsRow(
                       context,
-                      '自定义汉字字体',
+                      '汉字字体名称',
                       theme.customCjkFontFamily.isEmpty
                           ? '未设置'
                           : theme.customCjkFontFamily,
                       () => _editCustomFont(
                         context,
-                        title: '自定义汉字字体',
+                        title: '汉字字体名称',
                         initial: theme.customCjkFontFamily,
                         onSave: (value) =>
                             context
                                     .read<ThemeController>()
                                     .customCjkFontFamily =
+                                value,
+                      ),
+                    ),
+                  _settingsRow(
+                    context,
+                    '等宽字体',
+                    theme.effectiveMonospaceFontLabel,
+                    () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const MonospaceFontPickerView(),
+                      ),
+                    ),
+                  ),
+                  if (showMonospaceCustom)
+                    _settingsRow(
+                      context,
+                      '等宽字体名称',
+                      theme.customMonospaceFontFamily.isEmpty
+                          ? '未设置'
+                          : theme.customMonospaceFontFamily,
+                      () => _editCustomFont(
+                        context,
+                        title: '等宽字体名称',
+                        initial: theme.customMonospaceFontFamily,
+                        onSave: (value) =>
+                            context
+                                    .read<ThemeController>()
+                                    .customMonospaceFontFamily =
                                 value,
                       ),
                     ),
@@ -634,8 +666,8 @@ class FontSettingsView extends StatelessWidget {
                   ),
                   child: Text(
                     showCjkFallback
-                        ? '主要字体用于西文；汉字字体用于中文、日文等 CJK 字符。'
-                        : '当前主要字体已覆盖汉字，不需要单独设置汉字字体。',
+                        ? '主要字体用于西文；汉字字体用于中文、日文等 CJK 字符；等宽字体用于代码块。'
+                        : '当前主要字体已覆盖汉字；等宽字体用于代码块。',
                     style: TextStyle(
                       fontSize: AppTextSize.footnote,
                       color: c.textTertiary,
@@ -866,6 +898,134 @@ class FontPickerView extends StatelessWidget {
                           fontSize: AppTextSize.footnote,
                           color: c.textSecondary,
                         ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              if (selected)
+                Icon(Icons.check, size: AppIconSize.lg, color: AppTheme.brand),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class MonospaceFontPickerView extends StatelessWidget {
+  const MonospaceFontPickerView({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final theme = context.watch<ThemeController>();
+    final fonts = AppMonospaceFontChoice.values;
+    final selected = theme.monospaceFontChoice;
+    return Scaffold(
+      backgroundColor: c.groupedBackground,
+      body: Column(
+        children: [
+          NavHeader(title: '等宽字体', onBack: () => Navigator.of(context).pop()),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.xl,
+                AppSpacing.lg,
+                AppSpacing.section,
+              ),
+              children: [_fontCard(context, fonts, selected)],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _fontCard(
+    BuildContext context,
+    List<AppMonospaceFontChoice> fonts,
+    AppMonospaceFontChoice selected,
+  ) {
+    final c = context.colors;
+    final rows = fonts
+        .map(
+          (font) => _fontRow(
+            context,
+            font,
+            selected: selected == font,
+            onTap: () {
+              context.read<ThemeController>().monospaceFontChoice = font;
+            },
+          ),
+        )
+        .toList();
+    return Container(
+      decoration: BoxDecoration(
+        color: c.card,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          for (var i = 0; i < rows.length; i++) ...[
+            rows[i],
+            if (i < rows.length - 1)
+              const InsetDivider(leadingInset: AppSpacing.xxl),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _fontRow(
+    BuildContext context,
+    AppMonospaceFontChoice font, {
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    final c = context.colors;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: SizedBox(
+        height: AppMetric.menuRowHeight + AppSpacing.md,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxl),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      font.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: font.applyTextStyle(
+                        TextStyle(
+                          fontSize: AppTextSize.bodyLarge,
+                          color: c.textPrimary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      font.previewText,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: font.applyTextStyle(
+                        TextStyle(
+                          fontSize: AppTextSize.footnote,
+                          color: c.textSecondary,
+                        ),
+                        customFamily: context
+                            .watch<ThemeController>()
+                            .customMonospaceFontFamily,
                       ),
                     ),
                   ],

@@ -1700,8 +1700,8 @@ class _MessageBubbleState extends State<MessageBubble>
     var color = base;
     var weight = FontWeight.w400;
     FontStyle? fontStyle;
-    String? fontFamily;
     Color? backgroundColor;
+    var useCodeFont = false;
     final decorations = <TextDecoration>[];
     for (final e in active) {
       switch (e.type) {
@@ -1714,11 +1714,11 @@ class _MessageBubbleState extends State<MessageBubble>
         case 'textEntityTypeStrikethrough':
           decorations.add(TextDecoration.lineThrough);
         case 'textEntityTypeCode':
-          fontFamily = 'Menlo';
+          useCodeFont = true;
           backgroundColor = context.colors.searchFill.withValues(alpha: 0.85);
         case 'textEntityTypePre':
         case 'textEntityTypePreCode':
-          fontFamily = 'Menlo';
+          useCodeFont = true;
         case 'textEntityTypeSpoiler':
           color = base.withValues(alpha: 0.06);
           backgroundColor = base.withValues(alpha: 0.34);
@@ -1739,17 +1739,19 @@ class _MessageBubbleState extends State<MessageBubble>
           weight = FontWeight.w600;
       }
     }
-    return TextStyle(
+    final style = TextStyle(
       color: color,
       fontWeight: weight,
       fontStyle: fontStyle,
-      fontFamily: fontFamily,
       backgroundColor: backgroundColor,
       decoration: decorations.isEmpty
           ? null
           : TextDecoration.combine(decorations),
       decorationColor: color,
     );
+    return useCodeFont
+        ? context.watch<ThemeController>().codeTextStyle(style)
+        : style;
   }
 
   String? _entityTapTarget(String segment, List<MessageTextEntity> active) {

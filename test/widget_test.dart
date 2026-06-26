@@ -179,7 +179,7 @@ void main() {
       expect(style.fontFamilyFallback!, contains('Helvetica Neue'));
     });
 
-    test('custom font families override preset font families', () {
+    test('preset fonts ignore stale custom font families', () {
       final style = AppFontChoice.futura.applyTextStyle(
         const TextStyle(fontSize: 16),
         cjkFallback: AppFontChoice.pingFangTw,
@@ -187,9 +187,34 @@ void main() {
         customCjkFamily: 'My CJK',
       );
 
+      expect(style.fontFamily, 'Futura');
+      expect(style.fontFamilyFallback, isNotNull);
+      expect(style.fontFamilyFallback!.first, 'PingFang TC');
+      expect(style.fontFamilyFallback!.length, greaterThan(1));
+    });
+
+    test('custom font choices use explicit custom font families', () {
+      final style = AppFontChoice.custom.applyTextStyle(
+        const TextStyle(fontSize: 16),
+        cjkFallback: AppFontChoice.customCjk,
+        customPrimaryFamily: 'My Latin',
+        customCjkFamily: 'My CJK',
+      );
+
       expect(style.fontFamily, 'My Latin');
       expect(style.fontFamilyFallback, isNotNull);
       expect(style.fontFamilyFallback!.first, 'My CJK');
+      expect(style.fontFamilyFallback!.length, greaterThan(1));
+    });
+
+    test('monospace font choices render code with selected family', () {
+      final style = AppMonospaceFontChoice.custom.applyTextStyle(
+        const TextStyle(fontSize: 13),
+        customFamily: 'My Mono',
+      );
+
+      expect(style.fontFamily, 'My Mono');
+      expect(style.fontFamilyFallback, contains('My Mono'));
       expect(style.fontFamilyFallback!.length, greaterThan(1));
     });
   });

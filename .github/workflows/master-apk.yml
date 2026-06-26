@@ -77,6 +77,14 @@ jobs:
       - name: Flutter dependencies
         run: flutter pub get
 
+      - name: Write Firebase Android config
+        env:
+          FIREBASE_ANDROID_GOOGLE_SERVICES_JSON_B64: ${{ secrets.FIREBASE_ANDROID_GOOGLE_SERVICES_JSON_B64 }}
+        run: |
+          : "${FIREBASE_ANDROID_GOOGLE_SERVICES_JSON_B64:?set FIREBASE_ANDROID_GOOGLE_SERVICES_JSON_B64 in repository secrets}"
+          mkdir -p android/app
+          printf '%s' "$FIREBASE_ANDROID_GOOGLE_SERVICES_JSON_B64" | base64 -d > android/app/google-services.json
+
       - name: Write secrets.dart
         env:
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
