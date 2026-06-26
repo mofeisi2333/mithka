@@ -4,7 +4,7 @@
 //  代理 — connection proxy settings backed by TDLib (getProxies / addProxy /
 //  enableProxy / disableProxy / removeProxy). A "不使用代理" row plus the list of
 //  configured proxies (tap to enable; the active one carries a brand checkmark),
-//  and an 添加代理 row that opens a full-page QQ-style editor. SOCKS5 / HTTP /
+//  and an 添加代理 row that opens a full-page custom editor. SOCKS5 / HTTP /
 //  MTProto. No Material dialogs.
 //
 
@@ -266,7 +266,7 @@ class _ProxyViewState extends State<ProxyView> {
   }
 }
 
-/// Full-page QQ-style add-proxy editor — type segments + borderless fields.
+/// Full-page custom add-proxy editor — type segments + borderless fields.
 class ProxyEditView extends StatefulWidget {
   const ProxyEditView({super.key});
 

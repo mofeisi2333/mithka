@@ -1,7 +1,7 @@
 //
 //  poll_composer_view.dart
 //
-//  发起投票 — a full-page QQ-style poll composer (no Material dialog). A question
+//  发起投票 — a full-page custom poll composer (no Material dialog). A question
 //  card + an options card of borderless rows (add / remove, 2–10), with a brand
 //  发送 action in the header. Returns (question, options) via Navigator.pop.
 //

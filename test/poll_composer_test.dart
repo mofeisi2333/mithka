@@ -7,7 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   testWidgets(
-    'PollComposerView renders QQ-style composer (no Material dialog)',
+    'PollComposerView renders full-page composer (no Material dialog)',
     (tester) async {
       SharedPreferences.setMockInitialValues({});
       final prefs = await SharedPreferences.getInstance();

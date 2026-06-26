@@ -996,7 +996,7 @@ class _ChatViewState extends State<ChatView> {
       _scheduleAutoTranslate();
     }
     _syncKeyboardInset(MediaQuery.of(context).viewInsets.bottom);
-    // Not a member, joinable, and nothing to preview → a QQ-style join screen
+    // Not a member, joinable, and nothing to preview → a custom join screen
     // (header + centered card) instead of the transcript + composer.
     if (!_vm.isMember && _vm.canJoin && _vm.messages.isEmpty) {
       return Scaffold(
@@ -1243,7 +1243,7 @@ class _ChatViewState extends State<ChatView> {
     );
   }
 
-  /// QQ-style join screen for a joinable chat with no previewable content.
+  /// custom join screen for a joinable chat with no previewable content.
   Widget _joinScreenBody() {
     final c = context.colors;
     final requested = _vm.joinRequested;

@@ -782,7 +782,7 @@ class ChatFilterMenu extends StatelessWidget {
   }
 }
 
-// MARK: - QQ-style swipe row
+// MARK: - custom swipe row
 
 class SwipeActionItem {
   SwipeActionItem({

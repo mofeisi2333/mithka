@@ -26,7 +26,7 @@
 set -e
 
 FLUTTER_VERSION="3.44.2"
-TDJSON_URL="${TDJSON_XCFRAMEWORK_URL:-https://github.com/iebb/mithka-tdjson/releases/download/tdjson-1.8.65/tdjson-ios.xcframework.zip}"
+TDJSON_URL="${TDJSON_XCFRAMEWORK_URL:-https://github.com/iebb/mithka-tdjson/releases/download/tdjson-1.8.65-ios13/tdjson-ios.xcframework.zip}"
 
 # Xcode Cloud checks the repo out here; fall back to walking up from this script.
 REPO="${CI_PRIMARY_REPOSITORY_PATH:-$(cd "$(dirname "$0")/../.." && pwd)}"

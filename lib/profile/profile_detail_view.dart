@@ -1,10 +1,9 @@
 //
 //  profile_detail_view.dart
 //
-//  A user's profile page (个人资料), reached by tapping a contact — QQ-style: a
-//  blurred profile-photo cover with the avatar overlapping the bottom-left, name
-//  beside it, secondary action tiles, info rows (个性签名 / 电话), and a fixed
-//  bottom bar (音视频通话 / 发消息). Backed by TDLib.
+//  A user's profile page (个人资料), reached by tapping a contact: a blurred
+//  profile-photo cover with the avatar overlapping the bottom-left, name beside
+//  it, compact detail rows, and a fixed bottom bar (音视频通话 / 发消息).
 //
 
 import 'dart:ui' as ui;
@@ -18,6 +17,7 @@ import 'package:provider/provider.dart';
 import '../call/call_manager.dart';
 import '../chat/chat_search_view.dart';
 import '../chat/chat_view.dart';
+import '../chat/custom_emoji.dart';
 import '../chat/full_image_viewer.dart';
 import '../components/photo_avatar.dart';
 import '../components/sf_symbols.dart';
@@ -43,13 +43,14 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
   String _bio = '';
   TdFileRef? _photo;
   bool _isOnline = false;
+  bool _isPremium = false;
+  int _emojiStatusId = 0;
   String _statusText = '';
   int? _chatId;
-  bool _muted = false;
-  bool _blocked = false;
   List<TdFileRef> _photos = []; // 精选照片 — profile-photo history
   String _birthday = '';
   String _location = '';
+  bool _hideIdentity = false;
 
   @override
   void initState() {
@@ -71,6 +72,11 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
           _phone = TDParse.formatPhone(user.str('phone_number'));
           _photo = TDParse.smallPhoto(user.obj('profile_photo'));
           _isOnline = TDParse.isUserOnline(user);
+          _isPremium = user.boolean('is_premium') ?? false;
+          _emojiStatusId =
+              user.obj('emoji_status')?.obj('type')?.int64('custom_emoji_id') ??
+              user.obj('emoji_status')?.int64('custom_emoji_id') ??
+              0;
           _statusText = TDParse.userStatus(user);
         });
       }
@@ -119,21 +125,8 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
       if (mounted) {
         setState(() {
           _chatId = chat.int64('id');
-          _muted =
-              (chat.obj('notification_settings')?.integer('mute_for') ?? 0) > 0;
         });
       }
-    } catch (_) {}
-    try {
-      final res = await TdClient.shared.query({
-        '@type': 'getBlockedMessageSenders',
-        'block_list': {'@type': 'blockListMain'},
-        'offset': 0,
-        'limit': 100,
-      });
-      final blocked = (res.objects('senders') ?? const <Map<String, dynamic>>[])
-          .any((s) => s.int64('user_id') == widget.userId);
-      if (mounted) setState(() => _blocked = blocked);
     } catch (_) {}
   }
 
@@ -199,40 +192,6 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
     showToast(context, '已复制名片链接');
   }
 
-  Future<void> _toggleMute() async {
-    final cid = _chatId;
-    if (cid == null) return;
-    final next = !_muted;
-    setState(() => _muted = next);
-    try {
-      await TdClient.shared.query({
-        '@type': 'setChatNotificationSettings',
-        'chat_id': cid,
-        'notification_settings': {
-          '@type': 'chatNotificationSettings',
-          'use_default_mute_for': false,
-          'mute_for': next ? 365 * 24 * 60 * 60 : 0,
-        },
-      });
-    } catch (_) {
-      if (mounted) setState(() => _muted = !next);
-    }
-  }
-
-  Future<void> _toggleBlock() async {
-    final next = !_blocked;
-    setState(() => _blocked = next);
-    try {
-      await TdClient.shared.query({
-        '@type': 'setMessageSenderBlockList',
-        'sender_id': {'@type': 'messageSenderUser', 'user_id': widget.userId},
-        'block_list': next ? {'@type': 'blockListMain'} : null,
-      });
-    } catch (_) {
-      if (mounted) setState(() => _blocked = !next);
-    }
-  }
-
   // MARK: - Build
 
   @override
@@ -271,7 +230,6 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
     if (_bio.isNotEmpty) ('个性签名', _bio),
     if (_birthday.isNotEmpty) ('生日', _birthday),
     if (_location.isNotEmpty) ('所在地', _location),
-    if (_phone.isNotEmpty) ('电话', _phone),
   ];
 
   String _formatBirthday(Map<String, dynamic>? bd) {
@@ -353,7 +311,7 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
         color: c.card,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      padding: const EdgeInsets.fromLTRB(32, 34, 32, 18),
+      padding: const EdgeInsets.fromLTRB(28, 30, 28, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -375,37 +333,89 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                 child: PhotoAvatar(
                   title: _name.isEmpty ? '?' : _name,
                   photo: _photo,
-                  size: 104,
+                  size: 96,
                 ),
               ),
-              const SizedBox(width: 18),
+              const SizedBox(width: 16),
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.only(bottom: 12),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        _name.isEmpty ? '?' : _name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 30,
-                          height: 1.08,
-                          fontWeight: FontWeight.w700,
-                          color: c.textPrimary,
-                        ),
-                      ),
+                      _nameLine(),
                       if (subtitle.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 15,
-                            color: c.textSecondary,
-                          ),
+                        const SizedBox(height: 7),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _hideIdentity
+                                    ? _maskedIdentity(
+                                        phone: _phone,
+                                        idText: idText,
+                                      )
+                                    : subtitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: c.textSecondary,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () => setState(
+                                () => _hideIdentity = !_hideIdentity,
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(4),
+                                child: Icon(
+                                  _hideIdentity
+                                      ? CupertinoIcons.eye
+                                      : CupertinoIcons.eye_slash,
+                                  size: 17,
+                                  color: c.textTertiary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ] else if (idText.isNotEmpty) ...[
+                        const SizedBox(height: 7),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _hideIdentity ? 'ID：••••••' : idText,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: c.textSecondary,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () => setState(
+                                () => _hideIdentity = !_hideIdentity,
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(4),
+                                child: Icon(
+                                  _hideIdentity
+                                      ? CupertinoIcons.eye
+                                      : CupertinoIcons.eye_slash,
+                                  size: 17,
+                                  color: c.textTertiary,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ],
@@ -415,24 +425,22 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
             ],
           ),
           if (status.isNotEmpty) ...[
-            const SizedBox(height: 18),
+            const SizedBox(height: 16),
             Row(
               children: [
                 if (_isOnline) ...[
-                  const Icon(Icons.circle, size: 8, color: Color(0xFF1AC81A)),
+                  const Icon(Icons.circle, size: 7, color: Color(0xFF1AC81A)),
                   const SizedBox(width: 6),
                 ],
                 Text(
                   status,
-                  style: TextStyle(fontSize: 14, color: c.textSecondary),
+                  style: TextStyle(fontSize: 13, color: c.textSecondary),
                 ),
               ],
             ),
           ],
-          const SizedBox(height: 20),
-          _profileBadges(),
           if (_bio.isNotEmpty) ...[
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
             Row(
               children: [
                 Expanded(
@@ -440,11 +448,11 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                     _bio,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 17, color: c.textPrimary),
+                    style: TextStyle(fontSize: 15, color: c.textPrimary),
                   ),
                 ),
                 const SizedBox(width: 8),
-                Icon(sfIcon('pencil'), size: 18, color: c.textTertiary),
+                Icon(sfIcon('pencil'), size: 17, color: c.textTertiary),
               ],
             ),
           ],
@@ -453,35 +461,44 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
     );
   }
 
-  Widget _profileBadges() {
+  Widget _nameLine() {
     final c = context.colors;
+    final usePremiumWeight = _isPremium ? FontWeight.w700 : FontWeight.w600;
     return Row(
       children: [
-        _badge('VIP', const Color(0xFF9CA0A6), Colors.white),
-        const SizedBox(width: 8),
-        const Text('👑 ☀️ 🌙 🌙 ⭐ ⭐ ⭐', style: TextStyle(fontSize: 22)),
-        const Spacer(),
-        Icon(sfIcon('chevron.right'), size: 18, color: c.textTertiary),
+        Expanded(
+          child: Text(
+            _name.isEmpty ? '?' : _name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 24,
+              height: 1.08,
+              fontWeight: usePremiumWeight,
+              color: c.textPrimary,
+            ),
+          ),
+        ),
+        if (_emojiStatusId != 0) ...[
+          const SizedBox(width: 6),
+          CustomEmojiView(id: _emojiStatusId, size: 24),
+        ],
       ],
     );
   }
 
-  Widget _badge(String text, Color background, Color foreground) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: foreground,
-        ),
-      ),
-    );
+  String _maskedIdentity({required String phone, required String idText}) {
+    final parts = <String>[];
+    if (phone.isNotEmpty) parts.add(_maskPhone(phone));
+    if (idText.isNotEmpty) parts.add('ID：••••••');
+    return parts.join('  ');
+  }
+
+  String _maskPhone(String value) {
+    final digits = value.replaceAll(RegExp(r'\D'), '');
+    if (digits.length <= 4) return '••••';
+    final prefix = value.trimLeft().startsWith('+') ? '+' : '';
+    return '$prefix•••• ${digits.substring(digits.length - 4)}';
   }
 
   Widget _cover(double h) {
@@ -513,34 +530,10 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
       child: Column(
         children: [
           _profileRow(
-            'star',
-            _username?.isNotEmpty ?? false ? '他的 QQ 空间' : 'QQ 空间',
-            trailing: _username?.isNotEmpty ?? false ? '最近有更新' : null,
-            showDot: _username?.isNotEmpty ?? false,
-            onTap: _shareCard,
-          ),
-          const InsetDivider(leadingInset: 62),
-          _profileRow('tshirt', '他正在用的装扮', trailing: '查看', onTap: _shareCard),
-          const InsetDivider(leadingInset: 62),
-          _profileRow(
             'magnifyingglass',
             '查找聊天记录',
             trailing: '图片、视频、文件等',
             onTap: _openSearch,
-          ),
-          const InsetDivider(leadingInset: 62),
-          _profileRow(
-            _muted ? 'bell.slash.fill' : 'bell.fill',
-            _muted ? '已开启消息免打扰' : '消息免打扰',
-            trailing: _muted ? '开启' : '关闭',
-            onTap: _toggleMute,
-          ),
-          const InsetDivider(leadingInset: 62),
-          _profileRow(
-            _blocked ? 'lock.fill' : 'nosign',
-            _blocked ? '已加入黑名单' : '加入黑名单',
-            trailing: _blocked ? '开启' : '关闭',
-            onTap: _toggleBlock,
           ),
         ],
       ),
@@ -551,7 +544,6 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
     String icon,
     String title, {
     String? trailing,
-    bool showDot = false,
     required VoidCallback onTap,
   }) {
     final c = context.colors;
@@ -559,20 +551,20 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: SizedBox(
-        height: 72,
+        height: 56,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(32, 0, 28, 0),
+          padding: const EdgeInsets.fromLTRB(28, 0, 24, 0),
           child: Row(
             children: [
-              Icon(sfIcon(icon), size: 27, color: c.textPrimary),
-              const SizedBox(width: 20),
+              Icon(sfIcon(icon), size: 22, color: c.textPrimary),
+              const SizedBox(width: 16),
               Expanded(
                 child: Text(
                   title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 20,
+                    fontSize: 16,
                     fontWeight: FontWeight.w500,
                     color: c.textPrimary,
                   ),
@@ -586,23 +578,12 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     textAlign: TextAlign.right,
-                    style: TextStyle(fontSize: 15, color: c.textTertiary),
-                  ),
-                ),
-              ],
-              if (showDot) ...[
-                const SizedBox(width: 9),
-                Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    color: AppTheme.tagRed,
-                    shape: BoxShape.circle,
+                    style: TextStyle(fontSize: 13, color: c.textTertiary),
                   ),
                 ),
               ],
               const SizedBox(width: 10),
-              Icon(sfIcon('chevron.right'), size: 18, color: c.textTertiary),
+              Icon(sfIcon('chevron.right'), size: 16, color: c.textTertiary),
             ],
           ),
         ),

@@ -811,12 +811,12 @@ class _MessageBubbleState extends State<MessageBubble>
     );
   }
 
-  // MARK: - Call log bubble (QQ-style: icon + status, tap to redial)
+  // MARK: - Call log bubble (custom: icon + status, tap to redial)
 
-  /// A messageCall rendered like QQ's call-log bubble: a phone/video glyph plus
+  /// A messageCall rendered like the reference app's call-log bubble: a phone/video glyph plus
   /// the call's outcome (通话时长 MM:SS when it connected, otherwise 已取消 /
   /// 未接听 / 已拒绝). Tapping the bubble places the same kind of call again
-  /// (点击重拨). The glyph sits toward the bubble's outer edge like QQ.
+  /// (点击重拨). The glyph sits toward the bubble's outer edge like profile.
   Widget _callBubble(bool outgoing) {
     final c = context.colors;
     final isVideo = message.callIsVideo;

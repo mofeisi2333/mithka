@@ -1,7 +1,7 @@
 //
 //  toast.dart
 //
-//  QQ/WeChat-style transient toast — a dark rounded pill near the bottom that
+//  messenger-style transient toast — a dark rounded pill near the bottom that
 //  fades in, holds, fades out, and removes itself. Replaces Material SnackBars
 //  app-wide (no Material chrome). Capture the overlay synchronously so it still
 //  works when called after an `await` (the originating widget may have unmounted).

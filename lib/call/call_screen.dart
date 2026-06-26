@@ -1,7 +1,7 @@
 //
 //  call_screen.dart
 //
-//  Full-screen 1:1 call UI driven by a `CallManager`, styled after QQ's voice /
+//  Full-screen 1:1 call UI driven by a `CallManager`, styled after the reference app's voice /
 //  video call screens: a blurred-avatar backdrop, a large rounded-square avatar
 //  with name + status, the端到端 verification emojis, and a row of frosted
 //  translucent controls (mute / speaker / camera) over a red 挂断 — with
@@ -89,7 +89,7 @@ class _CallScreenState extends State<CallScreen> {
     );
   }
 
-  /// QQ's blurred-avatar backdrop (falls back to a dark gradient). For an active
+  /// the reference app's blurred-avatar backdrop (falls back to a dark gradient). For an active
   /// video call this is the (placeholder) remote feed area.
   Widget _backdrop(ActiveCall call, bool isVideoActive) {
     final hasPhoto = call.peerPhoto != null;
@@ -432,7 +432,7 @@ class _CallButton extends StatelessWidget {
   }
 }
 
-/// QQ-style frosted translucent toggle (white when active). `hidden` keeps the
+/// custom frosted translucent toggle (white when active). `hidden` keeps the
 /// row balanced by reserving the slot without drawing the control.
 class _CallToggle extends StatelessWidget {
   const _CallToggle({

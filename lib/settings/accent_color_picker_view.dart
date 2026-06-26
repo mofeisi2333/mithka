@@ -1,7 +1,7 @@
 //
 //  accent_color_picker_view.dart
 //
-//  A full-page QQ-style swatch picker for a Telegram accent color (the name
+//  A full-page custom swatch picker for a Telegram accent color (the name
 //  color via setAccentColor, or the profile color via setProfileAccentColor).
 //  Returns the chosen id via Navigator.pop (or -1 for “none” when allowed).
 //  No Material dialog — flat NavHeader + 保存.

@@ -2,7 +2,7 @@
 //  group_management_view.dart
 //
 //  Telegram-style group management for admins/owners. This intentionally maps
-//  to real TDLib capabilities instead of showing QQ-only automation controls
+//  to real TDLib capabilities instead of showing non-Telegram automation controls
 //  that Telegram groups cannot perform natively.
 //
 

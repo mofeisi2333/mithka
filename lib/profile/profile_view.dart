@@ -2,7 +2,7 @@
 //  profile_view.dart
 //
 //  The "我" side menu (slides in from the left, ~88% width). Redesigned to match
-//  QQ's drawer: an azure avatar banner → an edit-profile card → a vertical list
+//  the reference app's drawer: an azure avatar banner → an edit-profile card → a vertical list
 //  of rows (相册 / 收藏 / 文件 / 外观) → account switcher → a bottom bar
 //  (设置 · 夜间模式). Backed by real TDLib via ProfileViewModel + AccountStore.
 //
@@ -381,7 +381,7 @@ class _ProfileViewState extends State<ProfileView> {
     );
   }
 
-  // MARK: - QQ-style vertical rows
+  // MARK: - custom vertical rows
 
   Widget _rowsCard() {
     return Container(
@@ -650,7 +650,7 @@ class _ProfileViewState extends State<ProfileView> {
   }
 }
 
-/// QQ-style VIP indicator shown next to a Telegram Premium user's name: the QQ
+/// custom VIP indicator shown next to a Telegram Premium user's name: the profile
 /// penguin mascot followed by a gold "VIP" badge.
 class _VipBadge extends StatelessWidget {
   const _VipBadge();

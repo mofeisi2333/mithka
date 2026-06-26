@@ -131,7 +131,7 @@ class ChatViewModel extends ChangeNotifier {
   final Map<int, String> _typing = {};
   Timer? _typingTimer;
 
-  /// Header title: QQ shows the member count in parentheses after a group name.
+  /// Header title: profile shows the member count in parentheses after a group name.
   String get headerTitle =>
       (isGroup && memberCount > 0) ? '$peerTitle($memberCount)' : peerTitle;
 
@@ -437,7 +437,7 @@ class ChatViewModel extends ChangeNotifier {
   }
 
   /// 引用: set (or clear) the reply target. In a group, replying to someone also
-  /// @-mentions them in the draft (QQ behavior).
+  /// @-mentions them in the draft (messenger behavior).
   void setReply(ChatMessage? message) {
     replyTo = message;
     if (message != null &&

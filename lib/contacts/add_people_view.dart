@@ -1,7 +1,7 @@
 //
 //  add_people_view.dart
 //
-//  添加 — QQ-style "add" page reached from the 联系人 top-right +. A 找人 / 找群
+//  添加 — custom "add" page reached from the 联系人 top-right +. A 找人 / 找群
 //  segmented toggle drives a single search field (people: searchContacts +
 //  searchPublicChat; groups: searchPublicChats), and an options grid (扫一扫 /
 //  创建群聊 / 创建频道) shows when the query is empty.

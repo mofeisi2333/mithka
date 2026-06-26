@@ -1,16 +1,14 @@
 # Mithka
 
 A cross-platform (iOS + Android) Telegram client built with **Flutter** on top of
-**[TDLib](https://core.telegram.org/tdlib)** via FFI, with a UI **inspired by the
-look and feel of QQ-style messengers**.
+**[TDLib](https://core.telegram.org/tdlib)** via FFI, with a dense,
+mobile-native messaging interface.
 
 > **Disclaimer**
 >
 > Mithka is an **independent, unofficial** project. It is **not affiliated with,
-> endorsed by, or connected to Tencent, QQ, or Telegram** in any way. The
-> interface is merely *inspired by* the visual style of QQ-style messengers — no
-> QQ/Tencent code, assets, trademarks, or branding are used. "QQ", "Tencent" and
-> "Telegram" are trademarks of their respective owners.
+> endorsed by, or connected to Telegram** in any way. "Telegram" is a trademark
+> of its respective owner.
 >
 > The app talks to Telegram's network through TDLib using your own Telegram API
 > credentials. Use it at your own risk and in accordance with Telegram's
@@ -30,10 +28,10 @@ penguin on the scale.
 ## What it is
 
 Mithka connects to **real Telegram** (your account, your chats) through TDLib and
-presents it with a QQ-inspired interface: chat list, conversations with live
-state, reactions and stickers (including animated `.tgs`/`.webm`), voice notes,
-polls and checklists, location sharing, contacts, profiles, moments-style
-stories, settings, and a 1:1 call UI.
+presents it with a custom interface: chat list, conversations with live state,
+reactions and stickers (including animated `.tgs`/`.webm`), voice notes, polls
+and checklists, location sharing, contacts, profiles, moments-style stories,
+settings, and a 1:1 call UI.
 
 ## Architecture
 

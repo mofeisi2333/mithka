@@ -1,7 +1,7 @@
 //
 //  file_detail_view.dart
 //
-//  Full-screen file page shown when a document bubble is tapped, modeled on QQ's
+//  Full-screen file page shown when a document bubble is tapped, modeled on the reference app's
 //  file viewer: a large type glyph + name + size, a live download progress bar
 //  (downloaded / total) with a cancel button, then an 打开 (open) button once the
 //  download completes. Drives TDLib downloadFile / cancelDownloadFile directly
@@ -250,7 +250,7 @@ class _FileDetailViewState extends State<FileDetailView> {
     );
   }
 
-  /// QQ-style large file glyph: a neutral rounded square + doc icon + extension.
+  /// custom large file glyph: a neutral rounded square + doc icon + extension.
   Widget _glyph() {
     return Container(
       width: 100,

@@ -42,7 +42,7 @@ make_framework_plist() {
   <key>CFBundleVersion</key>
   <string>1.8.65</string>
   <key>MinimumOSVersion</key>
-  <string>16.0</string>
+  <string>13.0</string>
 </dict>
 </plist>
 EOF
@@ -75,10 +75,26 @@ wrap_slice() {
   echo "wrapped tdjson dylib slice as framework: $identifier"
 }
 
-wrap_slice ios-arm64
-wrap_slice ios-arm64_x86_64-simulator
+sim_identifier=""
+if [[ -d "$XCFRAMEWORK/ios-arm64_x86_64-simulator" ]]; then
+  sim_identifier="ios-arm64_x86_64-simulator"
+elif [[ -d "$XCFRAMEWORK/ios-arm64-simulator" ]]; then
+  sim_identifier="ios-arm64-simulator"
+else
+  echo "error: missing tdjson simulator slice in $XCFRAMEWORK" >&2
+  exit 1
+fi
 
-cat >"$XCFRAMEWORK/Info.plist" <<'EOF'
+wrap_slice ios-arm64
+wrap_slice "$sim_identifier"
+
+sim_arch_xml='        <string>arm64</string>'
+if [[ "$sim_identifier" == *x86_64* ]]; then
+  sim_arch_xml="$sim_arch_xml
+        <string>x86_64</string>"
+fi
+
+cat >"$XCFRAMEWORK/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -104,13 +120,12 @@ cat >"$XCFRAMEWORK/Info.plist" <<'EOF'
       <key>BinaryPath</key>
       <string>tdjson.framework/tdjson</string>
       <key>LibraryIdentifier</key>
-      <string>ios-arm64_x86_64-simulator</string>
+      <string>$sim_identifier</string>
       <key>LibraryPath</key>
       <string>tdjson.framework</string>
       <key>SupportedArchitectures</key>
       <array>
-        <string>arm64</string>
-        <string>x86_64</string>
+$sim_arch_xml
       </array>
       <key>SupportedPlatform</key>
       <string>ios</string>

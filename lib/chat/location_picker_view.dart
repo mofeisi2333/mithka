@@ -1,7 +1,7 @@
 //
 //  location_picker_view.dart
 //
-//  QQ/WeChat-style location picker with a fixed centre pin — pan the map to aim
+//  messenger-style location picker with a fixed centre pin — pan the map to aim
 //  the pin; the centre coordinate is what gets sent. Uses the native Apple Maps
 //  (MapKit) on iOS and flutter_map + OpenStreetMap tiles elsewhere. A 我的位置
 //  button recentres on the GPS fix and the current centre's address is

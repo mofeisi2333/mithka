@@ -474,7 +474,7 @@ class CurrentUser {
   String? username;
   TdFileRef? photo;
   int emojiStatusId; // custom_emoji_id of the Telegram emoji status, 0 = none
-  bool isPremium; // Telegram Premium subscriber → shown as a QQ-style VIP badge
+  bool isPremium; // Telegram Premium subscriber
 }
 
 // MARK: - Parsing
@@ -1325,7 +1325,7 @@ abstract final class TDParse {
       case 'userStatusRecently':
         return '最近在线';
       case 'userStatusOffline':
-        return '离线';
+        return _lastOnlineText(user.obj('status')?.integer('was_online') ?? 0);
       case 'userStatusLastWeek':
         return '一周内在线';
       case 'userStatusLastMonth':
@@ -1337,6 +1337,26 @@ abstract final class TDParse {
 
   static bool isUserOnline(Map<String, dynamic> user) =>
       user.obj('status')?.type == 'userStatusOnline';
+
+  static String _lastOnlineText(int unixSeconds) {
+    if (unixSeconds <= 0) return '最后在线时间未知';
+    final time = DateTime.fromMillisecondsSinceEpoch(
+      unixSeconds * 1000,
+    ).toLocal();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final day = DateTime(time.year, time.month, time.day);
+    final hh = time.hour.toString().padLeft(2, '0');
+    final mm = time.minute.toString().padLeft(2, '0');
+    if (day == today) return '最后在线 今天 $hh:$mm';
+    if (day == today.subtract(const Duration(days: 1))) {
+      return '最后在线 昨天 $hh:$mm';
+    }
+    if (time.year == now.year) {
+      return '最后在线 ${time.month}月${time.day}日';
+    }
+    return '最后在线 ${time.year}年${time.month}月${time.day}日';
+  }
 }
 
 /// Tuple-equivalent for [TDParse.mediaAttachment].

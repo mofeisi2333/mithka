@@ -134,7 +134,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
     );
   }
 
-  /// QQ-style identity row: avatar + name/subtitle inline & left-aligned, with a
+  /// custom identity row: avatar + name/subtitle inline & left-aligned, with a
   /// QR icon + chevron on the right (groups → tap opens the 群二维码 page).
   Widget _topCard() {
     final c = context.colors;

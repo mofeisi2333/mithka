@@ -22,9 +22,9 @@ end
 bf = embed.add_file_reference(ref, true)
 bf.settings = { 'ATTRIBUTES' => ['CodeSignOnCopy', 'RemoveHeadersOnCopy'] }
 
-# 3) Build settings: framework search path + deployment target (tdjson needs iOS 16)
+# 3) Build settings: framework search path + deployment target (tdjson supports iOS 13)
 (target.build_configurations + project.build_configurations).each do |c|
-  c.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
+  c.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
   paths = c.build_settings['FRAMEWORK_SEARCH_PATHS']
   paths = paths ? Array(paths) : ['$(inherited)']
   paths << '$(PROJECT_DIR)/tdjson' unless paths.include?('$(PROJECT_DIR)/tdjson')
@@ -32,6 +32,6 @@ bf.settings = { 'ATTRIBUTES' => ['CodeSignOnCopy', 'RemoveHeadersOnCopy'] }
 end
 
 project.save
-puts "OK: linked + embedded tdjson.xcframework into Runner; deployment target 16.0"
+puts "OK: linked + embedded tdjson.xcframework into Runner; deployment target 13.0"
 puts "Link phase files: #{target.frameworks_build_phase.files.map { |f| f.display_name }.join(', ')}"
 puts "Embed phase files: #{embed.files.map { |f| f.display_name }.join(', ')}"

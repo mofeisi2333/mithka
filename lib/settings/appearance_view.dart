@@ -2,7 +2,7 @@
 //  appearance_view.dart
 //
 //  外观: theme mode (跟随系统 / 浅色 / 深色) + tab-bar style (经典 / 系统), driving
-//  ThemeController live. Mapped from QQ's 外观/装扮 entry.
+//  ThemeController live. Mapped from the reference app's 外观/装扮 entry.
 //
 
 import 'package:flutter/material.dart';

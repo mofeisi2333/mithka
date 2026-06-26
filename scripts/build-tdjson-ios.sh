@@ -12,7 +12,7 @@
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="$REPO_ROOT/ios/tdjson"
-TDJSON_URL="${TDJSON_XCFRAMEWORK_URL:-https://github.com/iebb/mithka-tdjson/releases/download/tdjson-1.8.65/tdjson-ios.xcframework.zip}"
+TDJSON_URL="${TDJSON_XCFRAMEWORK_URL:-https://github.com/iebb/mithka-tdjson/releases/download/tdjson-1.8.65-ios13/tdjson-ios.xcframework.zip}"
 
 echo "→ Expected: $DEST/tdjson.xcframework"
 if [[ -d "$DEST/tdjson.xcframework" ]]; then

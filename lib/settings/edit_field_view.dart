@@ -1,7 +1,7 @@
 //
 //  edit_field_view.dart
 //
-//  QQ-style single-field editor: a flat nav header with a 保存 action and a
+//  custom single-field editor: a flat nav header with a 保存 action and a
 //  clean borderless field on a white card — no Material dialog / underlined
 //  input. Returns the edited string via Navigator.pop.
 //

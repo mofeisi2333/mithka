@@ -2,7 +2,7 @@
 //  my_album_view.dart
 //
 //  我的相册: a grid of the current user's profile photos (getUserProfilePhotos),
-//  mapped from QQ's personal album. Tap a photo to view it full-screen.
+//  mapped from the reference app's personal album. Tap a photo to view it full-screen.
 //
 
 import 'package:flutter/material.dart';

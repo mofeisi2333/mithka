@@ -1,7 +1,7 @@
 //
 //  sticker_set_detail_view.dart
 //
-//  表情详情 — a sticker-set detail page (modeled on QQ's): a header, a card with
+//  表情详情 — a sticker-set detail page (modeled on the reference app's): a header, a card with
 //  the set's cover + title + sticker count and an 添加/移除 (install/remove) button,
 //  and a grid of the set's stickers rendered with animated previews. Loads the set
 //  via TDLib getStickerSet and toggles install with changeStickerSet.
