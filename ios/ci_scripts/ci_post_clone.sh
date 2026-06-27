@@ -114,6 +114,12 @@ if ! command -v pod >/dev/null 2>&1; then
   brew install cocoapods || sudo gem install cocoapods
 fi
 echo "▸ pod install"
-cd ios && pod install
+cd ios
+# Xcode Cloud can restore or leave behind a stale Pods sandbox. The archive
+# phase compares Podfile.lock with Pods/Manifest.lock, so rebuild the sandbox
+# from the checked-in lockfile before xcodebuild runs.
+rm -rf Pods
+pod install --deployment
+diff -q Podfile.lock Pods/Manifest.lock
 
 echo "✓ ci_post_clone complete"
