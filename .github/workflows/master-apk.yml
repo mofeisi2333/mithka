@@ -133,6 +133,8 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CI_CHANNEL: ${{ secrets.TELEGRAM_CI_CHANNEL }}
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
           APK_PATH: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
           ARTIFACT_URL: ${{ steps.upload-apk.outputs.artifact-url }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -150,11 +152,12 @@ jobs:
           upload_document() {
             local path="$1"
             local caption="$2"
+            local bot_api_url="${3:-https://api.telegram.org}"
             curl -sS -o "$response" -w "%{http_code}" \
               -F "chat_id=$TELEGRAM_CI_CHANNEL" \
               -F "document=@$path" \
               -F "caption=$caption" \
-              "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument"
+              "${bot_api_url}/bot${TELEGRAM_BOT_TOKEN}/sendDocument"
           }
 
           send_message() {
@@ -177,29 +180,48 @@ jobs:
             exit 1
           fi
 
-          ZIP_PATH=/tmp/mithka-master-arm64-v8a-apk.zip
-          zip -j -9 "$ZIP_PATH" "$APK_PATH"
-          zip_size="$(stat -c '%s' "$ZIP_PATH")"
-
           too_large_text="$caption
 
-          APK is larger than 50 MB, so direct Telegram upload is skipped.
+          APK is larger than 50 MB, so uploading through local Bot API.
           Artifact: $ARTIFACT_URL
           Run: $RUN_URL"
           send_message "$too_large_text"
 
-          if [ "$zip_size" -lt "$max_bytes" ]; then
-            status="$(upload_document "$ZIP_PATH" "$caption · zipped")"
-            if [ "$status" = "200" ]; then
-              exit 0
-            fi
-            cat "$response"
-            exit 1
-          fi
+          : "${TELEGRAM_API_ID:?set TELEGRAM_API_ID in repository secrets}"
+          : "${TELEGRAM_API_HASH:?set TELEGRAM_API_HASH in repository secrets}"
+          mkdir -p "$RUNNER_TEMP/telegram-bot-api"
+          docker run -d --rm \
+            --name mithka-telegram-bot-api \
+            -p 127.0.0.1:8081:8081 \
+            -v "$RUNNER_TEMP/telegram-bot-api:/var/lib/telegram-bot-api" \
+            aiogram/telegram-bot-api:latest \
+            --api-id="$TELEGRAM_API_ID" \
+            --api-hash="$TELEGRAM_API_HASH" \
+            --local \
+            --http-ip-address=0.0.0.0 \
+            --http-port=8081 \
+            --dir=/var/lib/telegram-bot-api
+          trap 'docker stop mithka-telegram-bot-api >/dev/null 2>&1 || true' EXIT
 
+          for attempt in $(seq 1 30); do
+            if curl -fsS "http://127.0.0.1:8081/bot${TELEGRAM_BOT_TOKEN}/getMe" >/dev/null; then
+              break
+            fi
+            if [ "$attempt" = "30" ]; then
+              docker logs mithka-telegram-bot-api || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          status="$(upload_document "$APK_PATH" "$caption · local Bot API" "http://127.0.0.1:8081")"
+          if [ "$status" = "200" ]; then
+            exit 0
+          fi
+          cat "$response"
           send_message "$caption
 
-          ZIP is also larger than 50 MB.
+          Local Bot API upload failed.
           Artifact: $ARTIFACT_URL
           Run: $RUN_URL"
-            exit 0
+          exit 1
