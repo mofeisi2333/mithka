@@ -157,31 +157,49 @@ jobs:
               "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument"
           }
 
-          status="$(upload_document "$APK_PATH" "$caption")"
-          if [ "$status" = "200" ]; then
-            exit 0
+          send_message() {
+            local text="$1"
+            curl -fsS \
+              -F "chat_id=$TELEGRAM_CI_CHANNEL" \
+              -F "text=$text" \
+              "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"
+          }
+
+          max_bytes=$((50 * 1024 * 1024))
+          apk_size="$(stat -c '%s' "$APK_PATH")"
+
+          if [ "$apk_size" -lt "$max_bytes" ]; then
+            status="$(upload_document "$APK_PATH" "$caption")"
+            if [ "$status" = "200" ]; then
+              exit 0
+            fi
+            cat "$response"
+            exit 1
           fi
 
-          if [ "$status" = "413" ]; then
-            ZIP_PATH=/tmp/mithka-master-arm64-v8a-apk.zip
-            zip -j -9 "$ZIP_PATH" "$APK_PATH"
+          ZIP_PATH=/tmp/mithka-master-arm64-v8a-apk.zip
+          zip -j -9 "$ZIP_PATH" "$APK_PATH"
+          zip_size="$(stat -c '%s' "$ZIP_PATH")"
+
+          too_large_text="$caption
+
+          APK is larger than 50 MB, so direct Telegram upload is skipped.
+          Artifact: $ARTIFACT_URL
+          Run: $RUN_URL"
+          send_message "$too_large_text"
+
+          if [ "$zip_size" -lt "$max_bytes" ]; then
             status="$(upload_document "$ZIP_PATH" "$caption · zipped")"
             if [ "$status" = "200" ]; then
               exit 0
             fi
+            cat "$response"
+            exit 1
           fi
 
-          if [ "$status" = "413" ]; then
-            curl -fsS \
-              -F "chat_id=$TELEGRAM_CI_CHANNEL" \
-              -F "text=$caption
+          send_message "$caption
 
-          APK is too large for direct Telegram bot upload.
+          ZIP is also larger than 50 MB.
           Artifact: $ARTIFACT_URL
-          Run: $RUN_URL" \
-              "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"
+          Run: $RUN_URL"
             exit 0
-          fi
-
-          cat "$response"
-          exit 1
