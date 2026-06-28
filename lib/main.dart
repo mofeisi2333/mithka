@@ -42,11 +42,11 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final androidSdkInt = await _androidSdkInt();
   final useFvp = defaultTargetPlatform != TargetPlatform.android ||
-      (androidSdkInt != null && androidSdkInt < 35);
+      (androidSdkInt != null && androidSdkInt < 34);
   if (useFvp) {
     // Route video_player through the MDK/FFmpeg backend so .webm (VP9 + alpha)
     // video stickers decode + play (and stay transparent). fvp 0.37.2 crashes
-    // while loading libmdk.so on Android 15+, so those devices stay on the
+    // while loading libmdk.so on Android 14+, so those devices stay on the
     // stock Android video_player backend.
     fvp.registerWith(
       options: defaultTargetPlatform == TargetPlatform.android
