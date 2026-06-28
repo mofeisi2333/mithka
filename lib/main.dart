@@ -40,20 +40,22 @@ const _sentryEnvironment = String.fromEnvironment(
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Route video_player through the MDK/FFmpeg backend so .webm (VP9 + alpha)
-  // video stickers decode + play (and stay transparent).
-  //
-  // MDK's Android hardware decoder path uses AMediaCodec. Some Android 14 /
-  // HyperOS builds crash natively in AMediaCodec_dequeueInputBuffer, so Android
-  // uses software decoders first. Video stickers are small enough that this is a
-  // better tradeoff than risking a process abort.
-  fvp.registerWith(
-    options: defaultTargetPlatform == TargetPlatform.android
-        ? {
-            'video.decoders': ['FFmpeg', 'dav1d'],
-          }
-        : null,
-  );
+  final androidSdkInt = await _androidSdkInt();
+  final useFvp = defaultTargetPlatform != TargetPlatform.android ||
+      (androidSdkInt != null && androidSdkInt < 35);
+  if (useFvp) {
+    // Route video_player through the MDK/FFmpeg backend so .webm (VP9 + alpha)
+    // video stickers decode + play (and stay transparent). fvp 0.37.2 crashes
+    // while loading libmdk.so on Android 15+, so those devices stay on the
+    // stock Android video_player backend.
+    fvp.registerWith(
+      options: defaultTargetPlatform == TargetPlatform.android
+          ? {
+              'video.decoders': ['FFmpeg', 'dav1d'],
+            }
+          : null,
+    );
+  }
   // Let iPhone and iPad follow every physical orientation.
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
@@ -85,6 +87,19 @@ Future<void> main() async {
     options.sendDefaultPii = false;
     options.tracesSampleRate = 0;
   }, appRunner: () => runApp(app));
+}
+
+Future<int?> _androidSdkInt() async {
+  if (defaultTargetPlatform != TargetPlatform.android) return null;
+  try {
+    final info = await const MethodChannel(
+      'mithka/app_info',
+    ).invokeMapMethod<String, Object?>('info');
+    final sdkInt = info?['sdkInt'];
+    return sdkInt is int ? sdkInt : null;
+  } catch (_) {
+    return null;
+  }
 }
 
 class MithkaApp extends StatefulWidget {
