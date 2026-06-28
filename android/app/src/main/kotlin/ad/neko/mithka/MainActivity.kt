@@ -3,6 +3,7 @@ package ad.neko.mithka
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
+import android.util.Log
 import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.nl.translate.Translation
@@ -10,6 +11,7 @@ import com.google.mlkit.nl.translate.Translator
 import com.google.mlkit.nl.translate.TranslatorOptions
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
 
@@ -18,7 +20,7 @@ class MainActivity : FlutterActivity() {
     private val translators = mutableMapOf<String, Translator>()
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
+        registerPlugins(flutterEngine)
         val plugin = CallMediaPlugin(
             applicationContext,
             flutterEngine.dartExecutor.binaryMessenger,
@@ -39,6 +41,7 @@ class MainActivity : FlutterActivity() {
                         mapOf(
                             "abis" to Build.SUPPORTED_ABIS.toList(),
                             "version" to (pkg.versionName ?: ""),
+                            "sdkInt" to Build.VERSION.SDK_INT,
                         ),
                     )
                 } else {
@@ -107,6 +110,47 @@ class MainActivity : FlutterActivity() {
                     result.error("clipboard_unavailable", e.message, null)
                 }
             }
+    }
+
+    private fun registerPlugins(flutterEngine: FlutterEngine) {
+        val pluginClasses = buildList {
+            add("com.ryanheise.audio_session.AudioSessionPlugin")
+            add("com.mr.flutter.plugin.filepicker.FilePickerPlugin")
+            add("io.flutter.plugins.firebase.analytics.FlutterFirebaseAnalyticsPlugin")
+            add("io.flutter.plugins.firebase.core.FlutterFirebaseCorePlugin")
+            add("com.dexterous.flutterlocalnotifications.FlutterLocalNotificationsPlugin")
+            add("io.flutter.plugins.flutter_plugin_android_lifecycle.FlutterAndroidLifecyclePlugin")
+            add("xyz.canardoux.fluttersound.FlutterSound")
+            // fvp 0.37.2 crashes in libmdk.so during JNI_OnLoad on Android 15+
+            // before Dart can handle it. Older Android versions keep the backend.
+            if (Build.VERSION.SDK_INT < 35) {
+                add("com.mediadevkit.fvp.FvpPlugin")
+            }
+            add("com.baseflow.geolocator.GeolocatorPlugin")
+            add("io.flutter.plugins.imagepicker.ImagePickerPlugin")
+            add("com.github.dart_lang.jni.JniPlugin")
+            add("com.crazecoder.openfile.OpenFilePlugin")
+            add("dev.fluttercommunity.plus.packageinfo.PackageInfoPlugin")
+            add("io.flutter.plugins.pathprovider.PathProviderPlugin")
+            add("com.baseflow.permissionhandler.PermissionHandlerPlugin")
+            add("io.sentry.flutter.SentryFlutterPlugin")
+            add("io.flutter.plugins.sharedpreferences.SharedPreferencesPlugin")
+            add("io.flutter.plugins.urllauncher.UrlLauncherPlugin")
+            add("io.flutter.plugins.videoplayer.VideoPlayerPlugin")
+        }
+
+        for (className in pluginClasses) {
+            try {
+                val plugin = Class
+                    .forName(className, false, javaClass.classLoader)
+                    .asSubclass(FlutterPlugin::class.java)
+                    .getDeclaredConstructor()
+                    .newInstance()
+                flutterEngine.plugins.add(plugin)
+            } catch (e: Exception) {
+                Log.e("Mithka", "Error registering plugin $className", e)
+            }
+        }
     }
 
     private fun translateOnDevice(args: Map<*, *>?, result: MethodChannel.Result) {
