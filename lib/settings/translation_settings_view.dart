@@ -13,7 +13,6 @@ import 'package:provider/provider.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
-import 'edit_field_view.dart';
 import 'translation_api.dart';
 import 'translation_controller.dart';
 
@@ -58,56 +57,6 @@ class TranslationSettingsView extends StatelessWidget {
                     title: '目标语言',
                     trailing: translation.targetLanguageLabel,
                     onTap: () => _showTargetPicker(context),
-                  ),
-                ]),
-                const SizedBox(height: 14),
-                _card(context, [
-                  _navRow(
-                    context,
-                    icon: FontAwesomeIcons.link.data,
-                    title: 'Lingva 地址',
-                    trailing: _endpointLabel(translation.lingvaEndpoint),
-                    onTap: () => _editEndpoint(
-                      context,
-                      title: 'Lingva 地址',
-                      initial: translation.lingvaEndpoint,
-                      hint: TranslationController.defaultLingvaEndpoint,
-                      onSaved: (value) => translation.lingvaEndpoint = value,
-                    ),
-                  ),
-                  const InsetDivider(leadingInset: 56),
-                  _navRow(
-                    context,
-                    icon: FontAwesomeIcons.link.data,
-                    title: 'LibreTranslate 地址',
-                    trailing: _endpointLabel(
-                      translation.libreTranslateEndpoint,
-                    ),
-                    onTap: () => _editEndpoint(
-                      context,
-                      title: 'LibreTranslate 地址',
-                      initial: translation.libreTranslateEndpoint,
-                      hint: 'https://libretranslate.example.com',
-                      onSaved: (value) =>
-                          translation.libreTranslateEndpoint = value,
-                    ),
-                  ),
-                  const InsetDivider(leadingInset: 56),
-                  _navRow(
-                    context,
-                    icon: FontAwesomeIcons.key.data,
-                    title: 'LibreTranslate API Key',
-                    trailing: translation.libreTranslateApiKey.isEmpty
-                        ? '未设置'
-                        : '已设置',
-                    onTap: () => _editEndpoint(
-                      context,
-                      title: 'LibreTranslate API Key',
-                      initial: translation.libreTranslateApiKey,
-                      hint: '可留空',
-                      onSaved: (value) =>
-                          translation.libreTranslateApiKey = value,
-                    ),
                   ),
                 ]),
               ],
@@ -199,32 +148,6 @@ class TranslationSettingsView extends StatelessWidget {
         );
       },
     );
-  }
-
-  Future<void> _editEndpoint(
-    BuildContext context, {
-    required String title,
-    required String initial,
-    required String hint,
-    required ValueChanged<String> onSaved,
-  }) async {
-    final value = await Navigator.of(context).push<String>(
-      MaterialPageRoute(
-        builder: (_) => EditFieldView(
-          title: title,
-          initial: initial,
-          hint: hint,
-          keyboardType: TextInputType.url,
-        ),
-      ),
-    );
-    if (value == null) return;
-    onSaved(value);
-  }
-
-  String _endpointLabel(String endpoint) {
-    if (endpoint.trim().isEmpty) return '未设置';
-    return endpoint;
   }
 
   void _showTargetPicker(BuildContext context) {

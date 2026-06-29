@@ -45,6 +45,14 @@ android {
         manifestPlaceholders["sentryEnvironment"] = sentryEnvironment
     }
 
+    sourceSets {
+        getByName("main") {
+            // Flutter owns src/main/assets during builds; keep this stable source
+            // for Android Developer Verification while packaging it as an APK asset.
+            assets.srcDir("src/developerVerification/assets")
+        }
+    }
+
     packaging {
         jniLibs {
             // The APK is distributed directly from CI. Store native libraries

@@ -85,6 +85,16 @@ import UIKit
       binaryMessenger: engineBridge.applicationRegistrar.messenger()
     )
     fontsChannel.setMethodCallHandler { call, result in
+      if call.method == "normalizeFontFamilies" {
+        let values = call.arguments as? [String] ?? []
+        result(values.map { value in
+          if let font = UIFont(name: value, size: UIFont.systemFontSize) {
+            return font.familyName
+          }
+          return value
+        })
+        return
+      }
       guard call.method == "listFonts" else {
         result(FlutterMethodNotImplemented)
         return
@@ -92,7 +102,6 @@ import UIKit
       var names = Set<String>()
       UIFont.familyNames.forEach { family in
         names.insert(family)
-        UIFont.fontNames(forFamilyName: family).forEach { names.insert($0) }
       }
       result(Array(names).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending })
     }

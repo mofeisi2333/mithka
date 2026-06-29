@@ -98,6 +98,14 @@ class SettingsView extends StatelessWidget {
                   const InsetDivider(leadingInset: 56),
                   _navRow(
                     context,
+                    FontAwesomeIcons.eye.data,
+                    '显示',
+                    const Color(0xFF34A2DF),
+                    () => const DisplaySettingsView(),
+                  ),
+                  const InsetDivider(leadingInset: 56),
+                  _navRow(
+                    context,
                     FontAwesomeIcons.language.data,
                     '翻译',
                     const Color(0xFF34A2DF),

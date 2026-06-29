@@ -10,6 +10,7 @@ import 'dart:io';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -17,6 +18,7 @@ import 'package:provider/provider.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
+import '../theme/emoji_font_catalog.dart';
 import '../theme/system_font_catalog.dart';
 import '../theme/theme_controller.dart';
 
@@ -41,7 +43,7 @@ class AppearanceView extends StatelessWidget {
                 AppSpacing.section,
               ),
               children: [
-                _label(context, '深色模式'),
+                _label(context, '模式'),
                 _card(context, [
                   for (final m in AppearanceMode.values)
                     _choiceRow(
@@ -52,9 +54,6 @@ class AppearanceView extends StatelessWidget {
                       () => theme.mode = m,
                     ),
                 ]),
-                const SizedBox(height: AppSpacing.xl),
-                _label(context, '大小'),
-                _fontSizeCard(context, theme),
                 const SizedBox(height: AppSpacing.xl),
                 _label(context, '字体'),
                 _card(context, [
@@ -71,9 +70,41 @@ class AppearanceView extends StatelessWidget {
                   ),
                 ]),
                 const SizedBox(height: AppSpacing.xl),
-                _label(context, '主题颜色'),
+                _label(context, '颜色'),
                 _colorCard(context, theme),
                 const SizedBox(height: AppSpacing.xl),
+                _label(context, '大小'),
+                _fontSizeCard(context, theme),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class DisplaySettingsView extends StatelessWidget {
+  const DisplaySettingsView({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final theme = context.watch<ThemeController>();
+    return Scaffold(
+      backgroundColor: c.groupedBackground,
+      body: Column(
+        children: [
+          NavHeader(title: '显示', onBack: () => Navigator.of(context).pop()),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.xl,
+                AppSpacing.lg,
+                AppSpacing.section,
+              ),
+              children: [
                 _label(context, '显示'),
                 _card(context, [
                   _toggleRow(
@@ -200,6 +231,34 @@ class AppearanceView extends StatelessWidget {
     );
   }
 
+  Widget _label(BuildContext context, String t) =>
+      const AppearanceView()._label(context, t);
+
+  Widget _card(BuildContext context, List<Widget> rows) =>
+      const AppearanceView()._card(context, rows);
+
+  Widget _choiceRow(
+    BuildContext context,
+    IconData icon,
+    String label,
+    bool selected,
+    VoidCallback onTap,
+  ) => const AppearanceView()._choiceRow(context, icon, label, selected, onTap);
+
+  Widget _toggleRow(
+    BuildContext context,
+    IconData icon,
+    String label,
+    bool value,
+    ValueChanged<bool> onChanged,
+  ) =>
+      const AppearanceView()._toggleRow(context, icon, label, value, onChanged);
+}
+
+extension _DisplayAppearanceHelpers on AppearanceView {
+  static const _colorSwatchSize = (AppMetric.hitTarget - AppSpacing.xxs) * 0.9;
+  static const _colorSwatchGap = AppSpacing.xxl * 0.9;
+
   static const _palette = [
     Color(0xFF0099FF), // 蔚蓝 (default)
     Color(0xFF2DC100), // 绿
@@ -209,6 +268,14 @@ class AppearanceView extends StatelessWidget {
     Color(0xFFFF5E7D), // 粉
     Color(0xFFFA5151), // 红
     Color(0xFFFF9500), // 橙
+    Color(0xFFFFCC00), // 黄
+    Color(0xFF9ACD32), // 青柠
+    Color(0xFF00A884), // 翠绿
+    Color(0xFF32ADE6), // 天蓝
+    Color(0xFF5E5CE6), // 蓝紫
+    Color(0xFFAF52DE), // 洋紫
+    Color(0xFFFF2D55), // 玫红
+    Color(0xFF8E8E93), // 灰
   ];
 
   Widget _colorCard(BuildContext context, ThemeController theme) {
@@ -224,16 +291,16 @@ class AppearanceView extends StatelessWidget {
         vertical: AppSpacing.xxl,
       ),
       child: Wrap(
-        spacing: AppSpacing.xxl,
-        runSpacing: AppSpacing.xl,
+        spacing: _colorSwatchGap,
+        runSpacing: AppSpacing.xl * 0.9,
         children: [
           for (final color in _palette)
             GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: () => theme.brandColor = color,
               child: Container(
-                width: AppMetric.hitTarget - AppSpacing.xxs,
-                height: AppMetric.hitTarget - AppSpacing.xxs,
+                width: _colorSwatchSize,
+                height: _colorSwatchSize,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: color,
@@ -655,6 +722,7 @@ class FontCacheManagementView extends StatefulWidget {
 
 class _FontCacheManagementViewState extends State<FontCacheManagementView> {
   late Future<_FontCacheSnapshot> _snapshot = _loadSnapshot();
+  _FontCacheOperation? _operation;
 
   @override
   Widget build(BuildContext context) {
@@ -712,14 +780,18 @@ class _FontCacheManagementViewState extends State<FontCacheManagementView> {
     final theme = context.read<ThemeController>();
     final supportDir = await getApplicationSupportDirectory();
     final activeFamilies = _activeGoogleFamilies(theme);
-    final entries = <_FontCacheEntry>[];
+    final byFamily = <String, _FontCacheEntry>{};
     if (await supportDir.exists()) {
       await for (final entity in supportDir.list(followLinks: false)) {
         if (entity is! File) continue;
         final entry = await _FontCacheEntry.tryFromFile(entity, activeFamilies);
-        if (entry != null) entries.add(entry);
+        if (entry == null) continue;
+        final key = entry.normalizedDisplayName;
+        final current = byFamily[key];
+        byFamily[key] = current == null ? entry : current.merged(entry);
       }
     }
+    final entries = byFamily.values.toList();
     entries.sort((a, b) {
       if (a.active != b.active) return a.active ? -1 : 1;
       return a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase());
@@ -744,7 +816,6 @@ class _FontCacheManagementViewState extends State<FontCacheManagementView> {
     if (theme.monospaceFontChoice.isCustom) {
       addIfGoogle(theme.customMonospaceFontFamily);
     }
-    addIfGoogle(theme.emojiFontChoice.googleFamily);
     return active;
   }
 
@@ -758,16 +829,28 @@ class _FontCacheManagementViewState extends State<FontCacheManagementView> {
   }
 
   Widget _actionCard(BuildContext context, _FontCacheSnapshot data) {
+    final busy = _operation != null;
     return _cacheCard(context, [
-      _actionRow(context, '刷新缓存列表', FontAwesomeIcons.arrowsRotate.data, () {
-        setState(() => _snapshot = _loadSnapshot());
-      }),
+      _actionRow(
+        context,
+        '刷新缓存列表',
+        FontAwesomeIcons.arrowsRotate.data,
+        busy ? null : _refreshSnapshot,
+        busy: _operation == _FontCacheOperation.refreshing,
+        status: _operation == _FontCacheOperation.refreshed ? '已刷新' : null,
+      ),
       _actionRow(
         context,
         '清理未使用字体',
         FontAwesomeIcons.trash.data,
-        data.unusedCount == 0 ? null : () => _deleteUnused(data),
+        busy || data.unusedCount == 0 ? null : () => _deleteUnused(data),
         destructive: true,
+        busy: _operation == _FontCacheOperation.deletingUnused,
+        status: _operation == _FontCacheOperation.deletedUnused
+            ? '已清理'
+            : data.unusedCount == 0
+            ? '无可清理'
+            : null,
       ),
     ]);
   }
@@ -855,17 +938,19 @@ class _FontCacheManagementViewState extends State<FontCacheManagementView> {
     IconData icon,
     VoidCallback? onTap, {
     bool destructive = false,
+    bool busy = false,
+    String? status,
   }) {
     final c = context.colors;
-    final enabled = onTap != null;
+    final enabled = onTap != null && !busy;
     final color = destructive ? AppTheme.unreadBadge : AppTheme.brand;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: onTap,
+      onTap: enabled ? onTap : null,
       child: SizedBox(
         height: AppMetric.menuRowHeight + AppSpacing.xxs,
         child: Opacity(
-          opacity: enabled ? 1 : 0.35,
+          opacity: enabled || busy || status != null ? 1 : 0.35,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxl),
             child: Row(
@@ -880,13 +965,33 @@ class _FontCacheManagementViewState extends State<FontCacheManagementView> {
                   ),
                 ),
                 const Spacer(),
-                FaIcon(
-                  FontAwesomeIcons.chevronRight,
-                  size: AppIconSize.lg,
-                  color: enabled && !destructive
-                      ? c.textTertiary
-                      : Colors.transparent,
-                ),
+                if (busy)
+                  SizedBox(
+                    width: AppIconSize.lg,
+                    height: AppIconSize.lg,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: destructive
+                          ? AppTheme.unreadBadge
+                          : AppTheme.brand,
+                    ),
+                  )
+                else if (status != null)
+                  Text(
+                    status,
+                    style: TextStyle(
+                      fontSize: AppTextSize.footnote,
+                      color: c.textTertiary,
+                    ),
+                  )
+                else
+                  FaIcon(
+                    FontAwesomeIcons.chevronRight,
+                    size: AppIconSize.lg,
+                    color: enabled && !destructive
+                        ? c.textTertiary
+                        : Colors.transparent,
+                  ),
               ],
             ),
           ),
@@ -949,10 +1054,14 @@ class _FontCacheManagementViewState extends State<FontCacheManagementView> {
                 height: AppMetric.hitTarget,
                 child: Opacity(
                   opacity: entry.active ? 0.2 : 1,
-                  child: FaIcon(
-                    FontAwesomeIcons.trash,
-                    size: AppIconSize.xl,
-                    color: entry.active ? c.textTertiary : AppTheme.unreadBadge,
+                  child: Center(
+                    child: FaIcon(
+                      FontAwesomeIcons.trash,
+                      size: AppIconSize.xl,
+                      color: entry.active
+                          ? c.textTertiary
+                          : AppTheme.unreadBadge,
+                    ),
                   ),
                 ),
               ),
@@ -963,26 +1072,63 @@ class _FontCacheManagementViewState extends State<FontCacheManagementView> {
     );
   }
 
+  Future<void> _refreshSnapshot() async {
+    if (_operation != null) return;
+    setState(() {
+      _operation = _FontCacheOperation.refreshing;
+    });
+    final snapshot = await _loadSnapshot();
+    if (!mounted) return;
+    setState(() {
+      _snapshot = Future.value(snapshot);
+      _operation = _FontCacheOperation.refreshed;
+    });
+    _clearOperationSoon(_FontCacheOperation.refreshed);
+  }
+
   Future<void> _deleteUnused(_FontCacheSnapshot data) async {
+    if (_operation != null) return;
+    setState(() {
+      _operation = _FontCacheOperation.deletingUnused;
+    });
     for (final entry in data.entries.where((entry) => !entry.active)) {
       try {
-        await entry.file.delete();
+        await entry.deleteFiles();
       } catch (_) {
         // The cache may have been removed by the font loader or the OS.
       }
     }
     if (!mounted) return;
-    setState(() => _snapshot = _loadSnapshot());
+    final snapshot = await _loadSnapshot();
+    if (!mounted) return;
+    setState(() {
+      _snapshot = Future.value(snapshot);
+      _operation = _FontCacheOperation.deletedUnused;
+    });
+    _clearOperationSoon(_FontCacheOperation.deletedUnused);
   }
 
   Future<void> _deleteEntry(_FontCacheEntry entry) async {
     try {
-      await entry.file.delete();
+      await entry.deleteFiles();
     } catch (_) {
       // The cache may have been removed by the font loader or the OS.
     }
     if (!mounted) return;
-    setState(() => _snapshot = _loadSnapshot());
+    final snapshot = await _loadSnapshot();
+    if (!mounted) return;
+    setState(() {
+      _snapshot = Future.value(snapshot);
+    });
+  }
+
+  void _clearOperationSoon(_FontCacheOperation operation) {
+    Future<void>.delayed(const Duration(milliseconds: 900), () {
+      if (!mounted || _operation != operation) return;
+      setState(() {
+        _operation = null;
+      });
+    });
   }
 
   String _formatBytes(int bytes) {
@@ -1009,9 +1155,16 @@ class _FontCacheSnapshot {
   int get unusedCount => entries.length - activeCount;
 }
 
+enum _FontCacheOperation {
+  refreshing,
+  refreshed,
+  deletingUnused,
+  deletedUnused,
+}
+
 class _FontCacheEntry {
   const _FontCacheEntry({
-    required this.file,
+    required this.files,
     required this.displayName,
     required this.bytes,
     required this.modified,
@@ -1020,11 +1173,13 @@ class _FontCacheEntry {
 
   static final _cacheFilePattern = RegExp(r'^(.+)_([a-fA-F0-9]{16,128})\.ttf$');
 
-  final File file;
+  final List<File> files;
   final String displayName;
   final int bytes;
   final DateTime modified;
   final bool active;
+
+  String get normalizedDisplayName => _normalize(displayName);
 
   String get modifiedLabel {
     final local = modified.toLocal();
@@ -1051,12 +1206,32 @@ class _FontCacheEntry {
           normalizedFamily.contains(normalizedFile);
     });
     return _FontCacheEntry(
-      file: file,
+      files: [file],
       displayName: displayName,
       bytes: stat.size,
       modified: stat.modified,
       active: active,
     );
+  }
+
+  _FontCacheEntry merged(_FontCacheEntry other) {
+    return _FontCacheEntry(
+      files: [...files, ...other.files],
+      displayName: displayName,
+      bytes: bytes + other.bytes,
+      modified: modified.isAfter(other.modified) ? modified : other.modified,
+      active: active || other.active,
+    );
+  }
+
+  Future<void> deleteFiles() async {
+    for (final file in files) {
+      try {
+        if (await file.exists()) await file.delete();
+      } catch (_) {
+        // Individual cache files can disappear while the list is open.
+      }
+    }
   }
 
   static String _displayName(String rawFamily) {
@@ -1072,6 +1247,253 @@ class _FontCacheEntry {
 
   static String _normalize(String value) =>
       value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+}
+
+Future<Set<String>> _cachedGoogleFontFamilies() async {
+  final googleFamilies = GoogleFonts.asMap().keys.toList();
+  final byNormalized = {
+    for (final family in googleFamilies)
+      _FontCacheEntry._normalize(family): family,
+  };
+  final supportDir = await getApplicationSupportDirectory();
+  final cached = <String>{};
+  if (!await supportDir.exists()) return cached;
+  await for (final entity in supportDir.list(followLinks: false)) {
+    if (entity is! File) continue;
+    final name = entity.uri.pathSegments.isEmpty
+        ? entity.path
+        : entity.uri.pathSegments.last;
+    final match = _FontCacheEntry._cacheFilePattern.firstMatch(name);
+    if (match == null) continue;
+    final rawFamily = match.group(1)!;
+    final normalizedFile = _FontCacheEntry._normalize(rawFamily);
+    final exact = byNormalized[normalizedFile];
+    if (exact != null) {
+      cached.add(exact);
+      continue;
+    }
+    for (final entry in byNormalized.entries) {
+      if (normalizedFile.contains(entry.key) ||
+          entry.key.contains(normalizedFile)) {
+        cached.add(entry.value);
+        break;
+      }
+    }
+  }
+  return cached;
+}
+
+const _latinFontPreview = 'Aa 123';
+const _cjkFontPreview = '中文 日本語 門 説 線';
+
+List<String> _fontTitleFallback() {
+  return switch (defaultTargetPlatform) {
+    TargetPlatform.iOS || TargetPlatform.macOS => const [
+      '.AppleSystemUIFont',
+      'SF Pro',
+      'Helvetica Neue',
+      'Arial',
+    ],
+    TargetPlatform.android => const ['sans-serif', 'Roboto', 'Noto Sans'],
+    _ => const ['sans-serif', 'Arial'],
+  };
+}
+
+TextStyle _fontTitleStyle(
+  String family,
+  TextStyle base, {
+  String? googleFamily,
+  bool googleLoaded = false,
+}) {
+  final fallback = _fontTitleFallback();
+  if (googleFamily != null && googleLoaded) {
+    return GoogleFonts.getFont(
+      googleFamily,
+      textStyle: base,
+    ).copyWith(fontFamilyFallback: fallback);
+  }
+  if (googleFamily != null) return base.copyWith(fontFamilyFallback: fallback);
+  return base.copyWith(fontFamily: family, fontFamilyFallback: fallback);
+}
+
+String _fontPreviewSample(String family, {String? label, bool cjk = false}) =>
+    cjk || _isCjkFontFamily(family, label: label)
+    ? _cjkFontPreview
+    : _latinFontPreview;
+
+bool _isCjkFontFamily(String family, {String? label}) {
+  final value = '${family.toLowerCase()} ${(label ?? '').toLowerCase()}';
+  const markers = [
+    '[cn]',
+    '[hk]',
+    '[tw]',
+    '[jp]',
+    '[kr]',
+    ' cjk',
+    'cjk ',
+    'sc',
+    'tc',
+    'hk',
+    'jp',
+    'kr',
+    'pingfang',
+    'hiragino',
+    'heiti',
+    'songti',
+    'kaiti',
+    'yahei',
+    'simsun',
+    'simhei',
+    'mingliu',
+    'meiryo',
+    'yu gothic',
+    'yu mincho',
+    'source han',
+    'noto sans sc',
+    'noto sans tc',
+    'noto sans hk',
+    'noto sans jp',
+    'noto serif sc',
+    'noto serif tc',
+    'noto serif hk',
+    'noto serif jp',
+    'line seed sans jp',
+    'lxgw',
+    'zcool',
+    'klee',
+    'dotgothic',
+    'm plus',
+    'stick',
+    'chocolate classical',
+  ];
+  return markers.any((marker) {
+    if (marker.length == 2) {
+      return RegExp('(^|[^a-z])$marker([^a-z]|\$)').hasMatch(value);
+    }
+    return value.contains(marker);
+  });
+}
+
+int _popularSystemFontPriority(String family) {
+  final popular = switch (defaultTargetPlatform) {
+    TargetPlatform.iOS || TargetPlatform.macOS => const [
+      '.AppleSystemUIFont',
+      'SF Pro',
+      'Helvetica Neue',
+      'Helvetica',
+      'Avenir Next',
+      'Avenir',
+      'Futura',
+      'Gill Sans',
+      'Optima',
+      'Palatino',
+      'Georgia',
+      'Times New Roman',
+      'Didot',
+      'American Typewriter',
+      'Courier New',
+      'Menlo',
+      'PingFang SC',
+      'PingFang TC',
+      'PingFang HK',
+      'Hiragino Sans',
+    ],
+    TargetPlatform.android => const [
+      'sans',
+      'sans-serif',
+      'Roboto',
+      'Noto Sans',
+      'Noto Serif',
+      'Droid Sans',
+      'monospace',
+      'serif',
+    ],
+    _ => const [
+      'Arial',
+      'Helvetica',
+      'Verdana',
+      'Tahoma',
+      'Georgia',
+      'Times New Roman',
+      'Courier New',
+      'monospace',
+      'sans-serif',
+      'serif',
+    ],
+  };
+  final exact = popular.indexWhere(
+    (font) => font.toLowerCase() == family.toLowerCase(),
+  );
+  if (exact >= 0) return exact;
+  final prefix = popular.indexWhere(
+    (font) => family.toLowerCase().startsWith(font.toLowerCase()),
+  );
+  return prefix >= 0 ? prefix : popular.length + 1;
+}
+
+const _googleMonospaceFamilies = {
+  'Anonymous Pro',
+  'Azeret Mono',
+  'B612 Mono',
+  'Chivo Mono',
+  'Courier Prime',
+  'Cousine',
+  'Cutive Mono',
+  'DM Mono',
+  'Datatype',
+  'Fira Code',
+  'Fira Mono',
+  'Fragment Mono',
+  'Geist Mono',
+  'Google Sans Code',
+  'IBM Plex Mono',
+  'Inconsolata',
+  'Intel One Mono',
+  'Iosevka Charon',
+  'Iosevka Charon Mono',
+  'JetBrains Mono',
+  'Kode Mono',
+  'LXGW WenKai Mono TC',
+  'Lekton',
+  'Libertinus Mono',
+  'Lilex',
+  'M PLUS 1 Code',
+  'M PLUS Code Latin',
+  'Major Mono Display',
+  'Martian Mono',
+  'Monofett',
+  'Nanum Gothic Coding',
+  'Noto Sans Mono',
+  'Nova Mono',
+  'Overpass Mono',
+  'Oxygen Mono',
+  'PT Mono',
+  'Red Hat Mono',
+  'Reddit Mono',
+  'Roboto Mono',
+  'Rubik Mono One',
+  'Share Tech Mono',
+  'Sixtyfour',
+  'Sixtyfour Convergence',
+  'Sometype Mono',
+  'Sono',
+  'Source Code Pro',
+  'Space Mono',
+  'Spline Sans Mono',
+  'Syne Mono',
+  'Ubuntu Mono',
+  'Ubuntu Sans Mono',
+  'VT323',
+  'Victor Mono',
+  'Workbench',
+  'Xanh Mono',
+};
+
+bool _isSystemMonospaceFontFamily(String family) {
+  final normalized = family.toLowerCase();
+  return normalized.contains('mono') ||
+      normalized.contains('menlo') ||
+      normalized.contains('courier');
 }
 
 class TextFontView extends StatelessWidget {
@@ -1167,6 +1589,15 @@ class TextFontView extends StatelessWidget {
 
   Widget _chainRow(BuildContext context, String family, int index) {
     final c = context.colors;
+    final googleFamily = decodeGoogleFontFamily(family);
+    final displayFamily = displayStoredFontFamily(family);
+    TextStyle previewStyle(TextStyle base) {
+      if (googleFamily != null) {
+        return GoogleFonts.getFont(googleFamily, textStyle: base);
+      }
+      return base.copyWith(fontFamily: family);
+    }
+
     return SizedBox(
       height: AppMetric.menuRowHeight + AppSpacing.md,
       child: Padding(
@@ -1188,25 +1619,30 @@ class TextFontView extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    family,
+                    displayFamily,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontFamily: family,
-                      fontSize: AppTextSize.bodyLarge,
-                      color: c.textPrimary,
-                      fontWeight: FontWeight.w500,
+                    style: _fontTitleStyle(
+                      family,
+                      TextStyle(
+                        fontSize: AppTextSize.bodyLarge,
+                        color: c.textPrimary,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      googleFamily: googleFamily,
+                      googleLoaded: googleFamily != null,
                     ),
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Aa 123 门 門 戸 說 説',
+                    _fontPreviewSample(family, label: displayFamily),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontFamily: family,
-                      fontSize: AppTextSize.footnote,
-                      color: c.textSecondary,
+                    style: previewStyle(
+                      TextStyle(
+                        fontSize: AppTextSize.footnote,
+                        color: c.textSecondary,
+                      ),
                     ),
                   ),
                 ],
@@ -1221,10 +1657,12 @@ class TextFontView extends StatelessWidget {
               child: SizedBox(
                 width: AppMetric.hitTarget,
                 height: AppMetric.hitTarget,
-                child: FaIcon(
-                  FontAwesomeIcons.trash,
-                  size: AppIconSize.xl,
-                  color: c.textTertiary,
+                child: Center(
+                  child: FaIcon(
+                    FontAwesomeIcons.trash,
+                    size: AppIconSize.xl,
+                    color: c.textTertiary,
+                  ),
                 ),
               ),
             ),
@@ -1305,8 +1743,34 @@ class TextFontView extends StatelessWidget {
   }
 }
 
-class EmojiFontPickerView extends StatelessWidget {
+class EmojiFontPickerView extends StatefulWidget {
   const EmojiFontPickerView({super.key});
+
+  @override
+  State<EmojiFontPickerView> createState() => _EmojiFontPickerViewState();
+}
+
+class _EmojiFontPickerViewState extends State<EmojiFontPickerView> {
+  static const _fallbackPreviewAsset = 'assets/emoji_preview/noto.svg';
+  static const _previewAssets = {
+    'system': 'assets/emoji_preview/noto.svg',
+    'noto': 'assets/emoji_preview/noto.svg',
+    'noto-mono': 'assets/emoji_preview/noto-mono.svg',
+    'blobmoji': 'assets/emoji_preview/blobmoji.svg',
+    'fluent': 'assets/emoji_preview/fluent.png',
+    'fluent-flat': 'assets/emoji_preview/fluent-flat.svg',
+    'fluent-mono': 'assets/emoji_preview/fluent-mono.svg',
+    'twemoji': 'assets/emoji_preview/twemoji.svg',
+    'openmoji': 'assets/emoji_preview/openmoji.svg',
+    'emojitwo': 'assets/emoji_preview/emojitwo.svg',
+    'tossface': 'assets/emoji_preview/tossface.svg',
+  };
+
+  late final Future<List<EmojiFontManifestEntry>> _fonts = EmojiFontCatalog
+      .shared
+      .loadManifest(forceRefresh: true);
+  String? _loadingKey;
+  String? _failedKey;
 
   @override
   Widget build(BuildContext context) {
@@ -1318,48 +1782,68 @@ class EmojiFontPickerView extends StatelessWidget {
         children: [
           NavHeader(title: '表情字体', onBack: () => Navigator.of(context).pop()),
           Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.xl,
-                AppSpacing.lg,
-                AppSpacing.section,
-              ),
-              children: [
-                Container(
-                  decoration: BoxDecoration(
-                    color: c.card,
-                    borderRadius: BorderRadius.circular(AppRadius.card),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: Column(
-                    children: [
-                      for (
-                        var i = 0;
-                        i < EmojiFontChoice.values.length;
-                        i++
-                      ) ...[
-                        _row(context, EmojiFontChoice.values[i], theme),
-                        if (i < EmojiFontChoice.values.length - 1)
-                          const InsetDivider(leadingInset: AppSpacing.xxl),
-                      ],
-                    ],
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.xxl,
-                  ),
-                  child: Text(
-                    'Noto Color Emoji 依赖系统可用字体；不可用时会继续使用系统 fallback。',
-                    style: TextStyle(
-                      fontSize: AppTextSize.footnote,
-                      color: c.textTertiary,
+            child: FutureBuilder<List<EmojiFontManifestEntry>>(
+              future: _fonts,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snapshot.hasError && !snapshot.hasData) {
+                  return Center(
+                    child: Text(
+                      '加载失败',
+                      style: TextStyle(
+                        fontSize: AppTextSize.bodyLarge,
+                        color: c.textSecondary,
+                      ),
                     ),
+                  );
+                }
+                final entries =
+                    snapshot.data ?? const <EmojiFontManifestEntry>[];
+                return ListView(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    AppSpacing.xl,
+                    AppSpacing.lg,
+                    AppSpacing.section,
                   ),
-                ),
-              ],
+                  children: [
+                    Container(
+                      decoration: BoxDecoration(
+                        color: c.card,
+                        borderRadius: BorderRadius.circular(AppRadius.card),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: Column(
+                        children: [
+                          _systemRow(context, theme),
+                          if (entries.isNotEmpty)
+                            const InsetDivider(leadingInset: AppSpacing.xxl),
+                          for (var i = 0; i < entries.length; i++) ...[
+                            _entryRow(context, entries[i], theme),
+                            if (i < entries.length - 1)
+                              const InsetDivider(leadingInset: AppSpacing.xxl),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.xxl,
+                      ),
+                      child: Text(
+                        '字体列表来自 iebb/emojifonts manifest；选择时从 GitHub Releases 下载。预览图来自 Emojipedia。',
+                        style: TextStyle(
+                          fontSize: AppTextSize.footnote,
+                          color: c.textTertiary,
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         ],
@@ -1367,29 +1851,94 @@ class EmojiFontPickerView extends StatelessWidget {
     );
   }
 
-  Widget _row(
+  Widget _systemRow(BuildContext context, ThemeController theme) {
+    return _row(
+      context,
+      title: EmojiFontChoice.system.label,
+      subtitle: '系统 emoji 字体',
+      previewAsset: _previewAssetForKey(EmojiFontChoice.system.key),
+      selected: theme.emojiFontChoice.isSystem,
+      loading: false,
+      failed: false,
+      onTap: () {
+        context.read<ThemeController>().useSystemEmojiFont();
+        setState(() {
+          _loadingKey = null;
+          _failedKey = null;
+        });
+      },
+    );
+  }
+
+  Widget _entryRow(
     BuildContext context,
-    EmojiFontChoice choice,
+    EmojiFontManifestEntry entry,
     ThemeController theme,
   ) {
+    return _row(
+      context,
+      title: entry.label,
+      subtitle: [
+        entry.license,
+        if (entry.emojiVersion.isNotEmpty) 'Emoji ${entry.emojiVersion}',
+      ].where((part) => part.isNotEmpty).join(' · '),
+      previewAsset: _previewAssetForKey(entry.key),
+      selected: theme.emojiFontChoice.key == entry.key,
+      loading: _loadingKey == entry.key,
+      failed: _failedKey == entry.key,
+      onTap: () async {
+        if (_loadingKey != null) return;
+        setState(() {
+          _loadingKey = entry.key;
+          _failedKey = null;
+        });
+        try {
+          await context.read<ThemeController>().setEmojiFont(entry);
+        } catch (_) {
+          if (mounted) setState(() => _failedKey = entry.key);
+        } finally {
+          if (mounted) setState(() => _loadingKey = null);
+        }
+      },
+    );
+  }
+
+  Widget _row(
+    BuildContext context, {
+    required String title,
+    required String subtitle,
+    required String previewAsset,
+    required bool selected,
+    required bool loading,
+    required bool failed,
+    required VoidCallback onTap,
+  }) {
     final c = context.colors;
-    final selected = theme.emojiFontChoice == choice;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () => context.read<ThemeController>().emojiFontChoice = choice,
+      onTap: onTap,
       child: SizedBox(
         height: AppMetric.menuRowHeight + AppSpacing.md,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxl),
           child: Row(
             children: [
+              SizedBox(
+                width: 30,
+                child: Semantics(
+                  label: 'Face with Tears of Joy',
+                  image: true,
+                  child: _EmojiPreviewImage(asset: previewAsset),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.lg),
               Expanded(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      choice.label,
+                      title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -1400,10 +1949,10 @@ class EmojiFontPickerView extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '😀 👍 ❤️ 🏁',
+                      failed ? '$subtitle · 下载失败' : subtitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: _previewStyle(choice).copyWith(
+                      style: TextStyle(
                         fontSize: AppTextSize.footnote,
                         color: c.textSecondary,
                       ),
@@ -1411,7 +1960,13 @@ class EmojiFontPickerView extends StatelessWidget {
                   ],
                 ),
               ),
-              if (selected)
+              if (loading)
+                const SizedBox(
+                  width: AppIconSize.lg,
+                  height: AppIconSize.lg,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else if (selected)
                 FaIcon(
                   FontAwesomeIcons.check,
                   size: AppIconSize.lg,
@@ -1424,13 +1979,119 @@ class EmojiFontPickerView extends StatelessWidget {
     );
   }
 
-  TextStyle _previewStyle(EmojiFontChoice choice) {
-    final googleFamily = choice.googleFamily;
-    if (googleFamily != null) {
-      return GoogleFonts.getFont(googleFamily, textStyle: const TextStyle());
+  String _previewAssetForKey(String key) =>
+      _previewAssets[key] ?? _fallbackPreviewAsset;
+}
+
+class _EmojiPreviewImage extends StatelessWidget {
+  const _EmojiPreviewImage({required this.asset});
+
+  final String asset;
+
+  @override
+  Widget build(BuildContext context) {
+    if (asset.endsWith('.svg')) {
+      return SvgPicture.asset(
+        asset,
+        width: 26,
+        height: 26,
+        fit: BoxFit.contain,
+        placeholderBuilder: (_) => const _TearJoyFallbackIcon(),
+        errorBuilder: (_, _, _) => const _TearJoyFallbackIcon(),
+      );
     }
-    return TextStyle(fontFamilyFallback: choice.fontFamilies);
+    return Image.asset(
+      asset,
+      width: 26,
+      height: 26,
+      filterQuality: FilterQuality.medium,
+      errorBuilder: (_, _, _) => const _TearJoyFallbackIcon(),
+    );
   }
+}
+
+class _TearJoyFallbackIcon extends StatelessWidget {
+  const _TearJoyFallbackIcon();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(
+      width: 26,
+      height: 26,
+      child: CustomPaint(painter: _TearJoyFallbackPainter()),
+    );
+  }
+}
+
+class _TearJoyFallbackPainter extends CustomPainter {
+  const _TearJoyFallbackPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final face = Paint()..color = const Color(0xFFFFD447);
+    final stroke = Paint()
+      ..color = const Color(0xFF5A3210)
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = size.width * 0.08;
+    final tear = Paint()..color = const Color(0xFF37A8FF);
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.shortestSide * 0.43;
+    canvas.drawCircle(center, radius, face);
+
+    canvas.drawArc(
+      Rect.fromCenter(
+        center: Offset(size.width * 0.34, size.height * 0.39),
+        width: size.width * 0.28,
+        height: size.height * 0.18,
+      ),
+      0.15,
+      2.6,
+      false,
+      stroke,
+    );
+    canvas.drawArc(
+      Rect.fromCenter(
+        center: Offset(size.width * 0.66, size.height * 0.39),
+        width: size.width * 0.28,
+        height: size.height * 0.18,
+      ),
+      0.4,
+      2.6,
+      false,
+      stroke,
+    );
+    canvas.drawArc(
+      Rect.fromCenter(
+        center: Offset(size.width * 0.5, size.height * 0.55),
+        width: size.width * 0.48,
+        height: size.height * 0.34,
+      ),
+      0.1,
+      2.95,
+      false,
+      stroke,
+    );
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(size.width * 0.18, size.height * 0.58),
+        width: size.width * 0.18,
+        height: size.height * 0.28,
+      ),
+      tear,
+    );
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(size.width * 0.82, size.height * 0.58),
+        width: size.width * 0.18,
+        height: size.height * 0.28,
+      ),
+      tear,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class FontAddView extends StatefulWidget {
@@ -1443,49 +2104,37 @@ class FontAddView extends StatefulWidget {
 class _FontAddViewState extends State<FontAddView> {
   late final Future<List<_FontCandidate>> _fonts = _loadFonts();
   String _query = '';
+  String? _loadingGoogleFamily;
+  String? _failedGoogleFamily;
 
   Future<List<_FontCandidate>> _loadFonts() async {
     final systemFonts = await SystemFontCatalog.loadFonts();
+    final cachedGoogleFamilies = await _cachedGoogleFontFamilies();
     final candidates = <_FontCandidate>[
-      for (final font in AppFontChoice.primaryOptions)
-        if (!font.isCustom)
-          _FontCandidate(
-            label: font.label,
-            family: font.isGoogleFont ? font.googleFamily! : font.fontFamily,
-            preview: font.previewText,
-            source: font.isGoogleFont ? 'Google' : '内置',
-          ),
-      for (final font in AppFontChoice.cjkOptions)
-        if (!font.isCustom)
-          _FontCandidate(
-            label: font.label,
-            family: font.isGoogleFont ? font.googleFamily! : font.fontFamily,
-            preview: font.previewText,
-            source: font.isGoogleFont ? 'Google' : '内置',
-          ),
-      for (final font in AppMonospaceFontChoice.values)
-        if (!font.isCustom)
-          _FontCandidate(
-            label: font.label,
-            family: font.isGoogleFont ? font.googleFamily! : font.fontFamily,
-            preview: font.previewText,
-            source: font.isGoogleFont ? 'Google' : '内置',
-          ),
       for (final font in systemFonts)
         _FontCandidate(
           label: font,
           family: font,
-          preview: 'Aa 123 门 門 戸 說 説',
+          preview: _fontPreviewSample(font),
           source: '系统',
+          priority: _popularSystemFontPriority(font),
+        ),
+      for (final family in GoogleFonts.asMap().keys)
+        _FontCandidate(
+          label: family,
+          family: family,
+          preview: _fontPreviewSample(family),
+          source: 'Google',
+          google: true,
+          downloaded: cachedGoogleFamilies.contains(family),
+          priority: 0,
         ),
     ];
-    final byFamily = <String, _FontCandidate>{};
-    for (final candidate in candidates) {
-      byFamily.putIfAbsent(candidate.family, () => candidate);
-    }
-    return byFamily.values.toList()..sort((a, b) {
+    return candidates..sort((a, b) {
       final sourceCompare = a.sourceOrder.compareTo(b.sourceOrder);
       if (sourceCompare != 0) return sourceCompare;
+      final priorityCompare = a.priority.compareTo(b.priority);
+      if (priorityCompare != 0) return priorityCompare;
       return a.label.toLowerCase().compareTo(b.label.toLowerCase());
     });
   }
@@ -1507,6 +2156,17 @@ class _FontAddViewState extends State<FontAddView> {
             ),
             child: CupertinoSearchTextField(
               placeholder: '搜索字体',
+              itemColor: c.textTertiary,
+              prefixIcon: FaIcon(
+                FontAwesomeIcons.magnifyingGlass,
+                size: AppIconSize.lg,
+                color: c.textTertiary,
+              ),
+              suffixIcon: Icon(
+                FontAwesomeIcons.circleXmark.data,
+                size: AppIconSize.lg,
+                color: c.textTertiary,
+              ),
               onChanged: (value) => setState(() => _query = value.trim()),
             ),
           ),
@@ -1526,15 +2186,7 @@ class _FontAddViewState extends State<FontAddView> {
                           font.family.toLowerCase().contains(query),
                     )
                     .toList();
-                return ListView(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.lg,
-                    AppSpacing.sm,
-                    AppSpacing.lg,
-                    AppSpacing.section,
-                  ),
-                  children: [_fontCard(context, fonts)],
-                );
+                return _fontList(context, fonts);
               },
             ),
           ),
@@ -1543,31 +2195,78 @@ class _FontAddViewState extends State<FontAddView> {
     );
   }
 
-  Widget _fontCard(BuildContext context, List<_FontCandidate> fonts) {
+  Widget _fontList(BuildContext context, List<_FontCandidate> fonts) {
     final c = context.colors;
-    return Container(
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
+    if (fonts.isEmpty) {
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.sm,
+          AppSpacing.lg,
+          AppSpacing.section,
+        ),
         children: [
-          for (var i = 0; i < fonts.length; i++) ...[
-            _fontRow(context, fonts[i]),
-            if (i < fonts.length - 1)
-              const InsetDivider(leadingInset: AppSpacing.xxl),
-          ],
+          Container(
+            decoration: BoxDecoration(
+              color: c.card,
+              borderRadius: BorderRadius.circular(AppRadius.card),
+            ),
+            padding: const EdgeInsets.all(AppSpacing.xxl),
+            child: Text(
+              '没有匹配的字体',
+              style: TextStyle(
+                fontSize: AppTextSize.body,
+                color: c.textSecondary,
+              ),
+            ),
+          ),
         ],
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.sm,
+        AppSpacing.lg,
+        AppSpacing.section,
       ),
+      itemCount: fonts.length,
+      itemBuilder: (context, index) => _virtualRow(
+        context,
+        first: index == 0,
+        last: index == fonts.length - 1,
+        child: _fontRow(context, fonts[index]),
+      ),
+      separatorBuilder: (context, index) => ColoredBox(
+        color: c.card,
+        child: const InsetDivider(leadingInset: AppSpacing.xxl),
+      ),
+    );
+  }
+
+  Widget _virtualRow(
+    BuildContext context, {
+    required bool first,
+    required bool last,
+    required Widget child,
+  }) {
+    final radius = Radius.circular(AppRadius.card);
+    return ClipRRect(
+      borderRadius: BorderRadius.vertical(
+        top: first ? radius : Radius.zero,
+        bottom: last ? radius : Radius.zero,
+      ),
+      child: ColoredBox(color: context.colors.card, child: child),
     );
   }
 
   Widget _fontRow(BuildContext context, _FontCandidate font) {
     final c = context.colors;
+    final loading = font.google && _loadingGoogleFamily == font.family;
+    final failed = font.google && _failedGoogleFamily == font.family;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () => Navigator.of(context).pop(font.family),
+      onTap: () => _selectFont(context, font),
       child: SizedBox(
         height: AppMetric.menuRowHeight + AppSpacing.md,
         child: Padding(
@@ -1583,11 +2282,12 @@ class _FontAddViewState extends State<FontAddView> {
                       font.label,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontFamily: font.family,
-                        fontSize: AppTextSize.bodyLarge,
-                        color: c.textPrimary,
-                        fontWeight: FontWeight.w500,
+                      style: font.titleStyle(
+                        TextStyle(
+                          fontSize: AppTextSize.bodyLarge,
+                          color: c.textPrimary,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -1595,10 +2295,11 @@ class _FontAddViewState extends State<FontAddView> {
                       font.preview,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontFamily: font.family,
-                        fontSize: AppTextSize.footnote,
-                        color: c.textSecondary,
+                      style: font.previewStyle(
+                        TextStyle(
+                          fontSize: AppTextSize.footnote,
+                          color: c.textSecondary,
+                        ),
                       ),
                     ),
                   ],
@@ -1606,17 +2307,57 @@ class _FontAddViewState extends State<FontAddView> {
               ),
               const SizedBox(width: AppSpacing.md),
               Text(
-                font.source,
+                failed
+                    ? '下载失败'
+                    : font.google && font.downloaded
+                    ? 'Google 已下载'
+                    : font.source,
                 style: TextStyle(
                   fontSize: AppTextSize.footnote,
                   color: c.textTertiary,
                 ),
               ),
+              if (loading) ...[
+                const SizedBox(width: AppSpacing.md),
+                SizedBox(
+                  width: 48,
+                  child: LinearProgressIndicator(
+                    minHeight: 2,
+                    color: AppTheme.brand,
+                    backgroundColor: c.divider,
+                  ),
+                ),
+              ],
             ],
           ),
         ),
       ),
     );
+  }
+
+  Future<void> _selectFont(BuildContext context, _FontCandidate font) async {
+    if (!font.google) {
+      Navigator.of(context).pop(font.selectionFamily);
+      return;
+    }
+    if (_loadingGoogleFamily != null) return;
+    setState(() {
+      _loadingGoogleFamily = font.family;
+      _failedGoogleFamily = null;
+    });
+    try {
+      GoogleFonts.getFont(font.family, textStyle: const TextStyle());
+      await GoogleFonts.pendingFonts();
+      if (!context.mounted) return;
+      Navigator.of(context).pop(font.selectionFamily);
+    } catch (_) {
+      if (!mounted || _loadingGoogleFamily != font.family) return;
+      setState(() => _failedGoogleFamily = font.family);
+    } finally {
+      if (mounted && _loadingGoogleFamily == font.family) {
+        setState(() => _loadingGoogleFamily = null);
+      }
+    }
   }
 }
 
@@ -1626,17 +2367,41 @@ class _FontCandidate {
     required this.family,
     required this.preview,
     required this.source,
+    this.google = false,
+    this.downloaded = false,
+    this.priority = 0,
   });
 
   final String label;
   final String family;
   final String preview;
   final String source;
+  final bool google;
+  final bool downloaded;
+  final int priority;
+
+  String get selectionFamily =>
+      google ? encodeGoogleFontFamily(family) : family;
+
+  TextStyle titleStyle(TextStyle base) {
+    return _fontTitleStyle(
+      family,
+      base,
+      googleFamily: google ? family : null,
+      googleLoaded: downloaded,
+    );
+  }
+
+  TextStyle previewStyle(TextStyle base) {
+    if (google) {
+      return downloaded ? GoogleFonts.getFont(family, textStyle: base) : base;
+    }
+    return base.copyWith(fontFamily: family);
+  }
 
   int get sourceOrder => switch (source) {
-    '内置' => 0,
+    '系统' => 0,
     'Google' => 1,
-    '系统' => 2,
     _ => 4,
   };
 }
@@ -1649,6 +2414,7 @@ class _MonoFontCandidate {
     required this.source,
     this.choice,
     this.google = false,
+    this.downloaded = false,
     required this.priority,
   });
 
@@ -1658,6 +2424,7 @@ class _MonoFontCandidate {
   final String source;
   final AppMonospaceFontChoice? choice;
   final bool google;
+  final bool downloaded;
   final int priority;
 
   String get selectionKey {
@@ -1670,9 +2437,19 @@ class _MonoFontCandidate {
   }
 
   TextStyle previewStyle(TextStyle base, {required bool selected}) {
-    if (google && selected) return GoogleFonts.getFont(family, textStyle: base);
-    return base.copyWith(
-      fontFamily: google ? family.replaceAll(' ', '') : family,
+    if (google && (selected || downloaded)) {
+      return GoogleFonts.getFont(family, textStyle: base);
+    }
+    if (google) return base;
+    return base.copyWith(fontFamily: family);
+  }
+
+  TextStyle titleStyle(TextStyle base, {required bool selected}) {
+    return _fontTitleStyle(
+      family,
+      base,
+      googleFamily: google ? family : null,
+      googleLoaded: selected || downloaded,
     );
   }
 }
@@ -1707,15 +2484,7 @@ class _MonospaceFontPickerViewState extends State<MonospaceFontPickerView> {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                return ListView(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.lg,
-                    AppSpacing.xl,
-                    AppSpacing.lg,
-                    AppSpacing.section,
-                  ),
-                  children: [_fontCard(context, snapshot.data!, selectedKey)],
-                );
+                return _fontList(context, snapshot.data!, selectedKey);
               },
             ),
           ),
@@ -1726,10 +2495,11 @@ class _MonospaceFontPickerViewState extends State<MonospaceFontPickerView> {
 
   Future<List<_MonoFontCandidate>> _loadFonts() async {
     final systemFonts = await SystemFontCatalog.loadFonts();
+    final cachedGoogleFamilies = await _cachedGoogleFontFamilies();
     final candidates = <_MonoFontCandidate>[
       ..._preferredPlatformMonospaceFonts(),
-      ..._googleMonospaceFonts(),
-      for (final family in systemFonts.where(_isSystemMonospaceFamily))
+      ..._googleMonospaceFonts(cachedGoogleFamilies),
+      for (final family in systemFonts.where(_isSystemMonospaceFontFamily))
         _MonoFontCandidate(
           label: family,
           family: family,
@@ -1757,7 +2527,6 @@ class _MonospaceFontPickerViewState extends State<MonospaceFontPickerView> {
         AppMonospaceFontChoice.sfMono,
         AppMonospaceFontChoice.menlo,
         AppMonospaceFontChoice.courierNew,
-        AppMonospaceFontChoice.monaco,
       ],
       TargetPlatform.android => const [
         AppMonospaceFontChoice.system,
@@ -1781,9 +2550,13 @@ class _MonospaceFontPickerViewState extends State<MonospaceFontPickerView> {
     ];
   }
 
-  List<_MonoFontCandidate> _googleMonospaceFonts() {
+  List<_MonoFontCandidate> _googleMonospaceFonts(
+    Set<String> cachedGoogleFamilies,
+  ) {
     final families =
-        GoogleFonts.asMap().keys.where(_isGoogleMonospaceFamily).toList()
+        GoogleFonts.asMap().keys
+            .where(_googleMonospaceFamilies.contains)
+            .toList()
           ..sort((a, b) {
             final priorityCompare = _googleMonospacePriority(
               a,
@@ -1799,38 +2572,10 @@ class _MonospaceFontPickerViewState extends State<MonospaceFontPickerView> {
           preview: 'final count = 123;',
           source: 'Google',
           google: true,
+          downloaded: cachedGoogleFamilies.contains(family),
           priority: 100 + _googleMonospacePriority(family),
         ),
     ];
-  }
-
-  bool _isSystemMonospaceFamily(String family) {
-    final normalized = family.toLowerCase();
-    return normalized.contains('mono') ||
-        family == 'SF Mono' ||
-        family == 'Menlo' ||
-        family == 'Monaco' ||
-        family.startsWith('Courier');
-  }
-
-  bool _isGoogleMonospaceFamily(String family) {
-    final normalized = family.toLowerCase();
-    return normalized.contains('mono') ||
-        normalized.contains('source code') ||
-        normalized.contains('fira code') ||
-        normalized.contains('jetbrains') ||
-        normalized.contains('inconsolata') ||
-        normalized.contains('anonymous pro') ||
-        normalized.contains('cascadia') ||
-        normalized.contains('courier prime') ||
-        normalized.contains('commit mono') ||
-        normalized.contains('geist mono') ||
-        normalized.contains('ibm plex mono') ||
-        normalized.contains('pt mono') ||
-        normalized.contains('space mono') ||
-        normalized.contains('ubuntu mono') ||
-        normalized.contains('victor mono') ||
-        normalized == 'sono';
   }
 
   int _systemMonospacePriority(String family) {
@@ -1840,7 +2585,6 @@ class _MonospaceFontPickerViewState extends State<MonospaceFontPickerView> {
         'Menlo',
         'Courier',
         'Courier New',
-        'Monaco',
       ],
       TargetPlatform.android => const [
         'monospace',
@@ -1890,15 +2634,27 @@ class _MonospaceFontPickerViewState extends State<MonospaceFontPickerView> {
     return 'choice:${selected.name}';
   }
 
-  Widget _fontCard(
+  Widget _fontList(
     BuildContext context,
     List<_MonoFontCandidate> fonts,
     String selectedKey,
   ) {
     final c = context.colors;
-    final rows = fonts
-        .map(
-          (font) => _fontRow(
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.xl,
+        AppSpacing.lg,
+        AppSpacing.section,
+      ),
+      itemCount: fonts.length,
+      itemBuilder: (context, index) {
+        final font = fonts[index];
+        return _virtualRow(
+          context,
+          first: index == 0,
+          last: index == fonts.length - 1,
+          child: _fontRow(
             context,
             font,
             selected: selectedKey == font.selectionKey,
@@ -1919,23 +2675,28 @@ class _MonospaceFontPickerViewState extends State<MonospaceFontPickerView> {
               _trackGoogleFontLoad(font.google ? font.family : null);
             },
           ),
-        )
-        .toList();
-    return Container(
-      decoration: BoxDecoration(
+        );
+      },
+      separatorBuilder: (context, index) => ColoredBox(
         color: c.card,
-        borderRadius: BorderRadius.circular(AppRadius.card),
+        child: const InsetDivider(leadingInset: AppSpacing.xxl),
       ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          for (var i = 0; i < rows.length; i++) ...[
-            rows[i],
-            if (i < rows.length - 1)
-              const InsetDivider(leadingInset: AppSpacing.xxl),
-          ],
-        ],
+    );
+  }
+
+  Widget _virtualRow(
+    BuildContext context, {
+    required bool first,
+    required bool last,
+    required Widget child,
+  }) {
+    final radius = Radius.circular(AppRadius.card);
+    return ClipRRect(
+      borderRadius: BorderRadius.vertical(
+        top: first ? radius : Radius.zero,
+        bottom: last ? radius : Radius.zero,
       ),
+      child: ColoredBox(color: context.colors.card, child: child),
     );
   }
 
@@ -1966,7 +2727,7 @@ class _MonospaceFontPickerViewState extends State<MonospaceFontPickerView> {
                       font.label,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: font.previewStyle(
+                      style: font.titleStyle(
                         TextStyle(
                           fontSize: AppTextSize.bodyLarge,
                           color: c.textPrimary,
@@ -1993,7 +2754,11 @@ class _MonospaceFontPickerViewState extends State<MonospaceFontPickerView> {
               ),
               const SizedBox(width: AppSpacing.md),
               Text(
-                font.source,
+                failed
+                    ? '下载失败'
+                    : font.google && font.downloaded
+                    ? 'Google 已下载'
+                    : font.source,
                 style: TextStyle(
                   fontSize: AppTextSize.footnote,
                   color: c.textTertiary,

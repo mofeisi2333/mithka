@@ -66,6 +66,9 @@ jobs:
             target: android-arm
     env:
       TDJSON_REPO: iebb/mithka-tdjson
+      # fvp defaults Android MDK downloads to SourceForge nightly builds. Pin a
+      # stable MDK release to avoid native-load crashes from broken nightlies.
+      FVP_DEPS_URL: https://github.com/wang-bin/mdk-sdk/releases/download/v0.36.0
     steps:
       - uses: actions/checkout@v5
 
@@ -226,6 +229,20 @@ jobs:
           fi
           git tag -f "$RELEASE_TAG" "$GITHUB_SHA"
           git push --force origin "$RELEASE_TAG"
+
+      - name: Remove old APK assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            exit 0
+          fi
+          gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' \
+            | grep '^mithka-.*-release\.apk$' \
+            | while read -r asset; do
+                gh release delete-asset "$RELEASE_TAG" "$asset" --yes
+              done
 
       - name: Publish to GitHub Release
         uses: softprops/action-gh-release@v2

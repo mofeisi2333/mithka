@@ -26,4 +26,20 @@ class SystemFontCatalog {
       return const <String>[];
     }
   }
+
+  static Future<List<String>> normalizeFamilies(List<String> families) async {
+    try {
+      final result = await _channel.invokeListMethod<String>(
+        'normalizeFontFamilies',
+        families,
+      );
+      if (result == null || result.length != families.length) return families;
+      return [
+        for (var i = 0; i < result.length; i++)
+          result[i].trim().isEmpty ? families[i] : result[i].trim(),
+      ];
+    } catch (_) {
+      return families;
+    }
+  }
 }

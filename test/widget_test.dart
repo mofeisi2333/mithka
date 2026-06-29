@@ -7,6 +7,7 @@ import 'package:mithka/settings/keyword_blocker.dart';
 import 'package:mithka/settings/translation_controller.dart';
 import 'package:mithka/chat/media_album_layout.dart';
 import 'package:mithka/theme/date_text.dart';
+import 'package:mithka/theme/emoji_font_catalog.dart';
 import 'package:mithka/theme/theme_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -463,6 +464,40 @@ void main() {
       expect(style.fontFamily, 'My Mono');
       expect(style.fontFamilyFallback, contains('My Mono'));
       expect(style.fontFamilyFallback!.length, greaterThan(1));
+    });
+  });
+
+  group('EmojiFontChoice', () {
+    test('uses platform fallback until a runtime font is loaded', () {
+      expect(EmojiFontChoice.system.fontFamilies, isNotEmpty);
+      const choice = EmojiFontChoice(
+        key: 'twemoji',
+        label: 'Twemoji',
+        fontFamily: 'MithkaEmoji_twemoji',
+      );
+      expect(choice.fontFamilies.first, 'MithkaEmoji_twemoji');
+    });
+
+    test('parses release manifest entries and chooses a downloadable format', () {
+      final entry = EmojiFontManifestEntry.fromJson({
+        'key': 'twemoji',
+        'label': 'Twemoji',
+        'license': 'CC-BY-4.0',
+        'kind': 'color',
+        'coverage_pct': 99,
+        'emoji_version': '15.0',
+        'updated': '2026-06-16',
+        'formats': {
+          'sbix':
+              'https://github.com/iebb/emojifonts/releases/download/latest/twemoji.ttf',
+        },
+      });
+
+      expect(entry.key, 'twemoji');
+      expect(entry.runtimeFamily, 'MithkaEmoji_twemoji');
+      expect(entry.format, 'sbix');
+      expect(entry.emojiVersion, '15.0');
+      expect(entry.extension, 'ttf');
     });
   });
 

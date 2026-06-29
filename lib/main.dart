@@ -168,6 +168,7 @@ class _MithkaAppState extends State<MithkaApp> {
   @override
   void initState() {
     super.initState();
+    _theme.loadSelectedEmojiFontIfAvailable();
     _auth.start();
     NotificationController.shared.start();
   }

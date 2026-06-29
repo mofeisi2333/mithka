@@ -129,8 +129,6 @@ class MainActivity : FlutterActivity() {
         val fonts = linkedSetOf(
             "sans-serif",
             "sans-serif-condensed",
-            "sans-serif-medium",
-            "sans-serif-light",
             "serif",
             "monospace",
             "Roboto",
@@ -158,18 +156,14 @@ class MainActivity : FlutterActivity() {
                         if (event == XmlPullParser.START_TAG) {
                             when (parser.name) {
                                 "family" -> parser.getAttributeValue(null, "name")
-                                    ?.trim()
-                                    ?.takeIf { it.isNotEmpty() }
-                                    ?.let { fonts.add(it) }
+                                    ?.let { addFontFamily(fonts, it) }
                                 "alias" -> {
-                                    parser.getAttributeValue(null, "name")
-                                        ?.trim()
-                                        ?.takeIf { it.isNotEmpty() }
-                                        ?.let { fonts.add(it) }
+                                    if (parser.getAttributeValue(null, "weight").isNullOrBlank()) {
+                                        parser.getAttributeValue(null, "name")
+                                            ?.let { addFontFamily(fonts, it) }
+                                    }
                                     parser.getAttributeValue(null, "to")
-                                        ?.trim()
-                                        ?.takeIf { it.isNotEmpty() }
-                                        ?.let { fonts.add(it) }
+                                        ?.let { addFontFamily(fonts, it) }
                                 }
                             }
                         }
@@ -181,6 +175,33 @@ class MainActivity : FlutterActivity() {
             }
         }
         return fonts.sortedWith(String.CASE_INSENSITIVE_ORDER)
+    }
+
+    private fun addFontFamily(fonts: MutableSet<String>, name: String) {
+        val family = name.trim()
+        if (family.isEmpty() || isWeightedFontAlias(family)) return
+        fonts.add(family)
+    }
+
+    private fun isWeightedFontAlias(name: String): Boolean {
+        val normalized = name.lowercase()
+        val suffixes = listOf(
+            "-thin",
+            "-extralight",
+            "-ultralight",
+            "-light",
+            "-regular",
+            "-medium",
+            "-semibold",
+            "-demibold",
+            "-bold",
+            "-extrabold",
+            "-ultrabold",
+            "-black",
+            "-heavy",
+            "-italic",
+        )
+        return suffixes.any { normalized.endsWith(it) }
     }
 
     private fun registerPlugins(flutterEngine: FlutterEngine) {

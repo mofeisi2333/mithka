@@ -70,6 +70,8 @@ dependencies:
   package_info_plus: ^9.0.1
   sentry_flutter: ^9.22.0
   font_awesome_flutter: ^11.0.0
+  http: ^1.6.0
+  flutter_svg: ^2.3.0
 
 dev_dependencies:
   flutter_test:
@@ -90,3 +92,4 @@ flutter:
   assets:
     - assets/penguin.png
     - assets/app_icon.png
+    - assets/emoji_preview/

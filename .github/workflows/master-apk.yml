@@ -25,6 +25,9 @@ jobs:
       TARGET_PLATFORM: android-arm64
       NDK_VERSION: 28.2.13676358
       TDJSON_REPO: iebb/mithka-tdjson
+      # fvp defaults Android MDK downloads to SourceForge nightly builds. Pin a
+      # stable MDK release to avoid native-load crashes from broken nightlies.
+      FVP_DEPS_URL: https://github.com/wang-bin/mdk-sdk/releases/download/v0.36.0
     steps:
       - uses: actions/checkout@v5
 
