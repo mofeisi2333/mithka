@@ -25,6 +25,63 @@ abstract final class AppTextSize {
   static const double largeDisplay = 24;
 }
 
+abstract final class AppTextWeight {
+  static const FontWeight regular = FontWeight.w400;
+  static const FontWeight medium = FontWeight.w500;
+  static const FontWeight semibold = FontWeight.w600;
+  static const FontWeight bold = FontWeight.w700;
+}
+
+abstract final class AppTextStyle {
+  static TextStyle tiny(Color color, {FontWeight? weight}) => TextStyle(
+    fontSize: AppTextSize.tiny,
+    fontWeight: weight ?? AppTextWeight.regular,
+    color: color,
+  );
+
+  static TextStyle caption(Color color, {FontWeight? weight}) => TextStyle(
+    fontSize: AppTextSize.caption,
+    fontWeight: weight ?? AppTextWeight.regular,
+    color: color,
+  );
+
+  static TextStyle footnote(Color color, {FontWeight? weight}) => TextStyle(
+    fontSize: AppTextSize.footnote,
+    fontWeight: weight ?? AppTextWeight.regular,
+    color: color,
+  );
+
+  static TextStyle callout(Color color, {FontWeight? weight}) => TextStyle(
+    fontSize: AppTextSize.callout,
+    fontWeight: weight ?? AppTextWeight.regular,
+    color: color,
+  );
+
+  static TextStyle body(Color color, {FontWeight? weight}) => TextStyle(
+    fontSize: AppTextSize.body,
+    fontWeight: weight ?? AppTextWeight.regular,
+    color: color,
+  );
+
+  static TextStyle bodyLarge(Color color, {FontWeight? weight}) => TextStyle(
+    fontSize: AppTextSize.bodyLarge,
+    fontWeight: weight ?? AppTextWeight.regular,
+    color: color,
+  );
+
+  static TextStyle title(Color color, {FontWeight? weight}) => TextStyle(
+    fontSize: AppTextSize.title,
+    fontWeight: weight ?? AppTextWeight.medium,
+    color: color,
+  );
+
+  static TextStyle display(Color color, {FontWeight? weight}) => TextStyle(
+    fontSize: AppTextSize.display,
+    fontWeight: weight ?? AppTextWeight.semibold,
+    color: color,
+  );
+}
+
 abstract final class AppSpacing {
   static const double xxs = 2;
   static const double xs = 4;
@@ -34,6 +91,35 @@ abstract final class AppSpacing {
   static const double xl = 14;
   static const double xxl = 16;
   static const double section = 24;
+}
+
+abstract final class AppInsets {
+  static const EdgeInsets screen = EdgeInsets.fromLTRB(
+    AppSpacing.lg,
+    AppSpacing.xl,
+    AppSpacing.lg,
+    AppSpacing.section,
+  );
+  static const EdgeInsets row = EdgeInsets.symmetric(
+    horizontal: AppSpacing.xxl,
+  );
+  static const EdgeInsets navHeader = EdgeInsets.symmetric(
+    horizontal: AppSpacing.xl,
+  );
+  static const EdgeInsets card = EdgeInsets.all(AppSpacing.xxl);
+  static const EdgeInsets search = EdgeInsets.symmetric(
+    horizontal: AppSpacing.lg,
+  );
+  static const EdgeInsets pill = EdgeInsets.symmetric(
+    horizontal: AppSpacing.lg,
+    vertical: AppSpacing.xs + 1,
+  );
+  static const EdgeInsets composerScreen = EdgeInsets.fromLTRB(
+    AppSpacing.xxl,
+    AppSpacing.xl,
+    AppSpacing.xxl,
+    AppSpacing.section,
+  );
 }
 
 abstract final class AppRadius {
@@ -53,11 +139,14 @@ abstract final class AppIconSize {
   static const double nav = 22;
   static const double toolbar = 24;
   static const double add = 25;
+  static const double chevron = 17;
 }
 
 abstract final class AppMetric {
   static const double navHeaderHeight = 44;
   static const double listRowHeight = 64;
+  static const double settingsRowHeight = 56;
+  static const double compactSettingsRowHeight = 52;
   static const double avatarSize = 48;
   static const double headerAvatarSize = 40;
   static const double hitTarget = 36;
@@ -74,6 +163,16 @@ abstract final class AppMetric {
   static const double badgeOutlinePadding = 1.5;
   static const double unreadBadgeMin = 18;
   static const double unreadDot = 11;
+  static const double settingsLeadingInset = AppSpacing.xxl;
+  static const double settingsTrailingInset = AppSpacing.xl;
+  static const double settingsIconDividerInset = 56;
+  static const double maxBannerWidth = 300;
+  static const double composerHeaderHeight = 64;
+  static const double composerPublishButtonHeight = 38;
+  static const double composerFormatButtonWidth = 32;
+  static const double composerFormatButtonHeight = 28;
+  static const double mediaTile = 92;
+  static const double overlayCloseButton = 22;
 }
 
 /// Constants that read well on both light and dark, so they stay fixed.

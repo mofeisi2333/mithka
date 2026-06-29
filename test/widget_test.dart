@@ -53,6 +53,43 @@ void main() {
         expect(message('messageAnimation').isAlbumVisualMedia, isFalse);
       },
     );
+
+    test('photo messages keep a downloadable thumbnail before full image', () {
+      final message = TDParse.message({
+        '@type': 'message',
+        'id': 42,
+        'date': 1,
+        'is_outgoing': false,
+        'content': {
+          '@type': 'messagePhoto',
+          'photo': {
+            '@type': 'photo',
+            'sizes': [
+              {
+                '@type': 'photoSize',
+                'type': 'm',
+                'width': 320,
+                'height': 180,
+                'photo': {'@type': 'file', 'id': 10},
+              },
+              {
+                '@type': 'photoSize',
+                'type': 'y',
+                'width': 1920,
+                'height': 1080,
+                'photo': {'@type': 'file', 'id': 20},
+              },
+            ],
+          },
+        },
+      });
+
+      expect(message, isNotNull);
+      expect(message!.image?.id, 20);
+      expect(message.image?.thumbnail?.id, 10);
+      expect(message.imageWidth, 1920);
+      expect(message.imageHeight, 1080);
+    });
   });
 
   group('MediaAlbumLayout', () {
@@ -101,6 +138,24 @@ void main() {
       final style = theme.applyAppTextStyle(const TextStyle());
       expect(style.fontFamily, 'Futura');
       expect(style.fontFamilyFallback, contains('PingFang SC'));
+    });
+
+    test('honors system bold text by increasing app text weights', () async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final theme = ThemeController(prefs);
+
+      final regular = theme.applyAppTextStyle(
+        const TextStyle(),
+        boldText: true,
+      );
+      final medium = theme.applyAppTextStyle(
+        const TextStyle(fontWeight: FontWeight.w500),
+        boldText: true,
+      );
+
+      expect(regular.fontWeight, FontWeight.w600);
+      expect(medium.fontWeight, FontWeight.w700);
     });
   });
 

@@ -189,7 +189,11 @@ class _ChatListViewState extends State<ChatListView> {
     }
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => ChatView(chatId: chat.id, title: chat.title),
+        builder: (_) => ChatView(
+          chatId: chat.id,
+          title: chat.title,
+          seedMessage: chat.lastChatMessage,
+        ),
       ),
     );
   }

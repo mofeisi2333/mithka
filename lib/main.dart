@@ -241,10 +241,25 @@ class _MithkaAppState extends State<MithkaApp> {
             themeMode: theme.themeMode,
             // Apply the user's chosen font size app-wide (设置 › 通用 › 字体大小).
             builder: (context, child) {
+              final media = MediaQuery.of(context);
+              final currentTheme = Theme.of(context);
+              final themedChild = Theme(
+                data: currentTheme.copyWith(
+                  textTheme: theme.applyAppTextTheme(
+                    currentTheme.textTheme,
+                    boldText: media.boldText,
+                  ),
+                  primaryTextTheme: theme.applyAppTextTheme(
+                    currentTheme.primaryTextTheme,
+                    boldText: media.boldText,
+                  ),
+                ),
+                child: child ?? const SizedBox.shrink(),
+              );
               return _ScaledAppView(
                 fontScale: theme.fontScale,
                 interfaceScale: theme.interfaceScale,
-                child: child ?? const SizedBox.shrink(),
+                child: themedChild,
               );
             },
             // Rebuild the whole tree when the active account changes.

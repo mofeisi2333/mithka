@@ -100,7 +100,13 @@ class ChatViewModel extends ChangeNotifier {
     required this.chatId,
     required String title,
     this.initialMessageId,
-  }) : peerTitle = title;
+    ChatMessage? seedMessage,
+  }) : peerTitle = title {
+    if (seedMessage != null) {
+      _allMessages = [seedMessage];
+      messages = [seedMessage];
+    }
+  }
 
   final int chatId;
   final int? initialMessageId;
@@ -172,6 +178,7 @@ class ChatViewModel extends ChangeNotifier {
   final Map<int, String> _typing = {};
   Timer? _typingTimer;
   Timer? _draftSaveTimer;
+  Timer? _senderPatchTimer;
   String? _lastSavedDraftText;
 
   /// Header title: profile shows the member count in parentheses after a group name.
@@ -204,6 +211,13 @@ class ChatViewModel extends ChangeNotifier {
 
   final Map<int, _SenderInfo> _senderCache = {};
   final Set<int> _resolvingSenders = {};
+  bool _isDisposed = false;
+
+  @override
+  void notifyListeners() {
+    if (_isDisposed) return;
+    super.notifyListeners();
+  }
 
   /// After prepending older history, the view scrolls this id back to the top.
   int? consumeRestoreTop() {
@@ -396,10 +410,12 @@ class ChatViewModel extends ChangeNotifier {
 
   @override
   void dispose() {
+    _isDisposed = true;
     KeywordBlocker.shared.removeListener(_applyKeywordFilter);
     _sub?.cancel();
     _typingTimer?.cancel();
     _draftSaveTimer?.cancel();
+    _senderPatchTimer?.cancel();
     super.dispose();
   }
 
@@ -1111,6 +1127,7 @@ class ChatViewModel extends ChangeNotifier {
     _applyRemoteDraft(chat.obj('draft_message'), force: true, notify: false);
     final kind = TDParse.chatKind(chat);
     isGroup = kind == ChatKind.group || kind == ChatKind.channel;
+    _primeLastMessage(chat);
 
     // Chat-wide default send permission + permissive membership defaults
     // (refined per type below).
@@ -1175,6 +1192,15 @@ class ChatViewModel extends ChangeNotifier {
     }
     notifyListeners();
     _loadPinnedMessage();
+  }
+
+  void _primeLastMessage(Map<String, dynamic> chat) {
+    final lastRaw = chat.obj('last_message');
+    final lastMessage = lastRaw == null ? null : TDParse.message(lastRaw);
+    if (lastMessage == null) return;
+    _merge([lastMessage]);
+    _resolveRepliesIfNeeded([lastMessage]);
+    _resolveForwardsIfNeeded([lastMessage]);
   }
 
   Future<void> _loadSupergroupFullInfo(int supergroupId) async {
@@ -1382,7 +1408,10 @@ class ChatViewModel extends ChangeNotifier {
       });
       final list = res.objects('messages');
       if (list == null || list.isEmpty) return;
-      final parsed = list.map(TDParse.message).whereType<ChatMessage>().toList();
+      final parsed = list
+          .map(TDParse.message)
+          .whereType<ChatMessage>()
+          .toList();
       if (parsed.isEmpty) return;
       pinnedMessages = parsed;
       pinnedMessageIndex = pinnedMessageIndex.clamp(0, parsed.length - 1);
@@ -1470,28 +1499,31 @@ class ChatViewModel extends ChangeNotifier {
   // MARK: - History
 
   Future<void> _loadInitialHistory() async {
-    await _fetchHistory(0, 0, 40);
-    if (_allMessages.isEmpty) return;
-    // Telegram-style entry: open at the first unread message. Page older until
-    // a read message precedes the first unread (so the divider is loaded with
-    // context above it). Bounded so a large backlog can't stall the open — the
-    // view falls back to the bottom if the boundary still isn't reached.
-    if (unreadCount > 0 && lastReadInboxId > 0) {
-      var guard = 0;
-      while (_allMessages.first.id > lastReadInboxId && guard < 6) {
-        final before = _allMessages.first.id;
-        await _fetchHistory(
-          before,
-          0,
-          40,
-          isOlder: true,
-          restorePosition: false,
-        );
-        if (_allMessages.first.id == before) break; // no older messages left
-        guard++;
+    final seeded = _allMessages.isNotEmpty;
+    final localLoaded = await _fetchHistory(
+      0,
+      0,
+      40,
+      onlyLocal: true,
+      restorePosition: false,
+    );
+    if (!localLoaded) {
+      if (seeded || _allMessages.isNotEmpty) {
+        unawaited(_fetchHistory(0, 0, 40, restorePosition: false));
+        return;
       }
-    } else if (messages.length < 12) {
-      await _fetchHistory(_allMessages.first.id, 0, 40);
+      await _fetchHistory(0, 0, 40);
+    } else {
+      unawaited(_fetchHistory(0, 0, 40, restorePosition: false));
+    }
+    if (_allMessages.isEmpty) return;
+    // Render the first page immediately. Older unread-boundary paging used to
+    // happen here and could block a large media channel for seconds on cold
+    // cache before any UI appeared.
+    if (messages.length < 12) {
+      unawaited(
+        _fetchHistory(_allMessages.first.id, 0, 40, restorePosition: false),
+      );
     }
   }
 
@@ -1543,6 +1575,7 @@ class ChatViewModel extends ChangeNotifier {
     int limit, {
     bool isOlder = false,
     bool restorePosition = true,
+    bool onlyLocal = false,
   }) async {
     final anchor = messages.isNotEmpty ? messages.first.id : null;
     final allAnchor = _allMessages.isNotEmpty ? _allMessages.first.id : null;
@@ -1554,7 +1587,7 @@ class ChatViewModel extends ChangeNotifier {
         'from_message_id': fromMessageId,
         'offset': offset,
         'limit': limit,
-        'only_local': false,
+        'only_local': onlyLocal,
       });
     } catch (_) {
       return false;
@@ -2074,7 +2107,16 @@ class ChatViewModel extends ChangeNotifier {
       m.senderEmojiStatusId = info.emojiStatusId;
       changed = true;
     }
-    if (changed) notifyListeners();
+    if (changed) _scheduleSenderPatchNotify();
+  }
+
+  void _scheduleSenderPatchNotify() {
+    if (_isDisposed) return;
+    if (_senderPatchTimer != null) return;
+    _senderPatchTimer = Timer(const Duration(milliseconds: 16), () {
+      _senderPatchTimer = null;
+      notifyListeners();
+    });
   }
 
   // MARK: - Sender resolution (groups/channels only)
@@ -2223,7 +2265,9 @@ class ChatViewModel extends ChangeNotifier {
         name = '用户 $senderId';
         photo = null;
       }
-      final role = await _resolveRole(senderId);
+      final role = isChannel
+          ? (MemberRole.member, null)
+          : await _resolveRole(senderId);
       info = _SenderInfo(
         name,
         photo,
@@ -2249,6 +2293,7 @@ class ChatViewModel extends ChangeNotifier {
         info = _SenderInfo('群成员', null, MemberRole.member, null);
       }
     }
+    if (_isDisposed) return;
     _senderCache[senderId] = info;
     _resolvingSenders.remove(senderId);
     _patchSender(info, senderId);

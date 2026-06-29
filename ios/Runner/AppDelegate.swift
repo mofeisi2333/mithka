@@ -227,6 +227,9 @@ private final class NativeTranslationCoordinator: ObservableObject {
 
   private var queue: [NativeTranslationRequest] = []
   private var activeRequestId: UUID?
+  private var configurationSourceKey: String?
+  private var configurationTargetKey: String?
+  private var timeoutTask: Task<Void, Never>?
 
   func enqueue(
     text: String,
@@ -253,8 +256,10 @@ private final class NativeTranslationCoordinator: ObservableObject {
 
     do {
       let response = try await session.translate(request.text)
+      guard self.activeRequestId == activeRequestId else { return }
       request.result(response.targetText)
     } catch {
+      guard self.activeRequestId == activeRequestId else { return }
       request.result(
         FlutterError(
           code: "translation_failed",
@@ -264,19 +269,16 @@ private final class NativeTranslationCoordinator: ObservableObject {
       )
     }
 
-    queue.removeAll { $0.id == activeRequestId }
-    self.activeRequestId = nil
-    configuration = nil
-    if !queue.isEmpty {
-      Task { @MainActor in
-        self.startNextIfNeeded()
-      }
-    }
+    finishActiveRequest(activeRequestId)
   }
 
   private func startNextIfNeeded() {
     guard activeRequestId == nil, let request = queue.first else { return }
-    guard let target = Self.localeLanguage(for: request.targetLanguageCode) else {
+    let sourceKey = Self.normalizedLanguageKey(for: request.sourceLanguageCode)
+    guard
+      let targetKey = Self.normalizedLanguageKey(for: request.targetLanguageCode),
+      let target = Self.localeLanguage(for: targetKey)
+    else {
       request.result(
         FlutterError(
           code: "unsupported_language",
@@ -290,13 +292,61 @@ private final class NativeTranslationCoordinator: ObservableObject {
     }
 
     activeRequestId = request.id
-    configuration = TranslationSession.Configuration(
-      source: Self.localeLanguage(for: request.sourceLanguageCode),
-      target: target
-    )
+    startTimeout(for: request.id)
+
+    if configuration == nil ||
+      configurationSourceKey != sourceKey ||
+      configurationTargetKey != targetKey
+    {
+      configuration = TranslationSession.Configuration(
+        source: Self.localeLanguage(for: sourceKey),
+        target: target
+      )
+      configurationSourceKey = sourceKey
+      configurationTargetKey = targetKey
+    } else {
+      configuration?.invalidate()
+    }
+  }
+
+  private func startTimeout(for requestId: UUID) {
+    timeoutTask?.cancel()
+    timeoutTask = Task { @MainActor in
+      try? await Task.sleep(nanoseconds: 55_000_000_000)
+      guard self.activeRequestId == requestId,
+        let request = self.queue.first(where: { $0.id == requestId })
+      else { return }
+      request.result(
+        FlutterError(
+          code: "translation_timeout",
+          message: "本机翻译已取消或超时",
+          details: nil
+        )
+      )
+      self.finishActiveRequest(requestId)
+    }
+  }
+
+  private func finishActiveRequest(_ requestId: UUID) {
+    timeoutTask?.cancel()
+    timeoutTask = nil
+    queue.removeAll { $0.id == requestId }
+    if activeRequestId == requestId {
+      activeRequestId = nil
+    }
+    if !queue.isEmpty {
+      Task { @MainActor in
+        self.startNextIfNeeded()
+      }
+    }
   }
 
   private static func localeLanguage(for code: String?) -> Locale.Language? {
+    guard let normalized = normalizedLanguageKey(for: code) else { return nil }
+    return Locale.Language(identifier: normalized)
+  }
+
+  private static func normalizedLanguageKey(for code: String?) -> String? {
     guard
       let code,
       !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -308,12 +358,12 @@ private final class NativeTranslationCoordinator: ObservableObject {
       return nil
     }
     if normalized == "zh" || normalized == "zh-hans" || normalized == "zh-cn" {
-      return Locale.Language(identifier: "zh-Hans")
+      return "zh-Hans"
     }
     if normalized == "zh-hant" || normalized == "zh-tw" || normalized == "zh-hk" {
-      return Locale.Language(identifier: "zh-Hant")
+      return "zh-Hant"
     }
-    return Locale.Language(identifier: normalized.components(separatedBy: "-").first ?? normalized)
+    return normalized.components(separatedBy: "-").first ?? normalized
   }
 }
 

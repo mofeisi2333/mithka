@@ -53,6 +53,7 @@ class ChatView extends StatefulWidget {
     required this.chatId,
     required this.title,
     this.initialMessageId,
+    this.seedMessage,
     this.showBackButton = true,
     this.headerHeight = 48,
     this.headerColor,
@@ -62,6 +63,7 @@ class ChatView extends StatefulWidget {
   final int chatId;
   final String title;
   final int? initialMessageId;
+  final ChatMessage? seedMessage;
   final bool showBackButton;
   final double headerHeight;
   final Color? headerColor;
@@ -87,6 +89,7 @@ class _ChatViewState extends State<ChatView> {
     chatId: widget.chatId,
     title: widget.title,
     initialMessageId: widget.initialMessageId,
+    seedMessage: widget.seedMessage,
   );
   final _scroll = ScrollController();
   final _pinnedKey = GlobalKey(); // the pinned message's row, for scroll-to

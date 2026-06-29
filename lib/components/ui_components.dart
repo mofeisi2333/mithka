@@ -52,7 +52,7 @@ class NavHeader extends StatelessWidget {
         ),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
+        padding: AppInsets.navHeader,
         child: Row(
           children: [
             if (onBack != null)
@@ -73,11 +73,7 @@ class NavHeader extends StatelessWidget {
                 title.l10n(context),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: AppTextSize.title,
-                  fontWeight: FontWeight.w500,
-                  color: c.textPrimary,
-                ),
+                style: AppTextStyle.title(c.textPrimary),
               ),
             ),
             ?trailing,
@@ -203,7 +199,7 @@ class _UnreadBadgeState extends State<UnreadBadge> {
   Size _visualSize(BuildContext context, String label) {
     const style = TextStyle(
       fontSize: AppTextSize.caption,
-      fontWeight: FontWeight.w600,
+      fontWeight: AppTextWeight.semibold,
     );
     final painter = TextPainter(
       text: TextSpan(text: label, style: style),
@@ -241,10 +237,9 @@ class _UnreadBadgeBody extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: const TextStyle(
-          fontSize: AppTextSize.caption,
-          fontWeight: FontWeight.w600,
-          color: Colors.white,
+        style: AppTextStyle.caption(
+          Colors.white,
+          weight: AppTextWeight.semibold,
         ),
       ),
     );
@@ -341,11 +336,7 @@ class RoleTag extends StatelessWidget {
       ),
       child: Text(
         _label.l10n(context),
-        style: const TextStyle(
-          fontSize: AppTextSize.tiny,
-          fontWeight: FontWeight.w500,
-          color: Colors.white,
-        ),
+        style: AppTextStyle.tiny(Colors.white, weight: AppTextWeight.medium),
       ),
     );
   }
@@ -391,7 +382,7 @@ class SettingsCard extends StatelessWidget {
     final card = Container(
       decoration: BoxDecoration(
         color: context.colors.card,
-        borderRadius: BorderRadius.circular(AppRadius.lg),
+        borderRadius: BorderRadius.circular(AppRadius.card),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(mainAxisSize: MainAxisSize.min, children: children),
@@ -408,8 +399,8 @@ class SettingsRow extends StatelessWidget {
     this.leading,
     this.onTap,
     this.showChevron = true,
-    this.height = 56,
-    this.leadingInset = 16,
+    this.height = AppMetric.settingsRowHeight,
+    this.leadingInset = AppMetric.settingsLeadingInset,
     this.trailing,
   });
 
@@ -431,16 +422,16 @@ class SettingsRow extends StatelessWidget {
       child: SizedBox(
         height: height,
         child: Padding(
-          padding: EdgeInsets.only(left: leadingInset, right: 14),
+          padding: EdgeInsets.only(
+            left: leadingInset,
+            right: AppMetric.settingsTrailingInset,
+          ),
           child: Row(
             children: [
               if (leading != null) ...[leading!, const SizedBox(width: 12)],
               Text(
                 title.l10n(context),
-                style: TextStyle(
-                  fontSize: AppTextSize.body,
-                  color: c.textPrimary,
-                ),
+                style: AppTextStyle.body(c.textPrimary),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -453,16 +444,17 @@ class SettingsRow extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.right,
-                        style: TextStyle(
-                          fontSize: AppTextSize.footnote,
-                          color: c.textTertiary,
-                        ),
+                        style: AppTextStyle.footnote(c.textTertiary),
                       ),
                 ),
               ),
               if (showChevron) ...[
                 const SizedBox(width: 8),
-                Icon(sfIcon('chevron.right'), size: 17, color: c.textTertiary),
+                Icon(
+                  sfIcon('chevron.right'),
+                  size: AppIconSize.chevron,
+                  color: c.textTertiary,
+                ),
               ],
             ],
           ),
@@ -479,8 +471,8 @@ class SettingsSwitchRow extends StatelessWidget {
     required this.value,
     required this.onChanged,
     this.leading,
-    this.height = 56,
-    this.leadingInset = 16,
+    this.height = AppMetric.settingsRowHeight,
+    this.leadingInset = AppMetric.settingsLeadingInset,
   });
 
   final String title;
@@ -499,16 +491,16 @@ class SettingsSwitchRow extends StatelessWidget {
       child: SizedBox(
         height: height,
         child: Padding(
-          padding: EdgeInsets.only(left: leadingInset, right: 14),
+          padding: EdgeInsets.only(
+            left: leadingInset,
+            right: AppMetric.settingsTrailingInset,
+          ),
           child: Row(
             children: [
               if (leading != null) ...[leading!, const SizedBox(width: 12)],
               Text(
                 title.l10n(context),
-                style: TextStyle(
-                  fontSize: AppTextSize.body,
-                  color: c.textPrimary,
-                ),
+                style: AppTextStyle.body(c.textPrimary),
               ),
               const Spacer(),
               IgnorePointer(
@@ -536,10 +528,7 @@ class TimeSeparator extends StatelessWidget {
     child: Center(
       child: Text(
         DateText.separatorLabel(unix),
-        style: TextStyle(
-          fontSize: AppTextSize.caption,
-          color: context.colors.textSecondary,
-        ),
+        style: AppTextStyle.caption(context.colors.textSecondary),
       ),
     ),
   );
@@ -556,11 +545,8 @@ class SystemBanner extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
       child: Center(
         child: Container(
-          constraints: const BoxConstraints(maxWidth: 300),
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.lg,
-            vertical: AppSpacing.xs + 1,
-          ),
+          constraints: const BoxConstraints(maxWidth: AppMetric.maxBannerWidth),
+          padding: AppInsets.pill,
           decoration: BoxDecoration(
             color: c.textPrimary.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(AppRadius.md),
@@ -568,10 +554,7 @@ class SystemBanner extends StatelessWidget {
           child: Text(
             text,
             textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: AppTextSize.caption,
-              color: c.textSecondary,
-            ),
+            style: AppTextStyle.caption(c.textSecondary),
           ),
         ),
       ),

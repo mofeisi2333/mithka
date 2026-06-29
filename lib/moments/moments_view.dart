@@ -2667,11 +2667,11 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
           _header(),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+              padding: AppInsets.composerScreen,
               children: [
                 _editorCard(),
-                const SizedBox(height: 14),
-                _settingsCard(),
+                const SizedBox(height: AppSpacing.xl),
+                _publishSettingsCard(),
               ],
             ),
           ),
@@ -2685,28 +2685,25 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
     return Container(
       padding: EdgeInsets.only(
         top: MediaQuery.of(context).padding.top,
-        left: 16,
-        right: 16,
+        left: AppSpacing.xxl,
+        right: AppSpacing.xxl,
       ),
-      height: MediaQuery.of(context).padding.top + 64,
+      height:
+          MediaQuery.of(context).padding.top + AppMetric.composerHeaderHeight,
       color: c.groupedBackground,
       child: Row(
         children: [
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () => Navigator.of(context).pop(false),
-            child: Text(
-              '取消',
-              style: TextStyle(fontSize: 16, color: c.textPrimary),
-            ),
+            child: Text('取消', style: AppTextStyle.bodyLarge(c.textPrimary)),
           ),
           const Spacer(),
           Text(
             '发布动态',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-              color: c.textPrimary,
+            style: AppTextStyle.title(
+              c.textPrimary,
+              weight: AppTextWeight.semibold,
             ),
           ),
           const Spacer(),
@@ -2714,19 +2711,20 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
             behavior: HitTestBehavior.opaque,
             onTap: _sending ? null : _send,
             child: Container(
-              height: 38,
-              padding: const EdgeInsets.symmetric(horizontal: 18),
+              height: AppMetric.composerPublishButtonHeight,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.xxl + AppSpacing.xxs,
+              ),
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: AppTheme.brand.withValues(alpha: _canSend ? 1 : 0.45),
-                borderRadius: BorderRadius.circular(7),
+                borderRadius: BorderRadius.circular(AppRadius.md + 1),
               ),
               child: Text(
                 _sending ? '发送中' : '发表',
-                style: const TextStyle(
-                  fontSize: 16,
-                  color: Colors.white,
-                  fontWeight: FontWeight.w500,
+                style: AppTextStyle.bodyLarge(
+                  Colors.white,
+                  weight: AppTextWeight.medium,
                 ),
               ),
             ),
@@ -2741,9 +2739,14 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
     return Container(
       decoration: BoxDecoration(
         color: c.background,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppRadius.control),
       ),
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.xxl,
+        AppSpacing.xl,
+        AppSpacing.xxl,
+        AppSpacing.xl,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2754,17 +2757,17 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
             minLines: 9,
             maxLines: 16,
             textInputAction: TextInputAction.newline,
-            style: TextStyle(fontSize: 16, height: 1.4, color: c.textPrimary),
+            style: AppTextStyle.bodyLarge(c.textPrimary).copyWith(height: 1.4),
             decoration: InputDecoration(
               border: InputBorder.none,
               hintText: '分享新鲜事...',
-              hintStyle: TextStyle(fontSize: 16, color: c.textTertiary),
+              hintStyle: AppTextStyle.bodyLarge(c.textTertiary),
             ),
             onChanged: (_) => setState(() {}),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.lg),
           _mediaStrip(),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.lg),
           _markdownToolbar(),
         ],
       ),
@@ -2777,11 +2780,11 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
       if (_pickedImages.length < 9) _addImageTile(),
     ];
     return SizedBox(
-      height: 92,
+      height: AppMetric.mediaTile,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: children.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.md),
         itemBuilder: (_, index) => children[index],
       ),
     );
@@ -2793,34 +2796,38 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
     return Stack(
       children: [
         ClipRRect(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(AppRadius.md),
           child: Image.file(
             File(image.path),
-            width: 92,
-            height: 92,
+            width: AppMetric.mediaTile,
+            height: AppMetric.mediaTile,
             fit: BoxFit.cover,
             errorBuilder: (_, _, _) => Container(
-              width: 92,
-              height: 92,
+              width: AppMetric.mediaTile,
+              height: AppMetric.mediaTile,
               color: c.searchFill,
               child: Icon(sfIcon('photo'), color: c.textTertiary),
             ),
           ),
         ),
         Positioned(
-          top: 4,
-          right: 4,
+          top: AppSpacing.xs,
+          right: AppSpacing.xs,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () => setState(() => _pickedImages.removeAt(index)),
             child: Container(
-              width: 22,
-              height: 22,
+              width: AppMetric.overlayCloseButton,
+              height: AppMetric.overlayCloseButton,
               decoration: BoxDecoration(
                 color: Colors.black.withValues(alpha: 0.55),
                 shape: BoxShape.circle,
               ),
-              child: Icon(sfIcon('xmark'), size: 12, color: Colors.white),
+              child: Icon(
+                sfIcon('xmark'),
+                size: AppIconSize.xs,
+                color: Colors.white,
+              ),
             ),
           ),
         ),
@@ -2834,21 +2841,18 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
       behavior: HitTestBehavior.opaque,
       onTap: _pickImages,
       child: Container(
-        width: 92,
-        height: 92,
+        width: AppMetric.mediaTile,
+        height: AppMetric.mediaTile,
         decoration: BoxDecoration(
           color: c.searchFill,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(AppRadius.md),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(sfIcon('photo'), size: 25, color: c.textTertiary),
-            const SizedBox(height: 8),
-            Text(
-              '照片/视频',
-              style: TextStyle(fontSize: 13, color: c.textTertiary),
-            ),
+            Icon(sfIcon('photo'), size: AppIconSize.add, color: c.textTertiary),
+            const SizedBox(height: AppSpacing.md),
+            Text('照片/视频', style: AppTextStyle.footnote(c.textTertiary)),
           ],
         ),
       ),
@@ -2860,16 +2864,16 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
     return Row(
       children: [
         _formatButton('B', () => _wrapSelection('**')),
-        const SizedBox(width: 8),
+        const SizedBox(width: AppSpacing.md),
         _formatButton('I', () => _wrapSelection('_'), italic: true),
-        const SizedBox(width: 8),
+        const SizedBox(width: AppSpacing.md),
         _formatButton('`', () => _wrapSelection('`')),
-        const SizedBox(width: 8),
+        const SizedBox(width: AppSpacing.md),
         _formatButton('H', () => _prefixLine('## ')),
-        const SizedBox(width: 8),
+        const SizedBox(width: AppSpacing.md),
         _formatButton('•', () => _prefixLine('- ')),
         const Spacer(),
-        Text('Markdown', style: TextStyle(fontSize: 12, color: c.textTertiary)),
+        Text('Markdown', style: AppTextStyle.caption(c.textTertiary)),
       ],
     );
   }
@@ -2884,46 +2888,52 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: Container(
-        width: 32,
-        height: 28,
+        width: AppMetric.composerFormatButtonWidth,
+        height: AppMetric.composerFormatButtonHeight,
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: c.searchFill,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(AppRadius.md),
         ),
         child: Text(
           label,
-          style: TextStyle(
-            fontSize: 15,
-            fontStyle: italic ? FontStyle.italic : null,
-            fontWeight: FontWeight.w600,
-            color: c.textPrimary,
-          ),
+          style: AppTextStyle.body(
+            c.textPrimary,
+            weight: AppTextWeight.semibold,
+          ).copyWith(fontStyle: italic ? FontStyle.italic : null),
         ),
       ),
     );
   }
 
-  Widget _settingsCard() {
+  Widget _publishSettingsCard() {
     final c = context.colors;
     return SettingsCard(
       children: [
         SettingsRow(
-          leading: Icon(sfIcon('paperplane'), size: 22, color: c.textPrimary),
+          leading: Icon(
+            sfIcon('paperplane'),
+            size: AppIconSize.nav,
+            color: c.textPrimary,
+          ),
           title: '发布至',
           value: _channel?.title ?? '选择频道',
           onTap: _selectChannel,
-          leadingInset: 18,
-          height: 54,
+          leadingInset: AppSpacing.xxl + AppSpacing.xxs,
+          height: AppMetric.settingsRowHeight - AppSpacing.xxs,
         ),
-        const InsetDivider(leadingInset: 56),
+        const InsetDivider(leadingInset: AppMetric.settingsIconDividerInset),
         SettingsSwitchRow(
-          leading: Icon(sfIcon('bell'), size: 22, color: c.textPrimary),
+          leading: Icon(
+            sfIcon('bell'),
+            size: AppIconSize.nav,
+            color: c.textPrimary,
+          ),
           title: '通知订阅者',
           value: _notifySubscribers,
           onChanged: (value) => setState(() => _notifySubscribers = value),
-          leadingInset: 18,
-          height: 54,
+          leadingInset: AppSpacing.xxl + AppSpacing.xxs,
+          height: AppMetric.settingsRowHeight - AppSpacing.xxs,
         ),
       ],
     );

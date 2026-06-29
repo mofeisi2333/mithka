@@ -573,46 +573,51 @@ class FontSettingsView extends StatelessWidget {
                 AppSpacing.section,
               ),
               children: [
-                _settingsCard(context, [
-                  _settingsRow(
-                    context,
-                    '文本字体',
-                    theme.effectiveFontChainLabel,
-                    () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const TextFontView()),
-                    ),
-                  ),
-                  _settingsRow(
-                    context,
-                    '等宽字体',
-                    theme.effectiveMonospaceFontLabel,
-                    () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const MonospaceFontPickerView(),
+                SettingsCard(
+                  children: [
+                    SettingsRow(
+                      title: '文本字体',
+                      value: theme.effectiveFontChainLabel,
+                      height: AppMetric.compactSettingsRowHeight,
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const TextFontView()),
                       ),
                     ),
-                  ),
-                  _settingsRow(
-                    context,
-                    '表情字体',
-                    theme.emojiFontChoice.label,
-                    () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const EmojiFontPickerView(),
+                    const InsetDivider(leadingInset: AppSpacing.xxl),
+                    SettingsRow(
+                      title: '等宽字体',
+                      value: theme.effectiveMonospaceFontLabel,
+                      height: AppMetric.compactSettingsRowHeight,
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const MonospaceFontPickerView(),
+                        ),
                       ),
                     ),
-                  ),
-                  _settingsRow(
-                    context,
-                    '字体缓存',
-                    '管理',
-                    () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const FontCacheManagementView(),
+                    const InsetDivider(leadingInset: AppSpacing.xxl),
+                    SettingsRow(
+                      title: '表情字体',
+                      value: theme.emojiFontChoice.label,
+                      height: AppMetric.compactSettingsRowHeight,
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const EmojiFontPickerView(),
+                        ),
                       ),
                     ),
-                  ),
-                ]),
+                    const InsetDivider(leadingInset: AppSpacing.xxl),
+                    SettingsRow(
+                      title: '字体缓存',
+                      value: '管理',
+                      height: AppMetric.compactSettingsRowHeight,
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const FontCacheManagementView(),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: AppSpacing.md),
                 Padding(
                   padding: const EdgeInsets.symmetric(
@@ -630,75 +635,6 @@ class FontSettingsView extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _settingsCard(BuildContext context, List<Widget> rows) {
-    final c = context.colors;
-    return Container(
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          for (var i = 0; i < rows.length; i++) ...[
-            rows[i],
-            if (i < rows.length - 1)
-              const InsetDivider(leadingInset: AppSpacing.xxl),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _settingsRow(
-    BuildContext context,
-    String label,
-    String value,
-    VoidCallback onTap,
-  ) {
-    final c = context.colors;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: SizedBox(
-        height: AppMetric.menuRowHeight + AppSpacing.xxs,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxl),
-          child: Row(
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: AppTextSize.bodyLarge,
-                  color: c.textPrimary,
-                ),
-              ),
-              const SizedBox(width: AppSpacing.lg),
-              Expanded(
-                child: Text(
-                  value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                    fontSize: AppTextSize.body,
-                    color: c.textTertiary,
-                  ),
-                ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              Icon(
-                sfIcon('chevron.right'),
-                size: AppIconSize.lg,
-                color: c.textTertiary,
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

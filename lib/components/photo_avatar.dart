@@ -241,7 +241,9 @@ class TDImage extends StatefulWidget {
 
 class _TDImageState extends State<TDImage> {
   File? _file;
+  File? _thumbnailFile;
   int? _loadedId;
+  int? _loadedThumbnailId;
   int? _loadedSlot;
   TdFileProgress? _progress;
   StreamSubscription<TdFileProgress>? _progressSub;
@@ -267,14 +269,17 @@ class _TDImageState extends State<TDImage> {
   void _load() {
     final ref = widget.photo;
     final slot = TdClient.shared.activeSlot;
+    final thumbnailId = ref?.thumbnail?.id;
     if (ref == null) {
       _loadedId = null;
+      _loadedThumbnailId = null;
       _loadedSlot = null;
       _progressSub?.cancel();
       _progressSub = null;
-      if (_file != null || _progress != null) {
+      if (_file != null || _thumbnailFile != null || _progress != null) {
         setState(() {
           _file = null;
+          _thumbnailFile = null;
           _progress = null;
         });
       } else {
@@ -283,11 +288,13 @@ class _TDImageState extends State<TDImage> {
       return;
     }
     if (_loadedId == ref.id &&
+        _loadedThumbnailId == thumbnailId &&
         _loadedSlot == slot &&
         oldProgressModeUnchanged()) {
       return;
     }
     _loadedId = ref.id;
+    _loadedThumbnailId = thumbnailId;
     _loadedSlot = slot;
     _progress = null;
     _progressSub?.cancel();
@@ -295,10 +302,26 @@ class _TDImageState extends State<TDImage> {
     if (widget.showProgress) {
       _progressSub = TdFileCenter.shared.progress(ref.id).listen((progress) {
         if (!mounted || _loadedId != ref.id || _loadedSlot != slot) return;
+        if (progress.isCompleted) return;
         setState(() => _progress = progress);
       });
     }
-    setState(() => _file = null);
+    setState(() {
+      _file = null;
+      _thumbnailFile = null;
+    });
+    final thumbnail = ref.thumbnail;
+    if (thumbnail != null && thumbnail.id != ref.id) {
+      TdFileCenter.shared.path(thumbnail.id).then((path) {
+        if (!mounted ||
+            _loadedId != ref.id ||
+            _loadedThumbnailId != thumbnail.id ||
+            _loadedSlot != slot) {
+          return;
+        }
+        if (path != null) setState(() => _thumbnailFile = File(path));
+      });
+    }
     TdFileCenter.shared.path(ref.id).then((path) {
       if (!mounted || _loadedId != ref.id || _loadedSlot != slot) return;
       if (path != null) setState(() => _file = File(path));
@@ -321,6 +344,14 @@ class _TDImageState extends State<TDImage> {
         cacheHeight: widget.cacheHeight,
         gaplessPlayback: true,
       );
+    } else if (_thumbnailFile != null) {
+      child = Image.file(
+        _thumbnailFile!,
+        fit: widget.fit,
+        cacheWidth: widget.cacheWidth,
+        cacheHeight: widget.cacheHeight,
+        gaplessPlayback: true,
+      );
     } else if (widget.photo?.miniThumb != null) {
       child = Image.memory(
         widget.photo!.miniThumb!,
@@ -332,7 +363,9 @@ class _TDImageState extends State<TDImage> {
     } else {
       child = Container(color: context.colors.groupedBackground);
     }
-    if (widget.showProgress && _file == null) {
+    final showLoadingProgress =
+        widget.showProgress && _file == null && _progress?.isActive == true;
+    if (showLoadingProgress) {
       child = Stack(
         fit: StackFit.expand,
         children: [

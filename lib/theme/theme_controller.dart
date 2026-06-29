@@ -993,14 +993,15 @@ class ThemeController extends ChangeNotifier {
     ]);
   }
 
-  TextStyle applyAppTextStyle(TextStyle base) {
+  TextStyle applyAppTextStyle(TextStyle base, {bool boldText = false}) {
     final families = effectiveFontFamilyChain(base);
-    if (families.isEmpty) return base;
+    final weightedBase = boldText ? _applyBoldTextWeight(base) : base;
+    if (families.isEmpty) return weightedBase;
     final first = families.first;
     final googleFamily = _googleFamilyFor(first);
     final withPrimary = googleFamily == null
-        ? base.copyWith(fontFamily: first)
-        : GoogleFonts.getFont(googleFamily, textStyle: base);
+        ? weightedBase.copyWith(fontFamily: first)
+        : GoogleFonts.getFont(googleFamily, textStyle: weightedBase);
     return withPrimary.copyWith(
       fontFamilyFallback: dedupeFontFamilies([
         ..._emojiFontChoice.fontFamilies,
@@ -1010,9 +1011,9 @@ class ThemeController extends ChangeNotifier {
     );
   }
 
-  TextTheme applyAppTextTheme(TextTheme textTheme) {
+  TextTheme applyAppTextTheme(TextTheme textTheme, {bool boldText = false}) {
     TextStyle? apply(TextStyle? style) =>
-        style == null ? null : applyAppTextStyle(style);
+        style == null ? null : applyAppTextStyle(style, boldText: boldText);
     return textTheme.copyWith(
       displayLarge: apply(textTheme.displayLarge),
       displayMedium: apply(textTheme.displayMedium),
@@ -1030,6 +1031,20 @@ class ThemeController extends ChangeNotifier {
       labelMedium: apply(textTheme.labelMedium),
       labelSmall: apply(textTheme.labelSmall),
     );
+  }
+
+  TextStyle _applyBoldTextWeight(TextStyle style) {
+    final current = style.fontWeight ?? FontWeight.w400;
+    final next = switch (current) {
+      FontWeight.w100 => FontWeight.w400,
+      FontWeight.w200 => FontWeight.w500,
+      FontWeight.w300 => FontWeight.w500,
+      FontWeight.w400 => FontWeight.w600,
+      FontWeight.w500 => FontWeight.w700,
+      FontWeight.w600 => FontWeight.w800,
+      _ => FontWeight.w900,
+    };
+    return style.copyWith(fontWeight: next);
   }
 
   TextStyle codeTextStyle(TextStyle base) => _monospaceFontChoice

@@ -1,10 +1,10 @@
 name: 🚀 Release APK
 
 # Builds per-ABI **release** APKs from the release branch. Each ABI
-# (arm64-v8a, armeabi-v7a) builds in its OWN parallel matrix job — compiling the
-# native TDLib (tdjson) + static OpenSSL for just that ABI — then a final job
-# creates the version tag from pubspec.yaml and publishes all the APKs to a
-# single GitHub Release.
+# (arm64-v8a, armeabi-v7a) builds in its OWN parallel matrix job and downloads
+# the latest prebuilt native TDLib (tdjson) asset from iebb/mithka-tdjson. A
+# final job creates the version tag from pubspec.yaml and publishes all the APKs
+# to a single GitHub Release.
 #
 # Release by pushing the desired pubspec.yaml version to the release branch.
 #
@@ -58,20 +58,16 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      # One job per ABI → the heavy OpenSSL + TDLib compile runs in parallel.
       matrix:
         include:
           - abi: arm64-v8a
             target: android-arm64
           - abi: armeabi-v7a
             target: android-arm
+    env:
+      TDJSON_REPO: iebb/mithka-tdjson
     steps:
       - uses: actions/checkout@v5
-
-      - name: Install build tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build gperf clang libssl-dev
 
       - uses: actions/setup-java@v4
         with:
@@ -90,27 +86,52 @@ jobs:
           yes | sdkmanager "ndk;28.2.13676358" >/dev/null 2>&1 || true
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
 
-      # Cache the heavy native build per ABI, keyed on the build scripts.
-      - name: Cache native build (.tdlib-build)
-        uses: actions/cache@v4
-        with:
-          path: .tdlib-build
-          key: tdnative-${{ runner.os }}-ndk28-${{ matrix.abi }}-${{ hashFiles('scripts/build-tdjson-android.sh', 'scripts/build-openssl-android.sh') }}
+      - name: Resolve tdjson release
+        id: tdjson_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "${TDJSON_RELEASE_TAG:-}" ]; then
+            tag="$TDJSON_RELEASE_TAG"
+          else
+            tag="$(curl -fsSL \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/$TDJSON_REPO/releases/latest" \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "asset_url=https://github.com/$TDJSON_REPO/releases/download/$tag/tdjson-android-${{ matrix.abi }}.zip" >> "$GITHUB_OUTPUT"
+          echo "Using tdjson release $tag"
 
       - name: Cache jniLibs (${{ matrix.abi }})
+        id: jnilibs-cache
         uses: actions/cache@v4
         with:
           path: android/app/src/main/jniLibs/${{ matrix.abi }}
-          key: jnilibs-${{ runner.os }}-ndk28-${{ matrix.abi }}-${{ hashFiles('scripts/build-tdjson-android.sh', 'scripts/build-openssl-android.sh') }}
+          key: jnilibs-${{ runner.os }}-${{ steps.tdjson_release.outputs.tag }}-${{ matrix.abi }}
+          restore-keys: |
+            jnilibs-${{ runner.os }}-
 
-      - name: Build static OpenSSL (${{ matrix.abi }})
-        run: ./scripts/build-openssl-android.sh ${{ matrix.abi }}
+      - name: Check cached tdjson
+        id: tdjson
+        run: |
+          if [ -s "android/app/src/main/jniLibs/${{ matrix.abi }}/libtdjson.so" ]; then
+            echo "cached=true" >> "$GITHUB_OUTPUT"
+            ls -lh "android/app/src/main/jniLibs/${{ matrix.abi }}/libtdjson.so"
+          else
+            echo "cached=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Build libtdjson.so (${{ matrix.abi }})
-        env:
-          HOST_OPENSSL_ROOT_DIR: /usr
-          TD_ENABLE_LTO: 'OFF'
-        run: ./scripts/build-tdjson-android.sh ${{ matrix.abi }}
+      - name: Download prebuilt tdjson (${{ matrix.abi }})
+        if: steps.tdjson.outputs.cached != 'true'
+        run: |
+          mkdir -p "android/app/src/main/jniLibs/${{ matrix.abi }}"
+          curl -fsSL "${{ steps.tdjson_release.outputs.asset_url }}" -o /tmp/tdjson-android.zip
+          unzip -q -o /tmp/tdjson-android.zip -d /tmp/tdjson-android
+          install -m 0644 "/tmp/tdjson-android/${{ matrix.abi }}/libtdjson.so" \
+            "android/app/src/main/jniLibs/${{ matrix.abi }}/libtdjson.so"
+          ls -lh "android/app/src/main/jniLibs/${{ matrix.abi }}/libtdjson.so"
 
       - name: Flutter dependencies
         run: flutter pub get

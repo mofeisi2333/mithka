@@ -61,12 +61,12 @@ class Secrets {
 ```
 
 The TDLib native library is prepared with helper scripts (output is git-ignored).
-iOS downloads a prebuilt artifact from
-[`iebb/mithka-tdjson`](https://github.com/iebb/mithka-tdjson); Android still
-builds per ABI locally.
+CI downloads the latest prebuilt Android and iOS artifacts from
+[`iebb/mithka-tdjson`](https://github.com/iebb/mithka-tdjson). The Android
+source-build script is kept for local fallback/debug builds.
 
 ```bash
-# Android (per ABI) — produces android/app/src/main/jniLibs/<abi>/libtdjson.so
+# Android local fallback (per ABI) — produces android/app/src/main/jniLibs/<abi>/libtdjson.so
 scripts/build-tdjson-android.sh arm64-v8a
 
 # iOS — downloads ios/tdjson/tdjson.xcframework consumed by the Runner

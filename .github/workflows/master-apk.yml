@@ -24,7 +24,7 @@ jobs:
       ABI: arm64-v8a
       TARGET_PLATFORM: android-arm64
       NDK_VERSION: 28.2.13676358
-      TDJSON_ANDROID_ARM64_URL: https://github.com/iebb/mithka-tdjson/releases/download/tdjson-1.8.65-android/tdjson-android-arm64-v8a.zip
+      TDJSON_REPO: iebb/mithka-tdjson
     steps:
       - uses: actions/checkout@v5
 
@@ -45,14 +45,32 @@ jobs:
           yes | sdkmanager "ndk;$NDK_VERSION" >/dev/null 2>&1 || true
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
 
+      - name: Resolve tdjson release
+        id: tdjson_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "${TDJSON_RELEASE_TAG:-}" ]; then
+            tag="$TDJSON_RELEASE_TAG"
+          else
+            tag="$(curl -fsSL \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/$TDJSON_REPO/releases/latest" \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "asset_url=https://github.com/$TDJSON_REPO/releases/download/$tag/tdjson-android-$ABI.zip" >> "$GITHUB_OUTPUT"
+          echo "Using tdjson release $tag"
+
       - name: Cache jniLibs (${{ env.ABI }})
         id: jnilibs-cache
         uses: actions/cache@v4
         with:
           path: android/app/src/main/jniLibs/${{ env.ABI }}
-          key: jnilibs-${{ runner.os }}-tdjson-1.8.65-android-${{ env.ABI }}
+          key: jnilibs-${{ runner.os }}-${{ steps.tdjson_release.outputs.tag }}-${{ env.ABI }}
           restore-keys: |
-            jnilibs-${{ runner.os }}-tdjson-1.8.65-android-${{ env.ABI }}
+            jnilibs-${{ runner.os }}-
 
       - name: Check cached tdjson
         id: tdjson
@@ -68,7 +86,7 @@ jobs:
         if: steps.tdjson.outputs.cached != 'true'
         run: |
           mkdir -p "android/app/src/main/jniLibs/$ABI"
-          curl -fsSL "$TDJSON_ANDROID_ARM64_URL" -o /tmp/tdjson-android.zip
+          curl -fsSL "${{ steps.tdjson_release.outputs.asset_url }}" -o /tmp/tdjson-android.zip
           unzip -q -o /tmp/tdjson-android.zip -d /tmp/tdjson-android
           install -m 0644 "/tmp/tdjson-android/$ABI/libtdjson.so" \
             "android/app/src/main/jniLibs/$ABI/libtdjson.so"
@@ -208,13 +226,6 @@ jobs:
             exit 1
           fi
 
-          too_large_text="$caption
-
-          APK is larger than 50 MB, so uploading through local Bot API.
-          Artifact: $ARTIFACT_URL
-          Run: $RUN_URL"
-          send_message "$too_large_text"
-
           : "${TELEGRAM_API_ID:?set TELEGRAM_API_ID in repository secrets}"
           : "${TELEGRAM_API_HASH:?set TELEGRAM_API_HASH in repository secrets}"
           mkdir -p "$RUNNER_TEMP/telegram-bot-api"
@@ -239,14 +250,14 @@ jobs:
             sleep 1
           done
 
-          status="$(upload_document "$APK_PATH" "$caption · local Bot API" "http://127.0.0.1:8081")"
+          status="$(upload_document "$APK_PATH" "$caption" "http://127.0.0.1:8081")"
           if [ "$status" = "200" ]; then
             exit 0
           fi
           cat "$response"
           send_message "$caption
 
-          Local Bot API upload failed.
+          APK upload failed.
           Artifact: $ARTIFACT_URL
           Run: $RUN_URL"
           exit 1

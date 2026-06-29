@@ -614,16 +614,16 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                if (widget.onSwitchMode != null) ...[
-                  _modeSwitchButton(),
-                  const SizedBox(width: 12),
-                ],
                 Expanded(child: _loadingDebugText()),
                 _volumeSlider(),
                 const SizedBox(width: 12),
                 _speedMenu(),
                 const SizedBox(width: 12),
                 _roundIconButton('arrow.down.to.line', _downloadedNotice),
+                if (widget.onSwitchMode != null) ...[
+                  const SizedBox(width: 12),
+                  _modeSwitchButton(),
+                ],
                 const SizedBox(width: 12),
                 _roundIconButton('arrowshape.turn.up.right', _forwardVideo),
               ],
@@ -655,12 +655,6 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         bottom: 10,
         child: Row(
           children: [
-            if (widget.onSwitchMode != null &&
-                widget.presentation !=
-                    VideoPlayerPresentation.pictureInPicture) ...[
-              _modeSwitchButton(size: 34),
-              const SizedBox(width: 8),
-            ],
             const Text(
               '00:00',
               style: TextStyle(color: Colors.white70, fontSize: 11),
@@ -678,6 +672,12 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
                 fontWeight: FontWeight.w700,
               ),
             ),
+            if (widget.onSwitchMode != null &&
+                widget.presentation !=
+                    VideoPlayerPresentation.pictureInPicture) ...[
+              const SizedBox(width: 8),
+              _modeSwitchButton(size: 34),
+            ],
           ],
         ),
       ),
@@ -976,21 +976,21 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     final text = progress == null
         ? '等待视频文件'
         : '${_byteString(progress.downloaded)} / ${_byteString(progress.total)} · ${_speedString(_downloadSpeed)}/s';
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.38),
-        borderRadius: BorderRadius.circular(10),
+    return DefaultTextStyle(
+      style: const TextStyle(
+        color: Color(0xFF8E8E93),
+        fontSize: 11,
+        height: 1.25,
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        child: Text(
-          text,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '${widget.width ?? 0}x${widget.height ?? 0} · ${_speedText(_speed)}',
           ),
-        ),
+          Text(text, maxLines: 1, overflow: TextOverflow.ellipsis),
+        ],
       ),
     );
   }

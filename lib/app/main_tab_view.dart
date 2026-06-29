@@ -763,6 +763,7 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
           : ChatView(
               chatId: selected.chatId,
               title: selected.title,
+              seedMessage: chat?.lastChatMessage,
               showBackButton: false,
               headerHeight: headerHeight,
               headerColor: headerColor,

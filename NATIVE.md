@@ -3,9 +3,10 @@
 Mithka talks **only** to real TDLib via Dart FFI (`lib/tdlib/td_bindings.dart`),
 so each platform must ship the `tdjson` native library. There is no mock backend.
 
-The native TDLib artifacts are kept outside this app repository. iOS release
-assets live in [`iebb/mithka-tdjson`](https://github.com/iebb/mithka-tdjson), so
-normal users do not see a large vendored TDLib binary in the app source tree.
+The native TDLib artifacts are kept outside this app repository. Android and iOS
+release assets live in
+[`iebb/mithka-tdjson`](https://github.com/iebb/mithka-tdjson), so normal users do
+not see a large vendored TDLib binary in the app source tree.
 
 ## 1. Credentials
 
@@ -29,7 +30,11 @@ export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/<version>
 ```
 
 (Building tdjson needs a cross-compiled OpenSSL + zlib per ABI — see the official
-guide: <https://tdlib.github.io/td/build.html>. `minSdk` is pinned to 21.)
+guide: <https://tdlib.github.io/td/build.html>. `minSdk` is pinned to 23.)
+
+GitHub Actions does not run this source build in the app repo. It resolves the
+latest `iebb/mithka-tdjson` release, caches by that release tag, and downloads
+`tdjson-android-<abi>.zip`.
 
 ## 3. iOS
 
@@ -41,10 +46,8 @@ On Apple platforms the symbols are resolved from the app binary
    `TDJSON_XCFRAMEWORK_URL` overrides the source.
 2. `cd ios && pod install` (needs CocoaPods: `brew install cocoapods`).
 
-To refresh the prebuilt artifact, rebuild TDLib separately, package
-`tdjson.xcframework` in the `mithka-tdjson` repo, upload a new release asset, and
-bump the default URL in `scripts/build-tdjson-ios.sh` and
-`ios/ci_scripts/ci_post_clone.sh`.
+Xcode Cloud uses the same latest-release artifact by default. Set
+`TDJSON_XCFRAMEWORK_URL` only when a build must pin a specific artifact.
 
 ## 4. Run
 

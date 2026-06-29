@@ -14,9 +14,10 @@ import 'json_helpers.dart';
 
 /// Reference to a downloadable TDLib file (profile photo, thumbnail, …).
 class TdFileRef {
-  TdFileRef({required this.id, this.miniThumb});
+  TdFileRef({required this.id, this.miniThumb, this.thumbnail});
   final int id;
   Uint8List? miniThumb; // decoded JPEG for instant placeholder
+  TdFileRef? thumbnail; // downloadable thumbnail with the real aspect ratio
 }
 
 // MARK: - Navigation values (route arguments)
@@ -255,6 +256,7 @@ class ChatSummary {
     this.peerAccentColorId = -1,
     this.peerEmojiStatusId = 0,
     this.isForum = false,
+    this.lastChatMessage,
   });
 
   final int id;
@@ -278,6 +280,7 @@ class ChatSummary {
   int peerAccentColorId;
   int peerEmojiStatusId;
   bool isForum;
+  ChatMessage? lastChatMessage;
 
   /// Groups & channels use a rounded-square avatar unless UI preferences
   /// override them; people use a circle.
@@ -617,10 +620,12 @@ abstract final class TDParse {
     var lastText = '';
     var lastMessageId = 0;
     var date = 0;
+    ChatMessage? lastChatMessage;
     final last = chat.obj('last_message');
     if (last != null) {
       lastMessageId = last.int64('id') ?? 0;
       date = last.integer('date') ?? 0;
+      lastChatMessage = message(last);
       final content = last.obj('content');
       if (content != null) lastText = messageText(content);
     }
@@ -664,6 +669,7 @@ abstract final class TDParse {
         _ => null,
       },
       isForum: chat.boolean('view_as_topics') ?? false,
+      lastChatMessage: lastChatMessage,
     );
   }
 
@@ -870,11 +876,14 @@ abstract final class TDParse {
     final mini = decodeMiniThumb(photo.obj('minithumbnail'));
     final sizes = photo.objects('sizes');
     if (sizes == null || sizes.isEmpty) return const MediaAttachment();
-    final best = sizes.reduce(
-      (a, b) => (a.integer('width') ?? 0) >= (b.integer('width') ?? 0) ? a : b,
-    );
+    final best = bestPhotoSize(sizes);
+    final thumbnail = photoThumbnailSize(sizes, best);
     return MediaAttachment(
-      image: fileRef(best.obj('photo'), miniThumb: mini),
+      image: fileRef(
+        best.obj('photo'),
+        miniThumb: mini,
+        thumbnail: fileRef(thumbnail?.obj('photo'), miniThumb: mini),
+      ),
       width: best.integer('width'),
       height: best.integer('height'),
     );
@@ -1530,13 +1539,14 @@ abstract final class TDParse {
           final mini = decodeMiniThumb(photo.obj('minithumbnail'));
           final sizes = photo.objects('sizes');
           if (sizes != null && sizes.isNotEmpty) {
-            final best = sizes.reduce(
-              (a, b) => (a.integer('width') ?? 0) >= (b.integer('width') ?? 0)
-                  ? a
-                  : b,
-            );
+            final best = bestPhotoSize(sizes);
+            final thumbnail = photoThumbnailSize(sizes, best);
             return MediaAttachment(
-              image: fileRef(best.obj('photo'), miniThumb: mini),
+              image: fileRef(
+                best.obj('photo'),
+                miniThumb: mini,
+                thumbnail: fileRef(thumbnail?.obj('photo'), miniThumb: mini),
+              ),
               width: best.integer('width'),
               height: best.integer('height'),
             );
@@ -1946,10 +1956,53 @@ abstract final class TDParse {
   static TdFileRef? fileRef(
     Map<String, dynamic>? file, {
     Uint8List? miniThumb,
+    TdFileRef? thumbnail,
   }) {
     final id = file?.integer('id');
     if (file == null || id == null) return null;
-    return TdFileRef(id: id, miniThumb: miniThumb);
+    final normalizedThumbnail = thumbnail?.id == id ? null : thumbnail;
+    return TdFileRef(
+      id: id,
+      miniThumb: miniThumb,
+      thumbnail: normalizedThumbnail,
+    );
+  }
+
+  static Map<String, dynamic> bestPhotoSize(List<Map<String, dynamic>> sizes) {
+    return sizes.reduce((a, b) => _photoArea(a) >= _photoArea(b) ? a : b);
+  }
+
+  static Map<String, dynamic>? photoThumbnailSize(
+    List<Map<String, dynamic>> sizes,
+    Map<String, dynamic> best,
+  ) {
+    final candidates =
+        sizes
+            .where((size) => size.obj('photo')?.integer('id') != null)
+            .where(
+              (size) =>
+                  size.obj('photo')?.integer('id') !=
+                  best.obj('photo')?.integer('id'),
+            )
+            .toList()
+          ..sort((a, b) => _photoArea(a).compareTo(_photoArea(b)));
+    if (candidates.isEmpty) return null;
+
+    Map<String, dynamic>? preferred;
+    for (final candidate in candidates) {
+      final longestSide = [
+        candidate.integer('width') ?? 0,
+        candidate.integer('height') ?? 0,
+      ].reduce((a, b) => a > b ? a : b);
+      if (longestSide <= 640) preferred = candidate;
+    }
+    return preferred ?? candidates.first;
+  }
+
+  static int _photoArea(Map<String, dynamic> size) {
+    final width = size.integer('width') ?? 0;
+    final height = size.integer('height') ?? 0;
+    return width * height;
   }
 
   static Uint8List? decodeMiniThumb(Map<String, dynamic>? mini) {

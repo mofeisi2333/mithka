@@ -6,13 +6,14 @@
 # installs it into the Runner app checkout, so the Dart FFI layer can resolve the
 # symbols at runtime.
 #
-# The prebuilt artifact lives in the sibling mithka-tdjson repo. Set
-# TDJSON_XCFRAMEWORK_URL to override the default download.
+# The prebuilt artifact lives in the sibling mithka-tdjson repo. By default this
+# downloads the latest published artifact; set TDJSON_XCFRAMEWORK_URL to pin or
+# override the source.
 #
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="$REPO_ROOT/ios/tdjson"
-TDJSON_URL="${TDJSON_XCFRAMEWORK_URL:-https://github.com/iebb/mithka-tdjson/releases/download/tdjson-1.8.65-ios13/tdjson-ios.xcframework.zip}"
+TDJSON_URL="${TDJSON_XCFRAMEWORK_URL:-https://github.com/iebb/mithka-tdjson/releases/latest/download/tdjson-ios.xcframework.zip}"
 
 echo "→ Expected: $DEST/tdjson.xcframework"
 if [[ -d "$DEST/tdjson.xcframework" ]]; then
