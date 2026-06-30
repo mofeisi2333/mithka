@@ -97,3 +97,7 @@ GitHub Actions runs format + analyze + tests on the `release` branch (see
 TDLib is © Telegram, used under its own license. This repository contains only
 original, independently-written code; it ships no third-party app's proprietary
 assets or trademarks.
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/chart?repos=iebb/mithka&type=date&legend=top-left)](https://www.star-history.com/?repos=iebb%2Fmithka&type=date&legend=top-left)
