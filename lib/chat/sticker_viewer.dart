@@ -8,7 +8,7 @@
 import 'package:flutter/material.dart';
 
 import '../components/photo_avatar.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/ui_components.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
@@ -79,17 +79,13 @@ class _StickerViewerState extends State<StickerViewer> {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                FaIcon(
-                  FontAwesomeIcons.tableCells,
+                AppIcon(
+                  HeroAppIcons.tableCells,
                   size: 24,
                   color: c.textPrimary,
                 ),
                 const SizedBox(width: 22),
-                FaIcon(
-                  FontAwesomeIcons.ellipsis,
-                  size: 24,
-                  color: c.textPrimary,
-                ),
+                AppIcon(HeroAppIcons.ellipsis, size: 24, color: c.textPrimary),
               ],
             ),
           ),
@@ -127,8 +123,8 @@ class _StickerViewerState extends State<StickerViewer> {
         fit: BoxFit.contain,
       );
     }
-    return FaIcon(
-      FontAwesomeIcons.solidFaceSmile,
+    return AppIcon(
+      HeroAppIcons.solidFaceSmile,
       size: 96,
       color: AppTheme.brand,
     );
@@ -138,8 +134,8 @@ class _StickerViewerState extends State<StickerViewer> {
     final ref =
         _message.image ?? _message.animatedSticker ?? _message.videoSticker;
     if (ref == null) {
-      return FaIcon(
-        FontAwesomeIcons.solidFaceSmile,
+      return AppIcon(
+        HeroAppIcons.solidFaceSmile,
         size: 34,
         color: AppTheme.brand,
       );
@@ -192,8 +188,8 @@ class _StickerViewerState extends State<StickerViewer> {
                   style: TextStyle(fontSize: 16, color: c.textSecondary),
                 ),
                 const SizedBox(width: 8),
-                FaIcon(
-                  FontAwesomeIcons.chevronRight,
+                AppIcon(
+                  HeroAppIcons.chevronRight,
                   size: 18,
                   color: c.textTertiary,
                 ),

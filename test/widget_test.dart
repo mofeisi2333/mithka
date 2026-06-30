@@ -6,6 +6,7 @@ import 'package:mithka/l10n/app_locale_controller.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:mithka/settings/keyword_blocker.dart';
 import 'package:mithka/settings/translation_controller.dart';
+import 'package:mithka/chat/emoji_catalog.dart';
 import 'package:mithka/chat/media_album_layout.dart';
 import 'package:mithka/theme/date_text.dart';
 import 'package:mithka/theme/emoji_font_catalog.dart';
@@ -57,6 +58,16 @@ void main() {
         DateText.quoteLabel(yesterday.millisecondsSinceEpoch ~/ 1000),
         isNot(contains('themeDateTextText')),
       );
+    });
+  });
+
+  group('EmojiCatalog', () {
+    test('category labels resolve through localization', () {
+      for (final category in EmojiCatalog.categories) {
+        final localized = AppStrings.t(category.name);
+        expect(localized, isNot(category.name));
+        expect(localized, isNot(contains('emojiCategory')));
+      }
     });
   });
 

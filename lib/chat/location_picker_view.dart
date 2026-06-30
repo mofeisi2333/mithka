@@ -18,7 +18,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
 import 'package:mithka/l10n/app_localizations.dart';
@@ -206,8 +206,8 @@ class _LocationPickerViewState extends State<LocationPickerView> {
                   child: Center(
                     child: Transform.translate(
                       offset: const Offset(0, -18),
-                      child: FaIcon(
-                        FontAwesomeIcons.locationDot,
+                      child: AppIcon(
+                        HeroAppIcons.locationDot,
                         size: 38,
                         color: AppTheme.brand,
                       ),
@@ -235,8 +235,8 @@ class _LocationPickerViewState extends State<LocationPickerView> {
                           ),
                         ],
                       ),
-                      child: FaIcon(
-                        FontAwesomeIcons.locationDot,
+                      child: AppIcon(
+                        HeroAppIcons.locationDot,
                         size: 20,
                         color: AppTheme.brand,
                       ),
@@ -265,7 +265,7 @@ class _LocationPickerViewState extends State<LocationPickerView> {
       ),
       child: Row(
         children: [
-          FaIcon(FontAwesomeIcons.locationPin, size: 18, color: AppTheme.brand),
+          AppIcon(HeroAppIcons.locationPin, size: 18, color: AppTheme.brand),
           const SizedBox(width: 10),
           Expanded(
             child: Text(

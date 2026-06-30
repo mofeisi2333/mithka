@@ -13,7 +13,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
 
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/toast.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
@@ -146,8 +146,8 @@ class _FileDetailViewState extends State<FileDetailView> {
                       onTap: () => Navigator.of(context).pop(),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 14),
-                        child: FaIcon(
-                          FontAwesomeIcons.chevronLeft,
+                        child: AppIcon(
+                          HeroAppIcons.chevronLeft,
                           size: 24,
                           color: c.textPrimary,
                         ),
@@ -227,8 +227,8 @@ class _FileDetailViewState extends State<FileDetailView> {
                   shape: BoxShape.circle,
                   color: Color(0xFFFF3B30),
                 ),
-                child: FaIcon(
-                  FontAwesomeIcons.xmark,
+                child: AppIcon(
+                  HeroAppIcons.xmark,
                   size: 20,
                   color: Colors.white,
                 ),
@@ -275,7 +275,7 @@ class _FileDetailViewState extends State<FileDetailView> {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          FaIcon(FontAwesomeIcons.solidFile, size: 60, color: Colors.white),
+          AppIcon(HeroAppIcons.solidFile, size: 60, color: Colors.white),
           if (widget.doc.ext.isNotEmpty)
             Positioned(
               bottom: 24,

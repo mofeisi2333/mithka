@@ -69,9 +69,9 @@ dependencies:
   firebase_analytics: ^10.10.7
   package_info_plus: ^9.0.1
   sentry_flutter: ^9.22.0
-  font_awesome_flutter: ^11.0.0
   http: ^1.6.0
   flutter_svg: ^2.3.0
+  heroicons_flutter: ^0.5.0
 
 dev_dependencies:
   flutter_test:

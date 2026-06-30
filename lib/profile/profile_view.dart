@@ -20,7 +20,7 @@ import '../chat/custom_emoji.dart';
 import '../components/confirm_dialog.dart';
 import '../components/drawer_controller.dart' as dc;
 import '../components/photo_avatar.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/ui_components.dart';
 import '../chat/shared_media_view.dart';
 import '../settings/edit_profile_view.dart';
@@ -251,8 +251,8 @@ class _ProfileViewState extends State<ProfileView> {
                 const Spacer(),
                 GestureDetector(
                   onTap: _openMyProfile,
-                  child: FaIcon(
-                    FontAwesomeIcons.circleUser,
+                  child: AppIcon(
+                    HeroAppIcons.circleUser,
                     size: 22,
                     color: Colors.white,
                   ),
@@ -268,8 +268,8 @@ class _ProfileViewState extends State<ProfileView> {
                       ),
                     ),
                   ),
-                  child: FaIcon(
-                    FontAwesomeIcons.qrcode,
+                  child: AppIcon(
+                    HeroAppIcons.qrcode,
                     size: 22,
                     color: Colors.white,
                   ),
@@ -277,8 +277,8 @@ class _ProfileViewState extends State<ProfileView> {
                 const SizedBox(width: 16),
                 GestureDetector(
                   onTap: () => context.read<dc.DrawerController>().close(),
-                  child: FaIcon(
-                    FontAwesomeIcons.xmark,
+                  child: AppIcon(
+                    HeroAppIcons.xmark,
                     size: 22,
                     color: Colors.white,
                   ),
@@ -348,8 +348,8 @@ class _ProfileViewState extends State<ProfileView> {
                   onTap: () => _root.push(
                     MaterialPageRoute(builder: (_) => const EditProfileView()),
                   ),
-                  child: FaIcon(
-                    FontAwesomeIcons.penToSquare,
+                  child: AppIcon(
+                    HeroAppIcons.penToSquare,
                     size: 22,
                     color: Colors.white,
                   ),
@@ -389,8 +389,8 @@ class _ProfileViewState extends State<ProfileView> {
                     width: 1,
                   ),
                 ),
-                child: FaIcon(
-                  FontAwesomeIcons.plus,
+                child: AppIcon(
+                  HeroAppIcons.plus,
                   size: 16,
                   color: Colors.white.withValues(alpha: 0.9),
                 ),
@@ -408,7 +408,7 @@ class _ProfileViewState extends State<ProfileView> {
       child: Column(
         children: [
           _row(
-            FontAwesomeIcons.image.data,
+            HeroAppIcons.image,
             const Color(0xFFF5A623),
             AppStrings.t(AppStringKeys.chatInfoAlbum),
             () {
@@ -420,13 +420,13 @@ class _ProfileViewState extends State<ProfileView> {
             },
           ),
           _row(
-            FontAwesomeIcons.star.data,
+            HeroAppIcons.star,
             const Color(0xFFFF9D2E),
             AppStrings.t(AppStringKeys.messageActionFavorite),
             () => _openSaved(AppStrings.t(AppStringKeys.messageActionFavorite)),
           ),
           _row(
-            FontAwesomeIcons.folder.data,
+            HeroAppIcons.folder,
             const Color(0xFF3C8CF0),
             AppStrings.t(AppStringKeys.topicPostContentFile),
             () {
@@ -447,7 +447,7 @@ class _ProfileViewState extends State<ProfileView> {
     );
   }
 
-  Widget _row(IconData icon, Color color, String label, VoidCallback onTap) {
+  Widget _row(AppIconData icon, Color color, String label, VoidCallback onTap) {
     final c = context.colors;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -455,20 +455,20 @@ class _ProfileViewState extends State<ProfileView> {
       child: SizedBox(
         height: 54,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          padding: const EdgeInsets.only(left: 8, right: 18),
           child: Row(
             children: [
               Container(
                 width: 42,
                 height: 32,
                 alignment: Alignment.center,
-                child: Icon(icon, size: 20, color: color),
+                child: AppIcon(icon, size: 20, color: color),
               ),
               const SizedBox(width: 12),
               Text(label, style: TextStyle(fontSize: 15, color: c.textPrimary)),
               const Spacer(),
-              FaIcon(
-                FontAwesomeIcons.chevronRight,
+              AppIcon(
+                HeroAppIcons.chevronRight,
                 size: 15,
                 color: c.textTertiary,
               ),
@@ -531,8 +531,8 @@ class _ProfileViewState extends State<ProfileView> {
                         shape: BoxShape.circle,
                         color: AppTheme.brand.withValues(alpha: 0.12),
                       ),
-                      child: FaIcon(
-                        FontAwesomeIcons.plus,
+                      child: AppIcon(
+                        HeroAppIcons.plus,
                         size: 18,
                         color: AppTheme.brand,
                       ),
@@ -578,6 +578,8 @@ class _ProfileViewState extends State<ProfileView> {
     required bool selected,
   }) {
     final c = context.colors;
+    final avatarCacheSize = (36 * MediaQuery.devicePixelRatioOf(context))
+        .ceil();
     return SizedBox(
       height: 56,
       child: Padding(
@@ -591,6 +593,8 @@ class _ProfileViewState extends State<ProfileView> {
                   width: 36,
                   height: 36,
                   fit: BoxFit.cover,
+                  cacheWidth: avatarCacheSize,
+                  cacheHeight: avatarCacheSize,
                 ),
               )
             else
@@ -616,7 +620,7 @@ class _ProfileViewState extends State<ProfileView> {
               ),
             ),
             if (selected)
-              FaIcon(FontAwesomeIcons.check, size: 16, color: AppTheme.brand),
+              AppIcon(HeroAppIcons.check, size: 16, color: AppTheme.brand),
           ],
         ),
       ),
@@ -654,7 +658,7 @@ class _ProfileViewState extends State<ProfileView> {
                   MaterialPageRoute(builder: (_) => const SettingsView()),
                 ),
                 child: _barItem(
-                  FontAwesomeIcons.gear.data,
+                  HeroAppIcons.gear.data,
                   AppStrings.t(AppStringKeys.profileSettings),
                 ),
               ),
@@ -667,9 +671,7 @@ class _ProfileViewState extends State<ProfileView> {
                     ? AppearanceMode.light
                     : AppearanceMode.dark,
                 child: _barItem(
-                  isDark
-                      ? FontAwesomeIcons.sun.data
-                      : FontAwesomeIcons.moon.data,
+                  isDark ? HeroAppIcons.sun.data : HeroAppIcons.moon.data,
                   isDark
                       ? AppStrings.t(AppStringKeys.profileDayMode)
                       : AppStrings.t(AppStringKeys.profileNightMode),

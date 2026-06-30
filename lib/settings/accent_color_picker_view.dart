@@ -9,7 +9,7 @@
 
 import 'package:flutter/material.dart';
 
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
 import 'package:mithka/l10n/app_localizations.dart';
@@ -137,17 +137,13 @@ class _AccentColorPickerViewState extends State<AccentColorPickerView> {
                 : null,
           ),
           child: selected
-              ? FaIcon(
-                  FontAwesomeIcons.check,
+              ? AppIcon(
+                  HeroAppIcons.check,
                   size: 20,
                   color: color == null ? c.textSecondary : Colors.white,
                 )
               : (color == null
-                    ? FaIcon(
-                        FontAwesomeIcons.ban,
-                        size: 18,
-                        color: c.textTertiary,
-                      )
+                    ? AppIcon(HeroAppIcons.ban, size: 18, color: c.textTertiary)
                     : null),
         ),
       ),

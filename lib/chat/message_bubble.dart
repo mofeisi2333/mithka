@@ -12,10 +12,11 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../components/photo_avatar.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/ui_components.dart';
 import '../profile/profile_detail_view.dart';
 import '../theme/app_theme.dart';
@@ -175,8 +176,8 @@ class _MessageBubbleState extends State<MessageBubble>
               padding: const EdgeInsets.only(right: 16),
               child: Opacity(
                 opacity: (math.min(1, math.max(0, -_swipeX) / 50)).toDouble(),
-                child: FaIcon(
-                  FontAwesomeIcons.reply,
+                child: AppIcon(
+                  HeroAppIcons.reply,
                   size: 18,
                   color: AppTheme.brand,
                 ),
@@ -561,13 +562,13 @@ class _MessageBubbleState extends State<MessageBubble>
             mainAxisSize: MainAxisSize.min,
             children: [
               if (message.isEdited)
-                FaIcon(FontAwesomeIcons.pen, size: 13, color: faint),
+                AppIcon(HeroAppIcons.pen, size: 13, color: faint),
               if (message.isEdited && outgoing) const SizedBox(width: 3),
               if (outgoing)
                 Icon(
                   widget.isRead
-                      ? FontAwesomeIcons.checkDouble.data
-                      : FontAwesomeIcons.check.data,
+                      ? HeroAppIcons.checkDouble.data
+                      : HeroAppIcons.check.data,
                   size: 14,
                   color: widget.isRead ? Colors.white : faint,
                 ),
@@ -900,8 +901,8 @@ class _MessageBubbleState extends State<MessageBubble>
                   color: Colors.black.withValues(alpha: 0.45),
                   shape: BoxShape.circle,
                 ),
-                child: FaIcon(
-                  FontAwesomeIcons.play,
+                child: AppIcon(
+                  HeroAppIcons.play,
                   color: Colors.white,
                   size: 20,
                 ),
@@ -1044,11 +1045,7 @@ class _MessageBubbleState extends State<MessageBubble>
               color: const Color(0xFFFF3B30),
               borderRadius: BorderRadius.circular(4),
             ),
-            child: FaIcon(
-              FontAwesomeIcons.music,
-              color: Colors.white,
-              size: 14,
-            ),
+            child: AppIcon(HeroAppIcons.music, color: Colors.white, size: 14),
           ),
           const SizedBox(width: 7),
           Text(
@@ -1128,8 +1125,8 @@ class _MessageBubbleState extends State<MessageBubble>
         : Container(
             color: AppTheme.brand.withValues(alpha: 0.12),
             alignment: Alignment.center,
-            child: FaIcon(
-              FontAwesomeIcons.compactDisc,
+            child: AppIcon(
+              HeroAppIcons.compactDisc,
               size: 28,
               color: c.textSecondary,
             ),
@@ -1171,10 +1168,8 @@ class _MessageBubbleState extends State<MessageBubble>
                           valueColor: AlwaysStoppedAnimation(Colors.white),
                         ),
                       )
-                    : FaIcon(
-                        playing
-                            ? FontAwesomeIcons.pause
-                            : FontAwesomeIcons.play,
+                    : AppIcon(
+                        playing ? HeroAppIcons.pause : HeroAppIcons.play,
                         color: Colors.white,
                         size: 17,
                       ),
@@ -1243,9 +1238,7 @@ class _MessageBubbleState extends State<MessageBubble>
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              isVideo
-                  ? FontAwesomeIcons.video.data
-                  : FontAwesomeIcons.phone.data,
+              isVideo ? HeroAppIcons.video.data : HeroAppIcons.phone.data,
               size: 18,
               color: accent,
             ),
@@ -1273,8 +1266,8 @@ class _MessageBubbleState extends State<MessageBubble>
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        FaIcon(
-          FontAwesomeIcons.share,
+        AppIcon(
+          HeroAppIcons.share,
           size: 11,
           color: accent.withValues(alpha: 0.9),
         ),
@@ -1353,7 +1346,7 @@ class _MessageBubbleState extends State<MessageBubble>
               ),
             ),
             const SizedBox(width: 10),
-            FaIcon(FontAwesomeIcons.arrowUp, size: 18, color: faded),
+            AppIcon(HeroAppIcons.arrowUp, size: 18, color: faded),
           ],
         ),
       ),
@@ -1380,13 +1373,13 @@ class _MessageBubbleState extends State<MessageBubble>
           mainAxisSize: MainAxisSize.min,
           children: [
             if (widget.message.isEdited)
-              FaIcon(FontAwesomeIcons.pen, size: 11, color: faint),
+              AppIcon(HeroAppIcons.pen, size: 11, color: faint),
             if (widget.message.isEdited && outgoing) const SizedBox(width: 4),
             if (outgoing)
               Icon(
                 widget.isRead
-                    ? FontAwesomeIcons.checkDouble.data
-                    : FontAwesomeIcons.check.data,
+                    ? HeroAppIcons.checkDouble.data
+                    : HeroAppIcons.check.data,
                 size: 13,
                 color: widget.isRead ? Colors.white : faint,
               ),
@@ -1502,6 +1495,7 @@ class _MessageBubbleState extends State<MessageBubble>
       base,
       link,
       entities ?? message.textEntities,
+      fontSize,
     );
     if (appendMeta) children.add(_metaSpan(outgoing));
     final style = DefaultTextStyle.of(
@@ -1595,64 +1589,72 @@ class _MessageBubbleState extends State<MessageBubble>
     final c = context.colors;
     final language = (pre.language ?? '').trim();
     final codeBackground = _codeBackgroundColor;
-    return Container(
-      width: _bubbleMaxWidth(),
-      decoration: BoxDecoration(
-        color: codeBackground,
-        borderRadius: BorderRadius.circular(7),
-        border: Border.all(color: c.divider, width: 0.5),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (language.isNotEmpty)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(10, 5, 10, 4),
-              color: Color.alphaBlend(
-                Colors.black.withValues(alpha: 0.045),
-                codeBackground,
-              ),
-              child: Text(
-                language,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 11,
-                  color: c.textSecondary,
-                  fontWeight: FontWeight.w600,
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _copyMonospaceText(text.substring(start, end)),
+      child: Container(
+        width: _bubbleMaxWidth(),
+        decoration: BoxDecoration(
+          color: codeBackground,
+          borderRadius: BorderRadius.circular(7),
+          border: Border.all(color: c.divider, width: 0.5),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (language.isNotEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(10, 5, 10, 4),
+                color:
+                    (Theme.of(context).brightness == Brightness.dark
+                            ? Colors.white
+                            : Colors.black)
+                        .withValues(alpha: 0.045),
+                child: Text(
+                  language,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: c.textSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 9),
+              child: _richText(
+                text,
+                base,
+                link,
+                start,
+                end,
+                false,
+                false,
+                entities: entities,
+                fontSize: 13,
+              ),
             ),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(10, 8, 10, 9),
-            child: _richText(
-              text,
-              base,
-              link,
-              start,
-              end,
-              false,
-              false,
-              entities: entities,
-              fontSize: 13,
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   Color get _codeBackgroundColor {
-    final c = context.colors;
-    final alpha = Theme.of(context).brightness == Brightness.dark ? 0.10 : 0.07;
-    return Color.alphaBlend(
-      Colors.black.withValues(alpha: alpha),
-      c.searchFill,
-    );
+    return (Theme.of(context).brightness == Brightness.dark
+            ? Colors.white
+            : Colors.black)
+        .withValues(alpha: 0.10);
+  }
+
+  void _copyMonospaceText(String text) {
+    if (text.isEmpty) return;
+    Clipboard.setData(ClipboardData(text: text));
   }
 
   List<InlineSpan> _entitySpans(
@@ -1662,6 +1664,7 @@ class _MessageBubbleState extends State<MessageBubble>
     Color base,
     Color link,
     List<MessageTextEntity> sourceEntities,
+    double fontSize,
   ) {
     final entities =
         sourceEntities
@@ -1716,7 +1719,7 @@ class _MessageBubbleState extends State<MessageBubble>
         cursor = next;
         continue;
       }
-      spans.addAll(_textSegmentSpans(segment, active, base, link));
+      spans.addAll(_textSegmentSpans(segment, active, base, link, fontSize));
       cursor = next;
     }
     return spans;
@@ -1727,6 +1730,7 @@ class _MessageBubbleState extends State<MessageBubble>
     List<MessageTextEntity> active,
     Color base,
     Color link,
+    double fontSize,
   ) {
     final spoilerKey = _spoilerKey(active);
     final spoilerHidden =
@@ -1753,6 +1757,9 @@ class _MessageBubbleState extends State<MessageBubble>
               .where((e) => e.type != 'textEntityTypeSpoiler')
               .toList(growable: false);
     final style = _entityStyle(effectiveActive, base, link);
+    if (_hasInlineCode(effectiveActive)) {
+      return [_inlineCodeSpan(segment, style, fontSize)];
+    }
     final userId = _entityMentionUserId(effectiveActive);
     if (userId != null) {
       final recognizer = TapGestureRecognizer()
@@ -1779,14 +1786,37 @@ class _MessageBubbleState extends State<MessageBubble>
       _linkRecognizers.add(recognizer);
       return [TextSpan(text: segment, style: style, recognizer: recognizer)];
     }
-    final hasCode = active.any(
-      (e) =>
-          e.type == 'textEntityTypeCode' ||
-          e.type == 'textEntityTypePre' ||
-          e.type == 'textEntityTypePreCode',
-    );
-    if (hasCode) return [TextSpan(text: segment, style: style)];
+    if (_hasPreCode(active)) return [TextSpan(text: segment, style: style)];
     return _linkSpansStyled(segment, style, link);
+  }
+
+  InlineSpan _inlineCodeSpan(String segment, TextStyle style, double fontSize) {
+    return WidgetSpan(
+      alignment: PlaceholderAlignment.baseline,
+      baseline: TextBaseline.alphabetic,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _copyMonospaceText(segment),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+          decoration: BoxDecoration(
+            color: _codeBackgroundColor,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(segment, style: style.copyWith(fontSize: fontSize)),
+        ),
+      ),
+    );
+  }
+
+  bool _hasInlineCode(List<MessageTextEntity> active) {
+    return active.any((e) => e.type == 'textEntityTypeCode');
+  }
+
+  bool _hasPreCode(List<MessageTextEntity> active) {
+    return active.any(
+      (e) => e.type == 'textEntityTypePre' || e.type == 'textEntityTypePreCode',
+    );
   }
 
   String? _spoilerKey(List<MessageTextEntity> active) {
@@ -1820,7 +1850,6 @@ class _MessageBubbleState extends State<MessageBubble>
           decorations.add(TextDecoration.lineThrough);
         case 'textEntityTypeCode':
           useCodeFont = true;
-          backgroundColor = _codeBackgroundColor;
         case 'textEntityTypePre':
         case 'textEntityTypePreCode':
           useCodeFont = true;
@@ -2100,8 +2129,8 @@ class _MessageBubbleState extends State<MessageBubble>
                   color: Colors.black.withValues(alpha: 0.45),
                   shape: BoxShape.circle,
                 ),
-                child: FaIcon(
-                  FontAwesomeIcons.play,
+                child: AppIcon(
+                  HeroAppIcons.play,
                   color: Colors.white,
                   size: 24,
                 ),
@@ -2244,10 +2273,10 @@ class _MessageBubbleState extends State<MessageBubble>
                             valueColor: AlwaysStoppedAnimation(fg),
                           ),
                         )
-                      : FaIcon(
+                      : AppIcon(
                           _voice.isPlaying
-                              ? FontAwesomeIcons.pause
-                              : FontAwesomeIcons.play,
+                              ? HeroAppIcons.pause
+                              : HeroAppIcons.play,
                           size: 14,
                           color: fg,
                         ),
@@ -2439,7 +2468,7 @@ class _MessageBubbleState extends State<MessageBubble>
         clipBehavior: Clip.none,
         alignment: Alignment.center,
         children: [
-          FaIcon(FontAwesomeIcons.solidFile, size: 40, color: _fileColor(ext)),
+          AppIcon(HeroAppIcons.solidFile, size: 40, color: _fileColor(ext)),
           Positioned(
             bottom: 8,
             child: Text(
@@ -2463,8 +2492,8 @@ class _MessageBubbleState extends State<MessageBubble>
                 shape: BoxShape.circle,
                 border: Border.all(color: c.card, width: 1.5),
               ),
-              child: FaIcon(
-                FontAwesomeIcons.arrowDown,
+              child: AppIcon(
+                HeroAppIcons.arrowDown,
                 size: 11,
                 color: Colors.white,
               ),
@@ -2585,8 +2614,8 @@ class _MapThumbnailState extends State<_MapThumbnail> {
           else
             Container(color: c.groupedBackground),
           Center(
-            child: FaIcon(
-              FontAwesomeIcons.locationPin,
+            child: AppIcon(
+              HeroAppIcons.locationPin,
               size: 32,
               color: AppTheme.brand,
             ),

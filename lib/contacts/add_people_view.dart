@@ -16,7 +16,7 @@ import '../components/toast.dart';
 import '../chat/chat_view.dart';
 import '../components/icon_grid.dart';
 import '../components/photo_avatar.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../profile/profile_detail_view.dart';
 import '../settings/edit_field_view.dart';
 import '../tdlib/json_helpers.dart';
@@ -302,8 +302,8 @@ class _AddPeopleViewState extends State<AddPeopleView> {
                 onTap: () => Navigator.of(context).pop(),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 14),
-                  child: FaIcon(
-                    FontAwesomeIcons.chevronLeft,
+                  child: AppIcon(
+                    HeroAppIcons.chevronLeft,
                     size: 22,
                     color: c.textPrimary,
                   ),
@@ -372,8 +372,8 @@ class _AddPeopleViewState extends State<AddPeopleView> {
         ),
         child: Row(
           children: [
-            FaIcon(
-              FontAwesomeIcons.magnifyingGlass,
+            AppIcon(
+              HeroAppIcons.magnifyingGlass,
               size: 16,
               color: c.textTertiary,
             ),
@@ -409,12 +409,12 @@ class _AddPeopleViewState extends State<AddPeopleView> {
   Widget _optionsGrid() {
     final options = <(IconData, String, VoidCallback)>[
       (
-        FontAwesomeIcons.users.data,
+        HeroAppIcons.users.data,
         AppStrings.t(AppStringKeys.chatListCreateGroup),
         _createGroup,
       ),
       (
-        FontAwesomeIcons.towerBroadcast.data,
+        HeroAppIcons.towerBroadcast.data,
         AppStrings.t(AppStringKeys.chatListCreateChannel),
         _createChannel,
       ),
@@ -560,11 +560,7 @@ class _AddPeopleViewState extends State<AddPeopleView> {
                 ],
               ),
             ),
-            FaIcon(
-              FontAwesomeIcons.chevronRight,
-              size: 14,
-              color: c.textTertiary,
-            ),
+            AppIcon(HeroAppIcons.chevronRight, size: 14, color: c.textTertiary),
           ],
         ),
       ),

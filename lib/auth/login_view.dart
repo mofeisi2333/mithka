@@ -13,7 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../settings/proxy_config.dart';
 import '../settings/proxy_view.dart';
 import '../tdlib/td_client.dart';
@@ -154,8 +154,8 @@ class _LoginViewState extends State<LoginView> {
                     : _showBackOptions(auth),
                 child: Padding(
                   padding: const EdgeInsets.all(10),
-                  child: FaIcon(
-                    FontAwesomeIcons.chevronLeft,
+                  child: AppIcon(
+                    HeroAppIcons.chevronLeft,
                     size: 26,
                     color: c.textPrimary,
                   ),
@@ -322,8 +322,8 @@ class _LoginViewState extends State<LoginView> {
                             _detectedCountry!.flag,
                             style: const TextStyle(fontSize: 30),
                           )
-                        : FaIcon(
-                            FontAwesomeIcons.globe,
+                        : AppIcon(
+                            HeroAppIcons.globe,
                             size: 26,
                             color: c.textTertiary,
                           ),
@@ -391,8 +391,8 @@ class _LoginViewState extends State<LoginView> {
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            FaIcon(
-              FontAwesomeIcons.globe,
+            AppIcon(
+              HeroAppIcons.globe,
               size: 25,
               color: enabled ? AppTheme.brand : c.textPrimary,
             ),
@@ -455,7 +455,7 @@ class _LoginViewState extends State<LoginView> {
         ),
         const SizedBox(height: 16),
         InputField(
-          systemImage: FontAwesomeIcons.shieldHalved.data,
+          systemImage: HeroAppIcons.shieldHalved.data,
           placeholder: AppStrings.t(AppStringKeys.loginVerificationCode),
           controller: _code,
           keyboardType: TextInputType.number,
@@ -507,7 +507,7 @@ class _LoginViewState extends State<LoginView> {
           ),
         const SizedBox(height: 16),
         InputField(
-          systemImage: FontAwesomeIcons.lock.data,
+          systemImage: HeroAppIcons.lock.data,
           placeholder: AppStrings.t(AppStringKeys.loginTwoStepPassword),
           controller: _password,
           secure: true,
@@ -538,14 +538,14 @@ class _LoginViewState extends State<LoginView> {
         ),
         const SizedBox(height: 16),
         InputField(
-          systemImage: FontAwesomeIcons.solidCircleUser.data,
+          systemImage: HeroAppIcons.solidCircleUser.data,
           placeholder: AppStrings.t(AppStringKeys.loginFirstName),
           controller: _firstName,
           onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 16),
         InputField(
-          systemImage: FontAwesomeIcons.circleUser.data,
+          systemImage: HeroAppIcons.circleUser.data,
           placeholder: AppStrings.t(AppStringKeys.loginLastNameOptional),
           controller: _lastName,
         ),
@@ -566,8 +566,8 @@ class _LoginViewState extends State<LoginView> {
       padding: const EdgeInsets.only(top: 12),
       child: Column(
         children: [
-          FaIcon(
-            FontAwesomeIcons.triangleExclamation,
+          AppIcon(
+            HeroAppIcons.triangleExclamation,
             size: 40,
             color: AppTheme.unreadBadge,
           ),
@@ -746,8 +746,8 @@ class _InputFieldState extends State<InputField> {
                 padding: const EdgeInsets.only(left: 8),
                 child: Icon(
                   _obscure
-                      ? FontAwesomeIcons.eyeSlash.data
-                      : FontAwesomeIcons.eye.data,
+                      ? HeroAppIcons.eyeSlash.data
+                      : HeroAppIcons.eye.data,
                   size: 20,
                   color: c.textTertiary,
                 ),

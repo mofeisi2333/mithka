@@ -6,7 +6,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../theme/app_theme.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 
@@ -587,7 +587,7 @@ class _ImageEditViewState extends State<ImageEditView> {
         children: [
           IconButton(
             onPressed: () => Navigator.of(context).pop(),
-            icon: FaIcon(FontAwesomeIcons.xmark, color: Colors.white),
+            icon: AppIcon(HeroAppIcons.xmark, color: Colors.white),
           ),
           Text(
             widget.avatar
@@ -603,14 +603,14 @@ class _ImageEditViewState extends State<ImageEditView> {
           IconButton(
             tooltip: AppStrings.t(AppStringKeys.imageEditResetCrop),
             onPressed: _resetCrop,
-            icon: FaIcon(FontAwesomeIcons.rotate, color: Colors.white),
+            icon: AppIcon(HeroAppIcons.rotate, color: Colors.white),
           ),
           if (!widget.avatar)
             IconButton(
               tooltip: AppStrings.t(AppStringKeys.imageEditRotate),
               onPressed: _saving ? null : _rotateRight,
-              icon: FaIcon(
-                FontAwesomeIcons.rotateRight,
+              icon: AppIcon(
+                HeroAppIcons.rotateRight,
                 color: _saving ? Colors.white38 : Colors.white,
               ),
             ),
@@ -649,31 +649,31 @@ class _ImageEditViewState extends State<ImageEditView> {
               children: [
                 _toolButton(
                   _EditTool.crop,
-                  FontAwesomeIcons.crop.data,
+                  HeroAppIcons.crop.data,
                   AppStrings.t(AppStringKeys.imageEditCrop),
                 ),
                 if (!widget.avatar) ...[
                   _toolButton(
                     _EditTool.mask,
-                    FontAwesomeIcons.droplet.data,
+                    HeroAppIcons.droplet.data,
                     AppStrings.t(AppStringKeys.imageEditObscure),
                   ),
                   _toolButton(
                     _EditTool.draw,
-                    FontAwesomeIcons.pen.data,
+                    HeroAppIcons.pen.data,
                     AppStrings.t(AppStringKeys.imageEditBrush),
                   ),
                   _toolButton(
                     _EditTool.text,
-                    FontAwesomeIcons.font.data,
+                    HeroAppIcons.font.data,
                     AppStrings.t(AppStringKeys.imageEditTextTool),
                   ),
                 ],
                 const Spacer(),
                 IconButton(
                   onPressed: _strokes.isEmpty && _labels.isEmpty ? null : _undo,
-                  icon: FaIcon(
-                    FontAwesomeIcons.rotateLeft,
+                  icon: AppIcon(
+                    HeroAppIcons.rotateLeft,
                     color: _strokes.isEmpty && _labels.isEmpty
                         ? Colors.white30
                         : Colors.white,
@@ -697,7 +697,7 @@ class _ImageEditViewState extends State<ImageEditView> {
       child: Row(
         children: [
           Icon(
-            isMask ? FontAwesomeIcons.droplet.data : FontAwesomeIcons.pen.data,
+            isMask ? HeroAppIcons.droplet.data : HeroAppIcons.pen.data,
             size: 16,
             color: Colors.white70,
           ),

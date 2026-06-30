@@ -18,7 +18,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../components/photo_avatar.dart'; // PhotoAvatar + TDImage
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import 'call_manager.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 
@@ -163,8 +163,8 @@ class _CallScreenState extends State<CallScreen> {
                 creationParamsCodec: StandardMessageCodec(),
               )
             : Center(
-                child: FaIcon(
-                  FontAwesomeIcons.video,
+                child: AppIcon(
+                  HeroAppIcons.video,
                   color: Colors.white.withValues(alpha: 0.5),
                   size: 26,
                 ),
@@ -186,7 +186,7 @@ class _CallScreenState extends State<CallScreen> {
           shape: BoxShape.circle,
           border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
         ),
-        child: FaIcon(FontAwesomeIcons.rotate, size: 22, color: Colors.white),
+        child: AppIcon(HeroAppIcons.rotate, size: 22, color: Colors.white),
       ),
     );
   }
@@ -336,15 +336,15 @@ class _CallScreenState extends State<CallScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
           _CallButton(
-            icon: FontAwesomeIcons.phoneSlash.data,
+            icon: HeroAppIcons.phoneSlash.data,
             label: AppStrings.t(AppStringKeys.callDecline),
             background: const Color(0xFFFF3B30),
             onTap: m.end,
           ),
           _CallButton(
             icon: call.isVideo
-                ? FontAwesomeIcons.video.data
-                : FontAwesomeIcons.phone.data,
+                ? HeroAppIcons.video.data
+                : HeroAppIcons.phone.data,
             label: AppStrings.t(AppStringKeys.callAccept),
             background: const Color(0xFF07C160),
             onTap: m.accept,
@@ -360,8 +360,8 @@ class _CallScreenState extends State<CallScreen> {
           children: [
             _CallToggle(
               icon: m.isMuted
-                  ? FontAwesomeIcons.microphoneSlash.data
-                  : FontAwesomeIcons.microphone.data,
+                  ? HeroAppIcons.microphoneSlash.data
+                  : HeroAppIcons.microphone.data,
               label: AppStrings.t(AppStringKeys.callMute),
               isOn: m.isMuted,
               onTap: m.toggleMute,
@@ -369,7 +369,7 @@ class _CallScreenState extends State<CallScreen> {
             const SizedBox(width: 26),
             if (call.isVideo) ...[
               _CallToggle(
-                icon: FontAwesomeIcons.video.data,
+                icon: HeroAppIcons.video.data,
                 label: AppStrings.t(AppStringKeys.callCamera),
                 isOn: m.isVideoEnabled,
                 onTap: _onCameraToggle,
@@ -377,7 +377,7 @@ class _CallScreenState extends State<CallScreen> {
               const SizedBox(width: 26),
             ],
             _CallToggle(
-              icon: FontAwesomeIcons.volumeHigh.data,
+              icon: HeroAppIcons.volumeHigh.data,
               label: AppStrings.t(AppStringKeys.callSpeakerphone),
               isOn: m.isSpeaker,
               onTap: m.toggleSpeaker,
@@ -386,7 +386,7 @@ class _CallScreenState extends State<CallScreen> {
         ),
         const SizedBox(height: 30),
         _CallButton(
-          icon: FontAwesomeIcons.phoneSlash.data,
+          icon: HeroAppIcons.phoneSlash.data,
           label: AppStrings.t(AppStringKeys.callHangUp),
           background: const Color(0xFFFF3B30),
           size: 66,

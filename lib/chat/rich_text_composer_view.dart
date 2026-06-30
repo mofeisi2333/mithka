@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../theme/app_theme.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 
@@ -186,7 +186,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
         alignment: Alignment.centerLeft,
         child: TextButton.icon(
           onPressed: _pickMedia,
-          icon: FaIcon(FontAwesomeIcons.image, size: 20),
+          icon: AppIcon(HeroAppIcons.image, size: 20),
           label: Text(AppStringKeys.richTextComposerPhotoVideo.l10n(context)),
         ),
       );
@@ -218,7 +218,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
           color: c.searchFill,
           borderRadius: BorderRadius.circular(8),
         ),
-        child: FaIcon(FontAwesomeIcons.plus, color: c.textTertiary),
+        child: AppIcon(HeroAppIcons.plus, color: c.textTertiary),
       ),
     );
   }
@@ -241,8 +241,8 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
               color: c.searchFill,
               child: Icon(
                 isVideo
-                    ? FontAwesomeIcons.solidFileVideo.data
-                    : FontAwesomeIcons.image.data,
+                    ? HeroAppIcons.solidFileVideo.data
+                    : HeroAppIcons.image.data,
                 color: c.textTertiary,
               ),
             ),
@@ -251,11 +251,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
         if (isVideo)
           Positioned.fill(
             child: Center(
-              child: FaIcon(
-                FontAwesomeIcons.play,
-                color: Colors.white,
-                size: 24,
-              ),
+              child: AppIcon(HeroAppIcons.play, color: Colors.white, size: 24),
             ),
           ),
         Positioned(
@@ -272,11 +268,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
                 color: Colors.black.withValues(alpha: 0.55),
                 shape: BoxShape.circle,
               ),
-              child: FaIcon(
-                FontAwesomeIcons.xmark,
-                size: 12,
-                color: Colors.white,
-              ),
+              child: AppIcon(HeroAppIcons.xmark, size: 12, color: Colors.white),
             ),
           ),
         ),

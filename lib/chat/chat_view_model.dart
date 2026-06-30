@@ -100,6 +100,7 @@ class ChatViewModel extends ChangeNotifier {
   ChatViewModel({
     required this.chatId,
     required String title,
+    required this.markReadOnOpen,
     this.initialMessageId,
     ChatMessage? seedMessage,
   }) : peerTitle = title {
@@ -111,6 +112,7 @@ class ChatViewModel extends ChangeNotifier {
 
   final int chatId;
   final int? initialMessageId;
+  final bool markReadOnOpen;
 
   List<ChatMessage> messages = [];
   List<ChatMessage> _allMessages = [];
@@ -261,10 +263,10 @@ class ChatViewModel extends ChangeNotifier {
       }
       initialLoaded = true;
       notifyListeners();
-      // Mark the chat read once positioned, so the badge clears and the next
-      // open lands at the latest message. The unread snapshot for this session's
-      // "以下为新消息" divider was already captured in _loadChatHeader.
-      if (target == null) _markChatRead();
+      // Only the "open at latest" preference should force-read the newest
+      // message on entry. When that preference is off, preserve TDLib's
+      // last-read marker so the next open can return to the unread boundary.
+      if (target == null && markReadOnOpen) _markChatRead();
       unawaited(_loadAvailableMessageSenders());
     }();
   }

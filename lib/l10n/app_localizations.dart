@@ -869,6 +869,7 @@ abstract final class AppStringKeys {
   static const loginVerify = 'loginVerify';
   static const markdownLabel = 'markdownLabel';
   static const messageActionCopy = 'messageActionCopy';
+  static const messageActionSelectText = 'messageActionSelectText';
   static const messageActionEdit = 'messageActionEdit';
   static const messageActionFavorite = 'messageActionFavorite';
   static const messageActionForward = 'messageActionForward';
@@ -1953,6 +1954,7 @@ const _messages = {
     'loginVerify': "验证",
     'markdownLabel': "Markdown",
     'messageActionCopy': "复制",
+    'messageActionSelectText': "选择文字",
     'messageActionEdit': "编辑",
     'messageActionFavorite': "收藏",
     'messageActionForward': "转发",
@@ -2969,6 +2971,7 @@ const _messages = {
     'loginVerify': "验证",
     'markdownLabel': "Markdown",
     'messageActionCopy': "复制",
+    'messageActionSelectText': "选择文字",
     'messageActionEdit': "编辑",
     'messageActionFavorite': "收藏",
     'messageActionForward': "转发",
@@ -3985,6 +3988,7 @@ const _messages = {
     'loginVerify': "验证",
     'markdownLabel': "Markdown",
     'messageActionCopy': "复制",
+    'messageActionSelectText': "选择文字",
     'messageActionEdit': "编辑",
     'messageActionFavorite': "收藏",
     'messageActionForward': "转发",
@@ -5001,6 +5005,7 @@ const _messages = {
     'loginVerify': "验证",
     'markdownLabel': "Markdown",
     'messageActionCopy': "复制",
+    'messageActionSelectText': "选择文字",
     'messageActionEdit': "编辑",
     'messageActionFavorite': "收藏",
     'messageActionForward': "转发",
@@ -6017,6 +6022,7 @@ const _messages = {
     'loginVerify': "验证",
     'markdownLabel': "Markdown",
     'messageActionCopy': "复制",
+    'messageActionSelectText': "选择文字",
     'messageActionEdit': "编辑",
     'messageActionFavorite': "收藏",
     'messageActionForward': "转发",
@@ -7033,6 +7039,7 @@ const _messages = {
     'loginVerify': "验证",
     'markdownLabel': "Markdown",
     'messageActionCopy': "复制",
+    'messageActionSelectText': "选择文字",
     'messageActionEdit': "编辑",
     'messageActionFavorite': "收藏",
     'messageActionForward': "转发",
@@ -8049,6 +8056,7 @@ const _messages = {
     'loginVerify': "验证",
     'markdownLabel': "Markdown",
     'messageActionCopy': "复制",
+    'messageActionSelectText': "选择文字",
     'messageActionEdit': "编辑",
     'messageActionFavorite': "收藏",
     'messageActionForward': "转发",
@@ -9065,6 +9073,7 @@ const _messages = {
     'loginVerify': "验证",
     'markdownLabel': "Markdown",
     'messageActionCopy': "复制",
+    'messageActionSelectText': "选择文字",
     'messageActionEdit': "编辑",
     'messageActionFavorite': "收藏",
     'messageActionForward': "转发",

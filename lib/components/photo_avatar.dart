@@ -100,7 +100,9 @@ class _PhotoAvatarState extends State<PhotoAvatar> {
     if (_loadedId == ref.id && _loadedSlot == slot) return;
     _loadedId = ref.id;
     _loadedSlot = slot;
-    setState(() => _file = null); // reset to placeholder
+    if (_file != null) {
+      setState(() => _file = null); // reset to placeholder
+    }
     TdFileCenter.shared.path(ref.id).then((path) {
       if (!mounted || _loadedId != ref.id || _loadedSlot != slot) return;
       if (path != null) setState(() => _file = File(path));
@@ -247,6 +249,7 @@ class _TDImageState extends State<TDImage> {
   int? _loadedSlot;
   TdFileProgress? _progress;
   StreamSubscription<TdFileProgress>? _progressSub;
+  DateTime? _lastProgressPaint;
 
   @override
   void initState() {
@@ -297,19 +300,30 @@ class _TDImageState extends State<TDImage> {
     _loadedThumbnailId = thumbnailId;
     _loadedSlot = slot;
     _progress = null;
+    _lastProgressPaint = null;
     _progressSub?.cancel();
     _progressSub = null;
     if (widget.showProgress) {
       _progressSub = TdFileCenter.shared.progress(ref.id).listen((progress) {
         if (!mounted || _loadedId != ref.id || _loadedSlot != slot) return;
         if (progress.isCompleted) return;
+        final now = DateTime.now();
+        final previous = _lastProgressPaint;
+        if (previous != null &&
+            now.difference(previous) < const Duration(milliseconds: 120)) {
+          _progress = progress;
+          return;
+        }
+        _lastProgressPaint = now;
         setState(() => _progress = progress);
       });
     }
-    setState(() {
-      _file = null;
-      _thumbnailFile = null;
-    });
+    if (_file != null || _thumbnailFile != null) {
+      setState(() {
+        _file = null;
+        _thumbnailFile = null;
+      });
+    }
     final thumbnail = ref.thumbnail;
     if (thumbnail != null && thumbnail.id != ref.id) {
       TdFileCenter.shared.path(thumbnail.id).then((path) {
@@ -335,50 +349,67 @@ class _TDImageState extends State<TDImage> {
 
   @override
   Widget build(BuildContext context) {
-    Widget child;
-    if (_file != null) {
-      child = Image.file(
-        _file!,
-        fit: widget.fit,
-        cacheWidth: widget.cacheWidth,
-        cacheHeight: widget.cacheHeight,
-        gaplessPlayback: true,
-      );
-    } else if (_thumbnailFile != null) {
-      child = Image.file(
-        _thumbnailFile!,
-        fit: widget.fit,
-        cacheWidth: widget.cacheWidth,
-        cacheHeight: widget.cacheHeight,
-        gaplessPlayback: true,
-      );
-    } else if (widget.photo?.miniThumb != null) {
-      child = Image.memory(
-        widget.photo!.miniThumb!,
-        fit: widget.fit,
-        cacheWidth: widget.cacheWidth,
-        cacheHeight: widget.cacheHeight,
-        gaplessPlayback: true,
-      );
-    } else {
-      child = Container(color: context.colors.groupedBackground);
-    }
-    final showLoadingProgress =
-        widget.showProgress && _file == null && _progress?.isActive == true;
-    if (showLoadingProgress) {
-      child = Stack(
-        fit: StackFit.expand,
-        children: [
-          child,
-          _MediaLoadingProgress(progress: _progress),
-        ],
-      );
-    }
     return ClipRRect(
       borderRadius: BorderRadius.circular(widget.cornerRadius),
-      child: child,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final cacheWidth =
+              widget.cacheWidth ??
+              _cacheSizePxFromConstraint(context, constraints.maxWidth);
+          final cacheHeight =
+              widget.cacheHeight ??
+              _cacheSizePxFromConstraint(context, constraints.maxHeight);
+          Widget child;
+          if (_file != null) {
+            child = Image.file(
+              _file!,
+              fit: widget.fit,
+              cacheWidth: cacheWidth,
+              cacheHeight: cacheHeight,
+              gaplessPlayback: true,
+            );
+          } else if (_thumbnailFile != null) {
+            child = Image.file(
+              _thumbnailFile!,
+              fit: widget.fit,
+              cacheWidth: cacheWidth,
+              cacheHeight: cacheHeight,
+              gaplessPlayback: true,
+            );
+          } else if (widget.photo?.miniThumb != null) {
+            child = Image.memory(
+              widget.photo!.miniThumb!,
+              fit: widget.fit,
+              cacheWidth: cacheWidth,
+              cacheHeight: cacheHeight,
+              gaplessPlayback: true,
+            );
+          } else {
+            child = Container(color: context.colors.groupedBackground);
+          }
+          final showLoadingProgress =
+              widget.showProgress &&
+              _file == null &&
+              _progress?.isActive == true;
+          if (showLoadingProgress) {
+            child = Stack(
+              fit: StackFit.expand,
+              children: [
+                child,
+                _MediaLoadingProgress(progress: _progress),
+              ],
+            );
+          }
+          return child;
+        },
+      ),
     );
   }
+}
+
+int? _cacheSizePxFromConstraint(BuildContext context, double logicalSize) {
+  if (!logicalSize.isFinite || logicalSize <= 0) return null;
+  return _cacheSizePx(context, logicalSize);
 }
 
 class _MediaLoadingProgress extends StatelessWidget {

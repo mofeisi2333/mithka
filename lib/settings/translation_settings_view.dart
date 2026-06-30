@@ -10,15 +10,24 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
 import 'translation_api.dart';
 import 'translation_controller.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 
-class TranslationSettingsView extends StatelessWidget {
+class TranslationSettingsView extends StatefulWidget {
   const TranslationSettingsView({super.key});
+
+  @override
+  State<TranslationSettingsView> createState() =>
+      _TranslationSettingsViewState();
+}
+
+class _TranslationSettingsViewState extends State<TranslationSettingsView> {
+  late final Future<Set<TranslationProvider>> _availableProvidersFuture =
+      NativeTranslationApi.availableProviders();
 
   @override
   Widget build(BuildContext context) {
@@ -39,7 +48,7 @@ class TranslationSettingsView extends StatelessWidget {
                 _card(context, [
                   _switchRow(
                     context,
-                    icon: FontAwesomeIcons.language.data,
+                    icon: HeroAppIcons.language.data,
                     title: AppStrings.t(AppStringKeys.translationSettingsTitle),
                     value: translation.enabled,
                     onChanged: (v) => translation.enabled = v,
@@ -49,7 +58,7 @@ class TranslationSettingsView extends StatelessWidget {
                 _card(context, [
                   _navRow(
                     context,
-                    icon: FontAwesomeIcons.networkWired.data,
+                    icon: HeroAppIcons.networkWired.data,
                     title: AppStrings.t(
                       AppStringKeys.translationSettingsService,
                     ),
@@ -59,7 +68,7 @@ class TranslationSettingsView extends StatelessWidget {
                   const InsetDivider(leadingInset: 56),
                   _navRow(
                     context,
-                    icon: FontAwesomeIcons.globe.data,
+                    icon: HeroAppIcons.globe.data,
                     title: AppStrings.t(
                       AppStringKeys.translationSettingsTargetLanguage,
                     ),
@@ -91,7 +100,7 @@ class TranslationSettingsView extends StatelessWidget {
             ),
             clipBehavior: Clip.antiAlias,
             child: FutureBuilder<Set<TranslationProvider>>(
-              future: NativeTranslationApi.availableProviders(),
+              future: _availableProvidersFuture,
               builder: (context, snapshot) {
                 final nativeProviders =
                     snapshot.data ?? const <TranslationProvider>{};
@@ -124,7 +133,7 @@ class TranslationSettingsView extends StatelessWidget {
                             children: [
                               _iconBadge(
                                 context,
-                                FontAwesomeIcons.networkWired.data,
+                                HeroAppIcons.networkWired.data,
                                 const Color(0xFF34A2DF),
                               ),
                               const SizedBox(width: 12),
@@ -138,8 +147,8 @@ class TranslationSettingsView extends StatelessWidget {
                                 ),
                               ),
                               if (selected)
-                                FaIcon(
-                                  FontAwesomeIcons.check,
+                                AppIcon(
+                                  HeroAppIcons.check,
                                   size: 18,
                                   color: AppTheme.brand,
                                 ),
@@ -195,7 +204,7 @@ class TranslationSettingsView extends StatelessWidget {
                         children: [
                           _iconBadge(
                             context,
-                            FontAwesomeIcons.globe.data,
+                            HeroAppIcons.globe.data,
                             const Color(0xFF34A2DF),
                           ),
                           const SizedBox(width: 12),
@@ -209,8 +218,8 @@ class TranslationSettingsView extends StatelessWidget {
                             ),
                           ),
                           if (selected)
-                            FaIcon(
-                              FontAwesomeIcons.check,
+                            AppIcon(
+                              HeroAppIcons.check,
                               size: 18,
                               color: AppTheme.brand,
                             ),
@@ -310,8 +319,8 @@ class TranslationSettingsView extends StatelessWidget {
               if (onTap != null)
                 SizedBox(
                   width: 14,
-                  child: FaIcon(
-                    FontAwesomeIcons.chevronRight,
+                  child: AppIcon(
+                    HeroAppIcons.chevronRight,
                     size: 14,
                     color: c.textTertiary,
                   ),

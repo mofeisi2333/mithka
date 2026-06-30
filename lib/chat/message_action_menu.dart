@@ -10,35 +10,30 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../settings/translation_controller.dart';
 import '../tdlib/td_models.dart';
 import 'emoji_store.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 
 enum MessageAction {
-  copy(FontAwesomeIcons.file, AppStringKeys.messageActionCopy),
-  edit(FontAwesomeIcons.pen, AppStringKeys.messageActionEdit),
-  translate(FontAwesomeIcons.language, AppStringKeys.messageActionTranslate),
-  reply(FontAwesomeIcons.quoteLeft, AppStringKeys.messageActionQuote),
-  forward(FontAwesomeIcons.share, AppStringKeys.messageActionForward),
-  playMuted(FontAwesomeIcons.volumeXmark, AppStringKeys.messageActionPlayMuted),
-  multiSelect(
-    FontAwesomeIcons.circleCheck,
-    AppStringKeys.messageActionMultiSelect,
-  ),
-  pinTodo(FontAwesomeIcons.thumbtack, AppStringKeys.messageActionSetTodo),
-  unpinTodo(FontAwesomeIcons.thumbtack, AppStringKeys.messageActionUnsetTodo),
-  save(FontAwesomeIcons.solidStar, AppStringKeys.messageActionFavorite),
-  saveSticker(FontAwesomeIcons.circlePlus, AppStringKeys.imageEditAdd),
-  viewStickerSet(
-    FontAwesomeIcons.tableCells,
-    AppStringKeys.messageActionSticker,
-  ),
-  delete(FontAwesomeIcons.trash, AppStringKeys.chatDelete);
+  copy(HeroAppIcons.file, AppStringKeys.messageActionCopy),
+  selectText(HeroAppIcons.font, AppStringKeys.messageActionSelectText),
+  edit(HeroAppIcons.pen, AppStringKeys.messageActionEdit),
+  translate(HeroAppIcons.language, AppStringKeys.messageActionTranslate),
+  reply(HeroAppIcons.quoteLeft, AppStringKeys.messageActionQuote),
+  forward(HeroAppIcons.share, AppStringKeys.messageActionForward),
+  playMuted(HeroAppIcons.volumeXmark, AppStringKeys.messageActionPlayMuted),
+  multiSelect(HeroAppIcons.circleCheck, AppStringKeys.messageActionMultiSelect),
+  pinTodo(HeroAppIcons.thumbtack, AppStringKeys.messageActionSetTodo),
+  unpinTodo(HeroAppIcons.thumbtack, AppStringKeys.messageActionUnsetTodo),
+  save(HeroAppIcons.solidStar, AppStringKeys.messageActionFavorite),
+  saveSticker(HeroAppIcons.circlePlus, AppStringKeys.imageEditAdd),
+  viewStickerSet(HeroAppIcons.tableCells, AppStringKeys.messageActionSticker),
+  delete(HeroAppIcons.trash, AppStringKeys.chatDelete);
 
   const MessageAction(this.glyph, this.label);
-  final FaIconData glyph;
+  final AppIconData glyph;
   final String label;
 
   bool get isDestructive => this == MessageAction.delete;
@@ -76,6 +71,7 @@ class MessageActionMenu extends StatelessWidget {
     final result = <MessageAction>[];
     if (_isTextMessage && message.text.isNotEmpty) {
       result.add(MessageAction.copy);
+      result.add(MessageAction.selectText);
       if (message.isOutgoing && _isEditableTextMessage) {
         result.add(MessageAction.edit);
       }

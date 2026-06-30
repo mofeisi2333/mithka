@@ -9,16 +9,22 @@ import 'package:flutter/material.dart';
 
 import '../app/app_version.dart';
 import '../chat/link_handler.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 
-class AboutView extends StatelessWidget {
+class AboutView extends StatefulWidget {
   const AboutView({super.key});
 
+  @override
+  State<AboutView> createState() => _AboutViewState();
+}
+
+class _AboutViewState extends State<AboutView> {
   static const _channelUrl = 'https://t.me/mithka';
   static const _githubUrl = 'https://github.com/iebb/mithka';
+  late final Future<AppVersion> _versionFuture = AppVersion.load();
 
   @override
   Widget build(BuildContext context) {
@@ -64,7 +70,7 @@ class AboutView extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       FutureBuilder<AppVersion>(
-                        future: AppVersion.load(),
+                        future: _versionFuture,
                         builder: (context, snapshot) {
                           final version = snapshot.data?.display ?? '...';
                           return Text(
@@ -91,7 +97,7 @@ class AboutView extends StatelessWidget {
                   child: Column(
                     children: [
                       _AboutLinkRow(
-                        icon: FontAwesomeIcons.solidPaperPlane.data,
+                        icon: HeroAppIcons.solidPaperPlane.data,
                         title: AppStrings.t(AppStringKeys.aboutTelegramChannel),
                         value: 't.me/mithka',
                         onTap: () => openLink(context, _channelUrl),
@@ -101,7 +107,7 @@ class AboutView extends StatelessWidget {
                         child: Divider(height: 1, color: c.divider),
                       ),
                       _AboutLinkRow(
-                        icon: FontAwesomeIcons.code.data,
+                        icon: HeroAppIcons.code.data,
                         title: 'GitHub',
                         value: 'github.com/iebb/mithka',
                         onTap: () => openLink(context, _githubUrl),
@@ -162,8 +168,8 @@ class _AboutLinkRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 6),
-              FaIcon(
-                FontAwesomeIcons.chevronRight,
+              AppIcon(
+                HeroAppIcons.chevronRight,
                 size: 14,
                 color: c.textTertiary,
               ),

@@ -10,7 +10,7 @@ import 'package:flutter/material.dart';
 
 import '../chats/chat_list_view_model.dart';
 import '../components/photo_avatar.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/ui_components.dart';
 import '../l10n/app_localizations.dart';
 import '../tdlib/chat_membership.dart';
@@ -241,8 +241,8 @@ class _TopicChannelsViewState extends State<TopicChannelsView> {
                     padding: const EdgeInsets.fromLTRB(8, 8, 0, 8),
                     child: Icon(
                       _nonMutedOnly
-                          ? FontAwesomeIcons.solidBell.data
-                          : FontAwesomeIcons.bellSlash.data,
+                          ? HeroAppIcons.solidBell.data
+                          : HeroAppIcons.bellSlash.data,
                       size: 24,
                       color: _nonMutedOnly ? AppTheme.brand : c.textPrimary,
                     ),
@@ -278,11 +278,7 @@ class _TopicChannelsViewState extends State<TopicChannelsView> {
         children: [
           _loading
               ? const CircularProgressIndicator()
-              : FaIcon(
-                  FontAwesomeIcons.hashtag,
-                  size: 46,
-                  color: AppTheme.brand,
-                ),
+              : AppIcon(HeroAppIcons.hashtag, size: 46, color: AppTheme.brand),
           const SizedBox(height: 12),
           Text(
             (_loading
@@ -423,21 +419,21 @@ class _TopicStats extends StatelessWidget {
           style: TextStyle(fontSize: 14, color: c.textTertiary),
         ),
         const Spacer(),
-        FaIcon(FontAwesomeIcons.thumbsUp, size: 24, color: c.textPrimary),
+        AppIcon(HeroAppIcons.thumbsUp, size: 24, color: c.textPrimary),
         const SizedBox(width: 5),
         Text(
           reactionCount == 0 ? '' : '$reactionCount',
           style: TextStyle(fontSize: 15, color: c.textPrimary),
         ),
         const SizedBox(width: 24),
-        FaIcon(FontAwesomeIcons.comment, size: 24, color: c.textPrimary),
+        AppIcon(HeroAppIcons.comment, size: 24, color: c.textPrimary),
         const SizedBox(width: 5),
         Text(
           message.commentCount == 0 ? '' : '${message.commentCount}',
           style: TextStyle(fontSize: 15, color: c.textPrimary),
         ),
         const SizedBox(width: 24),
-        FaIcon(FontAwesomeIcons.share, size: 27, color: c.textPrimary),
+        AppIcon(HeroAppIcons.share, size: 27, color: c.textPrimary),
       ],
     );
   }

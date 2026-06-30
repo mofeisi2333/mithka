@@ -15,7 +15,7 @@ import '../chat/rich_text_composer_view.dart';
 import '../components/confirm_dialog.dart';
 import '../components/drawer_controller.dart' as dc;
 import '../components/photo_avatar.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../l10n/app_localizations.dart';
@@ -535,8 +535,8 @@ class _TopicChatViewState extends State<TopicChatView> {
               onTap: () => Navigator.of(context).pop(),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-                child: FaIcon(
-                  FontAwesomeIcons.chevronLeft,
+                child: AppIcon(
+                  HeroAppIcons.chevronLeft,
                   size: 24,
                   color: c.textPrimary,
                 ),
@@ -582,8 +582,8 @@ class _TopicChatViewState extends State<TopicChatView> {
             onTap: _openSearch,
             child: Padding(
               padding: const EdgeInsets.all(4),
-              child: FaIcon(
-                FontAwesomeIcons.magnifyingGlass,
+              child: AppIcon(
+                HeroAppIcons.magnifyingGlass,
                 size: 25,
                 color: c.textPrimary,
               ),
@@ -595,11 +595,7 @@ class _TopicChatViewState extends State<TopicChatView> {
             onTap: _openSettings,
             child: Padding(
               padding: const EdgeInsets.all(4),
-              child: FaIcon(
-                FontAwesomeIcons.bars,
-                size: 25,
-                color: c.textPrimary,
-              ),
+              child: AppIcon(HeroAppIcons.bars, size: 25, color: c.textPrimary),
             ),
           ),
           const SizedBox(width: AppSpacing.xl),
@@ -772,8 +768,8 @@ class _TopicChatViewState extends State<TopicChatView> {
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: _openComposer,
-                child: FaIcon(
-                  FontAwesomeIcons.penToSquare,
+                child: AppIcon(
+                  HeroAppIcons.penToSquare,
                   size: 26,
                   color: AppTheme.brand,
                 ),
@@ -920,7 +916,7 @@ class _PostActions extends StatelessWidget {
           behavior: HitTestBehavior.opaque,
           onTap: onLike,
           onLongPress: onPickReaction,
-          child: FaIcon(FontAwesomeIcons.heart, size: 24, color: c.textPrimary),
+          child: AppIcon(HeroAppIcons.heart, size: 24, color: c.textPrimary),
         ),
         const SizedBox(width: 5),
         Text(
@@ -931,11 +927,7 @@ class _PostActions extends StatelessWidget {
         GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: onComments,
-          child: FaIcon(
-            FontAwesomeIcons.comment,
-            size: 24,
-            color: c.textPrimary,
-          ),
+          child: AppIcon(HeroAppIcons.comment, size: 24, color: c.textPrimary),
         ),
         const SizedBox(width: 5),
         Text(
@@ -943,7 +935,7 @@ class _PostActions extends StatelessWidget {
           style: TextStyle(fontSize: 14, color: c.textPrimary),
         ),
         const SizedBox(width: 24),
-        FaIcon(FontAwesomeIcons.share, size: 25, color: c.textPrimary),
+        AppIcon(HeroAppIcons.share, size: 25, color: c.textPrimary),
       ],
     );
   }
@@ -1141,19 +1133,15 @@ class _TopicCommentsSheetState extends State<_TopicCommentsSheet> {
                     ),
                   ),
                   const SizedBox(width: 14),
-                  FaIcon(FontAwesomeIcons.at, size: 25, color: c.textPrimary),
+                  AppIcon(HeroAppIcons.at, size: 25, color: c.textPrimary),
                   const SizedBox(width: 14),
-                  FaIcon(
-                    FontAwesomeIcons.solidFaceSmile,
+                  AppIcon(
+                    HeroAppIcons.solidFaceSmile,
                     size: 25,
                     color: c.textPrimary,
                   ),
                   const SizedBox(width: 14),
-                  FaIcon(
-                    FontAwesomeIcons.image,
-                    size: 25,
-                    color: c.textPrimary,
-                  ),
+                  AppIcon(HeroAppIcons.image, size: 25, color: c.textPrimary),
                 ],
               ),
             ),
@@ -1218,7 +1206,7 @@ class _CommentRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 10),
-          FaIcon(FontAwesomeIcons.heart, size: 22, color: c.textTertiary),
+          AppIcon(HeroAppIcons.heart, size: 22, color: c.textTertiary),
         ],
       ),
     );
@@ -1300,8 +1288,8 @@ class _TopicSearchViewState extends State<_TopicSearchView> {
               child: Row(
                 children: [
                   IconButton(
-                    icon: FaIcon(
-                      FontAwesomeIcons.chevronLeft,
+                    icon: AppIcon(
+                      HeroAppIcons.chevronLeft,
                       color: c.textPrimary,
                     ),
                     onPressed: () => Navigator.of(context).pop(),
@@ -1321,16 +1309,16 @@ class _TopicSearchViewState extends State<_TopicSearchView> {
                         style: TextStyle(fontSize: 16, color: c.textPrimary),
                         decoration: InputDecoration(
                           border: InputBorder.none,
-                          icon: FaIcon(
-                            FontAwesomeIcons.magnifyingGlass,
+                          icon: AppIcon(
+                            HeroAppIcons.magnifyingGlass,
                             color: c.textTertiary,
                           ),
                           hintText: AppStrings.t(AppStringKeys.topicChatSearch),
                           suffixIcon: _controller.text.isEmpty
                               ? null
                               : IconButton(
-                                  icon: FaIcon(
-                                    FontAwesomeIcons.solidCircleXmark,
+                                  icon: AppIcon(
+                                    HeroAppIcons.solidCircleXmark,
                                     color: c.textTertiary,
                                   ),
                                   onPressed: () {
@@ -1365,7 +1353,7 @@ class _TopicSearchViewState extends State<_TopicSearchView> {
                     style: TextStyle(color: c.textPrimary),
                   ),
                   const SizedBox(width: 3),
-                  FaIcon(FontAwesomeIcons.arrowsUpDown, size: 17),
+                  AppIcon(HeroAppIcons.arrowsUpDown, size: 17),
                 ],
               ),
             ),
@@ -1401,7 +1389,7 @@ class _TopicSearchViewState extends State<_TopicSearchView> {
             style: TextStyle(fontSize: 14, color: c.textPrimary),
           ),
           const SizedBox(width: 6),
-          FaIcon(FontAwesomeIcons.chevronDown, size: 14, color: c.textPrimary),
+          AppIcon(HeroAppIcons.chevronDown, size: 14, color: c.textPrimary),
         ],
       ),
     );
@@ -1711,8 +1699,8 @@ class _TopicChannelSettingsViewState extends State<_TopicChannelSettingsView> {
                 children: [
                   IconButton(
                     onPressed: () => Navigator.of(context).pop(),
-                    icon: FaIcon(
-                      FontAwesomeIcons.chevronLeft,
+                    icon: AppIcon(
+                      HeroAppIcons.chevronLeft,
                       color: c.textPrimary,
                     ),
                   ),
@@ -1731,7 +1719,7 @@ class _TopicChannelSettingsViewState extends State<_TopicChannelSettingsView> {
                   ),
                   IconButton(
                     onPressed: () {},
-                    icon: FaIcon(FontAwesomeIcons.share, color: c.textPrimary),
+                    icon: AppIcon(HeroAppIcons.share, color: c.textPrimary),
                   ),
                 ],
               ),
@@ -1777,8 +1765,8 @@ class _TopicChannelSettingsViewState extends State<_TopicChannelSettingsView> {
                           ],
                         ),
                       ),
-                      FaIcon(
-                        FontAwesomeIcons.qrcode,
+                      AppIcon(
+                        HeroAppIcons.qrcode,
                         size: 26,
                         color: c.textPrimary,
                       ),
@@ -1910,7 +1898,7 @@ class _TopicChannelSettingsViewState extends State<_TopicChannelSettingsView> {
                     color: c.searchFill,
                     shape: BoxShape.circle,
                   ),
-                  child: FaIcon(FontAwesomeIcons.plus, color: c.textSecondary),
+                  child: AppIcon(HeroAppIcons.plus, color: c.textSecondary),
                 ),
                 const SizedBox(height: 6),
                 Text(

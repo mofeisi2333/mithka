@@ -8,7 +8,7 @@
 
 import 'package:flutter/material.dart';
 
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
 import 'package:mithka/l10n/app_localizations.dart';
@@ -206,8 +206,8 @@ class _PollComposerViewState extends State<PollComposerView> {
                 onTap: () => _removeOption(i),
                 child: Padding(
                   padding: const EdgeInsets.only(left: 8),
-                  child: FaIcon(
-                    FontAwesomeIcons.circleMinus,
+                  child: AppIcon(
+                    HeroAppIcons.circleMinus,
                     size: 20,
                     color: AppTheme.tagRed.withValues(alpha: 0.8),
                   ),
@@ -230,8 +230,8 @@ class _PollComposerViewState extends State<PollComposerView> {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
             children: [
-              FaIcon(
-                FontAwesomeIcons.plus,
+              AppIcon(
+                HeroAppIcons.plus,
                 size: 18,
                 color: disabled
                     ? AppTheme.brand.withValues(alpha: 0.4)

@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../profile/profile_detail_view.dart';
 import '../tdlib/td_models.dart';
@@ -249,6 +250,8 @@ class _TelegramRichTextState extends State<TelegramRichText> {
     Color linkColor,
   ) {
     final style = _entityStyle(active, baseStyle, linkColor);
+    if (_hasCode(active)) return [_codeSpan(segment, style)];
+
     final mentionUserId = _mentionUserId(active);
     if (mentionUserId != null) {
       final recognizer = TapGestureRecognizer()
@@ -278,8 +281,38 @@ class _TelegramRichTextState extends State<TelegramRichText> {
       return [TextSpan(text: segment, style: style, recognizer: recognizer)];
     }
 
-    if (_hasCode(active)) return [TextSpan(text: segment, style: style)];
     return _autoLinkSpans(context, segment, style, linkColor);
+  }
+
+  InlineSpan _codeSpan(String segment, TextStyle style) {
+    return WidgetSpan(
+      alignment: PlaceholderAlignment.baseline,
+      baseline: TextBaseline.alphabetic,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _copyMonospaceText(segment),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+          decoration: BoxDecoration(
+            color: _codeBackgroundColor,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(segment, style: style),
+        ),
+      ),
+    );
+  }
+
+  Color get _codeBackgroundColor {
+    return (Theme.of(context).brightness == Brightness.dark
+            ? Colors.white
+            : Colors.black)
+        .withValues(alpha: 0.10);
+  }
+
+  void _copyMonospaceText(String text) {
+    if (text.isEmpty) return;
+    Clipboard.setData(ClipboardData(text: text));
   }
 
   TextStyle _entityStyle(
@@ -302,12 +335,7 @@ class _TelegramRichTextState extends State<TelegramRichText> {
         case 'textEntityTypeCode':
         case 'textEntityTypePre':
         case 'textEntityTypePreCode':
-          style = style.copyWith(
-            fontFamily: 'monospace',
-            backgroundColor: (style.color ?? Colors.black).withValues(
-              alpha: 0.10,
-            ),
-          );
+          style = style.copyWith(fontFamily: 'monospace');
         case 'textEntityTypeSpoiler':
           final color = style.color ?? Colors.black;
           style = style.copyWith(

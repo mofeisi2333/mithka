@@ -23,7 +23,7 @@ import '../channels/topic_chat_view.dart';
 import '../components/confirm_dialog.dart';
 import '../components/drawer_controller.dart' as dc;
 import '../components/photo_avatar.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/ui_components.dart';
 import '../profile/profile_detail_view.dart';
 import '../theme/app_theme.dart';
@@ -87,12 +87,8 @@ class _TranscriptEntry {
 }
 
 class _ChatViewState extends State<ChatView> {
-  late final ChatViewModel _vm = ChatViewModel(
-    chatId: widget.chatId,
-    title: widget.title,
-    initialMessageId: widget.initialMessageId,
-    seedMessage: widget.seedMessage,
-  );
+  late final bool _openAtLatest;
+  late final ChatViewModel _vm;
   final _scroll = ScrollController();
   final _pinnedKey = GlobalKey(); // the pinned message's row, for scroll-to
   final _targetKey = GlobalKey(); // arbitrary linked/anchored message row
@@ -139,6 +135,14 @@ class _ChatViewState extends State<ChatView> {
   @override
   void initState() {
     super.initState();
+    _openAtLatest = context.read<ThemeController>().openChatsAtLatest;
+    _vm = ChatViewModel(
+      chatId: widget.chatId,
+      title: widget.title,
+      markReadOnOpen: _openAtLatest,
+      initialMessageId: widget.initialMessageId,
+      seedMessage: widget.seedMessage,
+    );
     _vm.addListener(_onModel);
     _scroll.addListener(_onScroll);
     _scrollTargetId = widget.initialMessageId;
@@ -182,7 +186,10 @@ class _ChatViewState extends State<ChatView> {
         pos.maxScrollExtent - pos.pixels < 36) {
       unawaited(_returnToLatest());
     }
-    if (_liveNewMessageCount > 0 && _isNearBottom(80)) {
+    final nearBottom = _isNearBottom(80);
+    if (nearBottom &&
+        (_liveNewMessageCount > 0 ||
+            (!_openAtLatest && !_bannerDismissed && _vm.unreadCount > 0))) {
       setState(() {
         _liveNewMessageCount = 0;
         _bannerDismissed = true;
@@ -388,22 +395,15 @@ class _ChatViewState extends State<ChatView> {
         _initialPaintReady = true;
       } else {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          _initialScroll();
-          _scheduleShortTranscriptFill();
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted && !_initialPaintReady) {
-              setState(() => _initialPaintReady = true);
-            }
-          });
+          unawaited(_completeInitialScroll());
         });
       }
     } else if (_vm.initialLoaded && _vm.messages.isNotEmpty) {
       _scheduleShortTranscriptFill();
     }
-    // The "N条新消息" banner shows on entry, then auto-hides after a few seconds.
-    final keepEntryUnreadBanner =
-        context.read<ThemeController>().openChatsAtLatest &&
-        _liveNewMessageCount == 0;
+    // Keep the entry unread banner visible; only live-new-message banners
+    // should auto-hide after a short delay.
+    final keepEntryUnreadBanner = _liveNewMessageCount == 0;
     if (_vm.unreadCount > 0 &&
         _liveNewMessageCount == 0 &&
         _bannerTimer == null &&
@@ -425,22 +425,35 @@ class _ChatViewState extends State<ChatView> {
   /// divider near the top). Because the list is lazily built, the divider's
   /// context may not exist yet — jump approximately first to build it, then snap
   /// precisely.
-  void _initialScroll() {
+  Future<void> _completeInitialScroll() async {
+    await _initialScroll();
+    _scheduleShortTranscriptFill();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_initialPaintReady) {
+        setState(() => _initialPaintReady = true);
+      }
+    });
+  }
+
+  Future<void> _initialScroll() async {
     if (!_scroll.hasClients) return;
     final target = widget.initialMessageId;
     if (target != null) {
       _scrollTargetId = target;
-      _ensureMessageVisible(target);
+      await _ensureMessageVisible(target);
       return;
     }
-    if (context.read<ThemeController>().openChatsAtLatest) {
+    if (_openAtLatest) {
       _scrollToBottom(settle: true, forceSettle: true);
       return;
     }
     final i = _firstUnreadIndex();
-    final boundaryLoaded =
-        _vm.messages.isNotEmpty && _vm.messages.first.id <= _vm.lastReadInboxId;
+    final boundaryLoaded = _isUnreadBoundaryLoaded();
     if (_vm.unreadCount <= 0 || i < 0 || !boundaryLoaded) {
+      if (_vm.unreadCount > 0 && _vm.lastReadInboxId > 0) {
+        await _scrollToMessage(_vm.lastReadInboxId);
+        return;
+      }
       _scrollToBottom();
       return;
     }
@@ -540,13 +553,12 @@ class _ChatViewState extends State<ChatView> {
   }
 
   void _positionAfterShortFill() {
-    if (context.read<ThemeController>().openChatsAtLatest) {
+    if (_openAtLatest) {
       _scrollToBottom(settle: true, forceSettle: true);
       return;
     }
     final i = _firstUnreadIndex();
-    final boundaryLoaded =
-        _vm.messages.isNotEmpty && _vm.messages.first.id <= _vm.lastReadInboxId;
+    final boundaryLoaded = _isUnreadBoundaryLoaded();
     if (_vm.unreadCount > 0 && i >= 0 && boundaryLoaded) {
       final ctx = _unreadKey.currentContext;
       if (ctx != null) {
@@ -555,6 +567,12 @@ class _ChatViewState extends State<ChatView> {
       }
     }
     _scrollToBottom();
+  }
+
+  bool _isUnreadBoundaryLoaded() {
+    if (_vm.messages.isEmpty) return false;
+    return _vm.lastReadInboxId <= 0 ||
+        _vm.messages.first.id <= _vm.lastReadInboxId;
   }
 
   bool get _canBackSwipe =>
@@ -1184,6 +1202,8 @@ class _ChatViewState extends State<ChatView> {
     switch (action) {
       case MessageAction.copy:
         Clipboard.setData(ClipboardData(text: message.text));
+      case MessageAction.selectText:
+        await _showTextSelection(message);
       case MessageAction.edit:
         _editMessage(message);
       case MessageAction.translate:
@@ -1256,6 +1276,17 @@ class _ChatViewState extends State<ChatView> {
         if (!mounted || !confirmed) return;
         _vm.deleteMessage(message.id);
     }
+  }
+
+  Future<void> _showTextSelection(ChatMessage message) async {
+    if (message.text.isEmpty || !mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _MessageTextSelectionSheet(text: message.text),
+    );
   }
 
   Future<bool> _translateMessage(
@@ -1472,16 +1503,29 @@ class _ChatViewState extends State<ChatView> {
             child: _pinnedBar(_vm.pinnedMessage!),
           ),
         if (_isSelecting) _selectToHereButton(),
-        if ((_vm.unreadCount + _liveNewMessageCount) > 0 && !_bannerDismissed)
-          Positioned(
-            top: showPinnedTodo ? 72 : 8,
-            right: 12,
-            child: _newMessagesBanner(),
-          ),
-        if (_showJumpDown)
+        if (_shouldShowNewMessagesBanner)
+          _openAtLatest
+              ? Positioned(
+                  top: showPinnedTodo ? 72 : 8,
+                  right: 12,
+                  child: _newMessagesBanner(pointsDown: false),
+                )
+              : Positioned(
+                  right: 16,
+                  bottom: 12,
+                  child: _newMessagesBanner(pointsDown: true),
+                ),
+        if (_showJumpDown && !(!_openAtLatest && _shouldShowNewMessagesBanner))
           Positioned(right: 16, bottom: 12, child: _jumpToBottomButton()),
       ],
     );
+  }
+
+  bool get _shouldShowNewMessagesBanner {
+    if ((_vm.unreadCount + _liveNewMessageCount) <= 0 || _bannerDismissed) {
+      return false;
+    }
+    return _openAtLatest || !_isNearBottom(80);
   }
 
   /// Small button (bottom-right of the transcript) to return to the newest
@@ -1507,8 +1551,8 @@ class _ChatViewState extends State<ChatView> {
             ),
           ],
         ),
-        child: FaIcon(
-          FontAwesomeIcons.angleDown,
+        child: AppIcon(
+          HeroAppIcons.angleDown,
           size: 22,
           color: c.textSecondary,
         ),
@@ -1516,13 +1560,14 @@ class _ChatViewState extends State<ChatView> {
     );
   }
 
-  /// Top-right "N条新消息" pill; tap jumps up to the first unread message.
-  Widget _newMessagesBanner() {
+  /// "N条新消息" pill. In latest-on-open mode it points up to the unread
+  /// boundary; in unread-boundary mode it points down to the newest message.
+  Widget _newMessagesBanner({required bool pointsDown}) {
     final c = context.colors;
     final count = _vm.unreadCount + _liveNewMessageCount;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: _jumpToFirstUnread,
+      onTap: pointsDown ? _returnToLatest : _jumpToFirstUnread,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
@@ -1540,7 +1585,11 @@ class _ChatViewState extends State<ChatView> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            FaIcon(FontAwesomeIcons.arrowUp, size: 14, color: AppTheme.brand),
+            AppIcon(
+              pointsDown ? HeroAppIcons.arrowDown : HeroAppIcons.arrowUp,
+              size: 14,
+              color: AppTheme.brand,
+            ),
             const SizedBox(width: 5),
             Text(
               AppStrings.t(AppStringKeys.chatNewMessagesCount, {
@@ -1635,7 +1684,7 @@ class _ChatViewState extends State<ChatView> {
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            FaIcon(FontAwesomeIcons.solidBell, size: 18, color: AppTheme.brand),
+            AppIcon(HeroAppIcons.solidBell, size: 18, color: AppTheme.brand),
             const SizedBox(width: 8),
             Text(
               (muted ? AppStringKeys.chatUnmute : AppStringKeys.callMute).l10n(
@@ -1821,8 +1870,8 @@ class _ChatViewState extends State<ChatView> {
                   onTap: widget.onBack ?? () => Navigator.of(context).pop(),
                   child: Padding(
                     padding: const EdgeInsets.only(right: 10),
-                    child: FaIcon(
-                      FontAwesomeIcons.chevronLeft,
+                    child: AppIcon(
+                      HeroAppIcons.chevronLeft,
                       size: 22,
                       color: c.textPrimary,
                     ),
@@ -1837,8 +1886,8 @@ class _ChatViewState extends State<ChatView> {
                   onTap: () => _openTopicMode(),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 10),
-                    child: FaIcon(
-                      FontAwesomeIcons.hashtag,
+                    child: AppIcon(
+                      HeroAppIcons.hashtag,
                       size: 22,
                       color: c.textPrimary,
                     ),
@@ -1855,8 +1904,8 @@ class _ChatViewState extends State<ChatView> {
                     ),
                   ),
                 ),
-                child: FaIcon(
-                  FontAwesomeIcons.bars,
+                child: AppIcon(
+                  HeroAppIcons.bars,
                   size: 22,
                   color: c.textPrimary,
                 ),
@@ -1889,8 +1938,8 @@ class _ChatViewState extends State<ChatView> {
             children: [
               Expanded(child: title),
               const SizedBox(width: 4),
-              FaIcon(
-                FontAwesomeIcons.chevronDown,
+              AppIcon(
+                HeroAppIcons.chevronDown,
                 size: 14,
                 color: c.textSecondary,
               ),
@@ -1977,8 +2026,8 @@ class _ChatViewState extends State<ChatView> {
             return ListTile(
               leading: Icon(
                 all
-                    ? FontAwesomeIcons.hashtag.data
-                    : FontAwesomeIcons.solidMessage.data,
+                    ? HeroAppIcons.hashtag.data
+                    : HeroAppIcons.solidMessage.data,
                 color: all ? AppTheme.brand : c.textSecondary,
               ),
               title: Text(
@@ -2039,8 +2088,8 @@ class _ChatViewState extends State<ChatView> {
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: FaIcon(
-                FontAwesomeIcons.magnifyingGlass,
+              child: AppIcon(
+                HeroAppIcons.magnifyingGlass,
                 size: 22,
                 color: c.textPrimary,
               ),
@@ -2087,8 +2136,8 @@ class _ChatViewState extends State<ChatView> {
               children: [
                 Icon(
                   _selectionScrollingUp
-                      ? FontAwesomeIcons.arrowUp.data
-                      : FontAwesomeIcons.chevronDown.data,
+                      ? HeroAppIcons.arrowUp.data
+                      : HeroAppIcons.chevronDown.data,
                   size: 18,
                   color: AppTheme.brand,
                 ),
@@ -2129,11 +2178,11 @@ class _ChatViewState extends State<ChatView> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            button(FontAwesomeIcons.share.data, _forwardSelected),
-            button(FontAwesomeIcons.star.data, _saveSelected),
-            button(FontAwesomeIcons.trash.data, _deleteSelected),
+            button(HeroAppIcons.share.data, _forwardSelected),
+            button(HeroAppIcons.star.data, _saveSelected),
+            button(HeroAppIcons.trash.data, _deleteSelected),
             button(
-              FontAwesomeIcons.ellipsis.data,
+              HeroAppIcons.ellipsis.data,
               () =>
                   showToast(context, AppStringKeys.chatMoreActionsUnsupported),
             ),
@@ -2180,8 +2229,8 @@ class _ChatViewState extends State<ChatView> {
                 border: Border.all(color: const Color(0xFFFFB300), width: 2),
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: FaIcon(
-                FontAwesomeIcons.check,
+              child: AppIcon(
+                HeroAppIcons.check,
                 size: 15,
                 color: const Color(0xFFFFB300),
               ),
@@ -2208,12 +2257,12 @@ class _ChatViewState extends State<ChatView> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   _pinnedNavButton(
-                    icon: FontAwesomeIcons.chevronUp.data,
+                    icon: HeroAppIcons.chevronUp.data,
                     enabled: canPrevious,
                     onTap: _goToPreviousPinned,
                   ),
                   _pinnedNavButton(
-                    icon: FontAwesomeIcons.chevronDown.data,
+                    icon: HeroAppIcons.chevronDown.data,
                     enabled: canNext,
                     onTap: _goToNextPinned,
                   ),
@@ -2226,8 +2275,8 @@ class _ChatViewState extends State<ChatView> {
               onTap: _vm.dismissPinned,
               child: Padding(
                 padding: const EdgeInsets.all(4),
-                child: FaIcon(
-                  FontAwesomeIcons.xmark,
+                child: AppIcon(
+                  HeroAppIcons.xmark,
                   size: 16,
                   color: c.textTertiary,
                 ),
@@ -2478,7 +2527,7 @@ class _ChatViewState extends State<ChatView> {
               ),
             ),
             child: selected
-                ? FaIcon(FontAwesomeIcons.check, size: 17, color: Colors.white)
+                ? AppIcon(HeroAppIcons.check, size: 17, color: Colors.white)
                 : null,
           ),
           const SizedBox(width: 8),
@@ -2772,8 +2821,8 @@ class _ChatViewState extends State<ChatView> {
                     color: Colors.black.withValues(alpha: 0.45),
                     shape: BoxShape.circle,
                   ),
-                  child: FaIcon(
-                    FontAwesomeIcons.play,
+                  child: AppIcon(
+                    HeroAppIcons.play,
                     color: Colors.white,
                     size: 21,
                   ),
@@ -2877,22 +2926,25 @@ class _ChatViewState extends State<ChatView> {
     final bottomSafe = screenH - media.padding.bottom - 8;
     final outgoing = _actionTarget!.isOutgoing;
     final rect = _actionRect;
+    final showActionMenu = !_reactionExpanded;
 
     final reactionH = _reactionExpanded ? 268.0 : 48.0;
-    const menuH = 84.0;
+    final menuH = showActionMenu ? 84.0 : 0.0;
     const gap = 8.0;
+    final menuGap = showActionMenu ? gap : 0.0;
 
     double reactionTop, menuTop;
     if (rect != null) {
-      // Reaction bar above the message, action menu below it.
+      // Reaction picker stays near the pressed message; the action menu is
+      // hidden while the picker is expanded.
       reactionTop = (rect.top - reactionH - gap).clamp(
         topSafe,
         bottomSafe - reactionH,
       );
       menuTop = (rect.bottom + gap).clamp(topSafe, bottomSafe - menuH);
     } else {
-      reactionTop = (screenH - reactionH - menuH - gap) / 2;
-      menuTop = reactionTop + reactionH + gap;
+      reactionTop = (screenH - reactionH - menuH - menuGap) / 2;
+      menuTop = reactionTop + reactionH + menuGap;
     }
     final align = outgoing ? Alignment.centerRight : Alignment.centerLeft;
 
@@ -2926,20 +2978,21 @@ class _ChatViewState extends State<ChatView> {
                     : _quickReactionBar(),
               ),
             ),
-          Positioned(
-            top: menuTop,
-            left: 10,
-            right: 10,
-            child: Align(
-              alignment: align,
-              child: MessageActionMenu(
-                message: _actionTarget!,
-                isPinned: _vm.pinnedMessage?.id == _actionTarget!.id,
-                source: _actionSource,
-                onSelect: (action) => _perform(action, _actionTarget!),
+          if (showActionMenu)
+            Positioned(
+              top: menuTop,
+              left: 10,
+              right: 10,
+              child: Align(
+                alignment: align,
+                child: MessageActionMenu(
+                  message: _actionTarget!,
+                  isPinned: _vm.pinnedMessage?.id == _actionTarget!.id,
+                  source: _actionSource,
+                  onSelect: (action) => _perform(action, _actionTarget!),
+                ),
               ),
             ),
-          ),
         ],
       ),
     );
@@ -2983,8 +3036,8 @@ class _ChatViewState extends State<ChatView> {
                 color: Color(0xFF3A3A3C),
                 shape: BoxShape.circle,
               ),
-              child: FaIcon(
-                FontAwesomeIcons.chevronDown,
+              child: AppIcon(
+                HeroAppIcons.chevronDown,
                 size: 22,
                 color: Colors.white,
               ),
@@ -3019,6 +3072,7 @@ class _ChatViewState extends State<ChatView> {
   }
 
   Widget _reactionContent(List packs) {
+    const reactionEmojiSize = 26.0;
     if (_reactionTab != 'standard') {
       final id = int.tryParse(_reactionTab);
       CustomEmojiPack? pack;
@@ -3030,7 +3084,7 @@ class _ChatViewState extends State<ChatView> {
       }
       if (pack != null) {
         return GridView.count(
-          crossAxisCount: 6,
+          crossAxisCount: 7,
           padding: const EdgeInsets.all(10),
           children: [
             for (final item in pack.emoji)
@@ -3038,11 +3092,10 @@ class _ChatViewState extends State<ChatView> {
                 GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: () => _reactCustom(item.customEmojiId),
-                  child: Padding(
-                    padding: const EdgeInsets.all(3),
+                  child: Center(
                     child: CustomEmojiView(
                       id: item.customEmojiId,
-                      size: 34,
+                      size: reactionEmojiSize,
                       color: Colors.white,
                     ),
                   ),
@@ -3059,7 +3112,12 @@ class _ChatViewState extends State<ChatView> {
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () => _react(e),
-            child: Center(child: Text(e, style: const TextStyle(fontSize: 26))),
+            child: Center(
+              child: Text(
+                e,
+                style: const TextStyle(fontSize: reactionEmojiSize),
+              ),
+            ),
           ),
       ],
     );
@@ -3077,8 +3135,8 @@ class _ChatViewState extends State<ChatView> {
         children: [
           _reactionTab2(
             'standard',
-            FaIcon(
-              FontAwesomeIcons.solidFaceSmile,
+            AppIcon(
+              HeroAppIcons.solidFaceSmile,
               size: 22,
               color: Colors.white70,
             ),
@@ -3092,8 +3150,8 @@ class _ChatViewState extends State<ChatView> {
                       size: 26,
                       color: Colors.white,
                     )
-                  : FaIcon(
-                      FontAwesomeIcons.objectGroup,
+                  : AppIcon(
+                      HeroAppIcons.objectGroup,
                       size: 20,
                       color: Colors.white70,
                     ),
@@ -3117,6 +3175,102 @@ class _ChatViewState extends State<ChatView> {
           borderRadius: BorderRadius.circular(8),
         ),
         child: SizedBox(width: 28, height: 28, child: Center(child: child)),
+      ),
+    );
+  }
+}
+
+class _MessageTextSelectionSheet extends StatefulWidget {
+  const _MessageTextSelectionSheet({required this.text});
+
+  final String text;
+
+  @override
+  State<_MessageTextSelectionSheet> createState() =>
+      _MessageTextSelectionSheetState();
+}
+
+class _MessageTextSelectionSheetState
+    extends State<_MessageTextSelectionSheet> {
+  late final TextEditingController _controller;
+  late final FocusNode _focusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.text);
+    _focusNode = FocusNode();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focusNode.requestFocus();
+      _controller.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: widget.text.length,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Material(
+        color: c.card,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 10, 18, 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: c.divider,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(height: 12),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(context).height * 0.62,
+                ),
+                child: Scrollbar(
+                  child: SingleChildScrollView(
+                    child: TextField(
+                      controller: _controller,
+                      focusNode: _focusNode,
+                      readOnly: true,
+                      autofocus: true,
+                      maxLines: null,
+                      keyboardType: TextInputType.multiline,
+                      decoration: const InputDecoration(
+                        border: InputBorder.none,
+                        isCollapsed: true,
+                      ),
+                      style: TextStyle(
+                        fontSize: 16,
+                        height: 1.35,
+                        color: c.textPrimary,
+                      ),
+                      selectionControls: materialTextSelectionControls,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -10,7 +10,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../tdlib/td_image_loader.dart';
 import '../tdlib/td_models.dart';
 
@@ -85,8 +85,8 @@ class _FullImageViewerState extends State<FullImageViewer> {
               opacity: 1 - progress,
               child: Row(
                 children: [
-                  _circleFaIcon(
-                    FontAwesomeIcons.xmark,
+                  _circleAppIcon(
+                    HeroAppIcons.xmark,
                     () => Navigator.of(context).pop(),
                   ),
                   const Spacer(),
@@ -119,19 +119,20 @@ class _FullImageViewerState extends State<FullImageViewer> {
     );
   }
 
-  Widget _circleFaIcon(FaIconData name, VoidCallback onTap) => GestureDetector(
-    onTap: onTap,
-    child: Container(
-      width: 40,
-      height: 40,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.18),
-        shape: BoxShape.circle,
-      ),
-      child: FaIcon(name, size: 18, color: Colors.white),
-    ),
-  );
+  Widget _circleAppIcon(AppIconData name, VoidCallback onTap) =>
+      GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 40,
+          height: 40,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.18),
+            shape: BoxShape.circle,
+          ),
+          child: AppIcon(name, size: 18, color: Colors.white),
+        ),
+      );
 }
 
 class _ViewerPage extends StatefulWidget {
@@ -169,9 +170,18 @@ class _ViewerPageState extends State<_ViewerPage> {
 
   @override
   Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final cacheWidth = (media.size.width * media.devicePixelRatio).ceil();
+    final cacheHeight = (media.size.height * media.devicePixelRatio).ceil();
     if (_file == null) {
       if (widget.ref.miniThumb != null) {
-        return Center(child: Image.memory(widget.ref.miniThumb!));
+        return Center(
+          child: Image.memory(
+            widget.ref.miniThumb!,
+            cacheWidth: cacheWidth,
+            cacheHeight: cacheHeight,
+          ),
+        );
       }
       return const Center(
         child: CircularProgressIndicator(
@@ -183,7 +193,14 @@ class _ViewerPageState extends State<_ViewerPage> {
       transformationController: _controller,
       minScale: 1,
       maxScale: 5,
-      child: Center(child: Image.file(_file!, fit: BoxFit.contain)),
+      child: Center(
+        child: Image.file(
+          _file!,
+          fit: BoxFit.contain,
+          cacheWidth: cacheWidth,
+          cacheHeight: cacheHeight,
+        ),
+      ),
     );
   }
 }

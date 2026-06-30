@@ -9,7 +9,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../profile/qr_code_view.dart';
@@ -369,8 +369,8 @@ class _GroupManagementViewState extends State<GroupManagementView> {
                 const Spacer(),
               if (onTap != null) ...[
                 const SizedBox(width: 8),
-                FaIcon(
-                  FontAwesomeIcons.chevronRight,
+                AppIcon(
+                  HeroAppIcons.chevronRight,
                   size: 14,
                   color: c.textTertiary,
                 ),

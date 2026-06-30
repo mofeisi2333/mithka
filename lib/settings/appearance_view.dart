@@ -15,7 +15,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
 import '../theme/emoji_font_catalog.dart';
@@ -70,7 +70,7 @@ class AppearanceView extends StatelessWidget {
                         builder: (_) => const FontSettingsView(),
                       ),
                     ),
-                    icon: FontAwesomeIcons.font.data,
+                    icon: HeroAppIcons.font.data,
                   ),
                 ]),
                 const SizedBox(height: AppSpacing.xl),
@@ -115,14 +115,14 @@ class DisplaySettingsView extends StatelessWidget {
                 _card(context, [
                   _toggleRow(
                     context,
-                    FontAwesomeIcons.users.data,
+                    HeroAppIcons.users.data,
                     AppStrings.t(AppStringKeys.appearanceRoundGroupAvatars),
                     theme.circularGroupAvatars,
                     (v) => theme.circularGroupAvatars = v,
                   ),
                   _toggleRow(
                     context,
-                    FontAwesomeIcons.eyeSlash.data,
+                    HeroAppIcons.eyeSlash.data,
                     AppStrings.t(AppStringKeys.appearanceHidePhoneInSidebar),
                     theme.hideSidebarPhone,
                     (v) => theme.hideSidebarPhone = v,
@@ -133,14 +133,14 @@ class DisplaySettingsView extends StatelessWidget {
                 _card(context, [
                   _toggleRow(
                     context,
-                    FontAwesomeIcons.idBadge.data,
+                    HeroAppIcons.idBadge.data,
                     AppStrings.t(AppStringKeys.appearanceShowGroupMemberTitles),
                     theme.showMemberTags,
                     (v) => theme.showMemberTags = v,
                   ),
                   _toggleRow(
                     context,
-                    FontAwesomeIcons.images.data,
+                    HeroAppIcons.images.data,
                     AppStrings.t(
                       AppStringKeys.appearanceMergeConsecutiveImages,
                     ),
@@ -149,14 +149,14 @@ class DisplaySettingsView extends StatelessWidget {
                   ),
                   _toggleRow(
                     context,
-                    FontAwesomeIcons.palette.data,
+                    HeroAppIcons.palette.data,
                     AppStrings.t(AppStringKeys.appearanceShowPremiumNameColor),
                     theme.showChatPremiumNameColors,
                     (v) => theme.showChatPremiumNameColors = v,
                   ),
                   _toggleRow(
                     context,
-                    FontAwesomeIcons.solidFaceSmile.data,
+                    HeroAppIcons.solidFaceSmile.data,
                     AppStrings.t(
                       AppStringKeys.appearanceShowPremiumStatusEmoji,
                     ),
@@ -165,7 +165,7 @@ class DisplaySettingsView extends StatelessWidget {
                   ),
                   _toggleRow(
                     context,
-                    FontAwesomeIcons.penToSquare.data,
+                    HeroAppIcons.penToSquare.data,
                     AppStrings.t(AppStringKeys.appearanceShowEditAndReadMarks),
                     theme.showMessageMetaIndicators,
                     (v) => theme.showMessageMetaIndicators = v,
@@ -176,28 +176,28 @@ class DisplaySettingsView extends StatelessWidget {
                 _card(context, [
                   _toggleRow(
                     context,
-                    FontAwesomeIcons.filter.data,
+                    HeroAppIcons.filter.data,
                     AppStrings.t(AppStringKeys.appearanceShowChatFiltersOnTop),
                     theme.showChatFolderFilter,
                     (v) => theme.showChatFolderFilter = v,
                   ),
                   _toggleRow(
                     context,
-                    FontAwesomeIcons.magnifyingGlass.data,
+                    HeroAppIcons.magnifyingGlass.data,
                     AppStrings.t(AppStringKeys.appearanceShowChatListSearch),
                     theme.showChatListSearch,
                     (v) => theme.showChatListSearch = v,
                   ),
                   _toggleRow(
                     context,
-                    FontAwesomeIcons.palette.data,
+                    HeroAppIcons.palette.data,
                     AppStrings.t(AppStringKeys.appearanceShowPremiumNameColor),
                     theme.showPremiumNameColors,
                     (v) => theme.showPremiumNameColors = v,
                   ),
                   _toggleRow(
                     context,
-                    FontAwesomeIcons.solidFaceSmile.data,
+                    HeroAppIcons.solidFaceSmile.data,
                     AppStrings.t(
                       AppStringKeys.appearanceShowPremiumStatusEmoji,
                     ),
@@ -228,14 +228,14 @@ class DisplaySettingsView extends StatelessWidget {
                 _card(context, [
                   _toggleRow(
                     context,
-                    FontAwesomeIcons.message.data,
+                    HeroAppIcons.message.data,
                     AppStrings.t(AppStringKeys.appearanceShowUnreadChatCount),
                     theme.unreadBadgeShowsChatCount,
                     (v) => theme.unreadBadgeShowsChatCount = v,
                   ),
                   _toggleRow(
                     context,
-                    FontAwesomeIcons.solidBell.data,
+                    HeroAppIcons.solidBell.data,
                     AppStrings.t(AppStringKeys.appearanceCapUnreadCountAt99),
                     theme.capUnreadBadgeAt99,
                     (v) => theme.capUnreadBadgeAt99 = v,
@@ -338,11 +338,7 @@ extension _DisplayAppearanceHelpers on AppearanceView {
                   ],
                 ),
                 child: color.toARGB32() == selected
-                    ? FaIcon(
-                        FontAwesomeIcons.check,
-                        size: 18,
-                        color: Colors.white,
-                      )
+                    ? AppIcon(HeroAppIcons.check, size: 18, color: Colors.white)
                     : null,
               ),
             ),
@@ -363,7 +359,7 @@ extension _DisplayAppearanceHelpers on AppearanceView {
         children: [
           _scaleSlider(
             context,
-            icon: FontAwesomeIcons.font.data,
+            icon: HeroAppIcons.font.data,
             title: AppStrings.t(AppStringKeys.appearanceFontSize),
             value: theme.fontScale,
             min: ThemeController.minFontScale,
@@ -388,19 +384,19 @@ extension _DisplayAppearanceHelpers on AppearanceView {
           const InsetDivider(leadingInset: 52),
           _scaleSlider(
             context,
-            icon: FontAwesomeIcons.tableCells.data,
+            icon: HeroAppIcons.tableCells.data,
             title: AppStrings.t(AppStringKeys.appearanceInterfaceSize),
             value: theme.interfaceScale,
             min: ThemeController.minInterfaceScale,
             max: ThemeController.maxInterfaceScale,
             divisions: 17,
-            leading: FaIcon(
-              FontAwesomeIcons.square,
+            leading: AppIcon(
+              HeroAppIcons.square,
               size: AppTextSize.body,
               color: c.textSecondary,
             ),
-            trailing: FaIcon(
-              FontAwesomeIcons.square,
+            trailing: AppIcon(
+              HeroAppIcons.square,
               size: AppIconSize.add,
               color: c.textPrimary,
             ),
@@ -540,8 +536,8 @@ extension _DisplayAppearanceHelpers on AppearanceView {
               ),
               const Spacer(),
               if (selected)
-                FaIcon(
-                  FontAwesomeIcons.check,
+                AppIcon(
+                  HeroAppIcons.check,
                   size: AppIconSize.lg,
                   color: AppTheme.brand,
                 ),
@@ -629,8 +625,8 @@ extension _DisplayAppearanceHelpers on AppearanceView {
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
-              FaIcon(
-                FontAwesomeIcons.chevronRight,
+              AppIcon(
+                HeroAppIcons.chevronRight,
                 size: AppIconSize.lg,
                 color: c.textTertiary,
               ),
@@ -884,7 +880,7 @@ class _FontCacheManagementViewState extends State<FontCacheManagementView> {
       _actionRow(
         context,
         AppStrings.t(AppStringKeys.appearanceRefreshCacheList),
-        FontAwesomeIcons.arrowsRotate.data,
+        HeroAppIcons.arrowsRotate.data,
         busy ? null : _refreshSnapshot,
         busy: _operation == _FontCacheOperation.refreshing,
         status: _operation == _FontCacheOperation.refreshed
@@ -894,7 +890,7 @@ class _FontCacheManagementViewState extends State<FontCacheManagementView> {
       _actionRow(
         context,
         AppStrings.t(AppStringKeys.appearanceCleanUnusedFonts),
-        FontAwesomeIcons.trash.data,
+        HeroAppIcons.trash.data,
         busy || data.unusedCount == 0 ? null : () => _deleteUnused(data),
         destructive: true,
         busy: _operation == _FontCacheOperation.deletingUnused,
@@ -1037,8 +1033,8 @@ class _FontCacheManagementViewState extends State<FontCacheManagementView> {
                     ),
                   )
                 else
-                  FaIcon(
-                    FontAwesomeIcons.chevronRight,
+                  AppIcon(
+                    HeroAppIcons.chevronRight,
                     size: AppIconSize.lg,
                     color: enabled && !destructive
                         ? c.textTertiary
@@ -1109,8 +1105,8 @@ class _FontCacheManagementViewState extends State<FontCacheManagementView> {
                 child: Opacity(
                   opacity: entry.active ? 0.2 : 1,
                   child: Center(
-                    child: FaIcon(
-                      FontAwesomeIcons.trash,
+                    child: AppIcon(
+                      HeroAppIcons.trash,
                       size: AppIconSize.xl,
                       color: entry.active
                           ? c.textTertiary
@@ -1663,8 +1659,8 @@ class TextFontView extends StatelessWidget {
           children: [
             ReorderableDragStartListener(
               index: index,
-              child: FaIcon(
-                FontAwesomeIcons.bars,
+              child: AppIcon(
+                HeroAppIcons.bars,
                 size: AppIconSize.xl,
                 color: c.textTertiary,
               ),
@@ -1715,8 +1711,8 @@ class TextFontView extends StatelessWidget {
                 width: AppMetric.hitTarget,
                 height: AppMetric.hitTarget,
                 child: Center(
-                  child: FaIcon(
-                    FontAwesomeIcons.trash,
+                  child: AppIcon(
+                    HeroAppIcons.trash,
                     size: AppIconSize.xl,
                     color: c.textTertiary,
                   ),
@@ -1741,7 +1737,7 @@ class TextFontView extends StatelessWidget {
           _actionRow(
             context,
             AppStrings.t(AppStringKeys.appearanceAddTextFont),
-            FontAwesomeIcons.plus.data,
+            HeroAppIcons.plus.data,
             () async {
               final family = await Navigator.of(context).push<String>(
                 MaterialPageRoute(builder: (_) => const FontAddView()),
@@ -1755,7 +1751,7 @@ class TextFontView extends StatelessWidget {
             _actionRow(
               context,
               AppStrings.t(AppStringKeys.appearanceClearTextFonts),
-              FontAwesomeIcons.xmark.data,
+              HeroAppIcons.xmark.data,
               () => context.read<ThemeController>().setFontFallbackChain(
                 const <String>[],
               ),
@@ -1792,8 +1788,8 @@ class TextFontView extends StatelessWidget {
                 style: TextStyle(fontSize: AppTextSize.bodyLarge, color: color),
               ),
               const Spacer(),
-              FaIcon(
-                FontAwesomeIcons.chevronRight,
+              AppIcon(
+                HeroAppIcons.chevronRight,
                 size: AppIconSize.lg,
                 color: destructive ? Colors.transparent : c.textTertiary,
               ),
@@ -2041,8 +2037,8 @@ class _EmojiFontPickerViewState extends State<EmojiFontPickerView> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               else if (selected)
-                FaIcon(
-                  FontAwesomeIcons.check,
+                AppIcon(
+                  HeroAppIcons.check,
                   size: AppIconSize.lg,
                   color: AppTheme.brand,
                 ),
@@ -2234,13 +2230,13 @@ class _FontAddViewState extends State<FontAddView> {
             child: CupertinoSearchTextField(
               placeholder: AppStrings.t(AppStringKeys.appearanceSearchFont),
               itemColor: c.textTertiary,
-              prefixIcon: FaIcon(
-                FontAwesomeIcons.magnifyingGlass,
+              prefixIcon: AppIcon(
+                HeroAppIcons.magnifyingGlass,
                 size: AppIconSize.lg,
                 color: c.textTertiary,
               ),
               suffixIcon: Icon(
-                FontAwesomeIcons.circleXmark.data,
+                HeroAppIcons.circleXmark.data,
                 size: AppIconSize.lg,
                 color: c.textTertiary,
               ),
@@ -2867,8 +2863,8 @@ class _MonospaceFontPickerViewState extends State<MonospaceFontPickerView> {
                 const SizedBox(width: AppSpacing.md),
               ],
               if (selected)
-                FaIcon(
-                  FontAwesomeIcons.check,
+                AppIcon(
+                  HeroAppIcons.check,
                   size: AppIconSize.lg,
                   color: AppTheme.brand,
                 ),

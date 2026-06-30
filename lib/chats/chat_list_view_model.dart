@@ -438,7 +438,7 @@ class ChatListViewModel extends ChangeNotifier {
           }
         });
         _resolveSenderIfNeeded(id, update.obj('last_message'));
-        _resort();
+        _scheduleResort();
 
       case 'updateChatPosition':
         final id = update.int64('chat_id');
@@ -446,7 +446,7 @@ class ChatListViewModel extends ChangeNotifier {
         if (id == null || position == null) return;
         _applyPosition(id, position);
         _ensureChatLoaded(id);
-        _resort();
+        _scheduleResort();
 
       case 'updateChatAddedToList':
         final id = update.int64('chat_id');
@@ -460,7 +460,7 @@ class ChatListViewModel extends ChangeNotifier {
             _folderOrders.putIfAbsent(folderId, () => {})[id] = 1;
           }
         }
-        _resort();
+        _scheduleResort();
 
       case 'updateChatRemovedFromList':
         final id = update.int64('chat_id');
@@ -475,7 +475,7 @@ class ChatListViewModel extends ChangeNotifier {
             final folderId = list.integer('chat_folder_id');
             if (folderId != null) _folderOrders[folderId]?.remove(id);
         }
-        _resort();
+        _scheduleResort();
 
       case 'updateChatDraftMessage':
         final id = update.int64('chat_id');
@@ -485,7 +485,7 @@ class ChatListViewModel extends ChangeNotifier {
           id,
           (s) => s.draftText = TDParse.draftText(update.obj('draft_message')),
         );
-        _resort();
+        _scheduleResort();
 
       case 'updateChatReadInbox':
         final id = update.int64('chat_id');
@@ -495,7 +495,7 @@ class ChatListViewModel extends ChangeNotifier {
           (s) =>
               s.unreadCount = update.integer('unread_count') ?? s.unreadCount,
         );
-        _resort();
+        _scheduleResort();
 
       case 'updateChatIsMarkedAsUnread':
         final id = update.int64('chat_id');
@@ -505,13 +505,13 @@ class ChatListViewModel extends ChangeNotifier {
           (s) =>
               s.isMarkedUnread = update.boolean('is_marked_as_unread') ?? false,
         );
-        _resort();
+        _scheduleResort();
 
       case 'updateChatTitle':
         final id = update.int64('chat_id');
         if (id == null) return;
         _mutate(id, (s) => s.title = update.str('title') ?? s.title);
-        _resort();
+        _scheduleResort();
 
       case 'updateChatNotificationSettings':
         final id = update.int64('chat_id');
@@ -521,13 +521,13 @@ class ChatListViewModel extends ChangeNotifier {
               update.obj('notification_settings')?.integer('mute_for') ?? 0;
           s.isMuted = muteFor > 0;
         });
-        _resort();
+        _scheduleResort();
 
       case 'updateChatPhoto':
         final id = update.int64('chat_id');
         if (id == null) return;
         _mutate(id, (s) => s.photo = TDParse.smallPhoto(update.obj('photo')));
-        _resort();
+        _scheduleResort();
 
       case 'updateUser':
         final user = update.obj('user');
@@ -781,7 +781,7 @@ class ChatListViewModel extends ChangeNotifier {
           final name = TDParse.userName(user);
           _senderNames[userId] = name;
           _setLastSender(name, id);
-          _resort();
+          _scheduleResort();
         })
         .catchError((_) {
           _resolvingSenders.remove(userId);
@@ -799,7 +799,7 @@ class ChatListViewModel extends ChangeNotifier {
           if (title == null) return;
           _senderNames[senderChatId] = title;
           _setLastSender(title, id);
-          _resort();
+          _scheduleResort();
         })
         .catchError((_) {
           _resolvingSenders.remove(senderChatId);

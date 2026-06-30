@@ -10,7 +10,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import 'package:provider/provider.dart';
 
 import '../call/call_manager.dart';
@@ -131,10 +131,10 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
   );
 
   static const _allTabs = [
-    _MainTabItem(0, AppStringKeys.tabMessages, FontAwesomeIcons.solidMessage),
-    _MainTabItem(1, AppStringKeys.tabChannels, FontAwesomeIcons.hashtag),
-    _MainTabItem(2, AppStringKeys.tabContacts, FontAwesomeIcons.users),
-    _MainTabItem(3, AppStringKeys.tabMoments, FontAwesomeIcons.circleNotch),
+    _MainTabItem(0, AppStringKeys.tabMessages, HeroAppIcons.solidMessage),
+    _MainTabItem(1, AppStringKeys.tabChannels, HeroAppIcons.hashtag),
+    _MainTabItem(2, AppStringKeys.tabContacts, HeroAppIcons.users),
+    _MainTabItem(3, AppStringKeys.tabMoments, HeroAppIcons.circleNotch),
   ];
 
   List<_MainTabItem> _visibleTabs(ThemeController theme) => [
@@ -760,13 +760,13 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
     1 =>
       _selectedChannelDetail ??
           const _SplitEmptyPane(
-            icon: FontAwesomeIcons.hashtag,
+            icon: HeroAppIcons.hashtag,
             title: AppStringKeys.tabSelectChannelContent,
           ),
     2 =>
       _selectedContactDetail ??
           const _SplitEmptyPane(
-            icon: FontAwesomeIcons.users,
+            icon: HeroAppIcons.users,
             title: AppStringKeys.tabSelectContact,
           ),
     _ =>
@@ -887,7 +887,7 @@ class _MessageEmptyPane extends StatelessWidget {
 class _SplitEmptyPane extends StatelessWidget {
   const _SplitEmptyPane({required this.icon, required this.title});
 
-  final FaIconData icon;
+  final AppIconData icon;
   final String title;
 
   @override
@@ -901,7 +901,7 @@ class _SplitEmptyPane extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              FaIcon(icon, size: 56, color: c.textTertiary),
+              AppIcon(icon, size: 56, color: c.textTertiary),
               const SizedBox(height: 14),
               Text(
                 title.l10n(context),
@@ -924,7 +924,7 @@ class _MainTabItem {
 
   final int index;
   final String label;
-  final FaIconData icon;
+  final AppIconData icon;
 }
 
 class _LazyTabStack extends StatefulWidget {
@@ -1103,7 +1103,7 @@ class _ClassicTabBar extends StatelessWidget {
                                 clipBehavior: Clip.none,
                                 alignment: Alignment.center,
                                 children: [
-                                  FaIcon(
+                                  AppIcon(
                                     items[i].icon,
                                     size: 24,
                                     color: selection == i

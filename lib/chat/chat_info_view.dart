@@ -16,7 +16,7 @@ import 'package:provider/provider.dart';
 import '../components/confirm_dialog.dart';
 import '../components/icon_grid.dart';
 import '../components/photo_avatar.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../tdlib/json_helpers.dart';
@@ -190,14 +190,10 @@ class _ChatInfoViewState extends State<ChatInfoView> {
               ),
               if (_vm.isGroup) ...[
                 const SizedBox(width: 8),
-                FaIcon(
-                  FontAwesomeIcons.qrcode,
-                  size: 22,
-                  color: c.textSecondary,
-                ),
+                AppIcon(HeroAppIcons.qrcode, size: 22, color: c.textSecondary),
                 const SizedBox(width: 6),
-                FaIcon(
-                  FontAwesomeIcons.chevronRight,
+                AppIcon(
+                  HeroAppIcons.chevronRight,
                   size: 15,
                   color: c.textTertiary,
                 ),
@@ -260,7 +256,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          FaIcon(FontAwesomeIcons.lock, size: 10, color: c.textTertiary),
+          AppIcon(HeroAppIcons.lock, size: 10, color: c.textTertiary),
           const SizedBox(width: 3),
           Text(text, style: TextStyle(fontSize: 11, color: c.textTertiary)),
         ],
@@ -298,8 +294,8 @@ class _ChatInfoViewState extends State<ChatInfoView> {
                     style: TextStyle(fontSize: 14, color: c.textSecondary),
                   ),
                 const SizedBox(width: 6),
-                FaIcon(
-                  FontAwesomeIcons.chevronRight,
+                AppIcon(
+                  HeroAppIcons.chevronRight,
                   size: 14,
                   color: c.textTertiary,
                 ),
@@ -340,7 +336,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
                     ),
                   if (_vm.canInvite)
                     _actionTile(
-                      FontAwesomeIcons.plus.data,
+                      HeroAppIcons.plus.data,
                       AppStrings.t(AppStringKeys.topicChatInvite),
                       () => Navigator.of(context).push(
                         MaterialPageRoute(
@@ -350,7 +346,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
                     ),
                   if (_vm.canRemove)
                     _actionTile(
-                      FontAwesomeIcons.minus.data,
+                      HeroAppIcons.minus.data,
                       AppStrings.t(AppStringKeys.chatInfoRemove),
                       _openMembers,
                     ),
@@ -465,8 +461,8 @@ class _ChatInfoViewState extends State<ChatInfoView> {
             children: [
               Text(title, style: TextStyle(fontSize: 15, color: c.textPrimary)),
               const Spacer(),
-              FaIcon(
-                FontAwesomeIcons.chevronRight,
+              AppIcon(
+                HeroAppIcons.chevronRight,
                 size: 14,
                 color: c.textTertiary,
               ),
@@ -494,8 +490,8 @@ class _ChatInfoViewState extends State<ChatInfoView> {
                   style: TextStyle(fontSize: 15, color: c.textPrimary),
                 ),
                 const Spacer(),
-                FaIcon(
-                  FontAwesomeIcons.chevronRight,
+                AppIcon(
+                  HeroAppIcons.chevronRight,
                   size: 14,
                   color: c.textTertiary,
                 ),
@@ -507,7 +503,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
                 perRow: _gridColumnsForWidth(constraints.maxWidth),
                 children: [
                   _groupAppItem(
-                    icon: FontAwesomeIcons.solidFolder.data,
+                    icon: HeroAppIcons.solidFolder.data,
                     color: const Color(0xFFFFB300),
                     label: AppStrings.t(AppStringKeys.topicPostContentFile),
                     onTap: () => Navigator.of(context).push(
@@ -525,7 +521,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
                     ),
                   ),
                   _groupAppItem(
-                    icon: FontAwesomeIcons.solidImage.data,
+                    icon: HeroAppIcons.solidImage.data,
                     color: const Color(0xFF15A7F7),
                     label: AppStrings.t(AppStringKeys.chatInfoAlbum),
                     onTap: () => Navigator.of(context).push(
@@ -543,7 +539,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
                     ),
                   ),
                   _groupAppItem(
-                    icon: FontAwesomeIcons.video.data,
+                    icon: HeroAppIcons.video.data,
                     color: const Color(0xFF7B61FF),
                     label: AppStrings.t(AppStringKeys.chatInfoGroupVideos),
                     onTap: () => Navigator.of(context).push(
@@ -561,7 +557,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
                     ),
                   ),
                   _groupAppItem(
-                    icon: FontAwesomeIcons.solidStar.data,
+                    icon: HeroAppIcons.solidStar.data,
                     color: const Color(0xFF18C26E),
                     label: AppStrings.t(AppStringKeys.chatInfoPinnedHighlights),
                     onTap: () => Navigator.of(context).push(
@@ -653,7 +649,8 @@ class _ChatInfoViewState extends State<ChatInfoView> {
         SettingsRow(
           title: AppStrings.t(AppStringKeys.chatInfoAutoDeleteMessages),
           value: TDParse.formatDuration(_vm.autoDeleteTime),
-          onTap: _chooseAutoDelete,
+          onTap: _vm.canChangeAutoDelete ? _chooseAutoDelete : null,
+          showChevron: _vm.canChangeAutoDelete,
           height: 52,
           leadingInset: 14,
         ),
@@ -662,6 +659,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
   }
 
   Future<void> _chooseAutoDelete() async {
+    if (!_vm.canChangeAutoDelete) return;
     final options = <(String, int)>[
       (AppStrings.t(AppStringKeys.chatInfoAutoDeleteOff), 0),
       (AppStrings.t(AppStringKeys.chatInfoAutoDeleteOneDay), 86400),
@@ -1062,8 +1060,8 @@ class _ChatFolderMembershipViewState extends State<ChatFolderMembershipView> {
               onTap: _loading ? null : _createFolder,
               child: Padding(
                 padding: const EdgeInsets.all(4),
-                child: FaIcon(
-                  FontAwesomeIcons.plus,
+                child: AppIcon(
+                  HeroAppIcons.plus,
                   size: 24,
                   color: c.textPrimary,
                 ),
@@ -1144,7 +1142,7 @@ class _ChatFolderMembershipViewState extends State<ChatFolderMembershipView> {
         padding: const EdgeInsets.symmetric(horizontal: 14),
         child: Row(
           children: [
-            FaIcon(FontAwesomeIcons.folder, size: 22, color: AppTheme.brand),
+            AppIcon(HeroAppIcons.folder, size: 22, color: AppTheme.brand),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
@@ -1200,6 +1198,7 @@ class ChatInfoViewModel extends ChangeNotifier {
   bool canInvite = false;
   bool canRemove = false;
   bool canManageGroup = false;
+  bool canChangeAutoDelete = false;
   bool isMember = false; // confirmed member → may quit; false hides 退出
   bool _loaded = false;
   String? _notice;
@@ -1232,6 +1231,7 @@ class ChatInfoViewModel extends ChangeNotifier {
     photo = TDParse.smallPhoto(chat.obj('photo'));
     final kind = TDParse.chatKind(chat);
     isGroup = kind == ChatKind.group || kind == ChatKind.channel;
+    canChangeAutoDelete = !isGroup;
     isMuted = (chat.obj('notification_settings')?.integer('mute_for') ?? 0) > 0;
     autoDeleteTime =
         chat.obj('message_auto_delete_time')?.integer('time') ??
@@ -1306,20 +1306,24 @@ class ChatInfoViewModel extends ChangeNotifier {
           canInvite = true;
           canRemove = true;
           canManageGroup = true;
+          canChangeAutoDelete = true;
         case 'chatMemberStatusAdministrator':
           final rights = status?.obj('rights');
           canInvite = rights?.boolean('can_invite_users') ?? false;
           canRemove = rights?.boolean('can_restrict_members') ?? false;
           canManageGroup = true;
+          canChangeAutoDelete = rights?.boolean('can_change_info') ?? false;
         default:
           canInvite = defaultInvite;
           canRemove = false;
           canManageGroup = false;
+          canChangeAutoDelete = false;
       }
     } catch (_) {
       canInvite = defaultInvite;
       canRemove = false;
       canManageGroup = false;
+      canChangeAutoDelete = !isGroup;
       isMember = false;
     }
     notifyListeners();
@@ -1437,6 +1441,7 @@ class ChatInfoViewModel extends ChangeNotifier {
   }
 
   void setAutoDeleteTime(int seconds) {
+    if (!canChangeAutoDelete) return;
     autoDeleteTime = seconds;
     notifyListeners();
     TdClient.shared.send({

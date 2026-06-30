@@ -10,7 +10,7 @@
 import 'package:flutter/material.dart';
 
 import '../components/photo_avatar.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/ui_components.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
@@ -153,8 +153,8 @@ class _PrivacyRuleViewState extends State<PrivacyRuleView> {
                                     ),
                                     const Spacer(),
                                     if (_value == i)
-                                      FaIcon(
-                                        FontAwesomeIcons.check,
+                                      AppIcon(
+                                        HeroAppIcons.check,
                                         size: 18,
                                         color: AppTheme.brand,
                                       ),

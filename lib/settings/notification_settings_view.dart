@@ -9,7 +9,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/ui_components.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
@@ -133,7 +133,7 @@ class _NotificationSettingsViewState extends State<NotificationSettingsView> {
                 children: [
                   _card([
                     _toggle(
-                      FontAwesomeIcons.circleUser.data,
+                      HeroAppIcons.circleUser.data,
                       const Color(0xFF3C8CF0),
                       AppStrings.t(AppStringKeys.notificationPrivateMessages),
                       _enabled(_private),
@@ -141,7 +141,7 @@ class _NotificationSettingsViewState extends State<NotificationSettingsView> {
                     ),
                     const InsetDivider(leadingInset: 56),
                     _toggle(
-                      FontAwesomeIcons.users.data,
+                      HeroAppIcons.users.data,
                       const Color(0xFF16B05A),
                       AppStrings.t(AppStringKeys.notificationGroupMessages),
                       _enabled(_group),
@@ -149,7 +149,7 @@ class _NotificationSettingsViewState extends State<NotificationSettingsView> {
                     ),
                     const InsetDivider(leadingInset: 56),
                     _toggle(
-                      FontAwesomeIcons.grip.data,
+                      HeroAppIcons.grip.data,
                       const Color(0xFFFF9D2E),
                       AppStrings.t(AppStringKeys.topicChatChannelMessages),
                       _enabled(_channel),
@@ -159,7 +159,7 @@ class _NotificationSettingsViewState extends State<NotificationSettingsView> {
                   const SizedBox(height: 14),
                   _card([
                     _toggle(
-                      FontAwesomeIcons.file.data,
+                      HeroAppIcons.file.data,
                       const Color(0xFF8E7BFF),
                       AppStrings.t(AppStringKeys.notificationPreview),
                       _preview(_private),
@@ -167,7 +167,7 @@ class _NotificationSettingsViewState extends State<NotificationSettingsView> {
                     ),
                     const InsetDivider(leadingInset: 56),
                     _toggle(
-                      FontAwesomeIcons.volumeHigh.data,
+                      HeroAppIcons.volumeHigh.data,
                       const Color(0xFFF5A623),
                       AppStrings.t(AppStringKeys.notificationSound),
                       _hasSound(_private),

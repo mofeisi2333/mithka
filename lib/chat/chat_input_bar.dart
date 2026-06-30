@@ -24,7 +24,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../components/photo_avatar.dart';
 import '../components/icon_grid.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
 import '../tdlib/td_models.dart';
@@ -85,6 +85,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   double _pressStartY = 0;
   Timer? _recTimer;
   String? _recPath;
+  late bool _hasText = vm.draft.trim().isNotEmpty;
 
   ChatViewModel get vm => widget.vm;
 
@@ -114,7 +115,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
     // setDraft doesn't notify (it would rebuild the whole chat per keystroke), so
     // rebuild just the composer here — otherwise `hasText` stays stale and the
     // send button never appears while typing.
-    if (mounted) setState(() {});
+    final hasText = _controller.text.trim().isNotEmpty;
+    if (hasText != _hasText) {
+      _hasText = hasText;
+      if (mounted) setState(() {});
+    }
     final now = DateTime.now();
     if (_controller.text.isNotEmpty &&
         (_lastTyping == null || now.difference(_lastTyping!).inSeconds >= 4)) {
@@ -130,6 +135,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
         selection: TextSelection.collapsed(offset: vm.draft.length),
       );
     }
+    _hasText = _controller.text.trim().isNotEmpty;
     if (mounted) setState(() {});
   }
 
@@ -388,8 +394,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
             const SizedBox(width: 8),
             GestureDetector(
               onTap: () => vm.setReply(null),
-              child: FaIcon(
-                FontAwesomeIcons.xmark,
+              child: AppIcon(
+                HeroAppIcons.xmark,
                 size: 18,
                 color: c.textTertiary,
               ),
@@ -492,7 +498,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
               children: [
                 if (menu?.isWebApp ?? false) ...[
                   _botMenuRow(
-                    icon: FontAwesomeIcons.tableCells.data,
+                    icon: HeroAppIcons.tableCells.data,
                     title: menu!.text.isEmpty
                         ? AppStrings.t(AppStringKeys.composerOpenMenu)
                         : menu.text,
@@ -506,7 +512,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                 ],
                 for (var i = 0; i < commands.length; i++) ...[
                   _botMenuRow(
-                    icon: FontAwesomeIcons.ban.data,
+                    icon: HeroAppIcons.ban.data,
                     title: '/${commands[i].command}',
                     subtitle: commands[i].description,
                     onTap: () {
@@ -614,7 +620,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   style: TextStyle(fontSize: 13, color: AppTheme.brand),
                 )
               else if (selected)
-                FaIcon(FontAwesomeIcons.check, size: 18, color: AppTheme.brand),
+                AppIcon(HeroAppIcons.check, size: 18, color: AppTheme.brand),
             ],
           ),
         ),
@@ -624,7 +630,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   Widget _inputRow() {
     final c = context.colors;
-    final hasText = _controller.text.trim().isNotEmpty;
+    final hasText = _hasText;
     final sender = vm.selectedMessageSender;
     return Padding(
       padding: const EdgeInsets.only(left: 12, right: 12, top: 8, bottom: 6),
@@ -646,8 +652,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   shape: BoxShape.circle,
                 ),
                 alignment: Alignment.center,
-                child: FaIcon(
-                  FontAwesomeIcons.tableCells,
+                child: AppIcon(
+                  HeroAppIcons.tableCells,
                   size: 20,
                   color: c.textSecondary,
                 ),
@@ -677,8 +683,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
                             size: 28,
                           ),
                           const SizedBox(width: 2),
-                          FaIcon(
-                            FontAwesomeIcons.chevronDown,
+                          AppIcon(
+                            HeroAppIcons.chevronDown,
                             size: 16,
                             color: c.textTertiary,
                           ),
@@ -786,8 +792,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          FaIcon(
-                            FontAwesomeIcons.solidStar,
+                          AppIcon(
+                            HeroAppIcons.solidStar,
                             size: 14,
                             color: Colors.white,
                           ),
@@ -802,8 +808,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
                           ),
                         ],
                       )
-                    : FaIcon(
-                        FontAwesomeIcons.solidPaperPlane,
+                    : AppIcon(
+                        HeroAppIcons.solidPaperPlane,
                         size: 17,
                         color: Colors.white,
                       ),
@@ -823,28 +829,24 @@ class _ChatInputBarState extends State<ChatInputBar> {
       child: Row(
         children: [
           _icon(
-            FontAwesomeIcons.microphone.data,
+            HeroAppIcons.microphone.data,
             _panel == _Panel.voice,
             _toggleVoice,
           ),
-          _icon(FontAwesomeIcons.image.data, false, _pickPhotos),
-          _icon(FontAwesomeIcons.camera.data, false, _takePhoto),
-          _icon(FontAwesomeIcons.grip.data, _panel == _Panel.sticker, () {
+          _icon(HeroAppIcons.image.data, false, _pickPhotos),
+          _icon(HeroAppIcons.camera.data, false, _takePhoto),
+          _icon(HeroAppIcons.grip.data, _panel == _Panel.sticker, () {
             _toggle(_Panel.sticker);
             if (_panel == _Panel.sticker) StickerStore.shared.loadIfNeeded();
           }),
-          _icon(
-            FontAwesomeIcons.solidFaceSmile.data,
-            _panel == _Panel.emoji,
-            () {
-              _toggle(_Panel.emoji);
-              if (_panel == _Panel.emoji) EmojiStore.shared.loadIfNeeded();
-            },
-          ),
+          _icon(HeroAppIcons.solidFaceSmile.data, _panel == _Panel.emoji, () {
+            _toggle(_Panel.emoji);
+            if (_panel == _Panel.emoji) EmojiStore.shared.loadIfNeeded();
+          }),
           _icon(
             _panel != _Panel.none
-                ? FontAwesomeIcons.xmark.data
-                : FontAwesomeIcons.circlePlus.data,
+                ? HeroAppIcons.xmark.data
+                : HeroAppIcons.circlePlus.data,
             _panel == _Panel.function,
             () => _toggle(_Panel.function),
           ),
@@ -1125,37 +1127,37 @@ class _ChatInputBarState extends State<ChatInputBar> {
   Widget _functionPanel() {
     final items = [
       (
-        FontAwesomeIcons.phone.data,
+        HeroAppIcons.phone.data,
         AppStrings.t(AppStringKeys.composerVoiceCall),
         () => widget.onStartCall(false),
       ),
       (
-        FontAwesomeIcons.video.data,
+        HeroAppIcons.video.data,
         AppStrings.t(AppStringKeys.composerVideoCall),
         () => widget.onStartCall(true),
       ),
       (
-        FontAwesomeIcons.locationDot.data,
+        HeroAppIcons.locationDot.data,
         AppStrings.t(AppStringKeys.composerLocation),
         _sendLocation,
       ),
       (
-        FontAwesomeIcons.solidFolder.data,
+        HeroAppIcons.solidFolder.data,
         AppStrings.t(AppStringKeys.topicPostContentFile),
         _pickFile,
       ),
       (
-        FontAwesomeIcons.grip.data,
+        HeroAppIcons.grip.data,
         AppStrings.t(AppStringKeys.composerPoll),
         _createPoll,
       ),
       (
-        FontAwesomeIcons.music.data,
+        HeroAppIcons.music.data,
         AppStrings.t(AppStringKeys.composerAudio),
         _pickAudio,
       ),
       (
-        FontAwesomeIcons.listCheck.data,
+        HeroAppIcons.listCheck.data,
         AppStrings.t(AppStringKeys.composerChecklist),
         _createChecklist,
       ),
@@ -1231,64 +1233,70 @@ class _ChatInputBarState extends State<ChatInputBar> {
         }
       }
       if (pack != null) {
-        return GridView.count(
-          crossAxisCount: 8,
+        return GridView.builder(
           padding: const EdgeInsets.all(12),
-          children: [
-            for (final item in pack.emoji)
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => _controller.insertCustomEmoji(
-                  item.customEmojiId,
-                  item.emoji,
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(2),
-                  child: item.customEmojiId != 0
-                      ? CustomEmojiView(
-                          id: item.customEmojiId,
-                          size: 34,
-                          color: context.colors.textPrimary,
-                        )
-                      : const SizedBox(),
-                ),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 8,
+          ),
+          itemCount: pack.emoji.length,
+          itemBuilder: (context, index) {
+            final item = pack!.emoji[index];
+            return GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () =>
+                  _controller.insertCustomEmoji(item.customEmojiId, item.emoji),
+              child: Padding(
+                padding: const EdgeInsets.all(2),
+                child: item.customEmojiId != 0
+                    ? CustomEmojiView(
+                        id: item.customEmojiId,
+                        size: 34,
+                        color: context.colors.textPrimary,
+                      )
+                    : const SizedBox(),
               ),
-          ],
+            );
+          },
         );
       }
     }
-    return ListView(
-      padding: const EdgeInsets.only(top: 8),
-      children: [
+    return CustomScrollView(
+      slivers: [
+        const SliverToBoxAdapter(child: SizedBox(height: 8)),
         for (final category in EmojiCatalog.categories) ...[
-          Padding(
-            padding: const EdgeInsets.only(left: 14, top: 6, bottom: 2),
-            child: Text(
-              category.name,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: context.colors.textSecondary,
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.only(left: 14, top: 6, bottom: 2),
+              child: Text(
+                category.name.l10n(context),
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: context.colors.textSecondary,
+                ),
               ),
             ),
           ),
-          GridView.count(
-            crossAxisCount: 8,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
+          SliverPadding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
-            children: [
-              for (final emoji in category.emojis)
-                GestureDetector(
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 8,
+              ),
+              delegate: SliverChildBuilderDelegate((context, index) {
+                final emoji = category.emojis[index];
+                return GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: () => _controller.insertText(emoji),
                   child: Center(
                     child: Text(emoji, style: const TextStyle(fontSize: 26)),
                   ),
-                ),
-            ],
+                );
+              }, childCount: category.emojis.length),
+            ),
           ),
         ],
+        const SliverToBoxAdapter(child: SizedBox(height: 8)),
       ],
     );
   }
@@ -1310,8 +1318,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
             _emojiTabButton(
               selected: _emojiTab == 'standard',
               onTap: () => setState(() => _emojiTab = 'standard'),
-              child: FaIcon(
-                FontAwesomeIcons.solidFaceSmile,
+              child: AppIcon(
+                HeroAppIcons.solidFaceSmile,
                 size: 20,
                 color: _emojiTab == 'standard'
                     ? AppTheme.brand
@@ -1439,8 +1447,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   color: _recordCancelled ? AppTheme.tagRed : AppTheme.brand,
                   shape: BoxShape.circle,
                 ),
-                child: FaIcon(
-                  FontAwesomeIcons.microphone,
+                child: AppIcon(
+                  HeroAppIcons.microphone,
                   size: 32,
                   color: Colors.white,
                 ),
@@ -1545,8 +1553,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   StickerStore.shared.loadPack(pack.id);
                 },
                 child: pack.id == StickerStore.recentPackId
-                    ? FaIcon(
-                        FontAwesomeIcons.clock,
+                    ? AppIcon(
+                        HeroAppIcons.clock,
                         size: 20,
                         color: pack.id == activeId
                             ? AppTheme.brand

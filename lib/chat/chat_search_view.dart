@@ -11,7 +11,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../components/photo_avatar.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
@@ -122,8 +122,8 @@ class _ChatSearchViewState extends State<ChatSearchView> {
                 onTap: () => Navigator.of(context).pop(),
                 child: Padding(
                   padding: const EdgeInsets.only(right: 10),
-                  child: FaIcon(
-                    FontAwesomeIcons.chevronLeft,
+                  child: AppIcon(
+                    HeroAppIcons.chevronLeft,
                     size: 22,
                     color: c.textPrimary,
                   ),
@@ -139,8 +139,8 @@ class _ChatSearchViewState extends State<ChatSearchView> {
                   ),
                   child: Row(
                     children: [
-                      FaIcon(
-                        FontAwesomeIcons.magnifyingGlass,
+                      AppIcon(
+                        HeroAppIcons.magnifyingGlass,
                         size: 15,
                         color: c.textTertiary,
                       ),
@@ -168,8 +168,8 @@ class _ChatSearchViewState extends State<ChatSearchView> {
                             _controller.clear();
                             _onChanged('');
                           },
-                          child: FaIcon(
-                            FontAwesomeIcons.xmark,
+                          child: AppIcon(
+                            HeroAppIcons.xmark,
                             size: 16,
                             color: c.textTertiary,
                           ),

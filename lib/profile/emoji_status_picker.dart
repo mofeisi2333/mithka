@@ -5,7 +5,7 @@ import '../chat/custom_emoji.dart';
 import '../chat/emoji_store.dart';
 import '../components/photo_avatar.dart';
 import '../components/toast.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../theme/app_theme.dart';
@@ -45,24 +45,23 @@ Future<void> showEmojiStatusPicker(
             ),
           );
         }
-        return GridView.count(
-          crossAxisCount: 6,
+        return GridView.builder(
           padding: const EdgeInsets.symmetric(vertical: 8),
-          children: [
-            for (final id in ids)
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => pick(id),
-                child: Padding(
-                  padding: const EdgeInsets.all(5),
-                  child: CustomEmojiView(
-                    id: id,
-                    size: 34,
-                    color: c.textPrimary,
-                  ),
-                ),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 6,
+          ),
+          itemCount: ids.length,
+          itemBuilder: (context, index) {
+            final id = ids[index];
+            return GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => pick(id),
+              child: Padding(
+                padding: const EdgeInsets.all(5),
+                child: CustomEmojiView(id: id, size: 34, color: c.textPrimary),
               ),
-          ],
+            );
+          },
         );
       }
 
@@ -277,8 +276,8 @@ Widget _statusTabStrip(
       children: [
         tab(
           0,
-          FaIcon(
-            FontAwesomeIcons.solidStar,
+          AppIcon(
+            HeroAppIcons.solidStar,
             size: 22,
             color: selected == 0 ? AppTheme.brand : c.textSecondary,
           ),
@@ -306,5 +305,5 @@ Widget _packTabIcon(CustomEmojiPack pack, dynamic c) {
       child: TDImage(photo: pack.cover, cornerRadius: 4),
     );
   }
-  return FaIcon(FontAwesomeIcons.tableCells, size: 22, color: c.textSecondary);
+  return AppIcon(HeroAppIcons.tableCells, size: 22, color: c.textSecondary);
 }

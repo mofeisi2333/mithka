@@ -10,7 +10,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -20,16 +20,13 @@ import 'system_font_catalog.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 
 enum AppearanceMode {
-  system(
-    AppStringKeys.appLocaleFollowSystem,
-    FontAwesomeIcons.circleHalfStroke,
-  ),
-  light(AppStringKeys.themeModeLight, FontAwesomeIcons.solidSun),
-  dark(AppStringKeys.themeModeDark, FontAwesomeIcons.solidMoon);
+  system(AppStringKeys.appLocaleFollowSystem, HeroAppIcons.circleHalfStroke),
+  light(AppStringKeys.themeModeLight, HeroAppIcons.solidSun),
+  dark(AppStringKeys.themeModeDark, HeroAppIcons.solidMoon);
 
   const AppearanceMode(this.label, this._icon);
   final String label;
-  final FaIconData _icon;
+  final AppIconData _icon;
 
   IconData get icon => _icon.data;
 
@@ -41,26 +38,23 @@ enum AppearanceMode {
 }
 
 enum UnreadBadgeMode {
-  messages(
-    AppStringKeys.themeUnreadMessageCount,
-    FontAwesomeIcons.solidMessage,
-  ),
-  chats(AppStringKeys.themeUnreadChatCount, FontAwesomeIcons.comments);
+  messages(AppStringKeys.themeUnreadMessageCount, HeroAppIcons.solidMessage),
+  chats(AppStringKeys.themeUnreadChatCount, HeroAppIcons.comments);
 
   const UnreadBadgeMode(this.label, this._icon);
   final String label;
-  final FaIconData _icon;
+  final AppIconData _icon;
 
   IconData get icon => _icon.data;
 }
 
 enum UnreadBadgeOverflowMode {
-  capped(AppStringKeys.themeUnreadCountCapAt99, FontAwesomeIcons.solidBell),
-  exact(AppStringKeys.themeUnreadCountShowActual, FontAwesomeIcons.thumbtack);
+  capped(AppStringKeys.themeUnreadCountCapAt99, HeroAppIcons.solidBell),
+  exact(AppStringKeys.themeUnreadCountShowActual, HeroAppIcons.thumbtack);
 
   const UnreadBadgeOverflowMode(this.label, this._icon);
   final String label;
-  final FaIconData _icon;
+  final AppIconData _icon;
 
   IconData get icon => _icon.data;
 
@@ -71,19 +65,19 @@ enum UnreadBadgeOverflowMode {
 }
 
 enum GroupAssistantPlacement {
-  top(AppStringKeys.themeGroupAssistantTopCollapsed, FontAwesomeIcons.arrowUp),
+  top(AppStringKeys.themeGroupAssistantTopCollapsed, HeroAppIcons.arrowUp),
   chronological(
     AppStringKeys.themeGroupAssistantSortByTime,
-    FontAwesomeIcons.clock,
+    HeroAppIcons.clock,
   ),
   secondScreen(
     AppStringKeys.themeGroupAssistantSecondPageFirst,
-    FontAwesomeIcons.arrowDown,
+    HeroAppIcons.arrowDown,
   );
 
   const GroupAssistantPlacement(this.label, this._icon);
   final String label;
-  final FaIconData _icon;
+  final AppIconData _icon;
 
   IconData get icon => _icon.data;
 }

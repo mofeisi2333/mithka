@@ -14,7 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../components/photo_avatar.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_image_loader.dart';
@@ -305,8 +305,8 @@ class _StoryViewerViewState extends State<StoryViewerView> {
                       child: SizedBox(
                         width: 36,
                         height: 36,
-                        child: FaIcon(
-                          FontAwesomeIcons.xmark,
+                        child: AppIcon(
+                          HeroAppIcons.xmark,
                           size: 22,
                           color: Colors.white,
                         ),
@@ -410,7 +410,7 @@ class _StoryViewerViewState extends State<StoryViewerView> {
               color: Colors.black.withValues(alpha: 0.35),
               shape: BoxShape.circle,
             ),
-            child: FaIcon(FontAwesomeIcons.play, size: 30, color: Colors.white),
+            child: AppIcon(HeroAppIcons.play, size: 30, color: Colors.white),
           ),
       ],
     );

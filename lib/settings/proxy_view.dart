@@ -14,7 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../components/confirm_dialog.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../tdlib/json_helpers.dart';
@@ -199,7 +199,7 @@ class _ProxyViewState extends State<ProxyView> {
               ),
               const Spacer(),
               if (!_anyEnabled)
-                FaIcon(FontAwesomeIcons.check, size: 18, color: AppTheme.brand),
+                AppIcon(HeroAppIcons.check, size: 18, color: AppTheme.brand),
             ],
           ),
         ),
@@ -243,7 +243,7 @@ class _ProxyViewState extends State<ProxyView> {
                 ),
               ),
               if (enabled) ...[
-                FaIcon(FontAwesomeIcons.check, size: 18, color: AppTheme.brand),
+                AppIcon(HeroAppIcons.check, size: 18, color: AppTheme.brand),
                 const SizedBox(width: 12),
               ],
               GestureDetector(
@@ -251,8 +251,8 @@ class _ProxyViewState extends State<ProxyView> {
                 onTap: () => _remove(id),
                 child: Padding(
                   padding: const EdgeInsets.all(4),
-                  child: FaIcon(
-                    FontAwesomeIcons.circleMinus,
+                  child: AppIcon(
+                    HeroAppIcons.circleMinus,
                     size: 20,
                     color: AppTheme.tagRed.withValues(alpha: 0.85),
                   ),
@@ -275,7 +275,7 @@ class _ProxyViewState extends State<ProxyView> {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
             children: [
-              FaIcon(FontAwesomeIcons.plus, size: 18, color: AppTheme.brand),
+              AppIcon(HeroAppIcons.plus, size: 18, color: AppTheme.brand),
               const SizedBox(width: 10),
               Text(
                 AppStrings.t(AppStringKeys.proxyAddProxy),

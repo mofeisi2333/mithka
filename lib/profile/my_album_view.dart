@@ -9,7 +9,7 @@ import 'package:flutter/material.dart';
 
 import '../chat/full_image_viewer.dart';
 import '../components/photo_avatar.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
@@ -90,8 +90,8 @@ class _MyAlbumViewState extends State<MyAlbumView> {
                 onTap: () => Navigator.of(context).pop(),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 14),
-                  child: FaIcon(
-                    FontAwesomeIcons.chevronLeft,
+                  child: AppIcon(
+                    HeroAppIcons.chevronLeft,
                     size: 22,
                     color: c.textPrimary,
                   ),

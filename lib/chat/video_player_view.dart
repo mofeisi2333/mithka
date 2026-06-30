@@ -16,7 +16,7 @@ import 'package:video_player/video_player.dart';
 
 import 'chat_picker_view.dart';
 import '../components/photo_avatar.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/toast.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_image_loader.dart';
@@ -675,9 +675,9 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       left: pip || embedded ? null : (phoneFullscreen ? 8 : 30),
       right: pip ? 4 : (embedded ? 8 : null),
       child: pip || embedded
-          ? _plainIconButton(FontAwesomeIcons.xmark.data, _close, size: 34)
+          ? _plainIconButton(HeroAppIcons.xmark.data, _close, size: 34)
           : _roundIconButton(
-              FontAwesomeIcons.chevronLeft.data,
+              HeroAppIcons.chevronLeft.data,
               _close,
               size: phoneFullscreen ? 44 : 58,
             ),
@@ -780,8 +780,8 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
           width: layout.playButtonSize.width,
           height: layout.playButtonSize.height,
           child: Center(
-            child: FaIcon(
-              FontAwesomeIcons.play,
+            child: AppIcon(
+              HeroAppIcons.play,
               color: Colors.white.withValues(alpha: 0.7),
               size: layout.playIconSize,
             ),
@@ -807,7 +807,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         _speedMenu(compact: layout.timelineCompact),
         SizedBox(width: layout.actionGap),
         _roundIconButton(
-          FontAwesomeIcons.download.data,
+          HeroAppIcons.download.data,
           _downloadedNotice,
           size: layout.actionButtonSize,
         ),
@@ -817,7 +817,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         ],
         SizedBox(width: layout.actionGap),
         _roundIconButton(
-          FontAwesomeIcons.share.data,
+          HeroAppIcons.share.data,
           _forwardVideo,
           size: layout.actionButtonSize,
         ),
@@ -833,8 +833,8 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
           width: 54,
           height: 54,
           child: Center(
-            child: FaIcon(
-              FontAwesomeIcons.play,
+            child: AppIcon(
+              HeroAppIcons.play,
               color: Colors.white.withValues(alpha: 0.7),
               size: 32,
             ),
@@ -964,8 +964,8 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
             width: layout.playButtonSize.width,
             height: layout.playButtonSize.height,
             child: Center(
-              child: FaIcon(
-                playing ? FontAwesomeIcons.pause : FontAwesomeIcons.play,
+              child: AppIcon(
+                playing ? HeroAppIcons.pause : HeroAppIcons.play,
                 color: Colors.white,
                 size: layout.playIconSize,
               ),
@@ -995,7 +995,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         _speedMenu(compact: layout.timelineCompact),
         SizedBox(width: layout.actionGap),
         _roundIconButton(
-          FontAwesomeIcons.download.data,
+          HeroAppIcons.download.data,
           _downloadedNotice,
           size: layout.actionButtonSize,
         ),
@@ -1005,7 +1005,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         ],
         SizedBox(width: layout.actionGap),
         _roundIconButton(
-          FontAwesomeIcons.share.data,
+          HeroAppIcons.share.data,
           _forwardVideo,
           size: layout.actionButtonSize,
         ),
@@ -1030,10 +1030,8 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
             width: 54,
             height: 54,
             child: Center(
-              child: FaIcon(
-                value.isPlaying
-                    ? FontAwesomeIcons.pause
-                    : FontAwesomeIcons.play,
+              child: AppIcon(
+                value.isPlaying ? HeroAppIcons.pause : HeroAppIcons.play,
                 color: Colors.white,
                 size: 32,
               ),
@@ -1200,7 +1198,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   Widget _loadingDebugText() {
     final progress = _progress;
     final text = progress == null
-        ? AppStringKeys.videoPlayerWaitingForFile
+        ? AppStringKeys.videoPlayerWaitingForFile.l10n(context)
         : '${_byteString(progress.downloaded)} / ${_byteString(progress.total)} · ${_speedString(_downloadSpeed)}/s';
     return DefaultTextStyle(
       style: const TextStyle(
@@ -1318,8 +1316,8 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   }
 
   IconData get _volumeIconData => _volume <= 0.01
-      ? FontAwesomeIcons.volumeXmark.data
-      : FontAwesomeIcons.volumeHigh.data;
+      ? HeroAppIcons.volumeXmark.data
+      : HeroAppIcons.volumeHigh.data;
 
   Widget _muteButton({required double size}) {
     return _roundIconButton(_volumeIconData, _toggleMute, size: size);
@@ -1328,7 +1326,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   Widget _fullscreenButton({required double size}) {
     final callback = widget.onSwitchMode;
     if (callback == null) return const SizedBox.shrink();
-    return _roundIconButton(FontAwesomeIcons.expand.data, () {
+    return _roundIconButton(HeroAppIcons.expand.data, () {
       callback(VideoDisplayMode.fullscreen);
       _scheduleHide();
     }, size: size);
@@ -1364,8 +1362,8 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         width: size,
         height: size,
         child: Center(
-          child: FaIcon(
-            FontAwesomeIcons.tableColumns,
+          child: AppIcon(
+            HeroAppIcons.tableColumns,
             color: Colors.white.withValues(alpha: 0.92),
             size: size * 0.5,
           ),
@@ -1385,11 +1383,14 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
           SizedBox(
             width: 20,
             child: mode == widget.currentMode
-                ? FaIcon(FontAwesomeIcons.check, size: 14, color: Colors.white)
+                ? AppIcon(HeroAppIcons.check, size: 14, color: Colors.white)
                 : null,
           ),
           const SizedBox(width: 8),
-          Text(label, style: const TextStyle(color: Colors.white)),
+          Text(
+            label.l10n(context),
+            style: const TextStyle(color: Colors.white),
+          ),
         ],
       ),
     );

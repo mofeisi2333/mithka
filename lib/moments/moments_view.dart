@@ -23,7 +23,7 @@ import '../chat/video_player_view.dart';
 import '../chats/chat_list_view_model.dart';
 import '../components/toast.dart';
 import '../components/photo_avatar.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/ui_components.dart';
 import '../l10n/app_localizations.dart';
 import '../settings/accent_color_picker_view.dart';
@@ -217,7 +217,7 @@ class _MomentsViewState extends State<MomentsView> {
                   child: Column(
                     children: [
                       _menuRow(
-                        icon: FontAwesomeIcons.star.data,
+                        icon: HeroAppIcons.star.data,
                         iconColor: const Color(0xFFFFBE00),
                         title: AppStrings.t(AppStringKeys.tabMoments),
                         trailing: _channelActivity(),
@@ -232,7 +232,7 @@ class _MomentsViewState extends State<MomentsView> {
                         ),
                       ),
                       _menuRow(
-                        icon: FontAwesomeIcons.wandMagicSparkles.data,
+                        icon: HeroAppIcons.wandMagicSparkles.data,
                         iconColor: const Color(0xFFFFBE00),
                         title: AppStrings.t(AppStringKeys.momentsStories),
                         onTap: () => _openDetail(
@@ -285,11 +285,7 @@ class _MomentsViewState extends State<MomentsView> {
               ),
             ],
             const SizedBox(width: AppSpacing.md),
-            FaIcon(
-              FontAwesomeIcons.chevronRight,
-              size: 18,
-              color: c.textTertiary,
-            ),
+            AppIcon(HeroAppIcons.chevronRight, size: 18, color: c.textTertiary),
             const SizedBox(width: AppSpacing.xl),
           ],
         ),
@@ -1300,8 +1296,8 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
                     padding: const EdgeInsets.fromLTRB(8, 8, 0, 8),
                     child: Icon(
                       _nonMutedOnly
-                          ? FontAwesomeIcons.solidBell.data
-                          : FontAwesomeIcons.bellSlash.data,
+                          ? HeroAppIcons.solidBell.data
+                          : HeroAppIcons.bellSlash.data,
                       size: 24,
                       color: _nonMutedOnly ? AppTheme.brand : c.textPrimary,
                     ),
@@ -1313,8 +1309,8 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
                   onTap: _openSearch,
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(12, 8, 0, 8),
-                    child: FaIcon(
-                      FontAwesomeIcons.magnifyingGlass,
+                    child: AppIcon(
+                      HeroAppIcons.magnifyingGlass,
                       size: 25,
                       color: c.textPrimary,
                     ),
@@ -1386,21 +1382,17 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
             children: [
               Row(
                 children: [
-                  FaIcon(
-                    FontAwesomeIcons.solidFaceSmile,
+                  AppIcon(
+                    HeroAppIcons.solidFaceSmile,
                     size: 24,
                     color: c.textPrimary,
                   ),
                   const SizedBox(width: 18),
-                  FaIcon(FontAwesomeIcons.font, size: 24, color: c.textPrimary),
+                  AppIcon(HeroAppIcons.font, size: 24, color: c.textPrimary),
                   const SizedBox(width: 18),
-                  FaIcon(
-                    FontAwesomeIcons.image,
-                    size: 24,
-                    color: c.textPrimary,
-                  ),
+                  AppIcon(HeroAppIcons.image, size: 24, color: c.textPrimary),
                   const SizedBox(width: 18),
-                  FaIcon(FontAwesomeIcons.at, size: 24, color: c.textPrimary),
+                  AppIcon(HeroAppIcons.at, size: 24, color: c.textPrimary),
                   const Spacer(),
                   GestureDetector(
                     behavior: HitTestBehavior.opaque,
@@ -1408,8 +1400,8 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
                       setState(() => _replyPost = null);
                       _replyFocus.unfocus();
                     },
-                    child: FaIcon(
-                      FontAwesomeIcons.xmark,
+                    child: AppIcon(
+                      HeroAppIcons.xmark,
                       size: 20,
                       color: c.textTertiary,
                     ),
@@ -1451,8 +1443,8 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
                       onTap: _sendQuickReply,
                       child: Padding(
                         padding: const EdgeInsets.only(left: 10),
-                        child: FaIcon(
-                          FontAwesomeIcons.solidPaperPlane,
+                        child: AppIcon(
+                          HeroAppIcons.solidPaperPlane,
                           size: 22,
                           color: AppTheme.brand,
                         ),
@@ -1477,8 +1469,8 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
         children: [
           loading
               ? const CircularProgressIndicator()
-              : FaIcon(
-                  FontAwesomeIcons.towerBroadcast,
+              : AppIcon(
+                  HeroAppIcons.towerBroadcast,
                   size: 46,
                   color: AppTheme.brand,
                 ),
@@ -1793,8 +1785,8 @@ class _ChannelMomentsSearchViewState extends State<ChannelMomentsSearchView> {
                 onTap: () => Navigator.of(context).pop(),
                 child: Padding(
                   padding: const EdgeInsets.only(right: 10),
-                  child: FaIcon(
-                    FontAwesomeIcons.chevronLeft,
+                  child: AppIcon(
+                    HeroAppIcons.chevronLeft,
                     size: 22,
                     color: c.textPrimary,
                   ),
@@ -1810,8 +1802,8 @@ class _ChannelMomentsSearchViewState extends State<ChannelMomentsSearchView> {
                   ),
                   child: Row(
                     children: [
-                      FaIcon(
-                        FontAwesomeIcons.magnifyingGlass,
+                      AppIcon(
+                        HeroAppIcons.magnifyingGlass,
                         size: 15,
                         color: c.textTertiary,
                       ),
@@ -1842,8 +1834,8 @@ class _ChannelMomentsSearchViewState extends State<ChannelMomentsSearchView> {
                             _controller.clear();
                             _onChanged('');
                           },
-                          child: FaIcon(
-                            FontAwesomeIcons.xmark,
+                          child: AppIcon(
+                            HeroAppIcons.xmark,
                             size: 16,
                             color: c.textTertiary,
                           ),
@@ -1935,84 +1927,83 @@ void openChannelPostOriginal(BuildContext context, ChannelPost post) {
 }
 
 Future<void> showChannelPostMenu(BuildContext context, ChannelPost post) {
-  return showGeneralDialog<void>(
-    context: context,
-    barrierDismissible: true,
-    barrierLabel: AppStringKeys.chatInfoAutoDeleteOff.l10n(context),
-    barrierColor: Colors.black.withValues(alpha: 0.12),
-    transitionDuration: const Duration(milliseconds: 120),
-    pageBuilder: (dialogContext, _, _) {
-      return SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.only(top: 44, right: 10),
-          child: Align(
-            alignment: Alignment.topRight,
-            child: _ChannelPostMenu(
-              onOpenOriginal: () {
-                Navigator.of(dialogContext).pop();
-                openChannelPostOriginal(context, post);
-              },
-            ),
-          ),
-        ),
-      );
-    },
+  final anchor = context.findRenderObject() as RenderBox?;
+  final overlay =
+      Navigator.of(context).overlay?.context.findRenderObject() as RenderBox?;
+  if (anchor == null || overlay == null) {
+    openChannelPostOriginal(context, post);
+    return Future.value();
+  }
+  final anchorTopLeft = anchor.localToGlobal(Offset.zero, ancestor: overlay);
+  final anchorBottomRight = anchor.localToGlobal(
+    anchor.size.bottomRight(Offset.zero),
+    ancestor: overlay,
   );
+  final anchorRect = Rect.fromLTRB(
+    anchorTopLeft.dx,
+    anchorTopLeft.dy,
+    anchorBottomRight.dx,
+    anchorBottomRight.dy + 4,
+  );
+  return showMenu<_ChannelPostMenuAction>(
+    context: context,
+    position: RelativeRect.fromRect(anchorRect, Offset.zero & overlay.size),
+    color: context.colors.card,
+    elevation: 8,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    items: [
+      PopupMenuItem<_ChannelPostMenuAction>(
+        value: _ChannelPostMenuAction.openOriginal,
+        height: AppMetric.menuRowHeight,
+        child: Row(
+          children: [
+            SizedBox(
+              width: AppMetric.menuIconSlot,
+              child: AppIcon(
+                HeroAppIcons.rightFromBracket,
+                size: AppIconSize.lg + 1,
+                color: context.colors.textPrimary,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.xl),
+            Text(
+              AppStringKeys.momentsOpenOriginalMessage.l10n(context),
+              style: TextStyle(
+                fontSize: AppTextSize.bodyLarge,
+                color: context.colors.textPrimary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ],
+  ).then((action) {
+    if (!context.mounted) return;
+    switch (action) {
+      case _ChannelPostMenuAction.openOriginal:
+        openChannelPostOriginal(context, post);
+      case null:
+        break;
+    }
+  });
 }
 
-class _ChannelPostMenu extends StatelessWidget {
-  const _ChannelPostMenu({required this.onOpenOriginal});
+enum _ChannelPostMenuAction { openOriginal }
 
-  final VoidCallback onOpenOriginal;
+class _ChannelPostOverflowButton extends StatelessWidget {
+  const _ChannelPostOverflowButton({required this.post});
+
+  final ChannelPost post;
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    return Material(
-      color: Colors.transparent,
-      child: Container(
-        width: AppMetric.menuWidth + 16,
-        decoration: BoxDecoration(
-          color: c.card,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.15),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: onOpenOriginal,
-          child: SizedBox(
-            height: AppMetric.menuRowHeight,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxl),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: AppMetric.menuIconSlot,
-                    child: FaIcon(
-                      FontAwesomeIcons.rightFromBracket,
-                      size: AppIconSize.lg + 1,
-                      color: c.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.xl),
-                  Text(
-                    AppStringKeys.momentsOpenOriginalMessage.l10n(context),
-                    style: TextStyle(
-                      fontSize: AppTextSize.bodyLarge,
-                      color: c.textPrimary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => showChannelPostMenu(context, post),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 4, 0, 4),
+        child: AppIcon(HeroAppIcons.ellipsis, size: 22, color: c.textTertiary),
       ),
     );
   }
@@ -2327,17 +2318,21 @@ class _ChannelPostDetailViewState extends State<ChannelPostDetailView> {
             onBack: widget.showBackButton
                 ? () => Navigator.of(context).pop()
                 : null,
-            trailing: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => showChannelPostMenu(context, post),
-              child: Padding(
-                padding: const EdgeInsets.all(4),
-                child: FaIcon(
-                  FontAwesomeIcons.ellipsis,
-                  size: 24,
-                  color: c.textPrimary,
-                ),
-              ),
+            trailing: Builder(
+              builder: (menuContext) {
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => showChannelPostMenu(menuContext, post),
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: AppIcon(
+                      HeroAppIcons.ellipsis,
+                      size: 24,
+                      color: c.textPrimary,
+                    ),
+                  ),
+                );
+              },
             ),
           ),
           Expanded(
@@ -2405,8 +2400,8 @@ class _ChannelPostDetailViewState extends State<ChannelPostDetailView> {
                     GestureDetector(
                       behavior: HitTestBehavior.opaque,
                       onTap: () => setState(() => _replyTo = null),
-                      child: FaIcon(
-                        FontAwesomeIcons.solidCircleXmark,
+                      child: AppIcon(
+                        HeroAppIcons.solidCircleXmark,
                         size: 18,
                         color: c.textTertiary,
                       ),
@@ -2455,8 +2450,8 @@ class _ChannelPostDetailViewState extends State<ChannelPostDetailView> {
                     onTap: _sendReply,
                     child: Padding(
                       padding: const EdgeInsets.only(left: 10),
-                      child: FaIcon(
-                        FontAwesomeIcons.solidPaperPlane,
+                      child: AppIcon(
+                        HeroAppIcons.solidPaperPlane,
                         size: 21,
                         color: AppTheme.brand.withValues(
                           alpha: _sending ? 0.45 : 1,
@@ -2668,8 +2663,8 @@ class _DetailCommentTile extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    FaIcon(
-                      FontAwesomeIcons.thumbsUp,
+                    AppIcon(
+                      HeroAppIcons.thumbsUp,
                       size: 21,
                       color: c.textTertiary,
                     ),
@@ -2892,7 +2887,7 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
               width: AppMetric.mediaTile,
               height: AppMetric.mediaTile,
               color: c.searchFill,
-              child: FaIcon(FontAwesomeIcons.image, color: c.textTertiary),
+              child: AppIcon(HeroAppIcons.image, color: c.textTertiary),
             ),
           ),
         ),
@@ -2910,8 +2905,8 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
                 color: Colors.black.withValues(alpha: 0.55),
                 shape: BoxShape.circle,
               ),
-              child: FaIcon(
-                FontAwesomeIcons.xmark,
+              child: AppIcon(
+                HeroAppIcons.xmark,
                 size: AppIconSize.xs,
                 color: Colors.white,
               ),
@@ -2937,8 +2932,8 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            FaIcon(
-              FontAwesomeIcons.image,
+            AppIcon(
+              HeroAppIcons.image,
               size: AppIconSize.add,
               color: c.textTertiary,
             ),
@@ -3008,8 +3003,8 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
     return SettingsCard(
       children: [
         SettingsRow(
-          leading: FaIcon(
-            FontAwesomeIcons.paperPlane,
+          leading: AppIcon(
+            HeroAppIcons.paperPlane,
             size: AppIconSize.nav,
             color: c.textPrimary,
           ),
@@ -3021,8 +3016,8 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
         ),
         const InsetDivider(leadingInset: AppMetric.settingsIconDividerInset),
         SettingsSwitchRow(
-          leading: FaIcon(
-            FontAwesomeIcons.bell,
+          leading: AppIcon(
+            HeroAppIcons.bell,
             size: AppIconSize.nav,
             color: c.textPrimary,
           ),
@@ -3121,7 +3116,7 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
                 style: TextStyle(fontSize: 16, color: c.textPrimary),
               ),
               trailing: selected
-                  ? FaIcon(FontAwesomeIcons.circleCheck, color: AppTheme.brand)
+                  ? AppIcon(HeroAppIcons.circleCheck, color: AppTheme.brand)
                   : null,
               onTap: () => Navigator.of(context).pop(channel),
             );
@@ -3277,18 +3272,7 @@ class ChannelPostRow extends StatelessWidget {
                               ),
                             ),
                           ),
-                          GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: () => showChannelPostMenu(context, post),
-                            child: Padding(
-                              padding: const EdgeInsets.fromLTRB(12, 4, 0, 4),
-                              child: FaIcon(
-                                FontAwesomeIcons.ellipsis,
-                                size: 22,
-                                color: c.textTertiary,
-                              ),
-                            ),
-                          ),
+                          _ChannelPostOverflowButton(post: post),
                         ],
                       ),
                       Row(
@@ -3710,8 +3694,8 @@ class _PostImageTile extends StatelessWidget {
                     color: Colors.black.withValues(alpha: 0.45),
                     shape: BoxShape.circle,
                   ),
-                  child: FaIcon(
-                    FontAwesomeIcons.play,
+                  child: AppIcon(
+                    HeroAppIcons.play,
                     color: Colors.white,
                     size: 24,
                   ),
@@ -3751,6 +3735,10 @@ class _PostActions extends StatelessWidget {
   ChatSummary get channel => post.channel;
   ChatMessage get message => post.message;
 
+  static const double _actionSize = 32;
+  static const double _actionGap = 8;
+  static const double _iconSize = 22;
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
@@ -3760,47 +3748,47 @@ class _PostActions extends StatelessWidget {
       children: [
         Text(likeText, style: TextStyle(fontSize: 13, color: c.linkBlue)),
         const Spacer(),
-        GestureDetector(
-          behavior: HitTestBehavior.opaque,
+        _actionButton(
+          context,
+          HeroAppIcons.thumbsUp,
           onTap: () => _react(context),
-          child: Padding(
-            padding: const EdgeInsets.all(4),
-            child: FaIcon(
-              FontAwesomeIcons.thumbsUp,
-              size: 27,
-              color: c.textPrimary,
-            ),
-          ),
         ),
         if (canComment) ...[
-          const SizedBox(width: 28),
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
+          const SizedBox(width: _actionGap),
+          _actionButton(
+            context,
+            HeroAppIcons.comment,
             onTap: () => onComment(post),
-            child: Padding(
-              padding: const EdgeInsets.all(4),
-              child: FaIcon(
-                FontAwesomeIcons.comment,
-                size: 27,
-                color: c.textPrimary,
-              ),
-            ),
           ),
         ],
-        const SizedBox(width: 28),
-        GestureDetector(
-          behavior: HitTestBehavior.opaque,
+        const SizedBox(width: _actionGap),
+        _actionButton(
+          context,
+          HeroAppIcons.share,
           onTap: () => _forward(context),
-          child: Padding(
-            padding: const EdgeInsets.all(4),
-            child: FaIcon(
-              FontAwesomeIcons.share,
-              size: 30,
-              color: c.textPrimary,
-            ),
-          ),
         ),
       ],
+    );
+  }
+
+  Widget _actionButton(
+    BuildContext context,
+    AppIconData icon, {
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: SizedBox.square(
+        dimension: _actionSize,
+        child: Center(
+          child: AppIcon(
+            icon,
+            size: _iconSize,
+            color: context.colors.textPrimary,
+          ),
+        ),
+      ),
     );
   }
 
@@ -3950,11 +3938,7 @@ class _StoriesViewState extends State<StoriesView> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            FaIcon(
-              FontAwesomeIcons.circleNotch,
-              size: 46,
-              color: AppTheme.brand,
-            ),
+            AppIcon(HeroAppIcons.circleNotch, size: 46, color: AppTheme.brand),
             const SizedBox(height: 12),
             Text(
               AppStrings.t(AppStringKeys.momentsNoFriendPosts).l10n(context),

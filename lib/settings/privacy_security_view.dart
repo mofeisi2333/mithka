@@ -8,7 +8,7 @@
 
 import 'package:flutter/material.dart';
 
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/ui_components.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
@@ -101,7 +101,7 @@ class _PrivacySecurityViewState extends State<PrivacySecurityView> {
               children: [
                 _group(AppStrings.t(AppStringKeys.privacySectionTitle), [
                   _Row(
-                    FontAwesomeIcons.clock.data,
+                    HeroAppIcons.clock.data,
                     AppStrings.t(AppStringKeys.privacyLastSeen),
                     _ruleValue['userPrivacySettingShowStatus'] ?? '',
                     () {
@@ -114,7 +114,7 @@ class _PrivacySecurityViewState extends State<PrivacySecurityView> {
                     },
                   ),
                   _Row(
-                    FontAwesomeIcons.circleUser.data,
+                    HeroAppIcons.circleUser.data,
                     AppStrings.t(AppStringKeys.privacyProfilePhoto),
                     _ruleValue['userPrivacySettingShowProfilePhoto'] ?? '',
                     () {
@@ -127,7 +127,7 @@ class _PrivacySecurityViewState extends State<PrivacySecurityView> {
                     },
                   ),
                   _Row(
-                    FontAwesomeIcons.phone.data,
+                    HeroAppIcons.phone.data,
                     AppStringKeys.composerVoiceCall,
                     _ruleValue['userPrivacySettingAllowCalls'] ?? '',
                     () {
@@ -145,31 +145,31 @@ class _PrivacySecurityViewState extends State<PrivacySecurityView> {
                   AppStrings.t(AppStringKeys.privacySecuritySectionTitle),
                   [
                     _Row(
-                      FontAwesomeIcons.lock.data,
+                      HeroAppIcons.lock.data,
                       AppStrings.t(AppStringKeys.privacyTwoStepVerification),
                       _twoStep,
                       null,
                     ),
                     _Row(
-                      FontAwesomeIcons.mobileScreenButton.data,
+                      HeroAppIcons.mobileScreenButton.data,
                       AppStrings.t(AppStringKeys.privacyLoggedInDevices),
                       '',
                       () => _open(const ActiveSessionsView()),
                     ),
                     _Row(
-                      FontAwesomeIcons.users.data,
+                      HeroAppIcons.users.data,
                       AppStrings.t(AppStringKeys.privacyBlockedUsers),
                       '',
                       () => _open(const BlockedUsersView()),
                     ),
                     _Row(
-                      FontAwesomeIcons.ban.data,
+                      HeroAppIcons.ban.data,
                       AppStrings.t(AppStringKeys.keywordBlockerTitle),
                       '',
                       () => _open(const KeywordBlockerView()),
                     ),
                     _Row(
-                      FontAwesomeIcons.stopwatch.data,
+                      HeroAppIcons.stopwatch.data,
                       AppStringKeys.chatInfoAutoDeleteMessages,
                       '',
                       () => _open(const AutoDeleteView()),
@@ -234,8 +234,8 @@ class _PrivacySecurityViewState extends State<PrivacySecurityView> {
                             ),
                           if (row.onTap != null) ...[
                             const SizedBox(width: 6),
-                            FaIcon(
-                              FontAwesomeIcons.chevronRight,
+                            AppIcon(
+                              HeroAppIcons.chevronRight,
                               size: 14,
                               color: c.textTertiary,
                             ),

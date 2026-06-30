@@ -17,7 +17,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../chat/image_edit_view.dart';
 import '../components/photo_avatar.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/ui_components.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
@@ -466,11 +466,7 @@ class _EditProfileViewState extends State<EditProfileView> {
                 ),
               ),
             ),
-            FaIcon(
-              FontAwesomeIcons.chevronRight,
-              size: 14,
-              color: c.textTertiary,
-            ),
+            AppIcon(HeroAppIcons.chevronRight, size: 14, color: c.textTertiary),
           ],
         ),
       ),
@@ -552,11 +548,7 @@ class _EditProfileViewState extends State<EditProfileView> {
                 margin: const EdgeInsets.only(right: 8),
                 decoration: BoxDecoration(color: color, shape: BoxShape.circle),
               ),
-            FaIcon(
-              FontAwesomeIcons.chevronRight,
-              size: 14,
-              color: c.textTertiary,
-            ),
+            AppIcon(HeroAppIcons.chevronRight, size: 14, color: c.textTertiary),
           ],
         ),
       ),

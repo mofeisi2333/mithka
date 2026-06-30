@@ -144,6 +144,18 @@ class _CustomEmojiViewState extends State<CustomEmojiView> {
   @override
   void initState() {
     super.initState();
+    _syncRequest();
+  }
+
+  @override
+  void didUpdateWidget(covariant CustomEmojiView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.id != widget.id) _syncRequest();
+  }
+
+  void _syncRequest() {
+    _sub?.cancel();
+    _sub = null;
     final center = CustomEmojiCenter.shared;
     if (center.get(widget.id) == null) {
       center.request(widget.id);

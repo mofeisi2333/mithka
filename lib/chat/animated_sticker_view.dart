@@ -8,15 +8,44 @@
 //
 
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 
 import '../tdlib/td_client.dart';
 import '../tdlib/td_image_loader.dart';
 import '../tdlib/td_models.dart';
+
+Uint8List _inflateTgsSticker(Uint8List bytes) {
+  return Uint8List.fromList(GZipDecoder().decodeBytes(bytes));
+}
+
+const _maxInflatedTgsCacheEntries = 80;
+final Map<String, Future<Uint8List?>> _inflatedTgsCache = {};
+
+Future<Uint8List?> _loadInflatedTgsSticker(String cacheKey, String path) {
+  final cached = _inflatedTgsCache.remove(cacheKey);
+  if (cached != null) {
+    _inflatedTgsCache[cacheKey] = cached;
+    return cached;
+  }
+
+  final future = File(path)
+      .readAsBytes()
+      .then((bytes) => compute(_inflateTgsSticker, bytes))
+      .then<Uint8List?>((bytes) => bytes)
+      .catchError((_) {
+        _inflatedTgsCache.remove(cacheKey);
+        return null;
+      });
+  _inflatedTgsCache[cacheKey] = future;
+  while (_inflatedTgsCache.length > _maxInflatedTgsCacheEntries) {
+    _inflatedTgsCache.remove(_inflatedTgsCache.keys.first);
+  }
+  return future;
+}
 
 class AnimatedStickerView extends StatefulWidget {
   const AnimatedStickerView({super.key, required this.file, this.onReady});
@@ -53,16 +82,12 @@ class _AnimatedStickerViewState extends State<AnimatedStickerView> {
 
     final path = await TdFileCenter.shared.path(ref.id);
     if (!mounted || path == null || _loadedId != ref.id) return;
-    try {
-      final bytes = await File(path).readAsBytes();
-      // .tgs = gzipped Lottie JSON.
-      final inflated = Uint8List.fromList(GZipDecoder().decodeBytes(bytes));
-      if (!mounted || _loadedId != ref.id) return;
-      setState(() => _bytes = inflated);
-      widget.onReady?.call();
-    } catch (_) {
-      // not gzipped or unreadable — leave the placeholder showing
-    }
+    // .tgs = gzipped Lottie JSON. Inflate away from the UI isolate and reuse
+    // decoded bytes across recycled chat rows / emoji-grid cells.
+    final inflated = await _loadInflatedTgsSticker('$slot:${ref.id}', path);
+    if (!mounted || _loadedId != ref.id || inflated == null) return;
+    setState(() => _bytes = inflated);
+    widget.onReady?.call();
   }
 
   @override

@@ -6,7 +6,7 @@
 
 import 'package:flutter/material.dart';
 
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
@@ -182,7 +182,7 @@ class _KeywordBlockerViewState extends State<KeywordBlockerView> {
       padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
       child: Row(
         children: [
-          FaIcon(FontAwesomeIcons.link, size: 19, color: AppTheme.brand),
+          AppIcon(HeroAppIcons.link, size: 19, color: AppTheme.brand),
           const SizedBox(width: 10),
           Expanded(
             child: TextField(
@@ -249,11 +249,7 @@ class _KeywordBlockerViewState extends State<KeywordBlockerView> {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
                   children: [
-                    FaIcon(
-                      FontAwesomeIcons.ban,
-                      size: 19,
-                      color: AppTheme.tagRed,
-                    ),
+                    AppIcon(HeroAppIcons.ban, size: 19, color: AppTheme.tagRed),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
@@ -268,8 +264,8 @@ class _KeywordBlockerViewState extends State<KeywordBlockerView> {
                       onTap: () => _blocker.remove(keyword),
                       child: Padding(
                         padding: const EdgeInsets.all(8),
-                        child: FaIcon(
-                          FontAwesomeIcons.xmark,
+                        child: AppIcon(
+                          HeroAppIcons.xmark,
                           size: 16,
                           color: c.textTertiary,
                         ),

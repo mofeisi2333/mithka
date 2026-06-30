@@ -19,7 +19,7 @@ import '../chat/chat_view.dart';
 import '../chat/custom_emoji.dart';
 import '../components/drawer_controller.dart' as dc;
 import '../components/photo_avatar.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../contacts/add_people_view.dart';
 import '../contacts/create_group_view.dart';
 import '../profile/emoji_status_picker.dart';
@@ -432,8 +432,8 @@ class _ChatListViewState extends State<ChatListView> {
                       ],
                       if (_meIsPremium && _meStatusId != 0) ...[
                         const SizedBox(width: AppSpacing.xs),
-                        FaIcon(
-                          FontAwesomeIcons.chevronDown,
+                        AppIcon(
+                          HeroAppIcons.chevronDown,
                           size: 14,
                           color: c.textTertiary,
                         ),
@@ -491,8 +491,8 @@ class _ChatListViewState extends State<ChatListView> {
                 child: SizedBox(
                   width: AppMetric.hitTarget,
                   height: AppMetric.hitTarget,
-                  child: FaIcon(
-                    FontAwesomeIcons.filter,
+                  child: AppIcon(
+                    HeroAppIcons.folder,
                     size: AppIconSize.toolbar,
                     color: c.textPrimary,
                   ),
@@ -507,8 +507,8 @@ class _ChatListViewState extends State<ChatListView> {
               child: SizedBox(
                 width: AppMetric.hitTarget,
                 height: AppMetric.hitTarget,
-                child: FaIcon(
-                  FontAwesomeIcons.plus,
+                child: AppIcon(
+                  HeroAppIcons.plus,
                   size: AppIconSize.add,
                   color: c.textPrimary,
                 ),
@@ -546,8 +546,8 @@ class _ChatListViewState extends State<ChatListView> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              FaIcon(
-                FontAwesomeIcons.magnifyingGlass,
+              AppIcon(
+                HeroAppIcons.magnifyingGlass,
                 size: AppMetric.searchIcon,
                 color: c.textTertiary,
               ),
@@ -602,20 +602,6 @@ class _ChatListViewState extends State<ChatListView> {
             assistantPlacement,
           );
 
-          // Build flat item list with the 群助手 entry interleaved.
-          final items = <Widget>[];
-          if (topAssistant) items.add(_assistantRow());
-          if (showSearch) items.add(_searchPill());
-          for (var i = 0; i < chats.length; i++) {
-            if (!topAssistant && hasArchive && i == assistantIndex) {
-              items.add(_assistantRow());
-            }
-            items.add(_swipeRow(chats[i]));
-          }
-          if (!topAssistant && hasArchive && assistantIndex >= chats.length) {
-            items.add(_assistantRow());
-          }
-
           if (topAssistant &&
               !_didApplyTopAssistantInitialOffset &&
               !_scrollController.hasClients) {
@@ -634,16 +620,53 @@ class _ChatListViewState extends State<ChatListView> {
             });
           }
 
+          final showInlineAssistant = !topAssistant && hasArchive;
+          final itemCount =
+              chats.length +
+              (topAssistant ? 1 : 0) +
+              (showSearch ? 1 : 0) +
+              (showInlineAssistant ? 1 : 0);
           return ListView.builder(
             controller: _scrollController,
             padding:
                 EdgeInsets.zero, // header already consumed the top safe-area
-            itemCount: items.length,
-            itemBuilder: (context, i) => items[i],
+            itemCount: itemCount,
+            itemBuilder: (context, index) => _chatListItem(
+              index: index,
+              chats: chats,
+              showSearch: showSearch,
+              topAssistant: topAssistant,
+              showInlineAssistant: showInlineAssistant,
+              assistantIndex: assistantIndex,
+            ),
           );
         },
       ),
     );
+  }
+
+  Widget _chatListItem({
+    required int index,
+    required List<ChatSummary> chats,
+    required bool showSearch,
+    required bool topAssistant,
+    required bool showInlineAssistant,
+    required int assistantIndex,
+  }) {
+    var chatIndex = index;
+    if (topAssistant) {
+      if (chatIndex == 0) return _assistantRow();
+      chatIndex -= 1;
+    }
+    if (showSearch) {
+      if (chatIndex == 0) return _searchPill();
+      chatIndex -= 1;
+    }
+    if (showInlineAssistant) {
+      if (chatIndex == assistantIndex) return _assistantRow();
+      if (chatIndex > assistantIndex) chatIndex -= 1;
+    }
+    return _swipeRow(chats[chatIndex]);
   }
 
   int _assistantInsertionIndex(
@@ -854,9 +877,9 @@ class PlusMenu extends StatelessWidget {
   final ValueChanged<String> onSelect;
 
   static const _items = [
-    (FontAwesomeIcons.circlePlus, AppStringKeys.chatListCreateGroup),
-    (FontAwesomeIcons.grip, AppStringKeys.chatListCreateChannel),
-    (FontAwesomeIcons.userPlus, AppStringKeys.chatListAddFriendOrGroup),
+    (HeroAppIcons.circlePlus, AppStringKeys.chatListCreateGroup),
+    (HeroAppIcons.grip, AppStringKeys.chatListCreateChannel),
+    (HeroAppIcons.userPlus, AppStringKeys.chatListAddFriendOrGroup),
   ];
 
   @override
@@ -971,8 +994,8 @@ class ChatFilterMenu extends StatelessWidget {
                     children: [
                       Icon(
                         filter.isAll
-                            ? FontAwesomeIcons.inbox.data
-                            : FontAwesomeIcons.folder.data,
+                            ? HeroAppIcons.inbox.data
+                            : HeroAppIcons.folder.data,
                         size: AppIconSize.lg + 1,
                         color: c.textPrimary,
                       ),
@@ -989,8 +1012,8 @@ class ChatFilterMenu extends StatelessWidget {
                         ),
                       ),
                       if (selectedFilter)
-                        FaIcon(
-                          FontAwesomeIcons.check,
+                        AppIcon(
+                          HeroAppIcons.check,
                           size: 18,
                           color: AppTheme.brand,
                         ),

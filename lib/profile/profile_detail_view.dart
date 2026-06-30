@@ -23,7 +23,7 @@ import '../chat/custom_emoji.dart';
 import '../chat/full_image_viewer.dart';
 import '../chat/voice_audio.dart';
 import '../components/photo_avatar.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/ui_components.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
@@ -391,8 +391,8 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                   color: Colors.black.withValues(alpha: 0.22),
                   shape: BoxShape.circle,
                 ),
-                child: FaIcon(
-                  FontAwesomeIcons.chevronLeft,
+                child: AppIcon(
+                  HeroAppIcons.chevronLeft,
                   size: 20,
                   color: Colors.white,
                 ),
@@ -413,8 +413,8 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                 color: Colors.black.withValues(alpha: 0.22),
                 shape: BoxShape.circle,
               ),
-              child: FaIcon(
-                FontAwesomeIcons.ellipsis,
+              child: AppIcon(
+                HeroAppIcons.ellipsis,
                 size: 21,
                 color: Colors.white,
               ),
@@ -506,8 +506,8 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                                 padding: const EdgeInsets.all(4),
                                 child: Icon(
                                   _hideIdentity
-                                      ? FontAwesomeIcons.eye.data
-                                      : FontAwesomeIcons.eyeSlash.data,
+                                      ? HeroAppIcons.eye.data
+                                      : HeroAppIcons.eyeSlash.data,
                                   size: 17,
                                   color: c.textTertiary,
                                 ),
@@ -527,8 +527,8 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
             Row(
               children: [
                 if (_isOnline) ...[
-                  FaIcon(
-                    FontAwesomeIcons.solidCircle,
+                  AppIcon(
+                    HeroAppIcons.solidCircle,
                     size: 7,
                     color: Color(0xFF1AC81A),
                   ),
@@ -554,7 +554,7 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                FaIcon(FontAwesomeIcons.pen, size: 17, color: c.textTertiary),
+                AppIcon(HeroAppIcons.pen, size: 17, color: c.textTertiary),
               ],
             ),
           ],
@@ -620,7 +620,7 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
           _musicRow(),
           const InsetDivider(leadingInset: 56),
           _profileRow(
-            FontAwesomeIcons.magnifyingGlass.data,
+            HeroAppIcons.magnifyingGlass.data,
             AppStrings.t(AppStringKeys.chatInfoSearchHistory),
             trailing: AppStrings.t(AppStringKeys.profileDetailMediaFiles),
             onTap: _openSearch,
@@ -666,11 +666,7 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
               padding: const EdgeInsets.fromLTRB(20, 0, 16, 0),
               child: Row(
                 children: [
-                  FaIcon(
-                    FontAwesomeIcons.music,
-                    size: 22,
-                    color: c.textPrimary,
-                  ),
+                  AppIcon(HeroAppIcons.music, size: 22, color: c.textPrimary),
                   const SizedBox(width: 16),
                   Expanded(
                     child: Column(
@@ -736,16 +732,16 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                           ? GestureDetector(
                               behavior: HitTestBehavior.opaque,
                               onTap: toggle,
-                              child: FaIcon(
+                              child: AppIcon(
                                 playing
-                                    ? FontAwesomeIcons.pause
-                                    : FontAwesomeIcons.play,
+                                    ? HeroAppIcons.pause
+                                    : HeroAppIcons.play,
                                 size: 18,
                                 color: AppTheme.brand,
                               ),
                             )
-                          : FaIcon(
-                              FontAwesomeIcons.chevronRight,
+                          : AppIcon(
+                              HeroAppIcons.chevronRight,
                               size: 16,
                               color: c.textTertiary,
                             ),
@@ -852,8 +848,8 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                 height: 24,
                 child: Center(
                   child: showChevron
-                      ? FaIcon(
-                          FontAwesomeIcons.chevronRight,
+                      ? AppIcon(
+                          HeroAppIcons.chevronRight,
                           size: 16,
                           color: c.textTertiary,
                         )
@@ -965,8 +961,8 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                 style: TextStyle(fontSize: 13, color: c.textSecondary),
               ),
               const SizedBox(width: 4),
-              FaIcon(
-                FontAwesomeIcons.chevronRight,
+              AppIcon(
+                HeroAppIcons.chevronRight,
                 size: 14,
                 color: c.textTertiary,
               ),

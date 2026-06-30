@@ -10,7 +10,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/ui_components.dart';
 import '../l10n/app_locale_controller.dart';
 import '../l10n/app_localizations.dart';
@@ -134,7 +134,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
     final locale = context.watch<AppLocaleController>();
     return _card([
       _navRow(
-        FontAwesomeIcons.globe.data,
+        HeroAppIcons.globe.data,
         const Color(0xFF34A2DF),
         AppStrings.t(AppStringKeys.generalAppLanguage),
         locale.selectedLabel(context),
@@ -180,7 +180,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
               child: Row(
                 children: [
                   _iconBadge(
-                    FontAwesomeIcons.solidFolder.data,
+                    HeroAppIcons.solidFolder.data,
                     const Color(0xFF16B0A0),
                   ),
                   const SizedBox(width: 12),
@@ -245,7 +245,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
         _sectionHeader(AppStrings.t(AppStringKeys.audioSearchChatTab)),
         _card([
           _toggleRow(
-            FontAwesomeIcons.reply.data,
+            HeroAppIcons.reply.data,
             const Color(0xFF3C8CF0),
             AppStrings.t(AppStringKeys.generalSendMessageWithEnter),
             _enterToSend,
@@ -256,7 +256,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
           ),
           const InsetDivider(leadingInset: 56),
           _toggleRow(
-            FontAwesomeIcons.download.data,
+            HeroAppIcons.download.data,
             const Color(0xFF3C8CF0),
             AppStrings.t(AppStringKeys.generalOpenChatAtLatestMessage),
             theme.openChatsAtLatest,
@@ -338,8 +338,8 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
                 ),
               ),
               const SizedBox(width: 6),
-              FaIcon(
-                FontAwesomeIcons.chevronRight,
+              AppIcon(
+                HeroAppIcons.chevronRight,
                 size: 14,
                 color: c.textTertiary,
               ),

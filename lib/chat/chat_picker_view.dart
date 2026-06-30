@@ -11,7 +11,7 @@ import 'package:provider/provider.dart';
 
 import '../chats/chat_list_view_model.dart';
 import '../components/photo_avatar.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
@@ -101,8 +101,8 @@ class _ChatPickerViewState extends State<ChatPickerView> {
                     onTap: () => Navigator.of(context).pop(),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 14),
-                      child: FaIcon(
-                        FontAwesomeIcons.chevronLeft,
+                      child: AppIcon(
+                        HeroAppIcons.chevronLeft,
                         size: 22,
                         color: c.textPrimary,
                       ),
@@ -131,8 +131,8 @@ class _ChatPickerViewState extends State<ChatPickerView> {
               ),
               child: Row(
                 children: [
-                  FaIcon(
-                    FontAwesomeIcons.magnifyingGlass,
+                  AppIcon(
+                    HeroAppIcons.magnifyingGlass,
                     size: 15,
                     color: c.textTertiary,
                   ),

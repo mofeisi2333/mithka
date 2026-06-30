@@ -14,7 +14,7 @@ import 'package:provider/provider.dart';
 import '../app/app_version.dart';
 import '../auth/account_store.dart';
 import '../auth/auth_manager.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../components/ui_components.dart';
 import '../l10n/app_localizations.dart';
 import '../theme/app_theme.dart';
@@ -28,8 +28,15 @@ import 'privacy_security_view.dart';
 import 'proxy_view.dart';
 import 'translation_settings_view.dart';
 
-class SettingsView extends StatelessWidget {
+class SettingsView extends StatefulWidget {
   const SettingsView({super.key});
+
+  @override
+  State<SettingsView> createState() => _SettingsViewState();
+}
+
+class _SettingsViewState extends State<SettingsView> {
+  late final Future<AppVersion> _versionFuture = AppVersion.load();
 
   @override
   Widget build(BuildContext context) {
@@ -49,7 +56,7 @@ class SettingsView extends StatelessWidget {
                 _card([
                   _navRow(
                     context,
-                    FontAwesomeIcons.solidCircleUser.data,
+                    HeroAppIcons.solidCircleUser.data,
                     AppStrings.t(AppStringKeys.editProfileTitle),
                     const Color(0xFF3C8CF0),
                     () => const EditProfileView(),
@@ -59,7 +66,7 @@ class SettingsView extends StatelessWidget {
                 _card([
                   _navRow(
                     context,
-                    FontAwesomeIcons.solidBell.data,
+                    HeroAppIcons.solidBell.data,
                     AppStrings.t(AppStringKeys.notificationTitle),
                     const Color(0xFFF5A623),
                     () => const NotificationSettingsView(),
@@ -67,7 +74,7 @@ class SettingsView extends StatelessWidget {
                   const InsetDivider(leadingInset: 56),
                   _navRow(
                     context,
-                    FontAwesomeIcons.shieldHalved.data,
+                    HeroAppIcons.shieldHalved.data,
                     AppStrings.t(AppStringKeys.privacySecurityTitle),
                     const Color(0xFF16B05A),
                     () => const PrivacySecurityView(),
@@ -77,7 +84,7 @@ class SettingsView extends StatelessWidget {
                 _card([
                   _navRow(
                     context,
-                    FontAwesomeIcons.gear.data,
+                    HeroAppIcons.gear.data,
                     AppStrings.t(AppStringKeys.generalTitle),
                     const Color(0xFF8E8E93),
                     () => const GeneralSettingsView(),
@@ -85,7 +92,7 @@ class SettingsView extends StatelessWidget {
                   const InsetDivider(leadingInset: 56),
                   _navRow(
                     context,
-                    FontAwesomeIcons.grip.data,
+                    HeroAppIcons.grip.data,
                     AppStrings.t(AppStringKeys.featureTitle),
                     const Color(0xFF3C8CF0),
                     () => const FeatureSettingsView(),
@@ -93,7 +100,7 @@ class SettingsView extends StatelessWidget {
                   const InsetDivider(leadingInset: 56),
                   _navRow(
                     context,
-                    FontAwesomeIcons.wandMagicSparkles.data,
+                    HeroAppIcons.wandMagicSparkles.data,
                     AppStrings.t(AppStringKeys.appearanceTitle),
                     const Color(0xFF8E7BFF),
                     () => const AppearanceView(),
@@ -101,7 +108,7 @@ class SettingsView extends StatelessWidget {
                   const InsetDivider(leadingInset: 56),
                   _navRow(
                     context,
-                    FontAwesomeIcons.eye.data,
+                    HeroAppIcons.eye.data,
                     AppStrings.t(AppStringKeys.appearanceDisplay),
                     const Color(0xFF34A2DF),
                     () => const DisplaySettingsView(),
@@ -109,7 +116,7 @@ class SettingsView extends StatelessWidget {
                   const InsetDivider(leadingInset: 56),
                   _navRow(
                     context,
-                    FontAwesomeIcons.language.data,
+                    HeroAppIcons.language.data,
                     AppStrings.t(AppStringKeys.messageActionTranslate),
                     const Color(0xFF34A2DF),
                     () => const TranslationSettingsView(),
@@ -117,7 +124,7 @@ class SettingsView extends StatelessWidget {
                   const InsetDivider(leadingInset: 56),
                   _navRow(
                     context,
-                    FontAwesomeIcons.globe.data,
+                    HeroAppIcons.globe.data,
                     AppStrings.t(AppStringKeys.proxyTitle),
                     const Color(0xFF34A2DF),
                     () => const ProxyView(),
@@ -192,11 +199,7 @@ class SettingsView extends StatelessWidget {
               ),
             ],
             const SizedBox(width: 6),
-            FaIcon(
-              FontAwesomeIcons.chevronRight,
-              size: 14,
-              color: c.textTertiary,
-            ),
+            AppIcon(HeroAppIcons.chevronRight, size: 14, color: c.textTertiary),
           ],
         ),
       ),
@@ -225,10 +228,10 @@ class SettingsView extends StatelessWidget {
       context,
     ).push(MaterialPageRoute(builder: (_) => const AboutView())),
     child: FutureBuilder<AppVersion>(
-      future: AppVersion.load(),
+      future: _versionFuture,
       builder: (context, snapshot) => _rowLabel(
         context,
-        FontAwesomeIcons.circleInfo.data,
+        HeroAppIcons.circleInfo.data,
         AppStrings.t(AppStringKeys.settingsAboutMithka),
         const Color(0xFF8E8E93),
         trailing: 'v${snapshot.data?.version ?? '...'}',

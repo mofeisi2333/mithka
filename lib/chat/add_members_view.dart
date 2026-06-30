@@ -9,7 +9,7 @@ import 'package:flutter/material.dart';
 import '../components/toast.dart';
 
 import '../components/photo_avatar.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../components/app_icons.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
@@ -126,8 +126,8 @@ class _AddMembersViewState extends State<AddMembersView> {
                 onTap: () => Navigator.of(context).pop(),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 14),
-                  child: FaIcon(
-                    FontAwesomeIcons.chevronLeft,
+                  child: AppIcon(
+                    HeroAppIcons.chevronLeft,
                     size: 22,
                     color: c.textPrimary,
                   ),
@@ -206,8 +206,8 @@ class _AddMembersViewState extends State<AddMembersView> {
           children: [
             Icon(
               selected
-                  ? FontAwesomeIcons.circleCheck.data
-                  : FontAwesomeIcons.circle.data,
+                  ? HeroAppIcons.circleCheck.data
+                  : HeroAppIcons.circle.data,
               size: 22,
               color: selected ? AppTheme.brand : c.textTertiary,
             ),
