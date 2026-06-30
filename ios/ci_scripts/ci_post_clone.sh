@@ -37,11 +37,10 @@ GIT_COMMIT="$(git rev-parse --short HEAD)"
 echo "▸ git commit: $GIT_COMMIT"
 
 # Xcode Cloud runs xcodebuild after this script and can otherwise keep using
-# stale FLUTTER_BUILD_NAME values from the checked-in project. Keep the archive
-# version sourced from pubspec.yaml, matching the Android/GitHub release flow.
-RAW_VERSION="$(awk '/^version:/ { print $2; exit }' pubspec.yaml)"
-test -n "$RAW_VERSION"
-APP_BUILD_NAME="${RAW_VERSION%%+*}"
+# stale FLUTTER_BUILD_NAME values from the checked-in project. This release
+# branch intentionally pins the iOS App Store version independently from
+# pubspec.yaml.
+APP_BUILD_NAME="0.1.17"
 APP_BUILD_NUMBER="$(date -u '+%y%m%d%H')"
 XCODE_BUILD_NAME="$APP_BUILD_NAME"
 echo "▸ app version: $APP_BUILD_NAME+$APP_BUILD_NUMBER"
