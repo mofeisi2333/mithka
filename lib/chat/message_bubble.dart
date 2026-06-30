@@ -1293,8 +1293,10 @@ class _MessageBubbleState extends State<MessageBubble>
   /// 引用 quote block shown above a reply's text.
   Widget _replyQuote(bool outgoing) {
     final c = context.colors;
-    final labelColor = c.textPrimary;
-    final faded = c.textSecondary;
+    final labelColor = outgoing ? Colors.white : c.textPrimary;
+    final faded = outgoing
+        ? Colors.white.withValues(alpha: 0.72)
+        : c.textSecondary;
     final sender = message.replyToSender ?? '';
     final time = DateText.quoteLabel(message.replyToDate ?? 0);
     final targetId = message.replyToMessageId;
@@ -1305,10 +1307,7 @@ class _MessageBubbleState extends State<MessageBubble>
         width: double.infinity,
         padding: const EdgeInsets.fromLTRB(12, 8, 10, 9),
         decoration: BoxDecoration(
-          color: Color.alphaBlend(
-            c.textPrimary.withValues(alpha: 0.08),
-            c.bubbleIncoming,
-          ),
+          color: _replyQuoteBackground(outgoing),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Row(
@@ -1351,6 +1350,14 @@ class _MessageBubbleState extends State<MessageBubble>
         ),
       ),
     );
+  }
+
+  Color _replyQuoteBackground(bool outgoing) {
+    final base = outgoing
+        ? AppTheme.bubbleOutgoing
+        : context.colors.bubbleIncoming;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Color.lerp(base, dark ? Colors.white : Colors.black, 0.10)!;
   }
 
   // URLs (group 1) and @username mentions (group 2). The lookbehind stops email
