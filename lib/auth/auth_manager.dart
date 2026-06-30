@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import '../config/secrets.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 sealed class AuthStep {
   const AuthStep();
@@ -189,13 +190,13 @@ class AuthManager extends ChangeNotifier {
   String _friendly(TdError error) {
     switch (error.message) {
       case 'PHONE_NUMBER_INVALID':
-        return '手机号格式不正确';
+        return AppStrings.t(AppStringKeys.authInvalidPhoneNumber);
       case 'PHONE_CODE_INVALID':
-        return '验证码错误';
+        return AppStrings.t(AppStringKeys.authInvalidVerificationCode);
       case 'PHONE_CODE_EXPIRED':
-        return '验证码已过期，请重新获取';
+        return AppStrings.t(AppStringKeys.authCodeExpiredRetry);
       case 'PASSWORD_HASH_INVALID':
-        return '密码错误';
+        return AppStrings.t(AppStringKeys.authInvalidPassword);
       default:
         return error.message;
     }
@@ -204,15 +205,15 @@ class AuthManager extends ChangeNotifier {
   String _codeDeliveryLabel(Map<String, dynamic>? type) {
     switch (type?.type) {
       case 'authenticationCodeTypeTelegramMessage':
-        return '验证码已发送至你的其他 Telegram 设备';
+        return AppStrings.t(AppStringKeys.authCodeSentToTelegramDevices);
       case 'authenticationCodeTypeSms':
-        return '验证码已通过短信发送';
+        return AppStrings.t(AppStringKeys.authCodeSentBySms);
       case 'authenticationCodeTypeCall':
-        return '你将接到一个电话告知验证码';
+        return AppStrings.t(AppStringKeys.authCodeSentByPhoneCall);
       case 'authenticationCodeTypeFlashCall':
-        return '你将接到一个闪信电话';
+        return AppStrings.t(AppStringKeys.authCodeSentByFlashCall);
       default:
-        return '验证码已发送';
+        return AppStrings.t(AppStringKeys.authCodeSent);
     }
   }
 }

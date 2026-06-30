@@ -5,14 +5,47 @@
 //
 
 import 'package:intl/intl.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class DateText {
   // 星期日 … 星期六, indexed by DateTime.weekday (Mon=1 … Sun=7).
   static const _weekdays = {
-    'zhHans': ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'],
-    'zhHant': ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'],
-    'ja': ['月曜日', '火曜日', '水曜日', '木曜日', '金曜日', '土曜日', '日曜日'],
-    'ko': ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일'],
+    'zhHans': [
+      AppStringKeys.dateWeekdayMondayChinese,
+      AppStringKeys.dateWeekdayTuesdayChinese,
+      AppStringKeys.dateWeekdayWednesdayChinese,
+      AppStringKeys.dateWeekdayThursdayChinese,
+      AppStringKeys.dateWeekdayFridayChinese,
+      AppStringKeys.dateWeekdaySaturdayChinese,
+      AppStringKeys.dateWeekdaySundayChinese,
+    ],
+    'zhHant': [
+      AppStringKeys.dateWeekdayMondayChinese,
+      AppStringKeys.dateWeekdayTuesdayChinese,
+      AppStringKeys.dateWeekdayWednesdayChinese,
+      AppStringKeys.dateWeekdayThursdayChinese,
+      AppStringKeys.dateWeekdayFridayChinese,
+      AppStringKeys.dateWeekdaySaturdayChinese,
+      AppStringKeys.dateWeekdaySundayChinese,
+    ],
+    'ja': [
+      AppStringKeys.dateWeekdayMondayJapanese,
+      AppStringKeys.dateWeekdayTuesdayJapanese,
+      AppStringKeys.dateWeekdayWednesdayJapanese,
+      AppStringKeys.dateWeekdayThursdayJapanese,
+      AppStringKeys.dateWeekdayFridayJapanese,
+      AppStringKeys.dateWeekdaySaturdayJapanese,
+      AppStringKeys.dateWeekdaySundayJapanese,
+    ],
+    'ko': [
+      AppStringKeys.dateWeekdayMondayKorean,
+      AppStringKeys.dateWeekdayTuesdayKorean,
+      AppStringKeys.dateWeekdayWednesdayKorean,
+      AppStringKeys.dateWeekdayThursdayKorean,
+      AppStringKeys.dateWeekdayFridayKorean,
+      AppStringKeys.dateWeekdaySaturdayKorean,
+      AppStringKeys.dateWeekdaySundayKorean,
+    ],
     'en': ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
     'fr': ['lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.', 'dim.'],
     'es': ['lun', 'mar', 'mie', 'jue', 'vie', 'sab', 'dom'],
@@ -20,10 +53,10 @@ class DateText {
   };
 
   static const _yesterday = {
-    'zhHans': '昨天',
-    'zhHant': '昨天',
-    'ja': '昨日',
-    'ko': '어제',
+    'zhHans': AppStringKeys.dateYesterdayChinese,
+    'zhHant': AppStringKeys.dateYesterdayChinese,
+    'ja': AppStringKeys.dateYesterdayJapanese,
+    'ko': AppStringKeys.dateYesterdayKorean,
     'en': 'Yesterday',
     'fr': 'Hier',
     'es': 'Ayer',
@@ -31,13 +64,43 @@ class DateText {
   };
 
   static const _periods = {
-    'zhHans': ['凌晨', '早上', '上午', '中午', '下午', '晚上'],
-    'zhHant': ['凌晨', '早上', '上午', '中午', '下午', '晚上'],
-    'ja': ['未明', '朝', '午前', '昼', '午後', '夜'],
-    'ko': ['새벽', '아침', '오전', '정오', '오후', '밤'],
+    'zhHans': [
+      AppStringKeys.datePeriodBeforeDawnChinese,
+      AppStringKeys.datePeriodMorningChinese,
+      AppStringKeys.datePeriodForenoonChinese,
+      AppStringKeys.datePeriodNoonChinese,
+      AppStringKeys.datePeriodAfternoonChinese,
+      AppStringKeys.datePeriodEveningChinese,
+    ],
+    'zhHant': [
+      AppStringKeys.datePeriodBeforeDawnChinese,
+      AppStringKeys.datePeriodMorningChinese,
+      AppStringKeys.datePeriodForenoonChinese,
+      AppStringKeys.datePeriodNoonChinese,
+      AppStringKeys.datePeriodAfternoonChinese,
+      AppStringKeys.datePeriodEveningChinese,
+    ],
+    'ja': [
+      AppStringKeys.datePeriodBeforeDawnJapanese,
+      AppStringKeys.datePeriodMorningJapanese,
+      AppStringKeys.datePeriodForenoonJapanese,
+      AppStringKeys.datePeriodNoonJapanese,
+      AppStringKeys.datePeriodAfternoonJapanese,
+      AppStringKeys.datePeriodNightJapanese,
+    ],
+    'ko': [
+      AppStringKeys.datePeriodBeforeDawnKorean,
+      AppStringKeys.datePeriodMorningKorean,
+      AppStringKeys.datePeriodForenoonKorean,
+      AppStringKeys.datePeriodNoonKorean,
+      AppStringKeys.datePeriodAfternoonKorean,
+      AppStringKeys.datePeriodNightKorean,
+    ],
   };
 
   static String _two(int n) => n.toString().padLeft(2, '0');
+
+  static String _label(String value) => AppStrings.t(value);
 
   static String get _localeKey {
     final locale = Intl.getCurrentLocale();
@@ -64,12 +127,14 @@ class DateText {
     final today = DateTime(now.year, now.month, now.day);
     if (_sameDay(date, now)) return _timeLabel(date);
     if (_sameDay(date, now.subtract(const Duration(days: 1)))) {
-      return _yesterday[_localeKey] ?? _yesterday['en']!;
+      return _label(_yesterday[_localeKey] ?? _yesterday['en']!);
     }
     final dayStart = DateTime(date.year, date.month, date.day);
     final days = today.difference(dayStart).inDays;
     if (days < 7) {
-      return (_weekdays[_localeKey] ?? _weekdays['en']!)[date.weekday - 1];
+      return _label(
+        (_weekdays[_localeKey] ?? _weekdays['en']!)[date.weekday - 1],
+      );
     }
     if (date.year == now.year) return '${_two(date.month)}/${_two(date.day)}';
     return '${date.year}/${_two(date.month)}/${_two(date.day)}';
@@ -92,6 +157,22 @@ class DateText {
     if (unix <= 0) return '';
     final date = DateTime.fromMillisecondsSinceEpoch(unix * 1000);
     return '${_two(date.hour)}:${_two(date.minute)}';
+  }
+
+  /// Reply quote timestamp, e.g. "Yesterday 0:38".
+  static String quoteLabel(int unix) {
+    if (unix <= 0) return '';
+    final date = DateTime.fromMillisecondsSinceEpoch(unix * 1000);
+    final now = DateTime.now();
+    final time = '${date.hour}:${_two(date.minute)}';
+    if (_sameDay(date, now)) return time;
+    if (_sameDay(date, now.subtract(const Duration(days: 1)))) {
+      return '${_label(_yesterday[_localeKey] ?? _yesterday['en']!)} $time';
+    }
+    final datePart = date.year == now.year
+        ? '${_two(date.month)}/${_two(date.day)}'
+        : '${date.year}/${_two(date.month)}/${_two(date.day)}';
+    return '$datePart $time';
   }
 
   static String _timeLabel(DateTime date) {
@@ -118,6 +199,6 @@ class DateText {
       periodIndex = 5;
     }
     final displayHour = hour <= 12 ? hour : hour - 12;
-    return '${periodSet[periodIndex]}$displayHour:${_two(date.minute)}';
+    return '${_label(periodSet[periodIndex])}$displayHour:${_two(date.minute)}';
   }
 }

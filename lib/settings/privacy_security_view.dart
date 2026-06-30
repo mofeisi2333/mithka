@@ -16,6 +16,7 @@ import '../theme/app_theme.dart';
 import 'auto_delete_view.dart';
 import 'keyword_blocker_view.dart';
 import 'privacy_detail_views.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class PrivacySecurityView extends StatefulWidget {
   const PrivacySecurityView({super.key});
@@ -48,8 +49,8 @@ class _PrivacySecurityViewState extends State<PrivacySecurityView> {
       if (mounted) {
         setState(
           () => _twoStep = (state.boolean('has_password') ?? false)
-              ? '已开启'
-              : '未开启',
+              ? AppStringKeys.privacyEnabled
+              : AppStringKeys.privacyDisabled,
         );
       }
     } catch (_) {}
@@ -62,17 +63,17 @@ class _PrivacySecurityViewState extends State<PrivacySecurityView> {
         'setting': {'@type': setting},
       });
       final rules = res.objects('rules') ?? const <Map<String, dynamic>>[];
-      var value = '所有人';
+      var value = AppStrings.t(AppStringKeys.privacyVisibilityEveryone);
       for (final r in rules) {
         final t = r.type;
         if (t == 'userPrivacySettingRuleAllowAll') {
-          value = '所有人';
+          value = AppStrings.t(AppStringKeys.privacyVisibilityEveryone);
           break;
         } else if (t == 'userPrivacySettingRuleAllowContacts') {
-          value = '我的联系人';
+          value = AppStrings.t(AppStringKeys.privacyVisibilityContacts);
           break;
         } else if (t == 'userPrivacySettingRuleRestrictAll') {
-          value = '没有人';
+          value = AppStrings.t(AppStringKeys.privacyVisibilityNobody);
           break;
         }
       }
@@ -90,20 +91,23 @@ class _PrivacySecurityViewState extends State<PrivacySecurityView> {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '隐私与安全', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.privacySecurityTitle),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(12, 14, 12, 24),
               children: [
-                _group('隐私', [
+                _group(AppStrings.t(AppStringKeys.privacySectionTitle), [
                   _Row(
                     FontAwesomeIcons.clock.data,
-                    '最后上线时间',
+                    AppStrings.t(AppStringKeys.privacyLastSeen),
                     _ruleValue['userPrivacySettingShowStatus'] ?? '',
                     () {
                       _open(
                         const PrivacyRuleView(
-                          title: '最后上线时间',
+                          title: AppStringKeys.privacyLastSeen,
                           setting: 'userPrivacySettingShowStatus',
                         ),
                       );
@@ -111,12 +115,12 @@ class _PrivacySecurityViewState extends State<PrivacySecurityView> {
                   ),
                   _Row(
                     FontAwesomeIcons.circleUser.data,
-                    '头像',
+                    AppStrings.t(AppStringKeys.privacyProfilePhoto),
                     _ruleValue['userPrivacySettingShowProfilePhoto'] ?? '',
                     () {
                       _open(
                         const PrivacyRuleView(
-                          title: '头像',
+                          title: AppStringKeys.privacyProfilePhoto,
                           setting: 'userPrivacySettingShowProfilePhoto',
                         ),
                       );
@@ -124,12 +128,12 @@ class _PrivacySecurityViewState extends State<PrivacySecurityView> {
                   ),
                   _Row(
                     FontAwesomeIcons.phone.data,
-                    '语音通话',
+                    AppStringKeys.composerVoiceCall,
                     _ruleValue['userPrivacySettingAllowCalls'] ?? '',
                     () {
                       _open(
                         const PrivacyRuleView(
-                          title: '语音通话',
+                          title: AppStringKeys.composerVoiceCall,
                           setting: 'userPrivacySettingAllowCalls',
                         ),
                       );
@@ -137,33 +141,41 @@ class _PrivacySecurityViewState extends State<PrivacySecurityView> {
                   ),
                 ]),
                 const SizedBox(height: 14),
-                _group('安全', [
-                  _Row(FontAwesomeIcons.lock.data, '两步验证', _twoStep, null),
-                  _Row(
-                    FontAwesomeIcons.mobileScreenButton.data,
-                    '已登录设备',
-                    '',
-                    () => _open(const ActiveSessionsView()),
-                  ),
-                  _Row(
-                    FontAwesomeIcons.users.data,
-                    '黑名单',
-                    '',
-                    () => _open(const BlockedUsersView()),
-                  ),
-                  _Row(
-                    FontAwesomeIcons.ban.data,
-                    '关键词屏蔽',
-                    '',
-                    () => _open(const KeywordBlockerView()),
-                  ),
-                  _Row(
-                    FontAwesomeIcons.stopwatch.data,
-                    '自动删除消息',
-                    '',
-                    () => _open(const AutoDeleteView()),
-                  ),
-                ]),
+                _group(
+                  AppStrings.t(AppStringKeys.privacySecuritySectionTitle),
+                  [
+                    _Row(
+                      FontAwesomeIcons.lock.data,
+                      AppStrings.t(AppStringKeys.privacyTwoStepVerification),
+                      _twoStep,
+                      null,
+                    ),
+                    _Row(
+                      FontAwesomeIcons.mobileScreenButton.data,
+                      AppStrings.t(AppStringKeys.privacyLoggedInDevices),
+                      '',
+                      () => _open(const ActiveSessionsView()),
+                    ),
+                    _Row(
+                      FontAwesomeIcons.users.data,
+                      AppStrings.t(AppStringKeys.privacyBlockedUsers),
+                      '',
+                      () => _open(const BlockedUsersView()),
+                    ),
+                    _Row(
+                      FontAwesomeIcons.ban.data,
+                      AppStrings.t(AppStringKeys.keywordBlockerTitle),
+                      '',
+                      () => _open(const KeywordBlockerView()),
+                    ),
+                    _Row(
+                      FontAwesomeIcons.stopwatch.data,
+                      AppStringKeys.chatInfoAutoDeleteMessages,
+                      '',
+                      () => _open(const AutoDeleteView()),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -205,7 +217,7 @@ class _PrivacySecurityViewState extends State<PrivacySecurityView> {
                           Icon(row.icon, size: 20, color: AppTheme.brand),
                           const SizedBox(width: 14),
                           Text(
-                            row.title,
+                            row.title.l10n(context),
                             style: TextStyle(
                               fontSize: 16,
                               color: c.textPrimary,
@@ -214,7 +226,7 @@ class _PrivacySecurityViewState extends State<PrivacySecurityView> {
                           const Spacer(),
                           if (row.value.isNotEmpty)
                             Text(
-                              row.value,
+                              row.value.l10n(context),
                               style: TextStyle(
                                 fontSize: 14,
                                 color: c.textSecondary,

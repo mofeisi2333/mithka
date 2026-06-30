@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../theme/app_theme.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class RichTextComposerResult {
   const RichTextComposerResult({required this.text, required this.media});
@@ -17,9 +18,9 @@ class RichTextComposerView extends StatefulWidget {
   const RichTextComposerView({
     super.key,
     required this.initialText,
-    this.title = '分享',
-    this.submitText = '发布',
-    this.hintText = '输入 Markdown 或富文本内容',
+    this.title = AppStringKeys.topicChatShare,
+    this.submitText = AppStringKeys.topicChatPublish,
+    this.hintText = AppStringKeys.richTextComposerContentPlaceholder,
     this.allowMedia = true,
   });
 
@@ -102,11 +103,14 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
                 children: [
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(),
-                    child: Text('取消', style: TextStyle(color: c.textPrimary)),
+                    child: Text(
+                      AppStringKeys.countryPickerCancel.l10n(context),
+                      style: TextStyle(color: c.textPrimary),
+                    ),
                   ),
                   Expanded(
                     child: Text(
-                      widget.title,
+                      widget.title.l10n(context),
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 17,
@@ -117,7 +121,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
                   ),
                   TextButton(
                     onPressed: _submit,
-                    child: Text(widget.submitText),
+                    child: Text(widget.submitText.l10n(context)),
                   ),
                 ],
               ),
@@ -140,7 +144,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
                 decoration: InputDecoration(
                   contentPadding: const EdgeInsets.all(16),
                   border: InputBorder.none,
-                  hintText: widget.hintText,
+                  hintText: widget.hintText.l10n(context),
                   hintStyle: TextStyle(color: c.textTertiary),
                 ),
               ),
@@ -166,7 +170,11 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
           _formatButton(c, '</>', () => _wrap('`')),
           _formatButton(c, 'H', () => _prefixLine('## ')),
           _formatButton(c, '•', () => _prefixLine('- ')),
-          _formatButton(c, '引用', () => _wrap('> ', '')),
+          _formatButton(
+            c,
+            AppStringKeys.messageActionQuote,
+            () => _wrap('> ', ''),
+          ),
         ],
       ),
     );
@@ -179,7 +187,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
         child: TextButton.icon(
           onPressed: _pickMedia,
           icon: FaIcon(FontAwesomeIcons.image, size: 20),
-          label: const Text('照片/视频'),
+          label: Text(AppStringKeys.richTextComposerPhotoVideo.l10n(context)),
         ),
       );
     }

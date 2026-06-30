@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class ChecklistComposerView extends StatefulWidget {
   const ChecklistComposerView({super.key});
@@ -79,7 +80,9 @@ class _ChecklistComposerViewState extends State<ChecklistComposerView> {
       body: Column(
         children: [
           NavHeader(
-            title: '新建清单',
+            title: AppStrings.t(
+              AppStringKeys.checklistComposerNewChecklistTitle,
+            ),
             onBack: () => Navigator.of(context).pop(),
             trailing: GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -87,7 +90,7 @@ class _ChecklistComposerViewState extends State<ChecklistComposerView> {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: Text(
-                  '发送',
+                  AppStrings.t(AppStringKeys.composerSend),
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
@@ -103,7 +106,13 @@ class _ChecklistComposerViewState extends State<ChecklistComposerView> {
             child: ListView(
               padding: const EdgeInsets.symmetric(vertical: 14),
               children: [
-                _card([_field(_title, '清单标题', autofocus: true)]),
+                _card([
+                  _field(
+                    _title,
+                    AppStrings.t(AppStringKeys.checklistComposerTitleLabel),
+                    autofocus: true,
+                  ),
+                ]),
                 const SizedBox(height: 14),
                 _card([
                   for (var i = 0; i < _tasks.length; i++) ...[
@@ -116,7 +125,9 @@ class _ChecklistComposerViewState extends State<ChecklistComposerView> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                   child: Text(
-                    '最多 30 项 · 创建清单需要 Telegram Premium',
+                    AppStrings.t(
+                      AppStringKeys.checklistComposerPremiumLimitHint,
+                    ),
                     style: TextStyle(fontSize: 13, color: c.textSecondary),
                   ),
                 ),
@@ -178,7 +189,10 @@ class _ChecklistComposerViewState extends State<ChecklistComposerView> {
                 decoration: InputDecoration(
                   isCollapsed: true,
                   border: InputBorder.none,
-                  hintText: '任务 ${i + 1}',
+                  hintText: AppStrings.t(
+                    AppStringKeys.checklistComposerTaskLabel,
+                    {'value1': i + 1},
+                  ),
                   hintStyle: TextStyle(color: c.textTertiary),
                 ),
               ),
@@ -222,7 +236,7 @@ class _ChecklistComposerViewState extends State<ChecklistComposerView> {
               ),
               const SizedBox(width: 8),
               Text(
-                '添加任务',
+                AppStrings.t(AppStringKeys.checklistComposerAddTask),
                 style: TextStyle(
                   fontSize: 16,
                   color: disabled

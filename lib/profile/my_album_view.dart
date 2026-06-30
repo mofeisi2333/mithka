@@ -14,6 +14,7 @@ import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class MyAlbumView extends StatefulWidget {
   const MyAlbumView({super.key, required this.userId});
@@ -98,7 +99,7 @@ class _MyAlbumViewState extends State<MyAlbumView> {
               ),
             ),
             Text(
-              '相册',
+              AppStrings.t(AppStringKeys.chatInfoAlbum),
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
@@ -125,7 +126,7 @@ class _MyAlbumViewState extends State<MyAlbumView> {
     if (_photos.isEmpty) {
       return Center(
         child: Text(
-          '暂无照片',
+          AppStrings.t(AppStringKeys.myAlbumNoPhotos),
           style: TextStyle(fontSize: 14, color: c.textSecondary),
         ),
       );

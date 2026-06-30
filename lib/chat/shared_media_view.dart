@@ -19,6 +19,7 @@ import 'file_detail_view.dart';
 import 'full_image_viewer.dart';
 import 'link_handler.dart';
 import 'video_player_view.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class _MediaTab {
   const _MediaTab(this.label, this.filter, this.grid, {this.videoOnly = false});
@@ -34,7 +35,7 @@ class SharedMediaView extends StatefulWidget {
     required this.chatId,
     required this.title,
     this.initialTab = 0,
-    this.displayTitle = '聊天文件',
+    this.displayTitle = AppStringKeys.sharedMediaChatFiles,
     this.lockedTab = false,
   });
   final int chatId;
@@ -49,11 +50,28 @@ class SharedMediaView extends StatefulWidget {
 
 class _SharedMediaViewState extends State<SharedMediaView> {
   static const _tabs = [
-    _MediaTab('图片视频', 'searchMessagesFilterPhotoAndVideo', true),
-    _MediaTab('文件', 'searchMessagesFilterDocument', false),
-    _MediaTab('链接', 'searchMessagesFilterUrl', false),
-    _MediaTab('语音', 'searchMessagesFilterVoiceNote', false),
-    _MediaTab('视频', 'searchMessagesFilterVideo', true, videoOnly: true),
+    _MediaTab(
+      AppStringKeys.sharedMediaPhotosAndVideos,
+      'searchMessagesFilterPhotoAndVideo',
+      true,
+    ),
+    _MediaTab(
+      AppStringKeys.topicPostContentFile,
+      'searchMessagesFilterDocument',
+      false,
+    ),
+    _MediaTab(AppStringKeys.sharedMediaLinks, 'searchMessagesFilterUrl', false),
+    _MediaTab(
+      AppStringKeys.sharedMediaVoice,
+      'searchMessagesFilterVoiceNote',
+      false,
+    ),
+    _MediaTab(
+      AppStringKeys.sharedMediaVideos,
+      'searchMessagesFilterVideo',
+      true,
+      videoOnly: true,
+    ),
   ];
 
   final TdClient _client = TdClient.shared;
@@ -145,7 +163,7 @@ class _SharedMediaViewState extends State<SharedMediaView> {
               ),
             ),
             Text(
-              widget.displayTitle,
+              widget.displayTitle.l10n(context),
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
@@ -183,7 +201,7 @@ class _SharedMediaViewState extends State<SharedMediaView> {
                     ),
                   ),
                   child: Text(
-                    _tabs[i].label,
+                    _tabs[i].label.l10n(context),
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 14,
@@ -214,7 +232,7 @@ class _SharedMediaViewState extends State<SharedMediaView> {
     if (items.isEmpty) {
       return Center(
         child: Text(
-          '暂无内容',
+          AppStringKeys.sharedMediaEmpty.l10n(context),
           style: TextStyle(fontSize: 14, color: c.textSecondary),
         ),
       );
@@ -345,7 +363,9 @@ class _SharedMediaViewState extends State<SharedMediaView> {
     final isLink = m.document == null && !isVoice;
     final title =
         m.document?.fileName ??
-        (isVoice ? '语音消息' : (m.text.isEmpty ? '链接' : m.text));
+        (isVoice
+            ? AppStringKeys.sharedMediaVoiceMessages
+            : (m.text.isEmpty ? AppStringKeys.sharedMediaLinks : m.text));
     final subtitle = m.document != null
         ? _fileSize(m.document!.size)
         : DateText.listLabel(m.date);

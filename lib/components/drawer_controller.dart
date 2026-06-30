@@ -25,6 +25,8 @@ class DrawerController extends ChangeNotifier {
 /// Tracks per-tab navigation depth so the classic bar hides on pushes.
 class TabBarVisibility extends ChangeNotifier {
   final Map<int, int> _depths = {};
+  int _chatSuppressions = 0;
+
   void setDepth(int tab, int depth) {
     if (_depths[tab] == depth) return;
     _depths[tab] = depth;
@@ -32,6 +34,19 @@ class TabBarVisibility extends ChangeNotifier {
   }
 
   int depth(int tab) => _depths[tab] ?? 0;
+
+  bool get isChatSuppressed => _chatSuppressions > 0;
+
+  void retainChatSuppression() {
+    _chatSuppressions++;
+    notifyListeners();
+  }
+
+  void releaseChatSuppression() {
+    if (_chatSuppressions == 0) return;
+    _chatSuppressions--;
+    notifyListeners();
+  }
 }
 
 /// A [NavigatorObserver] that reports the current stack depth of one tab's
@@ -40,29 +55,42 @@ class TabDepthObserver extends NavigatorObserver {
   TabDepthObserver(this.tab, this.visibility);
   final int tab;
   final TabBarVisibility visibility;
-  int _depth = 0;
+  final List<Route<dynamic>> _pageStack = [];
 
   void _report() => WidgetsBinding.instance.addPostFrameCallback(
-    (_) => visibility.setDepth(tab, _depth),
+    (_) => visibility.setDepth(tab, (_pageStack.length - 1).clamp(0, 1 << 20)),
   );
 
   @override
   void didPush(Route route, Route? previousRoute) {
-    // The Navigator's initial (root) route has no previousRoute — don't count it,
-    // so depth 0 = at root (tab bar visible).
-    if (route is PageRoute && previousRoute != null) _depth++;
+    if (route is PageRoute) _pageStack.add(route);
     _report();
   }
 
   @override
   void didPop(Route route, Route? previousRoute) {
-    if (route is PageRoute && _depth > 0) _depth--;
+    if (route is PageRoute) _pageStack.remove(route);
     _report();
   }
 
   @override
   void didRemove(Route route, Route? previousRoute) {
-    if (route is PageRoute && _depth > 0) _depth--;
+    if (route is PageRoute) _pageStack.remove(route);
+    _report();
+  }
+
+  @override
+  void didReplace({Route? newRoute, Route? oldRoute}) {
+    final index = oldRoute == null ? -1 : _pageStack.indexOf(oldRoute);
+    if (index >= 0) {
+      if (newRoute is PageRoute) {
+        _pageStack[index] = newRoute;
+      } else {
+        _pageStack.removeAt(index);
+      }
+    } else if (newRoute is PageRoute) {
+      _pageStack.add(newRoute);
+    }
     _report();
   }
 }

@@ -8,10 +8,12 @@
 
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../chat/chat_members_view.dart';
 import '../chat/rich_text_composer_view.dart';
 import '../components/confirm_dialog.dart';
+import '../components/drawer_controller.dart' as dc;
 import '../components/photo_avatar.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../components/toast.dart';
@@ -84,6 +86,7 @@ class _TopicChatViewState extends State<TopicChatView> {
   final _topicMessages = <int, List<ChatMessage>>{};
   final _loadingThreads = <int>{};
   final _senderCache = <int, _SenderInfo>{};
+  dc.TabBarVisibility? _tabBarVisibility;
   bool _loading = true;
   int? _selectedThreadId;
 
@@ -92,10 +95,28 @@ class _TopicChatViewState extends State<TopicChatView> {
     super.initState();
     _selectedThreadId = widget.initialThreadId;
     _loadTopics();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _retainTabBarSuppression();
+    });
+  }
+
+  void _retainTabBarSuppression() {
+    if (!mounted) return;
+    dc.TabBarVisibility? tabBarVisibility;
+    try {
+      tabBarVisibility = context.read<dc.TabBarVisibility>();
+    } on ProviderNotFoundException {
+      tabBarVisibility = null;
+    }
+    if (identical(_tabBarVisibility, tabBarVisibility)) return;
+    _tabBarVisibility?.releaseChatSuppression();
+    _tabBarVisibility = tabBarVisibility;
+    _tabBarVisibility?.retainChatSuppression();
   }
 
   @override
   void dispose() {
+    _tabBarVisibility?.releaseChatSuppression();
     _scroll.dispose();
     _input.dispose();
     super.dispose();
@@ -127,7 +148,10 @@ class _TopicChatViewState extends State<TopicChatView> {
                 info.int64('message_thread_id') ??
                 topic.int64('message_thread_id') ??
                 message.id,
-            name: info.str('name') ?? topic.str('name') ?? '话题',
+            name:
+                info.str('name') ??
+                topic.str('name') ??
+                AppStringKeys.topicChatTopicTitle,
             lastMessage: message,
             isPinned: topic.boolean('is_pinned') ?? false,
             isMuted:
@@ -240,7 +264,7 @@ class _TopicChatViewState extends State<TopicChatView> {
             'chat_id': id,
           });
           _senderCache[id] = _SenderInfo(
-            name: chat.str('title') ?? '用户',
+            name: chat.str('title') ?? AppStringKeys.topicChatUsers,
             photo: TDParse.smallPhoto(chat.obj('photo')),
           );
         }
@@ -281,9 +305,9 @@ class _TopicChatViewState extends State<TopicChatView> {
         fullscreenDialog: true,
         builder: (_) => RichTextComposerView(
           initialText: _input.text,
-          title: '分享',
-          submitText: '发布',
-          hintText: '分享想法、图片说明或链接',
+          title: AppStringKeys.topicChatShare,
+          submitText: AppStringKeys.topicChatPublish,
+          hintText: AppStringKeys.topicChatComposerPlaceholder,
         ),
       ),
     );
@@ -461,7 +485,7 @@ class _TopicChatViewState extends State<TopicChatView> {
         'chat_id': id,
       });
       final info = _SenderInfo(
-        name: chat.str('title') ?? '用户',
+        name: chat.str('title') ?? AppStringKeys.topicChatUsers,
         photo: TDParse.smallPhoto(chat.obj('photo')),
       );
       _senderCache[id] = info;
@@ -543,7 +567,11 @@ class _TopicChatViewState extends State<TopicChatView> {
                   ),
                 ),
                 Text(
-                  _topics.isEmpty ? '话题群聊' : '${_topics.length} 个话题',
+                  _topics.isEmpty
+                      ? AppStrings.t(AppStringKeys.topicChatGroupChatTitle)
+                      : AppStrings.t(AppStringKeys.topicChatTopicCount, {
+                          'value1': _topics.length,
+                        }),
                   style: TextStyle(fontSize: 12, color: c.textSecondary),
                 ),
               ],
@@ -583,7 +611,7 @@ class _TopicChatViewState extends State<TopicChatView> {
   Widget _topicTabs() {
     final c = context.colors;
     final tabs = [
-      (id: null, title: '全部'),
+      (id: null, title: AppStringKeys.topicChatAllFilter),
       ..._topics.take(8).map((topic) => (id: topic.id, title: topic.name)),
     ];
     return Container(
@@ -607,7 +635,7 @@ class _TopicChatViewState extends State<TopicChatView> {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   Text(
-                    tab.title,
+                    tab.title.l10n(context),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -647,7 +675,10 @@ class _TopicChatViewState extends State<TopicChatView> {
       ),
       child: Row(
         children: [
-          Text('置顶 | ', style: TextStyle(fontSize: 15, color: c.textSecondary)),
+          Text(
+            AppStringKeys.topicChatPinnedPrefix.l10n(context),
+            style: TextStyle(fontSize: 15, color: c.textSecondary),
+          ),
           Expanded(
             child: Text(
               widget.chat.lastMessage,
@@ -656,7 +687,10 @@ class _TopicChatViewState extends State<TopicChatView> {
               style: TextStyle(fontSize: 15, color: c.textPrimary),
             ),
           ),
-          Text('展开', style: TextStyle(fontSize: 14, color: c.textTertiary)),
+          Text(
+            AppStringKeys.topicChatExpand.l10n(context),
+            style: TextStyle(fontSize: 14, color: c.textTertiary),
+          ),
         ],
       ),
     );
@@ -670,7 +704,7 @@ class _TopicChatViewState extends State<TopicChatView> {
     if (posts.isEmpty) {
       return Center(
         child: Text(
-          '暂无更多内容',
+          AppStringKeys.topicChatNoMoreContent.l10n(context),
           style: TextStyle(fontSize: 15, color: context.colors.textTertiary),
         ),
       );
@@ -717,7 +751,11 @@ class _TopicChatViewState extends State<TopicChatView> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
-                      _input.text.trim().isEmpty ? '期待你的分享' : _input.text,
+                      _input.text.trim().isEmpty
+                          ? AppStrings.t(
+                              AppStringKeys.topicChatAwaitingYourPost,
+                            )
+                          : _input.text,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -835,7 +873,10 @@ class _TopicPostRow extends StatelessWidget {
   String get _displayText {
     final text = post.message.text.trim();
     if (text.startsWith('[') && text.endsWith(']')) return '';
-    if (post.message.document != null && text.startsWith('[文件]')) return '';
+    if (post.message.document != null &&
+        text.startsWith(AppStringKeys.channelsFileAttachment)) {
+      return '';
+    }
     return text;
   }
 
@@ -869,7 +910,9 @@ class _PostActions extends StatelessWidget {
     return Row(
       children: [
         Text(
-          '浏览 ${message.id.abs() % 900 + 10}',
+          AppStrings.t(AppStringKeys.topicChatBrowseCount, {
+            'value1': message.id.abs() % 900 + 10,
+          }),
           style: TextStyle(fontSize: 14, color: c.textTertiary),
         ),
         const Spacer(),
@@ -1042,7 +1085,9 @@ class _TopicCommentsSheetState extends State<_TopicCommentsSheet> {
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                '评论 ${widget.post.message.commentCount}',
+                AppStrings.t(AppStringKeys.topicChatCommentCount, {
+                  'value1': widget.post.message.commentCount,
+                }),
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
@@ -1063,7 +1108,9 @@ class _TopicCommentsSheetState extends State<_TopicCommentsSheet> {
                       return _CommentRow(
                         message: message,
                         sender: sender,
-                        fallbackName: widget.sender?.name ?? '用户',
+                        fallbackName:
+                            widget.sender?.name ??
+                            AppStrings.t(AppStringKeys.topicChatUsers),
                       );
                     },
                   ),
@@ -1088,7 +1135,7 @@ class _TopicCommentsSheetState extends State<_TopicCommentsSheet> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        '发言要友善',
+                        AppStrings.t(AppStringKeys.topicChatBeKindPrompt),
                         style: TextStyle(fontSize: 15, color: c.textTertiary),
                       ),
                     ),
@@ -1162,7 +1209,9 @@ class _CommentRow extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '${DateText.listLabel(message.date)}  回复',
+                  AppStrings.t(AppStringKeys.topicChatReplyCount, {
+                    'value1': DateText.listLabel(message.date),
+                  }),
                   style: TextStyle(fontSize: 13, color: c.textTertiary),
                 ),
               ],
@@ -1276,7 +1325,7 @@ class _TopicSearchViewState extends State<_TopicSearchView> {
                             FontAwesomeIcons.magnifyingGlass,
                             color: c.textTertiary,
                           ),
-                          hintText: '搜索',
+                          hintText: AppStrings.t(AppStringKeys.topicChatSearch),
                           suffixIcon: _controller.text.isEmpty
                               ? null
                               : IconButton(
@@ -1295,7 +1344,10 @@ class _TopicSearchViewState extends State<_TopicSearchView> {
                   ),
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(),
-                    child: Text('取消', style: TextStyle(color: AppTheme.brand)),
+                    child: Text(
+                      AppStringKeys.countryPickerCancel.l10n(context),
+                      style: TextStyle(color: AppTheme.brand),
+                    ),
                   ),
                 ],
               ),
@@ -1304,11 +1356,14 @@ class _TopicSearchViewState extends State<_TopicSearchView> {
               padding: const EdgeInsets.fromLTRB(18, 4, 18, 12),
               child: Row(
                 children: [
-                  _filterPill(c, '选择版块'),
+                  _filterPill(c, AppStringKeys.topicChatSelectSection),
                   const SizedBox(width: 10),
-                  _filterPill(c, '选择时间'),
+                  _filterPill(c, AppStringKeys.topicChatSelectTime),
                   const Spacer(),
-                  Text('最相关', style: TextStyle(color: c.textPrimary)),
+                  Text(
+                    AppStringKeys.topicChatMostRelevant.l10n(context),
+                    style: TextStyle(color: c.textPrimary),
+                  ),
                   const SizedBox(width: 3),
                   FaIcon(FontAwesomeIcons.arrowsUpDown, size: 17),
                 ],
@@ -1341,7 +1396,10 @@ class _TopicSearchViewState extends State<_TopicSearchView> {
       ),
       child: Row(
         children: [
-          Text(text, style: TextStyle(fontSize: 14, color: c.textPrimary)),
+          Text(
+            text.l10n(context),
+            style: TextStyle(fontSize: 14, color: c.textPrimary),
+          ),
           const SizedBox(width: 6),
           FaIcon(FontAwesomeIcons.chevronDown, size: 14, color: c.textPrimary),
         ],
@@ -1358,7 +1416,7 @@ class _SearchResultRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final name = message.senderName ?? '用户';
+    final name = message.senderName ?? AppStringKeys.topicChatUsers;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 16),
       child: Row(
@@ -1414,7 +1472,13 @@ class _SearchResultRow extends StatelessWidget {
                     ),
                     const Spacer(),
                     Text(
-                      '${message.reactions.fold<int>(0, (sum, item) => sum + item.count)} 赞 · ${message.commentCount} 评',
+                      AppStrings.t(AppStringKeys.topicChatLikeCommentSummary, {
+                        'value1': message.reactions.fold<int>(
+                          0,
+                          (sum, item) => sum + item.count,
+                        ),
+                        'value2': message.commentCount,
+                      }),
                       style: TextStyle(fontSize: 13, color: c.textTertiary),
                     ),
                   ],
@@ -1566,7 +1630,10 @@ class _TopicChannelSettingsViewState extends State<_TopicChannelSettingsView> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _topicPinned = !value);
-      showToast(context, _tdActionError('设置置顶失败', e));
+      showToast(
+        context,
+        _tdActionError(AppStringKeys.topicChatSetPinnedFailed, e),
+      );
     }
   }
 
@@ -1589,7 +1656,7 @@ class _TopicChannelSettingsViewState extends State<_TopicChannelSettingsView> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _topicMuted = !value);
-      showToast(context, _tdActionError('设置免打扰失败', e));
+      showToast(context, _tdActionError(AppStringKeys.topicChatMuteFailed, e));
     }
   }
 
@@ -1606,9 +1673,11 @@ class _TopicChannelSettingsViewState extends State<_TopicChannelSettingsView> {
     if (topic == null) return;
     final ok = await confirmDialog(
       context,
-      title: '退出频道',
-      message: '退出「${topic.name}」后将删除该话题频道。继续？',
-      confirmText: '退出',
+      title: AppStringKeys.topicChatLeaveChannel,
+      message: AppStrings.t(AppStringKeys.topicChatLeaveChannelConfirm, {
+        'value1': topic.name,
+      }),
+      confirmText: AppStringKeys.topicChatLeave,
       destructive: true,
     );
     if (!ok) return;
@@ -1621,7 +1690,9 @@ class _TopicChannelSettingsViewState extends State<_TopicChannelSettingsView> {
       await widget.onTopicChanged();
       if (mounted) Navigator.of(context).pop();
     } catch (_) {
-      if (mounted) showToast(context, '退出频道失败');
+      if (mounted) {
+        showToast(context, AppStringKeys.topicChatLeaveChannelFailed);
+      }
     }
   }
 
@@ -1647,7 +1718,9 @@ class _TopicChannelSettingsViewState extends State<_TopicChannelSettingsView> {
                   ),
                   Expanded(
                     child: Text(
-                      '频道设置'.l10n(context),
+                      AppStrings.t(
+                        AppStringKeys.topicChatChannelSettings,
+                      ).l10n(context),
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 17,
@@ -1692,7 +1765,10 @@ class _TopicChannelSettingsViewState extends State<_TopicChannelSettingsView> {
                             ),
                             const SizedBox(height: 6),
                             Text(
-                              '频道号：${widget.chat.id.abs()}'.l10n(context),
+                              AppStrings.t(
+                                AppStringKeys.topicChatChannelNumber,
+                                {'value1': widget.chat.id.abs()},
+                              ).l10n(context),
                               style: TextStyle(
                                 fontSize: 14,
                                 color: c.textSecondary,
@@ -1712,34 +1788,51 @@ class _TopicChannelSettingsViewState extends State<_TopicChannelSettingsView> {
                   SettingsCard(
                     children: [
                       SettingsRow(
-                        title: '频道成员',
-                        value: _loadingMembers ? '加载中' : '$_memberCount人',
+                        title: AppStrings.t(
+                          AppStringKeys.topicChatChannelMembers,
+                        ),
+                        value: _loadingMembers
+                            ? AppStrings.t(AppStringKeys.topicChatLoading)
+                            : AppStrings.t(AppStringKeys.topicChatMemberCount, {
+                                'value1': _memberCount,
+                              }),
                         onTap: _openMembers,
                       ),
                       _memberStrip(c),
                     ],
                   ),
                   const SizedBox(height: 16),
-                  const SettingsCard(
-                    children: [SettingsRow(title: '我的资料', value: 'ieb')],
+                  SettingsCard(
+                    children: [
+                      SettingsRow(
+                        title: AppStringKeys.topicChatMyProfile,
+                        value: 'ieb',
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 16),
                   SettingsCard(
                     children: [
                       SettingsRow(
-                        title: '频道消息',
-                        value: topic?.name ?? '全部话题',
+                        title: AppStrings.t(
+                          AppStringKeys.topicChatChannelMessages,
+                        ),
+                        value:
+                            topic?.name ??
+                            AppStrings.t(AppStringKeys.topicChatAllTopics),
                         onTap: widget.onOpenMessages,
                       ),
                       SettingsSwitchRow(
-                        title: '设为置顶',
+                        title: AppStrings.t(AppStringKeys.topicChatPinToggle),
                         value: _topicPinned,
                         onChanged: topic == null
                             ? (_) {}
                             : (value) => unawaited(_setTopicPinned(value)),
                       ),
                       SettingsSwitchRow(
-                        title: '消息免打扰',
+                        title: AppStrings.t(
+                          AppStringKeys.topicChatMuteMessagesToggle,
+                        ),
                         value: _topicMuted,
                         onChanged: topic == null
                             ? (_) {}
@@ -1758,7 +1851,9 @@ class _TopicChannelSettingsViewState extends State<_TopicChannelSettingsView> {
                             child: Padding(
                               padding: const EdgeInsets.symmetric(vertical: 16),
                               child: Text(
-                                '退出频道'.l10n(context),
+                                AppStrings.t(
+                                  AppStringKeys.topicChatLeaveChannel,
+                                ).l10n(context),
                                 style: TextStyle(
                                   fontSize: 16,
                                   color: const Color(0xFFFF3B30),
@@ -1819,7 +1914,7 @@ class _TopicChannelSettingsViewState extends State<_TopicChannelSettingsView> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '邀请',
+                  AppStringKeys.topicChatInvite.l10n(context),
                   style: TextStyle(fontSize: 12, color: c.textSecondary),
                 ),
               ],

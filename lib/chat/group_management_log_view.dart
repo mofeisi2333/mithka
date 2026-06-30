@@ -13,6 +13,7 @@ import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import '../theme/date_text.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class GroupManagementLogView extends StatefulWidget {
   const GroupManagementLogView({
@@ -85,7 +86,12 @@ class _GroupManagementLogViewState extends State<GroupManagementLogView> {
         photo: TDParse.smallPhoto(user.obj('profile_photo')),
       );
     } catch (_) {
-      _users[userId] = _UserSummary(name: '用户 $userId', photo: null);
+      _users[userId] = _UserSummary(
+        name: AppStrings.t(AppStringKeys.chatUserFallbackName, {
+          'value1': userId,
+        }),
+        photo: null,
+      );
     }
   }
 
@@ -93,7 +99,9 @@ class _GroupManagementLogViewState extends State<GroupManagementLogView> {
     final first = user.str('first_name') ?? '';
     final last = user.str('last_name') ?? '';
     final full = [first, last].where((s) => s.isNotEmpty).join(' ');
-    return full.isEmpty ? (user.str('username') ?? '用户') : full;
+    return full.isEmpty
+        ? (user.str('username') ?? AppStrings.t(AppStringKeys.topicChatUsers))
+        : full;
   }
 
   @override
@@ -139,7 +147,7 @@ class _GroupManagementLogViewState extends State<GroupManagementLogView> {
               ),
             ),
             Text(
-              '群管理记录',
+              AppStrings.t(AppStringKeys.groupManagementLogTitle),
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
@@ -166,7 +174,7 @@ class _GroupManagementLogViewState extends State<GroupManagementLogView> {
     if (_failed) {
       return Center(
         child: Text(
-          '没有权限查看群管理记录',
+          AppStrings.t(AppStringKeys.groupManagementLogNoPermission),
           style: TextStyle(fontSize: 14, color: c.textSecondary),
         ),
       );
@@ -174,7 +182,7 @@ class _GroupManagementLogViewState extends State<GroupManagementLogView> {
     if (_events.isEmpty) {
       return Center(
         child: Text(
-          '暂无管理记录',
+          AppStrings.t(AppStringKeys.groupManagementLogEmpty),
           style: TextStyle(fontSize: 14, color: c.textSecondary),
         ),
       );
@@ -204,7 +212,13 @@ class _GroupManagementLogViewState extends State<GroupManagementLogView> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          PhotoAvatar(title: user?.name ?? '管理员', photo: user?.photo, size: 38),
+          PhotoAvatar(
+            title:
+                user?.name ??
+                AppStrings.t(AppStringKeys.groupManagementLogAdmin),
+            photo: user?.photo,
+            size: 38,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -214,7 +228,8 @@ class _GroupManagementLogViewState extends State<GroupManagementLogView> {
                   children: [
                     Expanded(
                       child: Text(
-                        user?.name ?? '管理员',
+                        user?.name ??
+                            AppStrings.t(AppStringKeys.groupManagementLogAdmin),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -246,59 +261,69 @@ class _GroupManagementLogViewState extends State<GroupManagementLogView> {
   String _actionLabel(Map<String, dynamic>? action) {
     switch (action?.type) {
       case 'chatEventMessageEdited':
-        return '编辑了消息';
+        return AppStrings.t(AppStringKeys.groupManagementLogEditedMessage);
       case 'chatEventMessageDeleted':
-        return '删除了消息';
+        return AppStrings.t(AppStringKeys.groupManagementLogDeletedMessage);
       case 'chatEventMessagePinned':
-        return '置顶了消息';
+        return AppStrings.t(AppStringKeys.groupManagementLogPinnedMessage);
       case 'chatEventMessageUnpinned':
-        return '取消置顶消息';
+        return AppStrings.t(AppStringKeys.groupManagementLogUnpinnedMessage);
       case 'chatEventMemberJoined':
-        return '加入了群聊';
+        return AppStrings.t(AppStringKeys.groupManagementLogJoinedGroup);
       case 'chatEventMemberJoinedByInviteLink':
-        return '通过邀请链接加入';
+        return AppStrings.t(AppStringKeys.groupManagementLogJoinedByInviteLink);
       case 'chatEventMemberJoinedByRequest':
-        return '批准入群请求';
+        return AppStrings.t(
+          AppStringKeys.groupManagementLogApprovedJoinRequest,
+        );
       case 'chatEventMemberLeft':
-        return '离开了群聊';
+        return AppStrings.t(AppStringKeys.groupManagementLogLeftGroup);
       case 'chatEventMemberInvited':
-        return '邀请了成员';
+        return AppStrings.t(AppStringKeys.groupManagementLogInvitedMember);
       case 'chatEventMemberPromoted':
-        return '修改了管理员';
+        return AppStrings.t(AppStringKeys.groupManagementLogChangedAdmin);
       case 'chatEventMemberRestricted':
-        return '修改了成员权限';
+        return AppStrings.t(
+          AppStringKeys.groupManagementLogChangedMemberPermissions,
+        );
       case 'chatEventTitleChanged':
-        return '修改了群名称';
+        return AppStrings.t(AppStringKeys.groupManagementLogChangedGroupName);
       case 'chatEventPhotoChanged':
-        return '修改了群头像';
+        return AppStrings.t(AppStringKeys.groupManagementLogChangedGroupPhoto);
       case 'chatEventDescriptionChanged':
-        return '修改了群简介';
+        return AppStrings.t(
+          AppStringKeys.groupManagementLogChangedGroupDescription,
+        );
       case 'chatEventUsernameChanged':
-        return '修改了公开用户名';
+        return AppStrings.t(
+          AppStringKeys.groupManagementLogChangedPublicUsername,
+        );
       case 'chatEventPermissionsChanged':
-        return '修改了发言权限';
+        return AppStrings.t(
+          AppStringKeys.groupManagementLogChangedPostingPermissions,
+        );
       case 'chatEventSlowModeDelayChanged':
-        return '修改了慢速模式';
+        return AppStrings.t(AppStringKeys.groupManagementLogChangedSlowMode);
       case 'chatEventLinkedChatChanged':
-        return '修改了关联聊天';
+        return AppStrings.t(AppStringKeys.groupManagementLogChangedLinkedChat);
       case 'chatEventInviteLinkEdited':
-        return '编辑了邀请链接';
+        return AppStrings.t(AppStringKeys.groupManagementLogEditedInviteLink);
       case 'chatEventInviteLinkRevoked':
-        return '撤销了邀请链接';
+        return AppStrings.t(AppStringKeys.groupManagementLogRevokedInviteLink);
       case 'chatEventInviteLinkDeleted':
-        return '删除了邀请链接';
+        return AppStrings.t(AppStringKeys.groupManagementLogDeletedInviteLink);
       case 'chatEventVideoChatCreated':
-        return '创建了视频聊天';
+        return AppStrings.t(AppStringKeys.groupManagementLogStartedVideoChat);
       case 'chatEventVideoChatEnded':
-        return '结束了视频聊天';
+        return AppStrings.t(AppStringKeys.groupManagementLogEndedVideoChat);
       case 'chatEventForumTopicCreated':
-        return '创建了话题';
+        return AppStrings.t(AppStringKeys.groupManagementLogCreatedTopic);
       case 'chatEventForumTopicEdited':
-        return '编辑了话题';
+        return AppStrings.t(AppStringKeys.groupManagementLogEditedTopic);
       case 'chatEventForumTopicDeleted':
-        return '删除了话题';
+        return AppStrings.t(AppStringKeys.groupManagementLogDeletedTopic);
       default:
-        return '进行了管理操作';
+        return AppStrings.t(AppStringKeys.groupManagementLogGenericAdminAction);
     }
   }
 }

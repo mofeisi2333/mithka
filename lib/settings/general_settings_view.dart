@@ -98,7 +98,10 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '通用', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.generalTitle),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(12, 14, 12, 24),
@@ -133,7 +136,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
       _navRow(
         FontAwesomeIcons.globe.data,
         const Color(0xFF34A2DF),
-        '应用语言',
+        AppStrings.t(AppStringKeys.generalAppLanguage),
         locale.selectedLabel(context),
         () => Navigator.of(
           context,
@@ -168,7 +171,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _sectionHeader('存储空间'),
+        _sectionHeader(AppStrings.t(AppStringKeys.generalStorage)),
         _card([
           SizedBox(
             height: 52,
@@ -182,7 +185,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
                   ),
                   const SizedBox(width: 12),
                   Text(
-                    '缓存大小',
+                    AppStrings.t(AppStringKeys.generalCacheSize),
                     style: TextStyle(fontSize: 16, color: c.textPrimary),
                   ),
                   const Spacer(),
@@ -212,7 +215,9 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
                 child: Row(
                   children: [
                     Text(
-                      _clearing ? '正在清除…' : '清除缓存',
+                      _clearing
+                          ? AppStrings.t(AppStringKeys.generalClearingCache)
+                          : AppStrings.t(AppStringKeys.generalClearCache),
                       style: TextStyle(fontSize: 16, color: AppTheme.tagRed),
                     ),
                     const Spacer(),
@@ -237,12 +242,12 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _sectionHeader('聊天'),
+        _sectionHeader(AppStrings.t(AppStringKeys.audioSearchChatTab)),
         _card([
           _toggleRow(
             FontAwesomeIcons.reply.data,
             const Color(0xFF3C8CF0),
-            '回车键发送消息',
+            AppStrings.t(AppStringKeys.generalSendMessageWithEnter),
             _enterToSend,
             (v) {
               setState(() => _enterToSend = v);
@@ -253,7 +258,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
           _toggleRow(
             FontAwesomeIcons.download.data,
             const Color(0xFF3C8CF0),
-            '打开聊天显示最新消息',
+            AppStrings.t(AppStringKeys.generalOpenChatAtLatestMessage),
             theme.openChatsAtLatest,
             (v) => theme.openChatsAtLatest = v,
           ),

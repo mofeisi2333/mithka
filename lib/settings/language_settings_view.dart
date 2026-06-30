@@ -18,7 +18,10 @@ class LanguageSettingsView extends StatelessWidget {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '语言', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.languageTitle),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(12, 14, 12, 24),
@@ -26,18 +29,17 @@ class LanguageSettingsView extends StatelessWidget {
                 SettingsCard(
                   children: [
                     _LanguageRow(
-                      title: '跟随系统'.l10n(context),
+                      title: AppStringKeys.appLocaleFollowSystem.l10n(context),
                       selected: locale.followsSystem,
                       onTap: () => locale.locale = null,
                     ),
                     const InsetDivider(leadingInset: 16),
                     for (final option in AppLocaleController.options) ...[
                       _LanguageRow(
-                        title: option.label,
+                        title: option.label.l10n(context),
                         selected:
                             !locale.followsSystem &&
-                            AppLocaleController.labelFor(locale.locale!) ==
-                                option.label,
+                            option.tag == locale.locale!.toLanguageTag(),
                         onTap: () => locale.locale = option.locale,
                       ),
                       if (option != AppLocaleController.options.last)

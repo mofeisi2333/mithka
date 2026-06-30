@@ -11,6 +11,7 @@ import 'package:dlibphonenumber/dlibphonenumber.dart';
 import 'package:flutter/foundation.dart';
 
 import 'json_helpers.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 /// Reference to a downloadable TDLib file (profile photo, thumbnail, …).
 class TdFileRef {
@@ -70,13 +71,15 @@ enum ChatMediaCategory {
   member; // 群成员
 
   String get title => switch (this) {
-    ChatMediaCategory.media => '图片/视频',
-    ChatMediaCategory.file => '文件',
-    ChatMediaCategory.audio => '音频',
-    ChatMediaCategory.link => '链接',
-    ChatMediaCategory.sticker => '表情',
-    ChatMediaCategory.voice => '语音',
-    ChatMediaCategory.member => '群成员',
+    ChatMediaCategory.media => AppStrings.t(AppStringKeys.tdMessagePhotoVideo),
+    ChatMediaCategory.file => AppStrings.t(AppStringKeys.topicPostContentFile),
+    ChatMediaCategory.audio => AppStrings.t(AppStringKeys.composerAudio),
+    ChatMediaCategory.link => AppStrings.t(AppStringKeys.sharedMediaLinks),
+    ChatMediaCategory.sticker => AppStrings.t(AppStringKeys.tdMessageSticker),
+    ChatMediaCategory.voice => AppStrings.t(AppStringKeys.sharedMediaVoice),
+    ChatMediaCategory.member => AppStrings.t(
+      AppStringKeys.chatInfoGroupMembers,
+    ),
   };
 
   /// The TDLib SearchMessagesFilter `@type`, or null for non-message categories.
@@ -91,13 +94,17 @@ enum ChatMediaCategory {
   };
 
   String get emptyText => switch (this) {
-    ChatMediaCategory.media => '当前没有图片/视频',
-    ChatMediaCategory.file => '当前没有文件',
-    ChatMediaCategory.audio => '当前没有音频',
-    ChatMediaCategory.link => '当前没有链接',
-    ChatMediaCategory.sticker => '当前没有表情',
-    ChatMediaCategory.voice => '当前没有语音',
-    ChatMediaCategory.member => '暂无成员',
+    ChatMediaCategory.media => AppStrings.t(
+      AppStringKeys.tdMessageNoPhotoVideo,
+    ),
+    ChatMediaCategory.file => AppStrings.t(AppStringKeys.tdMessageNoFiles),
+    ChatMediaCategory.audio => AppStrings.t(AppStringKeys.tdMessageNoAudio),
+    ChatMediaCategory.link => AppStrings.t(AppStringKeys.tdMessageNoLinks),
+    ChatMediaCategory.sticker => AppStrings.t(
+      AppStringKeys.tdMessageNoStickers,
+    ),
+    ChatMediaCategory.voice => AppStrings.t(AppStringKeys.tdMessageNoVoice),
+    ChatMediaCategory.member => AppStrings.t(AppStringKeys.tdMessageNoMembers),
   };
 }
 
@@ -327,6 +334,7 @@ class ChatMessage {
     this.location,
     this.voice,
     this.replyToMessageId,
+    this.replyToDate,
     this.serviceUserIds = const [],
     this.customEmoji = const [],
     this.textEntities = const [],
@@ -383,6 +391,7 @@ class ChatMessage {
 
   // 引用 / reply: the message this one replies to, resolved lazily for the quote.
   int? replyToMessageId;
+  int? replyToDate; // unix timestamp of the quoted message
   String? replyToSender; // resolved sender name of the quoted message
   String? replyToPreview; // one-line preview of the quoted message
 
@@ -696,7 +705,9 @@ abstract final class TDParse {
         : null;
     final text = service
         ? serviceText(content)
-        : (content != null ? messageText(content) : '[消息]');
+        : (content != null
+              ? messageText(content)
+              : AppStrings.t(AppStringKeys.chatSearchMessageResultLabel));
 
     int? senderId;
     final sender = message.obj('sender_id');
@@ -1140,7 +1151,7 @@ abstract final class TDParse {
         return;
       case 'richTextIcon':
       case 'textImage':
-        builder.write('[图片]');
+        builder.write(AppStrings.t(AppStringKeys.composerImagePreview));
         return;
       case 'richTextMathematicalExpression':
         final expression = value.str('expression') ?? '';
@@ -1637,7 +1648,10 @@ abstract final class TDParse {
           final performer = _cleanString(audio.str('performer'));
           return MediaAttachment(
             music: MessageMusic(
-              title: title ?? fileName ?? '音乐',
+              title:
+                  title ??
+                  fileName ??
+                  AppStrings.t(AppStringKeys.profileDetailMusic),
               performer: performer,
               cover: fileRef(
                 audio.obj('album_cover_thumbnail')?.obj('file'),
@@ -1652,7 +1666,9 @@ abstract final class TDParse {
         final doc = content.obj('document');
         if (doc != null) {
           final f = doc.obj('document');
-          final name = doc.str('file_name') ?? '文件';
+          final name =
+              doc.str('file_name') ??
+              AppStrings.t(AppStringKeys.topicPostContentFile);
           final dot = name.lastIndexOf('.');
           final ext = dot >= 0 ? name.substring(dot + 1).toUpperCase() : '';
           return MediaAttachment(
@@ -1674,63 +1690,86 @@ abstract final class TDParse {
       case 'messageText':
         return content.obj('text')?.str('text') ?? '';
       case 'messageRichMessage':
-        return _richMessageText(content.obj('message'))?.text ?? '[消息]';
+        return _richMessageText(content.obj('message'))?.text ??
+            AppStrings.t(AppStringKeys.chatSearchMessageResultLabel);
       case 'messagePhoto':
         final caption = content.obj('caption')?.str('text') ?? '';
-        return caption.isEmpty ? '[图片]' : caption;
+        return caption.isEmpty
+            ? AppStrings.t(AppStringKeys.composerImagePreview)
+            : caption;
       case 'messageVideo':
         final caption = content.obj('caption')?.str('text') ?? '';
-        return caption.isEmpty ? '[视频]' : caption;
+        return caption.isEmpty
+            ? AppStrings.t(AppStringKeys.chatVideoPlaceholder)
+            : caption;
       case 'messageVideoNote':
-        return '[视频消息]';
+        return AppStrings.t(AppStringKeys.tdMessageVideoMessage);
       case 'messageVoiceNote':
-        return '[语音]';
+        return AppStrings.t(AppStringKeys.composerVoicePreview);
       case 'messageAudio':
         final caption = content.obj('caption')?.str('text') ?? '';
-        return caption.isEmpty ? '[音乐]' : caption;
+        return caption.isEmpty
+            ? AppStrings.t(AppStringKeys.tdMessageMusic)
+            : caption;
       case 'messageDocument':
         final caption = content.obj('caption')?.str('text') ?? '';
         if (caption.isNotEmpty) return caption;
         final name = content.obj('document')?.str('file_name');
-        return name != null ? '[文件] $name' : '[文件]';
+        return name != null
+            ? AppStrings.t(AppStringKeys.tdMessageFileWithName, {
+                'value1': name,
+              })
+            : AppStrings.t(AppStringKeys.channelsFileAttachment);
       case 'messageSticker':
         final emoji = content.obj('sticker')?.str('emoji') ?? '';
-        return emoji.isEmpty ? '[表情]' : '[表情$emoji]';
+        return emoji.isEmpty
+            ? AppStrings.t(AppStringKeys.tdMessageStickerPreview)
+            : AppStrings.t(AppStringKeys.tdMessageStickerWithEmoji, {
+                'value1': emoji,
+              });
       case 'messageAnimation':
         final caption = content.obj('caption')?.str('text') ?? '';
-        return caption.isEmpty ? '[动画表情]' : caption;
+        return caption.isEmpty
+            ? AppStrings.t(AppStringKeys.composerAnimatedEmojiPreview)
+            : caption;
       case 'messageAnimatedEmoji':
-        return content.obj('animated_emoji')?.str('emoji') ?? '[动画表情]';
+        return content.obj('animated_emoji')?.str('emoji') ??
+            AppStrings.t(AppStringKeys.composerAnimatedEmojiPreview);
       case 'messageLocation':
-        return '[位置]';
+        return AppStrings.t(AppStringKeys.composerLocationPreview);
       case 'messageVenue':
-        return '[位置]';
+        return AppStrings.t(AppStringKeys.composerLocationPreview);
       case 'messageContact':
-        return '[名片]';
+        return AppStrings.t(AppStringKeys.tdMessageContactCard);
       case 'messagePoll':
-        return '[投票]';
+        return AppStrings.t(AppStringKeys.tdMessagePoll);
       case 'messageChecklist':
         final title = content.obj('list')?.obj('title')?.str('text') ?? '';
-        return title.isEmpty ? '[清单]' : title;
+        return title.isEmpty
+            ? AppStrings.t(AppStringKeys.tdMessageChecklist)
+            : title;
       case 'messageCall':
-        return (content.boolean('is_video') ?? false) ? '[视频通话]' : '[语音通话]';
+        return (content.boolean('is_video') ?? false)
+            ? AppStrings.t(AppStringKeys.tdMessageVideoCall)
+            : AppStrings.t(AppStringKeys.tdMessageVoiceCall);
       case 'messageDice':
-        return content.str('emoji') ?? '[骰子]';
+        return content.str('emoji') ??
+            AppStrings.t(AppStringKeys.tdMessageDice);
       case 'messageGame':
-        return '[游戏]';
+        return AppStrings.t(AppStringKeys.tdMessageGame);
       case 'messageInvoice':
-        return '[商品]';
+        return AppStrings.t(AppStringKeys.tdMessageProduct);
       case 'messageStory':
-        return '[转发的故事]';
+        return AppStrings.t(AppStringKeys.tdMessageForwardedStory);
       case 'messageGiveaway':
       case 'messageGiveawayWinners':
       case 'messageGiveawayCompleted':
-        return '[抽奖]';
+        return AppStrings.t(AppStringKeys.tdMessageGiveaway);
       case 'messagePaidMedia':
-        return '[付费内容]';
+        return AppStrings.t(AppStringKeys.tdMessagePaidContent);
       case 'messagePaidMessagePriceChanged':
       case 'messageDirectMessagePriceChanged':
-        return '[付费消息设置已更改]';
+        return AppStrings.t(AppStringKeys.tdMessagePaidMessageSettingsChanged);
       case 'messageGift':
       case 'messagePremiumGiftCode':
       case 'messageGiftedPremium':
@@ -1738,27 +1777,27 @@ abstract final class TDParse {
       case 'messageGiftedTon':
       case 'messageUpgradedGift':
       case 'messageRefundedUpgradedGift':
-        return '[礼物]';
+        return AppStrings.t(AppStringKeys.tdMessageGift);
       case 'messageSuggestedPostInfo':
       case 'messageSuggestedPostApproved':
       case 'messageSuggestedPostApprovalFailed':
       case 'messageSuggestedPostDeclined':
       case 'messageSuggestedPostPaid':
       case 'messageSuggestedPostRefunded':
-        return '[投稿]';
+        return AppStrings.t(AppStringKeys.tdMessageSubmission);
       case 'messageExpiredPhoto':
-        return '[照片已过期]';
+        return AppStrings.t(AppStringKeys.tdMessageExpiredPhoto);
       case 'messageExpiredVideo':
-        return '[视频已过期]';
+        return AppStrings.t(AppStringKeys.tdMessageExpiredVideo);
       case 'messageUnsupported':
-        return '[当前版本暂不支持的消息]';
+        return AppStrings.t(AppStringKeys.tdMessageUnsupportedCurrentVersion);
       default:
         final fallback = _nestedFormattedText(content);
         if (fallback.isNotEmpty) return fallback;
         if (kDebugMode) {
           debugPrint('Unsupported TDLib message content: ${content.type}');
         }
-        return '[消息]';
+        return AppStrings.t(AppStringKeys.chatSearchMessageResultLabel);
     }
   }
 
@@ -1850,23 +1889,25 @@ abstract final class TDParse {
   static String serviceText(Map<String, dynamic>? content) {
     switch (content?.type) {
       case 'messageContactRegistered':
-        return '对方已加入 Telegram';
+        return AppStrings.t(AppStringKeys.tdMessageUserJoinedTelegram);
       case 'messageChatChangeTitle':
-        return '群名称已修改为 ${content?.str('title') ?? ''}';
+        return AppStrings.t(AppStringKeys.tdMessageGroupNameChanged, {
+          'value1': content?.str('title') ?? '',
+        });
       case 'messageChatChangePhoto':
-        return '群头像已更新';
+        return AppStrings.t(AppStringKeys.tdMessageGroupPhotoUpdated);
       case 'messageChatDeletePhoto':
-        return '群头像已删除';
+        return AppStrings.t(AppStringKeys.tdMessageGroupPhotoDeleted);
       case 'messageChatAddMembers':
-        return '新成员加入了群聊';
+        return AppStrings.t(AppStringKeys.tdMessageNewMemberJoinedGroup);
       case 'messageChatJoinByLink':
-        return '通过链接加入了群聊';
+        return AppStrings.t(AppStringKeys.tdMessageJoinedGroupByLink);
       case 'messageChatJoinByRequest':
-        return '加入了群聊';
+        return AppStrings.t(AppStringKeys.groupManagementLogJoinedGroup);
       case 'messageChatDeleteMember':
-        return '有成员离开了群聊';
+        return AppStrings.t(AppStringKeys.tdMessageMemberLeftGroup);
       case 'messagePinMessage':
-        return '置顶了一条消息';
+        return AppStrings.t(AppStringKeys.tdMessageMessagePinned);
       case 'messagePaidMessagePriceChanged':
       case 'messageDirectMessagePriceChanged':
         final stars =
@@ -1874,7 +1915,11 @@ abstract final class TDParse {
             content?.integer('star_count') ??
             content?.integer('price') ??
             0;
-        return stars > 0 ? '发送消息价格已改为 $stars 星' : '已关闭付费消息';
+        return stars > 0
+            ? AppStrings.t(AppStringKeys.tdMessagePaidMessagePriceChanged, {
+                'value1': stars,
+              })
+            : AppStrings.t(AppStringKeys.tdMessagePaidMessagesDisabled);
       case 'messageChatSetMessageAutoDeleteTime':
         final seconds =
             content?.obj('message_auto_delete_time')?.integer('time') ??
@@ -1883,21 +1928,23 @@ abstract final class TDParse {
             content?.integer('auto_delete_time') ??
             0;
         return seconds > 0
-            ? '自动删除消息已设为${formatDuration(seconds)}'
-            : '自动删除消息已关闭';
+            ? AppStrings.t(AppStringKeys.tdMessageAutoDeleteTimerChanged, {
+                'value1': formatDuration(seconds),
+              })
+            : AppStrings.t(AppStringKeys.tdMessageAutoDeleteTimerDisabled);
       case 'messageBasicGroupChatCreate':
       case 'messageSupergroupChatCreate':
-        return '群聊已创建';
+        return AppStrings.t(AppStringKeys.tdMessageGroupCreated);
       case 'messageVideoChatStarted':
-        return '群视频通话已开始';
+        return AppStrings.t(AppStringKeys.tdMessageGroupVideoChatStarted);
       case 'messageVideoChatEnded':
-        return '群视频通话已结束';
+        return AppStrings.t(AppStringKeys.tdMessageGroupVideoChatEnded);
       case 'messageForumTopicCreated':
-        return '创建了话题';
+        return AppStrings.t(AppStringKeys.groupManagementLogCreatedTopic);
       case 'messageChatBoost':
-        return '助力了本群';
+        return AppStrings.t(AppStringKeys.tdMessageBoostedGroup);
       default:
-        return '系统消息';
+        return AppStrings.t(AppStringKeys.tdMessageSystemMessage);
     }
   }
 
@@ -1922,20 +1969,30 @@ abstract final class TDParse {
   }
 
   static String formatDuration(int seconds) {
-    if (seconds <= 0) return '关闭';
+    if (seconds <= 0) {
+      return AppStrings.t(AppStringKeys.chatInfoAutoDeleteOff);
+    }
     if (seconds % 86400 == 0) {
       final days = seconds ~/ 86400;
-      return days == 1 ? '1天' : '$days天';
+      return days == 1
+          ? AppStrings.t(AppStringKeys.chatInfoAutoDeleteOneDay)
+          : AppStrings.t(AppStringKeys.tdMessageDaysDuration, {'value1': days});
     }
     if (seconds % 3600 == 0) {
       final hours = seconds ~/ 3600;
-      return '$hours小时';
+      return AppStrings.t(AppStringKeys.tdMessageHoursDuration, {
+        'value1': hours,
+      });
     }
     if (seconds % 60 == 0) {
       final minutes = seconds ~/ 60;
-      return '$minutes分钟';
+      return AppStrings.t(AppStringKeys.tdMessageMinutesDuration, {
+        'value1': minutes,
+      });
     }
-    return '$seconds秒';
+    return AppStrings.t(AppStringKeys.tdMessageSecondsDuration, {
+      'value1': seconds,
+    });
   }
 
   // MARK: Files
@@ -2020,7 +2077,9 @@ abstract final class TDParse {
     if (full.isNotEmpty) return full;
     final username = user.obj('usernames')?.str('editable_username');
     if (username != null && username.isNotEmpty) return '@$username';
-    return '用户 ${user.int64('id') ?? 0}';
+    return AppStrings.t(AppStringKeys.chatUserFallbackName, {
+      'value1': user.int64('id') ?? 0,
+    });
   }
 
   /// Formats a raw TDLib phone number (digits, no +) to international form via
@@ -2040,15 +2099,15 @@ abstract final class TDParse {
   static String userStatus(Map<String, dynamic> user) {
     switch (user.obj('status')?.type) {
       case 'userStatusOnline':
-        return '在线';
+        return AppStrings.t(AppStringKeys.chatOnline);
       case 'userStatusRecently':
-        return '最近在线';
+        return AppStrings.t(AppStringKeys.chatRecentlyOnline);
       case 'userStatusOffline':
         return _lastOnlineText(user.obj('status')?.integer('was_online') ?? 0);
       case 'userStatusLastWeek':
-        return '一周内在线';
+        return AppStrings.t(AppStringKeys.chatOnlineWithinWeek);
       case 'userStatusLastMonth':
-        return '一个月内在线';
+        return AppStrings.t(AppStringKeys.chatOnlineWithinMonth);
       default:
         return '';
     }
@@ -2058,7 +2117,9 @@ abstract final class TDParse {
       user.obj('status')?.type == 'userStatusOnline';
 
   static String _lastOnlineText(int unixSeconds) {
-    if (unixSeconds <= 0) return '最后在线时间未知';
+    if (unixSeconds <= 0) {
+      return AppStrings.t(AppStringKeys.tdMessageLastSeenUnknown);
+    }
     final time = DateTime.fromMillisecondsSinceEpoch(
       unixSeconds * 1000,
     ).toLocal();
@@ -2067,14 +2128,29 @@ abstract final class TDParse {
     final day = DateTime(time.year, time.month, time.day);
     final hh = time.hour.toString().padLeft(2, '0');
     final mm = time.minute.toString().padLeft(2, '0');
-    if (day == today) return '最后在线 今天 $hh:$mm';
+    if (day == today) {
+      return AppStrings.t(AppStringKeys.tdMessageLastSeenTodayTime, {
+        'value1': hh,
+        'value2': mm,
+      });
+    }
     if (day == today.subtract(const Duration(days: 1))) {
-      return '最后在线 昨天 $hh:$mm';
+      return AppStrings.t(AppStringKeys.tdMessageLastSeenYesterdayTime, {
+        'value1': hh,
+        'value2': mm,
+      });
     }
     if (time.year == now.year) {
-      return '最后在线 ${time.month}月${time.day}日';
+      return AppStrings.t(AppStringKeys.tdMessageLastSeenMonthDay, {
+        'value1': time.month,
+        'value2': time.day,
+      });
     }
-    return '最后在线 ${time.year}年${time.month}月${time.day}日';
+    return AppStrings.t(AppStringKeys.tdMessageLastSeenYearMonthDay, {
+      'value1': time.year,
+      'value2': time.month,
+      'value3': time.day,
+    });
   }
 }
 

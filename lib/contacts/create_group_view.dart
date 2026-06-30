@@ -15,6 +15,7 @@ import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class CreateGroupView extends StatefulWidget {
   const CreateGroupView({super.key});
@@ -78,7 +79,7 @@ class _CreateGroupViewState extends State<CreateGroupView> {
   Future<void> _create() async {
     if (_selected.isEmpty || _creating) return;
     final title = _titleController.text.trim().isEmpty
-        ? '群聊'
+        ? AppStrings.t(AppStringKeys.chatInfoGroupChat)
         : _titleController.text.trim();
     setState(() => _creating = true);
     try {
@@ -102,7 +103,7 @@ class _CreateGroupViewState extends State<CreateGroupView> {
     } catch (_) {
       if (mounted) {
         setState(() => _creating = false);
-        showToast(context, '创建群聊失败');
+        showToast(context, AppStrings.t(AppStringKeys.createGroupFailed));
       }
     }
   }
@@ -152,7 +153,7 @@ class _CreateGroupViewState extends State<CreateGroupView> {
               ),
             ),
             Text(
-              '发起群聊',
+              AppStrings.t(AppStringKeys.createGroupStartGroupChat),
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
@@ -167,7 +168,11 @@ class _CreateGroupViewState extends State<CreateGroupView> {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 14),
                   child: Text(
-                    _selected.isEmpty ? '完成' : '完成(${_selected.length})',
+                    _selected.isEmpty
+                        ? AppStrings.t(AppStringKeys.addMembersDone)
+                        : AppStrings.t(AppStringKeys.addMembersDoneWithCount, {
+                            'value1': _selected.length,
+                          }),
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
@@ -193,14 +198,17 @@ class _CreateGroupViewState extends State<CreateGroupView> {
       ),
       child: Row(
         children: [
-          Text('群名称', style: TextStyle(fontSize: 15, color: c.textSecondary)),
+          Text(
+            AppStrings.t(AppStringKeys.groupManagementGroupName),
+            style: TextStyle(fontSize: 15, color: c.textSecondary),
+          ),
           const SizedBox(width: 14),
           Expanded(
             child: TextField(
               controller: _titleController,
               style: TextStyle(fontSize: 15, color: c.textPrimary),
-              decoration: const InputDecoration(
-                hintText: '选填',
+              decoration: InputDecoration(
+                hintText: AppStrings.t(AppStringKeys.createGroupOptionalLabel),
                 border: InputBorder.none,
                 isCollapsed: true,
               ),

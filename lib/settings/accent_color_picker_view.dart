@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 /// The 7 built-in Telegram peer/name accent colors (ids 0–6, light theme).
 /// These ids are universal across clients; higher ids are premium palettes
@@ -63,7 +64,7 @@ class _AccentColorPickerViewState extends State<AccentColorPickerView> {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: Text(
-                  '保存',
+                  AppStrings.t(AppStringKeys.accentColorPickerSave),
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,

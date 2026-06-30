@@ -31,6 +31,7 @@ import 'group_management_view.dart';
 import 'pinned_messages_view.dart';
 import 'chat_search_view.dart';
 import 'shared_media_view.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class ChatMember {
   ChatMember(this.id, this.name, this.photo);
@@ -101,7 +102,10 @@ class _ChatInfoViewState extends State<ChatInfoView> {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '聊天信息', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.chatInfoTitle),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
@@ -222,7 +226,11 @@ class _ChatInfoViewState extends State<ChatInfoView> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          _vm.groupNumber.isEmpty ? '群聊' : '群号：${_vm.groupNumber}',
+          _vm.groupNumber.isEmpty
+              ? AppStrings.t(AppStringKeys.chatInfoGroupChat)
+              : AppStrings.t(AppStringKeys.chatInfoGroupId, {
+                  'value1': _vm.groupNumber,
+                }),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(fontSize: 13, color: c.textSecondary),
@@ -236,7 +244,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
             style: TextStyle(fontSize: 13, color: AppTheme.brand),
           )
         else
-          _lockBadge('不允许被搜索'),
+          _lockBadge(AppStrings.t(AppStringKeys.chatInfoNotSearchable)),
       ],
     );
   }
@@ -274,7 +282,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
             child: Row(
               children: [
                 Text(
-                  '群成员',
+                  AppStrings.t(AppStringKeys.chatInfoGroupMembers),
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w500,
@@ -284,7 +292,9 @@ class _ChatInfoViewState extends State<ChatInfoView> {
                 const Spacer(),
                 if (_vm.memberCount > 0)
                   Text(
-                    '${_vm.memberCount}人',
+                    AppStrings.t(AppStringKeys.topicChatMemberCount, {
+                      'value1': _vm.memberCount,
+                    }),
                     style: TextStyle(fontSize: 14, color: c.textSecondary),
                   ),
                 const SizedBox(width: 6),
@@ -331,7 +341,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
                   if (_vm.canInvite)
                     _actionTile(
                       FontAwesomeIcons.plus.data,
-                      '邀请',
+                      AppStrings.t(AppStringKeys.topicChatInvite),
                       () => Navigator.of(context).push(
                         MaterialPageRoute(
                           builder: (_) => AddMembersView(chatId: widget.chatId),
@@ -341,7 +351,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
                   if (_vm.canRemove)
                     _actionTile(
                       FontAwesomeIcons.minus.data,
-                      '移除',
+                      AppStrings.t(AppStringKeys.chatInfoRemove),
                       _openMembers,
                     ),
                 ],
@@ -391,7 +401,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
       child: Column(
         children: [
           _infoRow(
-            '查找聊天记录',
+            AppStrings.t(AppStringKeys.chatInfoSearchHistory),
             () => Navigator.of(context).push(
               MaterialPageRoute(
                 builder: (_) =>
@@ -400,18 +410,23 @@ class _ChatInfoViewState extends State<ChatInfoView> {
             ),
           ),
           const InsetDivider(leadingInset: 14),
-          _infoRow('聊天分组', _openChatFolders),
+          _infoRow(
+            AppStrings.t(AppStringKeys.chatInfoChatFolders),
+            _openChatFolders,
+          ),
           if (!_vm.isGroup) ...[
             const InsetDivider(leadingInset: 14),
             _infoRow(
-              '文件',
+              AppStrings.t(AppStringKeys.topicPostContentFile),
               () => Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => SharedMediaView(
                     chatId: widget.chatId,
                     title: widget.title,
                     initialTab: 1,
-                    displayTitle: '文件',
+                    displayTitle: AppStrings.t(
+                      AppStringKeys.topicPostContentFile,
+                    ),
                     lockedTab: true,
                   ),
                 ),
@@ -421,7 +436,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
           if (_vm.isGroup && _vm.canManageGroup) ...[
             const InsetDivider(leadingInset: 14),
             _infoRow(
-              '管理群',
+              AppStrings.t(AppStringKeys.chatInfoManageGroup),
               () => Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => GroupManagementView(
@@ -475,7 +490,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
             Row(
               children: [
                 Text(
-                  '群应用',
+                  AppStrings.t(AppStringKeys.chatInfoGroupApps),
                   style: TextStyle(fontSize: 15, color: c.textPrimary),
                 ),
                 const Spacer(),
@@ -494,14 +509,16 @@ class _ChatInfoViewState extends State<ChatInfoView> {
                   _groupAppItem(
                     icon: FontAwesomeIcons.solidFolder.data,
                     color: const Color(0xFFFFB300),
-                    label: '文件',
+                    label: AppStrings.t(AppStringKeys.topicPostContentFile),
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => SharedMediaView(
                           chatId: widget.chatId,
                           title: widget.title,
                           initialTab: 1,
-                          displayTitle: '群文件',
+                          displayTitle: AppStrings.t(
+                            AppStringKeys.chatInfoGroupFiles,
+                          ),
                           lockedTab: true,
                         ),
                       ),
@@ -510,14 +527,16 @@ class _ChatInfoViewState extends State<ChatInfoView> {
                   _groupAppItem(
                     icon: FontAwesomeIcons.solidImage.data,
                     color: const Color(0xFF15A7F7),
-                    label: '相册',
+                    label: AppStrings.t(AppStringKeys.chatInfoAlbum),
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => SharedMediaView(
                           chatId: widget.chatId,
                           title: widget.title,
                           initialTab: 0,
-                          displayTitle: '群相册',
+                          displayTitle: AppStrings.t(
+                            AppStringKeys.chatInfoGroupAlbum,
+                          ),
                           lockedTab: true,
                         ),
                       ),
@@ -526,14 +545,16 @@ class _ChatInfoViewState extends State<ChatInfoView> {
                   _groupAppItem(
                     icon: FontAwesomeIcons.video.data,
                     color: const Color(0xFF7B61FF),
-                    label: '群视频',
+                    label: AppStrings.t(AppStringKeys.chatInfoGroupVideos),
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => SharedMediaView(
                           chatId: widget.chatId,
                           title: widget.title,
                           initialTab: 4,
-                          displayTitle: '群视频',
+                          displayTitle: AppStrings.t(
+                            AppStringKeys.chatInfoGroupVideos,
+                          ),
                           lockedTab: true,
                         ),
                       ),
@@ -542,7 +563,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
                   _groupAppItem(
                     icon: FontAwesomeIcons.solidStar.data,
                     color: const Color(0xFF18C26E),
-                    label: '精华消息',
+                    label: AppStrings.t(AppStringKeys.chatInfoPinnedHighlights),
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => PinnedMessagesView(
@@ -604,7 +625,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
     return SettingsCard(
       children: [
         SettingsSwitchRow(
-          title: '置顶聊天',
+          title: AppStrings.t(AppStringKeys.chatInfoPinChat),
           value: _vm.isPinned,
           onChanged: _vm.setPinned,
           height: 52,
@@ -612,7 +633,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
         ),
         const InsetDivider(leadingInset: 14),
         SettingsSwitchRow(
-          title: '消息免打扰',
+          title: AppStrings.t(AppStringKeys.topicChatMuteMessagesToggle),
           value: _vm.isMuted,
           onChanged: _vm.setMuted,
           height: 52,
@@ -621,7 +642,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
         if (showGroupAssistant) ...[
           const InsetDivider(leadingInset: 14),
           SettingsSwitchRow(
-            title: '收进群助手',
+            title: AppStrings.t(AppStringKeys.chatInfoMoveToGroupAssistant),
             value: _vm.isArchived,
             onChanged: _vm.setArchived,
             height: 52,
@@ -630,7 +651,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
         ],
         const InsetDivider(leadingInset: 14),
         SettingsRow(
-          title: '自动删除消息',
+          title: AppStrings.t(AppStringKeys.chatInfoAutoDeleteMessages),
           value: TDParse.formatDuration(_vm.autoDeleteTime),
           onTap: _chooseAutoDelete,
           height: 52,
@@ -642,15 +663,15 @@ class _ChatInfoViewState extends State<ChatInfoView> {
 
   Future<void> _chooseAutoDelete() async {
     final options = <(String, int)>[
-      ('关闭', 0),
-      ('1天', 86400),
-      ('7天', 604800),
-      ('1个月', 2592000),
+      (AppStrings.t(AppStringKeys.chatInfoAutoDeleteOff), 0),
+      (AppStrings.t(AppStringKeys.chatInfoAutoDeleteOneDay), 86400),
+      (AppStrings.t(AppStringKeys.chatInfoAutoDeleteSevenDays), 604800),
+      (AppStrings.t(AppStringKeys.chatInfoAutoDeleteOneMonth), 2592000),
     ];
     final selected = await showCupertinoModalPopup<int>(
       context: context,
       builder: (context) => CupertinoActionSheet(
-        title: const Text('自动删除消息'),
+        title: Text(AppStrings.t(AppStringKeys.chatInfoAutoDeleteMessages)),
         actions: [
           for (final option in options)
             CupertinoActionSheetAction(
@@ -660,7 +681,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
         ],
         cancelButton: CupertinoActionSheetAction(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
+          child: Text(AppStrings.t(AppStringKeys.countryPickerCancel)),
         ),
       ),
     );
@@ -674,11 +695,14 @@ class _ChatInfoViewState extends State<ChatInfoView> {
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
-          _destructiveRow('清空聊天记录', _clearHistory),
+          _destructiveRow(
+            AppStrings.t(AppStringKeys.chatInfoClearHistory),
+            _clearHistory,
+          ),
           // Only a confirmed member can quit — hide 退出 for non-joined groups.
           if (_vm.isGroup && _vm.isMember) ...[
             const InsetDivider(leadingInset: 0),
-            _destructiveRow('退出群聊', () {
+            _destructiveRow(AppStrings.t(AppStringKeys.chatInfoLeaveGroup), () {
               _vm.leaveChat();
               Navigator.of(context).pop();
             }),
@@ -707,17 +731,19 @@ class _ChatInfoViewState extends State<ChatInfoView> {
   Future<void> _clearHistory() async {
     final first = await confirmDialog(
       context,
-      title: '清空聊天记录？',
-      message: '这会删除本地聊天记录，但不会退出聊天。',
-      confirmText: '清空',
+      title: AppStrings.t(AppStringKeys.chatInfoClearHistoryQuestion),
+      message: AppStrings.t(AppStringKeys.chatInfoClearHistoryDescription),
+      confirmText: AppStrings.t(AppStringKeys.chatInfoClear),
       destructive: true,
     );
     if (!mounted || !first) return;
     final second = await confirmDialog(
       context,
-      title: '再次确认',
-      message: '清空后当前设备上的记录将不可恢复。',
-      confirmText: '确认清空',
+      title: AppStrings.t(AppStringKeys.chatInfoConfirmAgain),
+      message: AppStrings.t(
+        AppStringKeys.chatInfoClearHistoryIrreversibleWarning,
+      ),
+      confirmText: AppStrings.t(AppStringKeys.chatInfoConfirmClearHistory),
       destructive: true,
     );
     if (!mounted || !second) return;
@@ -848,7 +874,7 @@ class _ChatFolderMembershipViewState extends State<ChatFolderMembershipView> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = '无法加载聊天分组';
+        _error = AppStrings.t(AppStringKeys.chatInfoLoadFoldersFailed);
       });
     }
   }
@@ -869,7 +895,9 @@ class _ChatFolderMembershipViewState extends State<ChatFolderMembershipView> {
         info.obj('title')?.str('text') ??
         info.str('title') ??
         info.str('name');
-    return (title == null || title.isEmpty) ? '分组 $id' : title;
+    return (title == null || title.isEmpty)
+        ? AppStrings.t(AppStringKeys.chatInfoFolderName, {'value1': id})
+        : title;
   }
 
   Future<void> _toggle(_FolderMembership item, bool value) async {
@@ -964,23 +992,28 @@ class _ChatFolderMembershipViewState extends State<ChatFolderMembershipView> {
         final c = context.colors;
         return AlertDialog(
           backgroundColor: c.card,
-          title: Text('新建聊天分组', style: TextStyle(color: c.textPrimary)),
+          title: Text(
+            AppStrings.t(AppStringKeys.chatInfoCreateFolderTitle),
+            style: TextStyle(color: c.textPrimary),
+          ),
           content: TextField(
             controller: controller,
             autofocus: true,
             textInputAction: TextInputAction.done,
-            decoration: const InputDecoration(hintText: '分组名称'),
+            decoration: InputDecoration(
+              hintText: AppStrings.t(AppStringKeys.chatInfoFolderNameLabel),
+            ),
             onSubmitted: (value) => Navigator.of(context).pop(value.trim()),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('取消'),
+              child: Text(AppStrings.t(AppStringKeys.countryPickerCancel)),
             ),
             TextButton(
               onPressed: () =>
                   Navigator.of(context).pop(controller.text.trim()),
-              child: const Text('创建'),
+              child: Text(AppStrings.t(AppStringKeys.chatInfoCreate)),
             ),
           ],
         );
@@ -1006,9 +1039,11 @@ class _ChatFolderMembershipViewState extends State<ChatFolderMembershipView> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _loading = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('无法创建聊天分组')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(AppStrings.t(AppStringKeys.chatInfoCreateFolderFailed)),
+        ),
+      );
     }
   }
 
@@ -1020,7 +1055,7 @@ class _ChatFolderMembershipViewState extends State<ChatFolderMembershipView> {
       body: Column(
         children: [
           NavHeader(
-            title: '聊天分组',
+            title: AppStrings.t(AppStringKeys.chatInfoChatFolders),
             onBack: () => Navigator.of(context).pop(),
             trailing: GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -1057,11 +1092,14 @@ class _ChatFolderMembershipViewState extends State<ChatFolderMembershipView> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('暂无聊天分组', style: TextStyle(color: c.textSecondary)),
+            Text(
+              AppStrings.t(AppStringKeys.chatInfoNoFolders),
+              style: TextStyle(color: c.textSecondary),
+            ),
             const SizedBox(height: 12),
             CupertinoButton.filled(
               onPressed: _createFolder,
-              child: const Text('新建分组'),
+              child: Text(AppStrings.t(AppStringKeys.chatInfoNewFolder)),
             ),
           ],
         ),
@@ -1090,7 +1128,7 @@ class _ChatFolderMembershipViewState extends State<ChatFolderMembershipView> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14),
           child: Text(
-            '关闭显式分组会将此聊天移出；如果自动分组规则仍会命中，则会加入排除列表。',
+            AppStrings.t(AppStringKeys.chatInfoDisableExplicitFolderWarning),
             style: TextStyle(fontSize: 13, color: c.textTertiary),
           ),
         ),
@@ -1431,15 +1469,21 @@ class ChatInfoViewModel extends ChangeNotifier {
     final hitPinned =
         normalized.contains('pin') ||
         normalized.contains('pinned') ||
-        normalized.contains('置顶');
+        normalized.contains(AppStrings.t(AppStringKeys.chatInfoPin));
     final hitLimit =
         normalized.contains('limit') ||
         normalized.contains('too many') ||
         normalized.contains('too much') ||
         normalized.contains('many') ||
         normalized.contains('much') ||
-        normalized.contains('上限');
-    if (hitPinned && hitLimit) return '置顶失败：置顶数量已达上限';
-    return text.isEmpty ? '置顶失败' : '置顶失败：$text';
+        normalized.contains(AppStrings.t(AppStringKeys.chatInfoPinLimit));
+    if (hitPinned && hitLimit) {
+      return AppStrings.t(AppStringKeys.chatInfoPinLimitReachedError);
+    }
+    return text.isEmpty
+        ? AppStrings.t(AppStringKeys.chatInfoPinFailed)
+        : AppStrings.t(AppStringKeys.chatInfoPinFailedWithReason, {
+            'value1': text,
+          });
   }
 }

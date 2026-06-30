@@ -17,6 +17,7 @@ import '../theme/app_theme.dart';
 import '../theme/date_text.dart';
 import '../theme/theme_controller.dart';
 import 'chat_row_view.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 /// Collapsed "群助手" entry summarizing archived chats.
 class GroupAssistantRow extends StatelessWidget {
@@ -82,7 +83,7 @@ class GroupAssistantRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '群助手',
+                  AppStrings.t(AppStringKeys.archivedChatsGroupAssistant),
                   style: TextStyle(
                     fontSize: AppTextSize.bodyLarge,
                     fontWeight: FontWeight.w500,
@@ -126,7 +127,10 @@ class ArchivedChatsView extends StatelessWidget {
       backgroundColor: c.background,
       body: Column(
         children: [
-          NavHeader(title: '群助手', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.archivedChatsGroupAssistant),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(
             child: ListView.builder(
               padding: EdgeInsets.zero,

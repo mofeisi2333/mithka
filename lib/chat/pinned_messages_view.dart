@@ -17,6 +17,7 @@ import '../theme/date_text.dart';
 import 'chat_view.dart';
 import 'full_image_viewer.dart';
 import 'video_player_view.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class PinnedMessagesView extends StatefulWidget {
   const PinnedMessagesView({
@@ -138,7 +139,7 @@ class _PinnedMessagesViewState extends State<PinnedMessagesView> {
               ),
             ),
             Text(
-              '精华消息',
+              AppStrings.t(AppStringKeys.chatInfoPinnedHighlights),
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
@@ -165,7 +166,7 @@ class _PinnedMessagesViewState extends State<PinnedMessagesView> {
     if (_items.isEmpty) {
       return Center(
         child: Text(
-          '暂无精华消息',
+          AppStrings.t(AppStringKeys.pinnedMessagesEmpty),
           style: TextStyle(fontSize: 14, color: c.textSecondary),
         ),
       );
@@ -229,7 +230,9 @@ class _PinnedMessagesViewState extends State<PinnedMessagesView> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '${DateText.listLabel(message.date)} 发送',
+                        AppStrings.t(AppStringKeys.pinnedMessagesSentBy, {
+                          'value1': DateText.listLabel(message.date),
+                        }),
                         style: TextStyle(fontSize: 13, color: c.textTertiary),
                       ),
                     ],
@@ -304,7 +307,7 @@ class _PinnedMessagesViewState extends State<PinnedMessagesView> {
     }
 
     final text = message.text.trim().isEmpty
-        ? '[消息]'
+        ? AppStrings.t(AppStringKeys.chatSearchMessageResultLabel)
         : message.text.replaceAll('\n', ' ');
     return Text(
       text,

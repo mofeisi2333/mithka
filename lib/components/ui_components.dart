@@ -317,9 +317,9 @@ class RoleTag extends StatelessWidget {
   String get _label {
     if (title != null && title!.isNotEmpty) return title!;
     return switch (role) {
-      MemberRole.owner => '群主',
-      MemberRole.admin => '管理员',
-      MemberRole.member => '成员',
+      MemberRole.owner => AppStrings.t(AppStringKeys.commonUiGroupOwner),
+      MemberRole.admin => AppStrings.t(AppStringKeys.groupManagementLogAdmin),
+      MemberRole.member => AppStrings.t(AppStringKeys.groupManagementMembers),
     };
   }
 
@@ -575,7 +575,12 @@ class ChatPreviewText extends StatelessWidget {
   final String message;
   final bool draft; // render a red "[草稿]" prefix and ignore sender
 
-  static const _redTags = ['[有新文件]', '[有人@我]', '[草稿]', '[@我]'];
+  static const _redTags = [
+    AppStringKeys.commonUiNewFileBadge,
+    AppStringKeys.commonUiMentionedBySomeoneBadge,
+    AppStringKeys.commonUiDraftBadge,
+    AppStringKeys.commonUiMentionMeBadge,
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -592,7 +597,7 @@ class ChatPreviewText extends StatelessWidget {
         children: [
           if (draft)
             TextSpan(
-              text: '${'[草稿]'.l10n(context)} ',
+              text: '${AppStringKeys.commonUiDraftBadge.l10n(context)} ',
               style: TextStyle(color: AppTheme.tagRed),
             )
           else if (sender != null && sender!.isNotEmpty)

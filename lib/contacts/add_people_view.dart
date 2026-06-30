@@ -25,6 +25,7 @@ import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import 'create_group_view.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class _ChatHit {
   _ChatHit(this.id, this.title, this.photo, this.subtitle, this.square);
@@ -144,7 +145,9 @@ class _AddPeopleViewState extends State<AddPeopleView> {
               id,
               chat.str('title') ?? '—',
               TDParse.smallPhoto(chat.obj('photo')),
-              kind == ChatKind.channel ? '频道' : '群组',
+              kind == ChatKind.channel
+                  ? AppStrings.t(AppStringKeys.tabChannels)
+                  : AppStrings.t(AppStringKeys.linkHandlerGroupLabel),
               true,
             ),
           );
@@ -170,7 +173,9 @@ class _AddPeopleViewState extends State<AddPeopleView> {
               id,
               chat.str('title') ?? '—',
               TDParse.smallPhoto(chat.obj('photo')),
-              kind == ChatKind.channel ? '频道' : '群组',
+              kind == ChatKind.channel
+                  ? AppStrings.t(AppStringKeys.tabChannels)
+                  : AppStrings.t(AppStringKeys.linkHandlerGroupLabel),
               true,
             ),
           );
@@ -230,8 +235,11 @@ class _AddPeopleViewState extends State<AddPeopleView> {
   Future<void> _createChannel() async {
     final title = await Navigator.of(context).push<String>(
       MaterialPageRoute(
-        builder: (_) =>
-            const EditFieldView(title: '创建频道', initial: '', hint: '频道名称'),
+        builder: (_) => EditFieldView(
+          title: AppStrings.t(AppStringKeys.chatListCreateChannel),
+          initial: '',
+          hint: AppStrings.t(AppStringKeys.chatListChannelName),
+        ),
       ),
     );
     if (title == null || title.isEmpty) return;
@@ -250,7 +258,12 @@ class _AddPeopleViewState extends State<AddPeopleView> {
         ),
       );
     } catch (_) {
-      if (mounted) showToast(context, '创建频道失败');
+      if (mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.chatListCreateChannelFailed),
+        );
+      }
     }
   }
 
@@ -337,7 +350,10 @@ class _AddPeopleViewState extends State<AddPeopleView> {
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
-        children: [seg('找人', 0), seg('找群', 1)],
+        children: [
+          seg(AppStrings.t(AppStringKeys.addPeopleFindPeople), 0),
+          seg(AppStrings.t(AppStringKeys.addPeopleFindGroups), 1),
+        ],
       ),
     );
   }
@@ -370,7 +386,13 @@ class _AddPeopleViewState extends State<AddPeopleView> {
                 textInputAction: TextInputAction.search,
                 style: TextStyle(fontSize: 15, color: c.textPrimary),
                 decoration: InputDecoration(
-                  hintText: _mode == 0 ? '用户名/手机号' : '群名称/链接',
+                  hintText: _mode == 0
+                      ? AppStrings.t(
+                          AppStringKeys.addPeopleUsernameOrPhonePlaceholder,
+                        )
+                      : AppStrings.t(
+                          AppStringKeys.addPeopleGroupNameOrLinkPlaceholder,
+                        ),
                   hintStyle: TextStyle(color: c.textTertiary),
                   border: InputBorder.none,
                   isCollapsed: true,
@@ -386,8 +408,16 @@ class _AddPeopleViewState extends State<AddPeopleView> {
 
   Widget _optionsGrid() {
     final options = <(IconData, String, VoidCallback)>[
-      (FontAwesomeIcons.users.data, '创建群聊', _createGroup),
-      (FontAwesomeIcons.towerBroadcast.data, '创建频道', _createChannel),
+      (
+        FontAwesomeIcons.users.data,
+        AppStrings.t(AppStringKeys.chatListCreateGroup),
+        _createGroup,
+      ),
+      (
+        FontAwesomeIcons.towerBroadcast.data,
+        AppStrings.t(AppStringKeys.chatListCreateChannel),
+        _createChannel,
+      ),
     ];
     final c = context.colors;
     return SingleChildScrollView(
@@ -450,7 +480,9 @@ class _AddPeopleViewState extends State<AddPeopleView> {
     if (rows.isEmpty) {
       return Center(
         child: Text(
-          _mode == 0 ? '没有找到用户' : '没有找到群组/频道',
+          _mode == 0
+              ? AppStrings.t(AppStringKeys.addPeopleNoUsersFound)
+              : AppStrings.t(AppStringKeys.addPeopleNoGroupsOrChannelsFound),
           style: TextStyle(fontSize: 14, color: c.textSecondary),
         ),
       );

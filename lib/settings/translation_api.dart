@@ -11,6 +11,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 import 'translation_controller.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class NativeTranslationApi {
   const NativeTranslationApi._();
@@ -45,10 +46,14 @@ class NativeTranslationApi {
           })
           .timeout(
             const Duration(seconds: 60),
-            onTimeout: () => throw TranslationApiException('本机翻译已取消或超时'),
+            onTimeout: () => throw TranslationApiException(
+              AppStrings.t(AppStringKeys.translationNativeCancelledOrTimedOut),
+            ),
           );
       if (translated == null || translated.isEmpty) {
-        throw TranslationApiException('本机翻译没有返回译文');
+        throw TranslationApiException(
+          AppStrings.t(AppStringKeys.translationNativeNoResult),
+        );
       }
       return translated;
     } on PlatformException catch (e) {
@@ -72,8 +77,10 @@ class ThirdPartyTranslationApi {
     final source = _sourceLanguage(sourceLanguageCode);
     final target = _apiLanguage(targetLanguageCode);
     return switch (provider) {
-      TranslationProvider.iosSystem || TranslationProvider.androidMlKit =>
-        throw TranslationApiException('本机翻译不走外部 API'),
+      TranslationProvider.iosSystem ||
+      TranslationProvider.androidMlKit => throw TranslationApiException(
+        AppStrings.t(AppStringKeys.translationNativeNoExternalApi),
+      ),
       TranslationProvider.myMemory => _translateMyMemory(text, source, target),
       TranslationProvider.lingva => _translateLingva(
         text,
@@ -89,7 +96,7 @@ class ThirdPartyTranslationApi {
         libreTranslateApiKey,
       ),
       TranslationProvider.tdlib => throw TranslationApiException(
-        '内部翻译不走外部 API',
+        AppStrings.t(AppStringKeys.translationInternalNoExternalApi),
       ),
     };
   }
@@ -112,7 +119,9 @@ class ThirdPartyTranslationApi {
           ? responseData['translatedText']?.toString()
           : null;
       if (value == null || value.isEmpty) {
-        throw TranslationApiException('MyMemory 没有返回译文');
+        throw TranslationApiException(
+          AppStrings.t(AppStringKeys.translationMyMemoryNoResult),
+        );
       }
       translated.add(value);
     }
@@ -135,7 +144,9 @@ class ThirdPartyTranslationApi {
       final json = await _getJson(uri);
       final value = json['translation']?.toString();
       if (value == null || value.isEmpty) {
-        throw TranslationApiException('Lingva 没有返回译文');
+        throw TranslationApiException(
+          AppStrings.t(AppStringKeys.translationLingvaNoResult),
+        );
       }
       translated.add(value);
     }
@@ -150,7 +161,9 @@ class ThirdPartyTranslationApi {
     String apiKey,
   ) async {
     if (endpoint.trim().isEmpty) {
-      throw TranslationApiException('请先设置 LibreTranslate 地址');
+      throw TranslationApiException(
+        AppStrings.t(AppStringKeys.translationLibreTranslateUrlRequired),
+      );
     }
     final uri = _appendPath(_endpointUri(endpoint), ['translate']);
     final body = <String, Object>{
@@ -163,7 +176,9 @@ class ThirdPartyTranslationApi {
     final json = await _postJson(uri, body);
     final value = json['translatedText']?.toString();
     if (value == null || value.isEmpty) {
-      throw TranslationApiException('LibreTranslate 没有返回译文');
+      throw TranslationApiException(
+        AppStrings.t(AppStringKeys.translationLibreTranslateNoResult),
+      );
     }
     return value;
   }
@@ -191,7 +206,9 @@ class ThirdPartyTranslationApi {
     final normalized = TranslationController.normalizeEndpoint(endpoint);
     final uri = Uri.tryParse(normalized);
     if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
-      throw TranslationApiException('翻译服务地址无效');
+      throw TranslationApiException(
+        AppStrings.t(AppStringKeys.translationServiceUrlInvalid),
+      );
     }
     return uri;
   }
@@ -243,11 +260,17 @@ class ThirdPartyTranslationApi {
   ) async {
     final body = await utf8.decoder.bind(response).join();
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw TranslationApiException('翻译服务返回 ${response.statusCode}');
+      throw TranslationApiException(
+        AppStrings.t(AppStringKeys.translationServiceReturnedStatus, {
+          'value1': response.statusCode,
+        }),
+      );
     }
     final decoded = jsonDecode(body);
     if (decoded is! Map<String, dynamic>) {
-      throw TranslationApiException('翻译服务响应格式不正确');
+      throw TranslationApiException(
+        AppStrings.t(AppStringKeys.translationServiceInvalidResponse),
+      );
     }
     return decoded;
   }

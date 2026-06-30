@@ -19,6 +19,7 @@ import '../tdlib/td_client.dart';
 import '../theme/app_theme.dart';
 import 'chat_members_view.dart';
 import 'group_management_log_view.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class GroupManagementView extends StatefulWidget {
   const GroupManagementView({
@@ -51,20 +52,24 @@ class _GroupManagementViewState extends State<GroupManagementView> {
   Map<String, bool> _permissions = _defaultPermissions;
 
   static const _permissionLabels = <String, String>{
-    'can_send_basic_messages': '发送消息',
-    'can_send_photos': '发送图片',
-    'can_send_videos': '发送视频',
-    'can_send_documents': '发送文件',
-    'can_send_voice_notes': '发送语音',
-    'can_send_video_notes': '发送视频消息',
-    'can_send_audios': '发送音乐',
-    'can_send_polls': '发送投票',
-    'can_send_other_messages': '发送贴纸和 GIF',
-    'can_add_web_page_previews': '链接预览',
-    'can_invite_users': '邀请成员',
-    'can_pin_messages': '置顶消息',
-    'can_change_info': '修改群资料',
-    'can_manage_topics': '创建话题',
+    'can_send_basic_messages':
+        AppStringKeys.groupManagementPermissionSendMessages,
+    'can_send_photos': AppStringKeys.groupManagementPermissionSendPhotos,
+    'can_send_videos': AppStringKeys.groupManagementPermissionSendVideos,
+    'can_send_documents': AppStringKeys.groupManagementPermissionSendFiles,
+    'can_send_voice_notes': AppStringKeys.groupManagementPermissionSendVoice,
+    'can_send_video_notes':
+        AppStringKeys.groupManagementPermissionSendVideoMessages,
+    'can_send_audios': AppStringKeys.groupManagementPermissionSendMusic,
+    'can_send_polls': AppStringKeys.groupManagementPermissionSendPolls,
+    'can_send_other_messages':
+        AppStringKeys.groupManagementPermissionSendStickersAndGifs,
+    'can_add_web_page_previews':
+        AppStringKeys.groupManagementPermissionLinkPreviews,
+    'can_invite_users': AppStringKeys.addMembersInviteMembersTitle,
+    'can_pin_messages': AppStringKeys.groupManagementPermissionPinMessages,
+    'can_change_info': AppStringKeys.groupManagementPermissionEditGroupInfo,
+    'can_manage_topics': AppStringKeys.groupManagementPermissionCreateTopics,
   };
 
   static const _defaultPermissions = <String, bool>{
@@ -120,7 +125,9 @@ class _GroupManagementViewState extends State<GroupManagementView> {
         }
       }
     } catch (_) {
-      if (mounted) showToast(context, '加载群管理失败');
+      if (mounted) {
+        showToast(context, AppStringKeys.groupManagementLoadFailed);
+      }
     }
     if (mounted) setState(() => _loading = false);
   }
@@ -167,88 +174,137 @@ class _GroupManagementViewState extends State<GroupManagementView> {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '管理群', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStringKeys.chatInfoManageGroup,
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(
             child: _loading
                 ? const Center(child: CupertinoActivityIndicator())
                 : ListView(
                     padding: const EdgeInsets.fromLTRB(12, 14, 12, 24),
                     children: [
-                      _section('基础管理', [
-                        _navRow('群名称', value: _title, onTap: _editTitle),
-                        if (_supergroupId != null)
+                      _section(
+                        AppStrings.t(AppStringKeys.groupManagementBasicSection),
+                        [
                           _navRow(
-                            '公开用户名',
-                            value: _username.isEmpty ? '未设置' : '@$_username',
-                            onTap: _canChangeInfo ? _editUsername : null,
+                            AppStrings.t(
+                              AppStringKeys.groupManagementGroupName,
+                            ),
+                            value: _title,
+                            onTap: _editTitle,
                           ),
-                        _navRow(
-                          '邀请链接 / 二维码',
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => QRCodeView(
-                                name: _title,
-                                chatId: widget.chatId,
-                                isGroup: true,
+                          if (_supergroupId != null)
+                            _navRow(
+                              AppStrings.t(
+                                AppStringKeys.groupManagementPublicUsername,
+                              ),
+                              value: _username.isEmpty
+                                  ? AppStrings.t(
+                                      AppStringKeys.groupManagementNotSet,
+                                    )
+                                  : '@$_username',
+                              onTap: _canChangeInfo ? _editUsername : null,
+                            ),
+                          _navRow(
+                            AppStrings.t(
+                              AppStringKeys.groupManagementInviteLinkQr,
+                            ),
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => QRCodeView(
+                                  name: _title,
+                                  chatId: widget.chatId,
+                                  isGroup: true,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ]),
+                        ],
+                      ),
                       if (_supergroupId != null) ...[
                         _gap(),
-                        _section('加群管理', [
-                          _switchRow(
-                            '加入后才能发言',
-                            _joinToSend,
-                            _canChangeInfo,
-                            _setJoinToSend,
+                        _section(
+                          AppStrings.t(
+                            AppStringKeys.groupManagementJoinSection,
                           ),
-                          _divider(),
-                          _switchRow(
-                            '需要管理员批准',
-                            _joinByRequest,
-                            _canChangeInfo,
-                            _setJoinByRequest,
-                          ),
-                        ]),
+                          [
+                            _switchRow(
+                              AppStrings.t(
+                                AppStringKeys.groupManagementJoinBeforePosting,
+                              ),
+                              _joinToSend,
+                              _canChangeInfo,
+                              _setJoinToSend,
+                            ),
+                            _divider(),
+                            _switchRow(
+                              AppStrings.t(
+                                AppStringKeys
+                                    .groupManagementAdminApprovalRequired,
+                              ),
+                              _joinByRequest,
+                              _canChangeInfo,
+                              _setJoinByRequest,
+                            ),
+                          ],
+                        ),
                       ],
                       _gap(),
-                      _section('成员管理', [
-                        _navRow('成员', onTap: () => _openMembers()),
-                        _divider(),
-                        _navRow(
-                          '管理员',
-                          value: _canPromoteMembers ? '可设置' : '只读',
-                          onTap: () => _openMembers(),
+                      _section(
+                        AppStrings.t(
+                          AppStringKeys.groupManagementMembersSection,
                         ),
-                        _divider(),
-                        _navRow(
-                          '群管理记录',
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => GroupManagementLogView(
-                                chatId: widget.chatId,
-                                title: _title,
+                        [
+                          _navRow(
+                            AppStrings.t(AppStringKeys.groupManagementMembers),
+                            onTap: () => _openMembers(),
+                          ),
+                          _divider(),
+                          _navRow(
+                            AppStrings.t(AppStringKeys.groupManagementLogAdmin),
+                            value: _canPromoteMembers
+                                ? AppStrings.t(
+                                    AppStringKeys.groupManagementEditable,
+                                  )
+                                : AppStrings.t(
+                                    AppStringKeys.groupManagementReadOnly,
+                                  ),
+                            onTap: () => _openMembers(),
+                          ),
+                          _divider(),
+                          _navRow(
+                            AppStrings.t(AppStringKeys.groupManagementLogTitle),
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => GroupManagementLogView(
+                                  chatId: widget.chatId,
+                                  title: _title,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ]),
+                        ],
+                      ),
                       if (!_isChannel) ...[
                         _gap(),
-                        _section('发言权限', [
-                          for (final entry in _permissionLabels.entries) ...[
-                            if (entry.key != _permissionLabels.keys.first)
-                              _divider(),
-                            _switchRow(
-                              entry.value,
-                              _permissions[entry.key] ?? false,
-                              _canRestrictMembers,
-                              (value) => _setPermission(entry.key, value),
-                            ),
+                        _section(
+                          AppStrings.t(
+                            AppStringKeys.groupManagementPostingPermissions,
+                          ),
+                          [
+                            for (final entry in _permissionLabels.entries) ...[
+                              if (entry.key != _permissionLabels.keys.first)
+                                _divider(),
+                              _switchRow(
+                                entry.value.l10n(context),
+                                _permissions[entry.key] ?? false,
+                                _canRestrictMembers,
+                                (value) => _setPermission(entry.key, value),
+                              ),
+                            ],
                           ],
-                        ]),
+                        ),
                       ],
                     ],
                   ),
@@ -363,13 +419,16 @@ class _GroupManagementViewState extends State<GroupManagementView> {
 
   Future<void> _editTitle() async {
     if (!_canChangeInfo) {
-      showToast(context, '没有修改群资料权限');
+      showToast(context, AppStringKeys.groupManagementNoEditInfoPermission);
       return;
     }
     final value = await Navigator.of(context).push<String>(
       MaterialPageRoute(
-        builder: (_) =>
-            EditFieldView(title: '群名称', initial: _title, maxLength: 128),
+        builder: (_) => EditFieldView(
+          title: AppStringKeys.groupManagementGroupName,
+          initial: _title,
+          maxLength: 128,
+        ),
       ),
     );
     if (!mounted || value == null || value.isEmpty || value == _title) return;
@@ -381,7 +440,9 @@ class _GroupManagementViewState extends State<GroupManagementView> {
       });
       setState(() => _title = value);
     } catch (_) {
-      if (mounted) showToast(context, '修改失败');
+      if (mounted) {
+        showToast(context, AppStringKeys.groupManagementEditFailed);
+      }
     }
   }
 
@@ -390,7 +451,7 @@ class _GroupManagementViewState extends State<GroupManagementView> {
     final value = await Navigator.of(context).push<String>(
       MaterialPageRoute(
         builder: (_) => EditFieldView(
-          title: '公开用户名',
+          title: AppStringKeys.groupManagementPublicUsername,
           initial: _username,
           prefix: '@',
           maxLength: 32,
@@ -406,7 +467,12 @@ class _GroupManagementViewState extends State<GroupManagementView> {
       });
       setState(() => _username = value);
     } catch (_) {
-      if (mounted) showToast(context, '用户名不可用或没有权限');
+      if (mounted) {
+        showToast(
+          context,
+          AppStringKeys.groupManagementUsernameUnavailableOrForbidden,
+        );
+      }
     }
   }
 
@@ -423,7 +489,7 @@ class _GroupManagementViewState extends State<GroupManagementView> {
     } catch (_) {
       if (mounted) {
         setState(() => _joinToSend = !value);
-        showToast(context, '设置失败');
+        showToast(context, AppStringKeys.groupManagementSetFailed);
       }
     }
   }
@@ -441,7 +507,7 @@ class _GroupManagementViewState extends State<GroupManagementView> {
     } catch (_) {
       if (mounted) {
         setState(() => _joinByRequest = !value);
-        showToast(context, '设置失败');
+        showToast(context, AppStringKeys.groupManagementSetFailed);
       }
     }
   }
@@ -461,7 +527,7 @@ class _GroupManagementViewState extends State<GroupManagementView> {
           () =>
               _permissions = Map<String, bool>.of(_permissions)..[key] = !value,
         );
-        showToast(context, '权限设置失败');
+        showToast(context, AppStringKeys.groupManagementPermissionSetFailed);
       }
     }
   }

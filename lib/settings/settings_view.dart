@@ -38,7 +38,10 @@ class SettingsView extends StatelessWidget {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '设置', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.profileSettings),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(12, 14, 12, 24),
@@ -47,7 +50,7 @@ class SettingsView extends StatelessWidget {
                   _navRow(
                     context,
                     FontAwesomeIcons.solidCircleUser.data,
-                    '编辑资料',
+                    AppStrings.t(AppStringKeys.editProfileTitle),
                     const Color(0xFF3C8CF0),
                     () => const EditProfileView(),
                   ),
@@ -57,7 +60,7 @@ class SettingsView extends StatelessWidget {
                   _navRow(
                     context,
                     FontAwesomeIcons.solidBell.data,
-                    '消息通知',
+                    AppStrings.t(AppStringKeys.notificationTitle),
                     const Color(0xFFF5A623),
                     () => const NotificationSettingsView(),
                   ),
@@ -65,7 +68,7 @@ class SettingsView extends StatelessWidget {
                   _navRow(
                     context,
                     FontAwesomeIcons.shieldHalved.data,
-                    '隐私与安全',
+                    AppStrings.t(AppStringKeys.privacySecurityTitle),
                     const Color(0xFF16B05A),
                     () => const PrivacySecurityView(),
                   ),
@@ -75,7 +78,7 @@ class SettingsView extends StatelessWidget {
                   _navRow(
                     context,
                     FontAwesomeIcons.gear.data,
-                    '通用',
+                    AppStrings.t(AppStringKeys.generalTitle),
                     const Color(0xFF8E8E93),
                     () => const GeneralSettingsView(),
                   ),
@@ -83,7 +86,7 @@ class SettingsView extends StatelessWidget {
                   _navRow(
                     context,
                     FontAwesomeIcons.grip.data,
-                    '功能',
+                    AppStrings.t(AppStringKeys.featureTitle),
                     const Color(0xFF3C8CF0),
                     () => const FeatureSettingsView(),
                   ),
@@ -91,7 +94,7 @@ class SettingsView extends StatelessWidget {
                   _navRow(
                     context,
                     FontAwesomeIcons.wandMagicSparkles.data,
-                    '外观',
+                    AppStrings.t(AppStringKeys.appearanceTitle),
                     const Color(0xFF8E7BFF),
                     () => const AppearanceView(),
                   ),
@@ -99,7 +102,7 @@ class SettingsView extends StatelessWidget {
                   _navRow(
                     context,
                     FontAwesomeIcons.eye.data,
-                    '显示',
+                    AppStrings.t(AppStringKeys.appearanceDisplay),
                     const Color(0xFF34A2DF),
                     () => const DisplaySettingsView(),
                   ),
@@ -107,7 +110,7 @@ class SettingsView extends StatelessWidget {
                   _navRow(
                     context,
                     FontAwesomeIcons.language.data,
-                    '翻译',
+                    AppStrings.t(AppStringKeys.messageActionTranslate),
                     const Color(0xFF34A2DF),
                     () => const TranslationSettingsView(),
                   ),
@@ -115,7 +118,7 @@ class SettingsView extends StatelessWidget {
                   _navRow(
                     context,
                     FontAwesomeIcons.globe.data,
-                    '代理',
+                    AppStrings.t(AppStringKeys.proxyTitle),
                     const Color(0xFF34A2DF),
                     () => const ProxyView(),
                   ),
@@ -226,7 +229,7 @@ class SettingsView extends StatelessWidget {
       builder: (context, snapshot) => _rowLabel(
         context,
         FontAwesomeIcons.circleInfo.data,
-        '关于 Mithka',
+        AppStrings.t(AppStringKeys.settingsAboutMithka),
         const Color(0xFF8E8E93),
         trailing: 'v${snapshot.data?.version ?? '...'}',
       ),
@@ -253,7 +256,7 @@ class SettingsView extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
         ),
         child: Text(
-          '退出登录',
+          AppStrings.t(AppStringKeys.settingsLogOut),
           style: TextStyle(fontSize: 16, color: AppTheme.tagRed),
         ),
       ),

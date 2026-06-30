@@ -19,6 +19,7 @@ import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_image_loader.dart';
 import '../tdlib/td_models.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class _StoryMedia {
   _StoryMedia(this.imageFile, this.caption, this.isVideo, this.videoFile);
@@ -43,7 +44,7 @@ class StoryViewerView extends StatefulWidget {
 
 class _StoryViewerViewState extends State<StoryViewerView> {
   int _index = 0;
-  String _senderName = '动态';
+  String _senderName = AppStringKeys.tabMoments;
   TdFileRef? _senderPhoto;
   _StoryMedia? _current;
   bool _loadError =
@@ -356,16 +357,16 @@ class _StoryViewerViewState extends State<StoryViewerView> {
 
   Widget _media() {
     if (_loadError) {
-      return const Center(
+      return Center(
         child: Text(
-          '动态加载失败',
+          AppStringKeys.storyLoadFailed.l10n(context),
           style: TextStyle(fontSize: 15, color: Colors.white70),
         ),
       );
     }
     final story = _current;
     if (story == null) {
-      return const Center(
+      return Center(
         child: CircularProgressIndicator(
           valueColor: AlwaysStoppedAnimation(Colors.white),
         ),
@@ -373,9 +374,9 @@ class _StoryViewerViewState extends State<StoryViewerView> {
     }
     if (story.imageFile == null) {
       // Loaded, but a content type we don't render (live / unsupported).
-      return const Center(
+      return Center(
         child: Text(
-          '暂不支持的动态',
+          AppStringKeys.storyUnsupported.l10n(context),
           style: TextStyle(fontSize: 15, color: Colors.white70),
         ),
       );

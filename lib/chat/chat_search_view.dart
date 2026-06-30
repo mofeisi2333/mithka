@@ -17,6 +17,7 @@ import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import '../theme/date_text.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class ChatSearchView extends StatefulWidget {
   const ChatSearchView({super.key, required this.chatId, required this.title});
@@ -151,8 +152,10 @@ class _ChatSearchViewState extends State<ChatSearchView> {
                           autocorrect: false,
                           textInputAction: TextInputAction.search,
                           style: TextStyle(fontSize: 15, color: c.textPrimary),
-                          decoration: const InputDecoration(
-                            hintText: '搜索聊天记录',
+                          decoration: InputDecoration(
+                            hintText: AppStrings.t(
+                              AppStringKeys.chatSearchHistoryTitle,
+                            ),
                             border: InputBorder.none,
                             isCollapsed: true,
                           ),
@@ -196,7 +199,7 @@ class _ChatSearchViewState extends State<ChatSearchView> {
     if (_query.trim().isEmpty) {
       return Center(
         child: Text(
-          '搜索本聊天的消息',
+          AppStrings.t(AppStringKeys.chatSearchMessagePlaceholder),
           style: TextStyle(fontSize: 14, color: c.textSecondary),
         ),
       );
@@ -204,7 +207,7 @@ class _ChatSearchViewState extends State<ChatSearchView> {
     if (_results.isEmpty) {
       return Center(
         child: Text(
-          '没有找到相关消息',
+          AppStrings.t(AppStringKeys.chatSearchNoMessagesFound),
           style: TextStyle(fontSize: 14, color: c.textSecondary),
         ),
       );
@@ -259,7 +262,9 @@ class _ChatSearchViewState extends State<ChatSearchView> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  m.text.isEmpty ? '[消息]' : m.text.replaceAll('\n', ' '),
+                  m.text.isEmpty
+                      ? AppStrings.t(AppStringKeys.chatSearchMessageResultLabel)
+                      : m.text.replaceAll('\n', ' '),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 13, color: c.textSecondary),

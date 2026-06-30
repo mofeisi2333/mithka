@@ -24,6 +24,7 @@ import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class ContactsView extends StatefulWidget {
   const ContactsView({super.key, this.onOpenDetail});
@@ -36,7 +37,7 @@ class ContactsView extends StatefulWidget {
 
 class _ContactsViewState extends State<ContactsView> {
   final _vm = ContactsViewModel();
-  String _meName = '我';
+  String _meName = AppStringKeys.chatMeLabel;
   TdFileRef? _mePhoto;
   int _tab = 0; // 0 好友, 1 群聊, 2 频道, 3 机器人
 
@@ -125,7 +126,7 @@ class _ContactsViewState extends State<ContactsView> {
             ),
             const SizedBox(width: 12),
             Text(
-              '联系人',
+              AppStringKeys.tabContacts.l10n(context),
               style: TextStyle(
                 fontSize: 17,
                 fontWeight: FontWeight.w600,
@@ -167,7 +168,10 @@ class _ContactsViewState extends State<ContactsView> {
               color: c.textTertiary,
             ),
             const SizedBox(width: 6),
-            Text('搜索', style: TextStyle(fontSize: 14, color: c.textTertiary)),
+            Text(
+              AppStringKeys.topicChatSearch.l10n(context),
+              style: TextStyle(fontSize: 14, color: c.textTertiary),
+            ),
           ],
         ),
       ),
@@ -176,7 +180,12 @@ class _ContactsViewState extends State<ContactsView> {
 
   Widget _tabs() {
     final c = context.colors;
-    const labels = ['好友', '群聊', '频道', '机器人'];
+    const labels = [
+      AppStringKeys.contactsFriends,
+      AppStringKeys.chatInfoGroupChat,
+      AppStringKeys.tabChannels,
+      AppStringKeys.chatsSearchBots,
+    ];
     return Container(
       margin: const EdgeInsets.only(top: 4),
       decoration: BoxDecoration(
@@ -196,7 +205,7 @@ class _ContactsViewState extends State<ContactsView> {
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       Text(
-                        labels[i],
+                        labels[i].l10n(context),
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: _tab == i
@@ -242,7 +251,9 @@ class _ContactsViewState extends State<ContactsView> {
     if (contacts.isEmpty) {
       return _stateCard(
         loading: loading,
-        emptyText: _tab == 3 ? '暂无机器人' : '暂无联系人',
+        emptyText: _tab == 3
+            ? AppStringKeys.contactsNoBots
+            : AppStringKeys.contactsNoContacts,
       );
     }
     return _card([
@@ -283,7 +294,7 @@ class _ContactsViewState extends State<ContactsView> {
                         if (contact.statusText.isNotEmpty) ...[
                           const SizedBox(height: 3),
                           Text(
-                            contact.statusText,
+                            contact.statusText.l10n(context),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
@@ -311,7 +322,9 @@ class _ContactsViewState extends State<ContactsView> {
     if (chats.isEmpty) {
       return _stateCard(
         loading: loading,
-        emptyText: _tab == 2 ? '暂无频道' : '暂无群聊',
+        emptyText: _tab == 2
+            ? AppStringKeys.contactsNoChannels
+            : AppStringKeys.contactsNoGroupChats,
       );
     }
     return _card([
@@ -376,7 +389,9 @@ class _ContactsViewState extends State<ContactsView> {
                 FaIcon(FontAwesomeIcons.users, size: 30, color: c.textTertiary),
               const SizedBox(height: 12),
               Text(
-                loading ? '加载中…' : emptyText,
+                (loading ? AppStringKeys.contactsLoading : emptyText).l10n(
+                  context,
+                ),
                 style: TextStyle(fontSize: 14, color: c.textSecondary),
               ),
             ],
@@ -455,7 +470,9 @@ class ContactsViewModel extends ChangeNotifier {
     id: id,
     name: TDParse.userName(user),
     username: user.obj('usernames')?.str('editable_username'),
-    statusText: _isBotUser(user) ? '机器人' : TDParse.userStatus(user),
+    statusText: _isBotUser(user)
+        ? AppStringKeys.chatsSearchBots
+        : TDParse.userStatus(user),
     photo: TDParse.smallPhoto(user.obj('profile_photo')),
     isOnline: TDParse.isUserOnline(user),
   );

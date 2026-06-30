@@ -25,6 +25,7 @@ import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import 'accent_color_picker_view.dart';
 import 'edit_field_view.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class EditProfileView extends StatefulWidget {
   const EditProfileView({super.key});
@@ -108,7 +109,11 @@ class _EditProfileViewState extends State<EditProfileView> {
   }
 
   Future<void> _editName() async {
-    final result = await _edit('修改名字', _displayName, hint: '名字');
+    final result = await _edit(
+      AppStrings.t(AppStringKeys.editProfileChangeName),
+      _displayName,
+      hint: AppStrings.t(AppStringKeys.loginFirstName),
+    );
     if (result == null || result.isEmpty) return;
     final parts = result.split(RegExp(r'\s+'));
     final first = parts.first;
@@ -124,16 +129,16 @@ class _EditProfileViewState extends State<EditProfileView> {
         _lastName = last;
       });
     } catch (_) {
-      _toast('保存失败');
+      _toast(AppStrings.t(AppStringKeys.editProfileSaveFailed));
     }
   }
 
   Future<void> _editUsername() async {
     final value = await _edit(
-      '修改用户名',
+      AppStrings.t(AppStringKeys.editProfileChangeUsername),
       _username,
       prefix: '@',
-      hint: '设置用户名',
+      hint: AppStrings.t(AppStringKeys.editProfileSetUsername),
       keyboardType: TextInputType.visiblePassword,
     );
     if (value == null) return;
@@ -141,15 +146,15 @@ class _EditProfileViewState extends State<EditProfileView> {
       await _client.query({'@type': 'setUsername', 'username': value});
       setState(() => _username = value);
     } catch (_) {
-      _toast('用户名不可用');
+      _toast(AppStrings.t(AppStringKeys.editProfileUsernameUnavailable));
     }
   }
 
   Future<void> _editBio() async {
     final value = await _edit(
-      '修改简介',
+      AppStrings.t(AppStringKeys.editProfileChangeBio),
       _bio,
-      hint: '介绍一下自己',
+      hint: AppStrings.t(AppStringKeys.editProfileBioPlaceholder),
       multiline: true,
       maxLength: 70,
     );
@@ -158,14 +163,24 @@ class _EditProfileViewState extends State<EditProfileView> {
       await _client.query({'@type': 'setBio', 'bio': value});
       setState(() => _bio = value);
     } catch (_) {
-      _toast('保存失败');
+      _toast(AppStrings.t(AppStringKeys.editProfileSaveFailed));
     }
   }
 
   String get _birthdayText {
-    if (_bDay == null || _bMonth == null) return '点击设置';
-    final base = '$_bMonth月$_bDay日';
-    return _bYear != null ? '$_bYear年$base' : base;
+    if (_bDay == null || _bMonth == null) {
+      return AppStrings.t(AppStringKeys.editProfileTapToSet);
+    }
+    final base = AppStrings.t(AppStringKeys.profileDetailMonthDayDate, {
+      'value1': _bMonth,
+      'value2': _bDay,
+    });
+    return _bYear != null
+        ? AppStrings.t(AppStringKeys.profileDetailYearMonthDate, {
+            'value1': _bYear,
+            'value2': base,
+          })
+        : base;
   }
 
   Future<void> _editBirthday() async {
@@ -206,7 +221,7 @@ class _EditProfileViewState extends State<EditProfileView> {
         });
       }
     } catch (_) {
-      _toast('保存失败');
+      _toast(AppStrings.t(AppStringKeys.editProfileSaveFailed));
     }
   }
 
@@ -214,9 +229,9 @@ class _EditProfileViewState extends State<EditProfileView> {
     final id = await Navigator.of(context).push<int>(
       MaterialPageRoute(
         builder: (_) => AccentColorPickerView(
-          title: '名字颜色',
+          title: AppStrings.t(AppStringKeys.editProfileNameColor),
           selectedId: _accentColorId,
-          footnote: '用于你的名字和消息边栏的颜色。',
+          footnote: AppStrings.t(AppStringKeys.editProfileNameColorDescription),
         ),
       ),
     );
@@ -229,7 +244,7 @@ class _EditProfileViewState extends State<EditProfileView> {
       });
       setState(() => _accentColorId = id);
     } catch (_) {
-      _toast('保存失败');
+      _toast(AppStrings.t(AppStringKeys.editProfileSaveFailed));
     }
   }
 
@@ -237,10 +252,12 @@ class _EditProfileViewState extends State<EditProfileView> {
     final id = await Navigator.of(context).push<int>(
       MaterialPageRoute(
         builder: (_) => AccentColorPickerView(
-          title: '资料颜色',
+          title: AppStrings.t(AppStringKeys.editProfileProfileColor),
           selectedId: _profileAccentColorId,
           allowNone: true,
-          footnote: '用于你的个人资料页背景的颜色。',
+          footnote: AppStrings.t(
+            AppStringKeys.editProfileProfileColorDescription,
+          ),
         ),
       ),
     );
@@ -253,7 +270,7 @@ class _EditProfileViewState extends State<EditProfileView> {
       });
       setState(() => _profileAccentColorId = id);
     } catch (_) {
-      _toast('保存失败');
+      _toast(AppStrings.t(AppStringKeys.editProfileSaveFailed));
     }
   }
 
@@ -274,7 +291,7 @@ class _EditProfileViewState extends State<EditProfileView> {
       if (edited == null) return;
       final file = File(edited);
       if (!await file.exists() || await file.length() == 0) {
-        _toast('头像文件无效');
+        _toast(AppStrings.t(AppStringKeys.editProfileInvalidAvatarFile));
         return;
       }
       await _client.query({
@@ -286,7 +303,7 @@ class _EditProfileViewState extends State<EditProfileView> {
         'is_public': false,
       });
       if (!mounted) return;
-      _toast('头像已更新');
+      _toast(AppStrings.t(AppStringKeys.editProfileAvatarUpdated));
       // The new photo propagates via updateUser after upload; re-read shortly.
       await Future<void>.delayed(const Duration(milliseconds: 800));
       final me = await _client.query({'@type': 'getMe'});
@@ -294,7 +311,11 @@ class _EditProfileViewState extends State<EditProfileView> {
         setState(() => _photo = TDParse.smallPhoto(me.obj('profile_photo')));
       }
     } catch (e) {
-      _toast('更换头像失败：$e');
+      _toast(
+        AppStrings.t(AppStringKeys.editProfileAvatarUpdateFailed, {
+          'value1': e,
+        }),
+      );
     }
   }
 
@@ -307,7 +328,10 @@ class _EditProfileViewState extends State<EditProfileView> {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '编辑资料', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.editProfileTitle),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(
             child: _loading
                 ? const Center(
@@ -335,7 +359,9 @@ class _EditProfileViewState extends State<EditProfileView> {
                             const SizedBox(height: 8),
                             Center(
                               child: Text(
-                                '更换头像',
+                                AppStrings.t(
+                                  AppStringKeys.editProfileChangeAvatar,
+                                ),
                                 style: TextStyle(
                                   fontSize: 14,
                                   color: AppTheme.brand,
@@ -347,34 +373,50 @@ class _EditProfileViewState extends State<EditProfileView> {
                       ),
                       const SizedBox(height: 18),
                       _field(
-                        '名字',
-                        _displayName.isEmpty ? '点击设置' : _displayName,
+                        AppStrings.t(AppStringKeys.loginFirstName),
+                        _displayName.isEmpty
+                            ? AppStrings.t(AppStringKeys.editProfileTapToSet)
+                            : _displayName,
                         _editName,
                       ),
                       _field(
-                        '用户名',
-                        _username.isEmpty ? '@未设置' : '@$_username',
+                        AppStrings.t(AppStringKeys.editProfileUsername),
+                        _username.isEmpty
+                            ? AppStrings.t(
+                                AppStringKeys.editProfileUsernameUnsetHandle,
+                              )
+                            : '@$_username',
                         _editUsername,
                       ),
                       _readonlyField(
-                        '电话',
-                        _phone.isEmpty ? '未绑定' : TDParse.formatPhone(_phone),
+                        AppStrings.t(AppStringKeys.editProfilePhone),
+                        _phone.isEmpty
+                            ? AppStrings.t(AppStringKeys.editProfileNotBound)
+                            : TDParse.formatPhone(_phone),
                       ),
                       _field(
-                        '生日',
+                        AppStrings.t(AppStringKeys.profileDetailBirthday),
                         _birthdayText,
                         _editBirthday,
                         faded: _bDay == null,
                       ),
                       _field(
-                        '简介',
-                        _bio.isEmpty ? '点击填写简介' : _bio,
+                        AppStrings.t(AppStringKeys.editProfileBio),
+                        _bio.isEmpty
+                            ? AppStrings.t(
+                                AppStringKeys.editProfileTapToFillBio,
+                              )
+                            : _bio,
                         _editBio,
                         faded: _bio.isEmpty,
                       ),
-                      _colorField('名字颜色', _accentColorId, _editNameColor),
                       _colorField(
-                        '资料颜色',
+                        AppStrings.t(AppStringKeys.editProfileNameColor),
+                        _accentColorId,
+                        _editNameColor,
+                      ),
+                      _colorField(
+                        AppStrings.t(AppStringKeys.editProfileProfileColor),
                         _profileAccentColorId,
                         _editProfileColor,
                       ),
@@ -498,7 +540,7 @@ class _EditProfileViewState extends State<EditProfileView> {
             Expanded(
               child: color == null
                   ? Text(
-                      '默认',
+                      AppStrings.t(AppStringKeys.editProfileDefault),
                       style: TextStyle(fontSize: 16, color: c.textTertiary),
                     )
                   : const SizedBox.shrink(),
@@ -602,10 +644,13 @@ class _BirthdayPickerSheetState extends State<_BirthdayPickerSheet> {
               children: [
                 CupertinoButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: Text('取消', style: TextStyle(color: c.textSecondary)),
+                  child: Text(
+                    AppStrings.t(AppStringKeys.countryPickerCancel),
+                    style: TextStyle(color: c.textSecondary),
+                  ),
                 ),
                 Text(
-                  '生日',
+                  AppStrings.t(AppStringKeys.profileDetailBirthday),
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
@@ -615,7 +660,7 @@ class _BirthdayPickerSheetState extends State<_BirthdayPickerSheet> {
                 CupertinoButton(
                   onPressed: _done,
                   child: Text(
-                    '完成',
+                    AppStrings.t(AppStringKeys.addMembersDone),
                     style: TextStyle(
                       color: AppTheme.brand,
                       fontWeight: FontWeight.w600,
@@ -635,7 +680,15 @@ class _BirthdayPickerSheetState extends State<_BirthdayPickerSheet> {
                           setState(() => _month = i + 1),
                       children: [
                         for (var m = 1; m <= 12; m++)
-                          Center(child: Text('$m月', style: labelStyle)),
+                          Center(
+                            child: Text(
+                              AppStrings.t(
+                                AppStringKeys.editProfileBirthMonth,
+                                {'value1': m},
+                              ),
+                              style: labelStyle,
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -646,7 +699,14 @@ class _BirthdayPickerSheetState extends State<_BirthdayPickerSheet> {
                       onSelectedItemChanged: (i) => _day = i + 1,
                       children: [
                         for (var d = 1; d <= 31; d++)
-                          Center(child: Text('$d日', style: labelStyle)),
+                          Center(
+                            child: Text(
+                              AppStrings.t(AppStringKeys.editProfileBirthDay, {
+                                'value1': d,
+                              }),
+                              style: labelStyle,
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -657,9 +717,21 @@ class _BirthdayPickerSheetState extends State<_BirthdayPickerSheet> {
                       itemExtent: 36,
                       onSelectedItemChanged: (i) => _yearIdx = i,
                       children: [
-                        Center(child: Text('无年份', style: labelStyle)),
+                        Center(
+                          child: Text(
+                            AppStrings.t(AppStringKeys.editProfileNoBirthYear),
+                            style: labelStyle,
+                          ),
+                        ),
                         for (final y in _years)
-                          Center(child: Text('$y年', style: labelStyle)),
+                          Center(
+                            child: Text(
+                              AppStrings.t(AppStringKeys.editProfileBirthYear, {
+                                'value1': y,
+                              }),
+                              style: labelStyle,
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -670,7 +742,10 @@ class _BirthdayPickerSheetState extends State<_BirthdayPickerSheet> {
               CupertinoButton(
                 onPressed: () =>
                     Navigator.of(context).pop(const _BdayResult.clear()),
-                child: Text('清除生日', style: TextStyle(color: AppTheme.tagRed)),
+                child: Text(
+                  AppStrings.t(AppStringKeys.editProfileClearBirthday),
+                  style: TextStyle(color: AppTheme.tagRed),
+                ),
               ),
           ],
         ),

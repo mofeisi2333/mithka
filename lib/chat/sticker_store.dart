@@ -14,6 +14,7 @@ import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import 'custom_emoji.dart';
 import 'sticker_item.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class StickerPack {
   StickerPack({
@@ -61,7 +62,7 @@ class StickerStore extends ChangeNotifier {
         result.add(
           StickerPack(
             id: recentPackId,
-            title: '最近',
+            title: AppStrings.t(AppStringKeys.stickerStoreRecent),
             cover: items.first,
             stickers: items,
             loaded: true,

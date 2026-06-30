@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class PollComposerView extends StatefulWidget {
   const PollComposerView({super.key});
@@ -83,7 +84,7 @@ class _PollComposerViewState extends State<PollComposerView> {
       body: Column(
         children: [
           NavHeader(
-            title: '发起投票',
+            title: AppStrings.t(AppStringKeys.pollComposerCreatePollTitle),
             onBack: () => Navigator.of(context).pop(),
             trailing: GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -91,7 +92,7 @@ class _PollComposerViewState extends State<PollComposerView> {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: Text(
-                  '发送',
+                  AppStrings.t(AppStringKeys.composerSend),
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
@@ -108,7 +109,12 @@ class _PollComposerViewState extends State<PollComposerView> {
               padding: const EdgeInsets.symmetric(vertical: 14),
               children: [
                 _card([
-                  _field(_question, '请输入问题', autofocus: true, multiline: true),
+                  _field(
+                    _question,
+                    AppStrings.t(AppStringKeys.pollComposerQuestionRequired),
+                    autofocus: true,
+                    multiline: true,
+                  ),
                 ]),
                 const SizedBox(height: 14),
                 _card([
@@ -122,7 +128,9 @@ class _PollComposerViewState extends State<PollComposerView> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                   child: Text(
-                    '单选 · 最多 10 个选项',
+                    AppStrings.t(
+                      AppStringKeys.pollComposerSingleChoiceLimitHint,
+                    ),
                     style: TextStyle(fontSize: 13, color: c.textSecondary),
                   ),
                 ),
@@ -184,7 +192,10 @@ class _PollComposerViewState extends State<PollComposerView> {
                 decoration: InputDecoration(
                   isCollapsed: true,
                   border: InputBorder.none,
-                  hintText: '选项 ${i + 1}',
+                  hintText: AppStrings.t(
+                    AppStringKeys.pollComposerOptionLabel,
+                    {'value1': i + 1},
+                  ),
                   hintStyle: TextStyle(color: c.textTertiary),
                 ),
               ),
@@ -228,7 +239,7 @@ class _PollComposerViewState extends State<PollComposerView> {
               ),
               const SizedBox(width: 8),
               Text(
-                '添加选项',
+                AppStrings.t(AppStringKeys.pollComposerAddOption),
                 style: TextStyle(
                   fontSize: 16,
                   color: disabled

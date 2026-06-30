@@ -6,6 +6,7 @@
 
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class TranslationLanguage {
   const TranslationLanguage(this.code, this.label);
@@ -15,9 +16,9 @@ class TranslationLanguage {
 }
 
 enum TranslationProvider {
-  tdlib('tdlib', 'Telegram 翻译'),
-  iosSystem('ios_system', '系统翻译'),
-  androidMlKit('android_mlkit', 'ML Kit（本地）'),
+  tdlib('tdlib', AppStringKeys.translationTelegram),
+  iosSystem('ios_system', AppStringKeys.translationSystem),
+  androidMlKit('android_mlkit', AppStringKeys.translationMlKitLocal),
   myMemory('my_memory', 'MyMemory'),
   lingva('lingva', 'Lingva'),
   libreTranslate('libre_translate', 'LibreTranslate');
@@ -74,25 +75,25 @@ class TranslationController extends ChangeNotifier {
   static const defaultLingvaEndpoint = 'https://lingva.ml';
 
   static const targetLanguages = <TranslationLanguage>[
-    TranslationLanguage('zh-Hans', '简体中文'),
-    TranslationLanguage('zh-Hant', '繁體中文'),
-    TranslationLanguage('en', 'English'),
-    TranslationLanguage('ja', '日本語'),
-    TranslationLanguage('ko', '한국어'),
-    TranslationLanguage('fr', 'Français'),
-    TranslationLanguage('de', 'Deutsch'),
-    TranslationLanguage('es', 'Español'),
-    TranslationLanguage('ru', 'Русский'),
-    TranslationLanguage('ar', 'العربية'),
-    TranslationLanguage('pt', 'Português'),
-    TranslationLanguage('it', 'Italiano'),
-    TranslationLanguage('tr', 'Türkçe'),
-    TranslationLanguage('vi', 'Tiếng Việt'),
-    TranslationLanguage('th', 'ไทย'),
-    TranslationLanguage('id', 'Indonesia'),
-    TranslationLanguage('ms', 'Melayu'),
-    TranslationLanguage('hi', 'हिन्दी'),
-    TranslationLanguage('uk', 'Українська'),
+    TranslationLanguage('zh-Hans', AppStringKeys.appLocaleSimplifiedChinese),
+    TranslationLanguage('zh-Hant', AppStringKeys.appLocaleTraditionalChinese),
+    TranslationLanguage('en', AppStringKeys.appLocaleEnglish),
+    TranslationLanguage('ja', AppStringKeys.appLocaleJapanese),
+    TranslationLanguage('ko', AppStringKeys.appLocaleKorean),
+    TranslationLanguage('fr', AppStringKeys.appLocaleFrench),
+    TranslationLanguage('de', AppStringKeys.appLocaleGerman),
+    TranslationLanguage('es', AppStringKeys.appLocaleSpanish),
+    TranslationLanguage('ru', AppStringKeys.appLocaleRussian),
+    TranslationLanguage('ar', AppStringKeys.appLocaleArabic),
+    TranslationLanguage('pt', AppStringKeys.appLocalePortuguese),
+    TranslationLanguage('it', AppStringKeys.appLocaleItalian),
+    TranslationLanguage('tr', AppStringKeys.appLocaleTurkish),
+    TranslationLanguage('vi', AppStringKeys.appLocaleVietnamese),
+    TranslationLanguage('th', AppStringKeys.appLocaleThai),
+    TranslationLanguage('id', AppStringKeys.appLocaleIndonesian),
+    TranslationLanguage('ms', AppStringKeys.appLocaleMalay),
+    TranslationLanguage('hi', AppStringKeys.appLocaleHindi),
+    TranslationLanguage('uk', AppStringKeys.appLocaleUkrainian),
   ];
 
   final SharedPreferences _prefs;
@@ -162,7 +163,10 @@ class TranslationController extends ChangeNotifier {
   static String labelForTarget(String code) => targetLanguages
       .firstWhere(
         (l) => l.code == _normalizeTargetLanguage(code),
-        orElse: () => const TranslationLanguage('zh-Hans', '简体中文'),
+        orElse: () => const TranslationLanguage(
+          'zh-Hans',
+          AppStringKeys.appLocaleSimplifiedChinese,
+        ),
       )
       .label;
 

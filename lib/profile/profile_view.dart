@@ -34,6 +34,7 @@ import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import 'qr_code_view.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class ProfileViewModel extends ChangeNotifier {
   CurrentUser? user;
@@ -260,7 +261,11 @@ class _ProfileViewState extends State<ProfileView> {
                 GestureDetector(
                   onTap: () => _root.push(
                     MaterialPageRoute(
-                      builder: (_) => QRCodeView(name: user?.name ?? '我'),
+                      builder: (_) => QRCodeView(
+                        name:
+                            user?.name ??
+                            AppStrings.t(AppStringKeys.chatMeLabel),
+                      ),
                     ),
                   ),
                   child: FaIcon(
@@ -289,7 +294,8 @@ class _ProfileViewState extends State<ProfileView> {
                     border: Border.all(color: Colors.white, width: 2),
                   ),
                   child: PhotoAvatar(
-                    title: user?.name ?? '我',
+                    title:
+                        user?.name ?? AppStrings.t(AppStringKeys.chatMeLabel),
                     photo: user?.photo,
                     size: 64,
                   ),
@@ -303,7 +309,8 @@ class _ProfileViewState extends State<ProfileView> {
                         children: [
                           Flexible(
                             child: Text(
-                              user?.name ?? '加载中…',
+                              user?.name ??
+                                  AppStrings.t(AppStringKeys.contactsLoading),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
@@ -400,28 +407,41 @@ class _ProfileViewState extends State<ProfileView> {
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
-          _row(FontAwesomeIcons.image.data, const Color(0xFFF5A623), '相册', () {
-            _root.push(
-              MaterialPageRoute(
-                builder: (_) => MyAlbumView(userId: _vm.user?.id ?? 0),
-              ),
-            );
-          }),
+          _row(
+            FontAwesomeIcons.image.data,
+            const Color(0xFFF5A623),
+            AppStrings.t(AppStringKeys.chatInfoAlbum),
+            () {
+              _root.push(
+                MaterialPageRoute(
+                  builder: (_) => MyAlbumView(userId: _vm.user?.id ?? 0),
+                ),
+              );
+            },
+          ),
           _row(
             FontAwesomeIcons.star.data,
             const Color(0xFFFF9D2E),
-            '收藏',
-            () => _openSaved('收藏'),
+            AppStrings.t(AppStringKeys.messageActionFavorite),
+            () => _openSaved(AppStrings.t(AppStringKeys.messageActionFavorite)),
           ),
-          _row(FontAwesomeIcons.folder.data, const Color(0xFF3C8CF0), '文件', () {
-            final cid = _vm.savedChatId ?? _vm.user?.id ?? 0;
-            _root.push(
-              MaterialPageRoute(
-                builder: (_) =>
-                    SharedMediaView(chatId: cid, title: '文件', initialTab: 1),
-              ),
-            );
-          }),
+          _row(
+            FontAwesomeIcons.folder.data,
+            const Color(0xFF3C8CF0),
+            AppStrings.t(AppStringKeys.topicPostContentFile),
+            () {
+              final cid = _vm.savedChatId ?? _vm.user?.id ?? 0;
+              _root.push(
+                MaterialPageRoute(
+                  builder: (_) => SharedMediaView(
+                    chatId: cid,
+                    title: AppStrings.t(AppStringKeys.topicPostContentFile),
+                    initialTab: 1,
+                  ),
+                ),
+              );
+            },
+          ),
         ],
       ),
     );
@@ -519,7 +539,7 @@ class _ProfileViewState extends State<ProfileView> {
                     ),
                     const SizedBox(width: 12),
                     Text(
-                      '添加账号',
+                      AppStrings.t(AppStringKeys.profileAddAccount),
                       style: TextStyle(fontSize: 15, color: AppTheme.brand),
                     ),
                   ],
@@ -540,9 +560,11 @@ class _ProfileViewState extends State<ProfileView> {
     final label = s.phone.isNotEmpty ? '${s.name}（${s.phone}）' : s.name;
     final ok = await confirmDialog(
       context,
-      title: '移除账号',
-      message: '将从账号列表移除 $label。可随时重新登录。',
-      confirmText: '移除',
+      title: AppStrings.t(AppStringKeys.profileRemoveAccount),
+      message: AppStrings.t(AppStringKeys.profileRemoveAccountConfirm, {
+        'value1': label,
+      }),
+      confirmText: AppStrings.t(AppStringKeys.chatInfoRemove),
       destructive: true,
     );
     if (!ok || !mounted) return;
@@ -631,7 +653,10 @@ class _ProfileViewState extends State<ProfileView> {
                 onTap: () => _root.push(
                   MaterialPageRoute(builder: (_) => const SettingsView()),
                 ),
-                child: _barItem(FontAwesomeIcons.gear.data, '设置'),
+                child: _barItem(
+                  FontAwesomeIcons.gear.data,
+                  AppStrings.t(AppStringKeys.profileSettings),
+                ),
               ),
               const SizedBox(width: 24),
               GestureDetector(
@@ -645,7 +670,9 @@ class _ProfileViewState extends State<ProfileView> {
                   isDark
                       ? FontAwesomeIcons.sun.data
                       : FontAwesomeIcons.moon.data,
-                  isDark ? '日间' : '夜间',
+                  isDark
+                      ? AppStrings.t(AppStringKeys.profileDayMode)
+                      : AppStrings.t(AppStringKeys.profileNightMode),
                 ),
               ),
               const Spacer(),
@@ -705,8 +732,8 @@ class _VipBadge extends StatelessWidget {
             child: Text('🐧', style: TextStyle(fontSize: 13, height: 1.1)),
           ),
           const SizedBox(width: 2),
-          const Text(
-            'VIP',
+          Text(
+            AppStringKeys.vipBadgeLabel.l10n(context),
             style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w800,

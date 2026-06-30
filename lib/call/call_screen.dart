@@ -20,6 +20,7 @@ import 'package:flutter/services.dart';
 import '../components/photo_avatar.dart'; // PhotoAvatar + TDImage
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'call_manager.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class CallScreen extends StatefulWidget {
   const CallScreen({super.key, required this.manager});
@@ -205,27 +206,27 @@ class _CallScreenState extends State<CallScreen> {
     showCupertinoModalPopup<void>(
       context: context,
       builder: (sheet) => CupertinoActionSheet(
-        title: const Text('选择摄像头'),
+        title: Text(AppStrings.t(AppStringKeys.callSelectCamera)),
         actions: [
           CupertinoActionSheetAction(
             onPressed: () {
               Navigator.of(sheet).pop();
               widget.manager.enableVideo(true);
             },
-            child: const Text('前置摄像头'),
+            child: Text(AppStrings.t(AppStringKeys.callFrontCamera)),
           ),
           CupertinoActionSheetAction(
             onPressed: () {
               Navigator.of(sheet).pop();
               widget.manager.enableVideo(false);
             },
-            child: const Text('后置摄像头'),
+            child: Text(AppStrings.t(AppStringKeys.callRearCamera)),
           ),
         ],
         cancelButton: CupertinoActionSheetAction(
           isDefaultAction: true,
           onPressed: () => Navigator.of(sheet).pop(),
-          child: const Text('取消'),
+          child: Text(AppStrings.t(AppStringKeys.countryPickerCancel)),
         ),
       ),
     );
@@ -275,15 +276,21 @@ class _CallScreenState extends State<CallScreen> {
     switch (call.phase) {
       case CallPhase.requesting:
       case CallPhase.ringingOutgoing:
-        return '正在等待对方接受邀请…';
+        return AppStrings.t(AppStringKeys.callWaitingForInviteAccept);
       case CallPhase.ringingIncoming:
-        return '邀请你进行${call.isVideo ? "视频" : "语音"}通话';
+        return AppStrings.t(AppStringKeys.callIncomingCallInvite, {
+          'value1': AppStrings.t(
+            call.isVideo
+                ? AppStringKeys.sharedMediaVideos
+                : AppStringKeys.sharedMediaVoice,
+          ),
+        });
       case CallPhase.exchangingKeys:
-        return '连接中…';
+        return AppStrings.t(AppStringKeys.callConnecting);
       case CallPhase.active:
         return _durationText(call.startedAt);
       case CallPhase.ending:
-        return '通话结束';
+        return AppStrings.t(AppStringKeys.callEnded);
     }
   }
 
@@ -311,7 +318,7 @@ class _CallScreenState extends State<CallScreen> {
             ),
           const SizedBox(width: 6),
           Text(
-            '端到端加密',
+            AppStrings.t(AppStringKeys.callEndToEndEncrypted),
             style: TextStyle(
               fontSize: 12,
               color: Colors.white.withValues(alpha: 0.6),
@@ -330,7 +337,7 @@ class _CallScreenState extends State<CallScreen> {
         children: [
           _CallButton(
             icon: FontAwesomeIcons.phoneSlash.data,
-            label: '拒绝',
+            label: AppStrings.t(AppStringKeys.callDecline),
             background: const Color(0xFFFF3B30),
             onTap: m.end,
           ),
@@ -338,7 +345,7 @@ class _CallScreenState extends State<CallScreen> {
             icon: call.isVideo
                 ? FontAwesomeIcons.video.data
                 : FontAwesomeIcons.phone.data,
-            label: '接听',
+            label: AppStrings.t(AppStringKeys.callAccept),
             background: const Color(0xFF07C160),
             onTap: m.accept,
           ),
@@ -355,7 +362,7 @@ class _CallScreenState extends State<CallScreen> {
               icon: m.isMuted
                   ? FontAwesomeIcons.microphoneSlash.data
                   : FontAwesomeIcons.microphone.data,
-              label: '静音',
+              label: AppStrings.t(AppStringKeys.callMute),
               isOn: m.isMuted,
               onTap: m.toggleMute,
             ),
@@ -363,7 +370,7 @@ class _CallScreenState extends State<CallScreen> {
             if (call.isVideo) ...[
               _CallToggle(
                 icon: FontAwesomeIcons.video.data,
-                label: '摄像头',
+                label: AppStrings.t(AppStringKeys.callCamera),
                 isOn: m.isVideoEnabled,
                 onTap: _onCameraToggle,
               ),
@@ -371,7 +378,7 @@ class _CallScreenState extends State<CallScreen> {
             ],
             _CallToggle(
               icon: FontAwesomeIcons.volumeHigh.data,
-              label: '免提',
+              label: AppStrings.t(AppStringKeys.callSpeakerphone),
               isOn: m.isSpeaker,
               onTap: m.toggleSpeaker,
             ),
@@ -380,7 +387,7 @@ class _CallScreenState extends State<CallScreen> {
         const SizedBox(height: 30),
         _CallButton(
           icon: FontAwesomeIcons.phoneSlash.data,
-          label: '挂断',
+          label: AppStrings.t(AppStringKeys.callHangUp),
           background: const Color(0xFFFF3B30),
           size: 66,
           onTap: m.end,

@@ -23,7 +23,10 @@ class FeatureSettingsView extends StatelessWidget {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '功能', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.featureTitle),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(
@@ -33,17 +36,20 @@ class FeatureSettingsView extends StatelessWidget {
                 AppSpacing.section,
               ),
               children: [
-                _sectionHeader(context, '底部标签'),
+                _sectionHeader(
+                  context,
+                  AppStrings.t(AppStringKeys.featureBottomTabs),
+                ),
                 SettingsCard(
                   children: [
                     SettingsSwitchRow(
-                      title: '频道',
+                      title: AppStrings.t(AppStringKeys.tabChannels),
                       value: theme.showChannelsTab,
                       onChanged: (value) => theme.showChannelsTab = value,
                     ),
                     const InsetDivider(leadingInset: 16),
                     SettingsSwitchRow(
-                      title: '动态',
+                      title: AppStrings.t(AppStringKeys.tabMoments),
                       value: theme.showMomentsTab,
                       onChanged: (value) => theme.showMomentsTab = value,
                     ),

@@ -21,6 +21,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class LocationPickerView extends StatefulWidget {
   const LocationPickerView({super.key, required this.initial});
@@ -168,7 +169,7 @@ class _LocationPickerViewState extends State<LocationPickerView> {
       body: Column(
         children: [
           NavHeader(
-            title: '位置',
+            title: AppStrings.t(AppStringKeys.composerLocation),
             onBack: () => Navigator.of(context).pop(),
             trailing: GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -184,8 +185,8 @@ class _LocationPickerViewState extends State<LocationPickerView> {
                     color: AppTheme.brand,
                     borderRadius: BorderRadius.circular(6),
                   ),
-                  child: const Text(
-                    '发送',
+                  child: Text(
+                    AppStrings.t(AppStringKeys.composerSend),
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -269,8 +270,12 @@ class _LocationPickerViewState extends State<LocationPickerView> {
           Expanded(
             child: Text(
               _geocoding && _address.isEmpty
-                  ? '正在获取位置…'
-                  : (_address.isEmpty ? '拖动地图选择位置' : _address),
+                  ? AppStrings.t(AppStringKeys.locationDetailFetchingLocation)
+                  : (_address.isEmpty
+                        ? AppStrings.t(
+                            AppStringKeys.locationPickerDragMapToChoose,
+                          )
+                        : _address),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 14, color: c.textPrimary),

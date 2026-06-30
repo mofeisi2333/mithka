@@ -17,6 +17,7 @@ import '../theme/app_theme.dart';
 import 'custom_emoji.dart'; // parseStickers
 import 'sticker_item.dart';
 import 'sticker_preview.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class StickerSetDetailView extends StatefulWidget {
   const StickerSetDetailView({super.key, required this.setId});
@@ -70,9 +71,19 @@ class _StickerSetDetailViewState extends State<StickerSetDetailView> {
       });
       if (!mounted) return;
       setState(() => _installed = target);
-      showToast(context, target ? '已添加表情' : '已移除表情');
+      showToast(
+        context,
+        target
+            ? AppStrings.t(AppStringKeys.stickerSetDetailAddSuccess)
+            : AppStrings.t(AppStringKeys.stickerSetDetailRemoved),
+      );
     } catch (_) {
-      if (mounted) showToast(context, '操作失败');
+      if (mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.stickerSetDetailActionFailed),
+        );
+      }
     } finally {
       if (mounted) setState(() => _working = false);
     }
@@ -116,7 +127,10 @@ class _StickerSetDetailViewState extends State<StickerSetDetailView> {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          Text('表情详情', style: TextStyle(fontSize: 17, color: c.textPrimary)),
+          Text(
+            AppStrings.t(AppStringKeys.stickerSetDetailTitle),
+            style: TextStyle(fontSize: 17, color: c.textPrimary),
+          ),
           Align(
             alignment: Alignment.centerLeft,
             child: GestureDetector(
@@ -171,7 +185,9 @@ class _StickerSetDetailViewState extends State<StickerSetDetailView> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${_stickers.length} 个表情',
+                  AppStrings.t(AppStringKeys.stickerSetDetailStickerCount, {
+                    'value1': _stickers.length,
+                  }),
                   style: TextStyle(fontSize: 13, color: c.textSecondary),
                 ),
               ],
@@ -207,7 +223,9 @@ class _StickerSetDetailViewState extends State<StickerSetDetailView> {
                 ),
               )
             : Text(
-                _installed ? '移除' : '添加',
+                _installed
+                    ? AppStrings.t(AppStringKeys.chatInfoRemove)
+                    : AppStrings.t(AppStringKeys.imageEditAdd),
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,

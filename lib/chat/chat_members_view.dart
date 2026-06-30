@@ -18,6 +18,7 @@ import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class GroupMember {
   GroupMember({
@@ -147,9 +148,11 @@ class _ChatMembersViewState extends State<ChatMembersView> {
     if (m.role == MemberRole.owner) return; // can't remove the creator
     final ok = await confirmDialog(
       context,
-      title: '移除成员',
-      message: '将 ${m.name} 移出群聊？',
-      confirmText: '移除',
+      title: AppStrings.t(AppStringKeys.chatMembersRemoveMemberTitle),
+      message: AppStrings.t(AppStringKeys.chatMembersRemoveMemberConfirmation, {
+        'value1': m.name,
+      }),
+      confirmText: AppStrings.t(AppStringKeys.chatInfoRemove),
       destructive: true,
     );
     if (!ok) return;
@@ -166,7 +169,12 @@ class _ChatMembersViewState extends State<ChatMembersView> {
         if (_total > 0) _total--;
       });
     } catch (_) {
-      if (mounted) showToast(context, '移除失败，可能没有权限');
+      if (mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.chatMembersRemoveFailedPermission),
+        );
+      }
     }
   }
 
@@ -178,7 +186,11 @@ class _ChatMembersViewState extends State<ChatMembersView> {
       body: Column(
         children: [
           NavHeader(
-            title: _total > 0 ? '群成员 ($_total)' : '群成员',
+            title: _total > 0
+                ? AppStrings.t(AppStringKeys.chatMembersTitleWithCount, {
+                    'value1': _total,
+                  })
+                : AppStrings.t(AppStringKeys.chatInfoGroupMembers),
             onBack: () => Navigator.of(context).pop(),
           ),
           Expanded(

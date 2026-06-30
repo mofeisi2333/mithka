@@ -19,6 +19,7 @@ import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import 'chat_row_view.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class SearchView extends StatefulWidget {
   const SearchView({super.key});
@@ -115,8 +116,10 @@ class _SearchViewState extends State<SearchView> {
                           autocorrect: false,
                           textInputAction: TextInputAction.search,
                           style: TextStyle(fontSize: 15, color: c.textPrimary),
-                          decoration: const InputDecoration(
-                            hintText: '搜索',
+                          decoration: InputDecoration(
+                            hintText: AppStrings.t(
+                              AppStringKeys.topicChatSearch,
+                            ),
                             border: InputBorder.none,
                             isCollapsed: true,
                           ),
@@ -152,8 +155,12 @@ class _SearchViewState extends State<SearchView> {
 
   Widget _results() {
     final c = context.colors;
-    if (_query.trim().isEmpty) return _empty('搜索聊天、联系人');
-    if (_vm.results.isEmpty) return _empty('未找到相关聊天');
+    if (_query.trim().isEmpty) {
+      return _empty(AppStrings.t(AppStringKeys.chatsSearchPlaceholder));
+    }
+    if (_vm.results.isEmpty) {
+      return _empty(AppStrings.t(AppStringKeys.chatsSearchNoResults));
+    }
     return Container(
       color: c.background,
       child: ListView.builder(
@@ -331,7 +338,12 @@ class SearchViewModel extends ChangeNotifier {
         for (final id in (public.int64Array('chat_ids') ?? const <int>[]).take(
           30,
         )) {
-          await addChat(id, subtitle: '公开群组/频道');
+          await addChat(
+            id,
+            subtitle: AppStrings.t(
+              AppStringKeys.chatsSearchPublicGroupsAndChannels,
+            ),
+          );
         }
       } catch (_) {}
 
@@ -401,9 +413,17 @@ class SearchHit {
   final int? userId;
 
   static String _chatSubtitle(ChatSummary chat) {
-    if (chat.kind == ChatKind.group) return '群组';
-    if (chat.kind == ChatKind.channel) return '频道';
-    if (chat.kind == ChatKind.bot) return '机器人';
-    return chat.lastMessage.isEmpty ? '聊天' : chat.lastMessage;
+    if (chat.kind == ChatKind.group) {
+      return AppStrings.t(AppStringKeys.linkHandlerGroupLabel);
+    }
+    if (chat.kind == ChatKind.channel) {
+      return AppStrings.t(AppStringKeys.tabChannels);
+    }
+    if (chat.kind == ChatKind.bot) {
+      return AppStrings.t(AppStringKeys.chatsSearchBots);
+    }
+    return chat.lastMessage.isEmpty
+        ? AppStrings.t(AppStringKeys.audioSearchChatTab)
+        : chat.lastMessage;
   }
 }

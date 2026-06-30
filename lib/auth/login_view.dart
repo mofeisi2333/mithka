@@ -21,6 +21,7 @@ import '../theme/app_theme.dart';
 import 'account_store.dart';
 import 'auth_manager.dart';
 import 'country_picker.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class LoginView extends StatefulWidget {
   const LoginView({super.key});
@@ -198,7 +199,7 @@ class _LoginViewState extends State<LoginView> {
                 _password.clear();
                 setState(() => _forcePhone = true);
               },
-              child: const Text('重新输入手机号'),
+              child: Text(AppStrings.t(AppStringKeys.loginReenterPhoneNumber)),
             ),
           // Aborting an add-account drops the half-created slot and returns to
           // the account we came from.
@@ -209,7 +210,13 @@ class _LoginViewState extends State<LoginView> {
                 accounts.cancelAddAccount(auth);
                 if (mounted) setState(() => _forcePhone = false);
               },
-              child: Text(returnName != null ? '返回 $returnName' : '返回上一账号'),
+              child: Text(
+                returnName != null
+                    ? AppStrings.t(AppStringKeys.loginBackToAccount, {
+                        'value1': returnName,
+                      })
+                    : AppStrings.t(AppStringKeys.loginBackToPreviousAccount),
+              ),
             )
           else if (others.isNotEmpty)
             CupertinoActionSheetAction(
@@ -218,13 +225,13 @@ class _LoginViewState extends State<LoginView> {
                 accounts.switchTo(others.first, auth);
                 if (mounted) setState(() => _forcePhone = false);
               },
-              child: const Text('切换账号'),
+              child: Text(AppStrings.t(AppStringKeys.loginSwitchAccount)),
             ),
         ],
         cancelButton: CupertinoActionSheetAction(
           isDefaultAction: true,
           onPressed: () => Navigator.of(sheet).pop(),
-          child: const Text('取消'),
+          child: Text(AppStrings.t(AppStringKeys.countryPickerCancel)),
         ),
       ),
     );
@@ -280,7 +287,7 @@ class _LoginViewState extends State<LoginView> {
           ),
           const SizedBox(height: 4),
           Text(
-            '登录 Telegram 账号',
+            AppStrings.t(AppStringKeys.loginTelegramAccountTitle),
             style: TextStyle(fontSize: 15, color: c.textSecondary),
           ),
         ],
@@ -329,8 +336,10 @@ class _LoginViewState extends State<LoginView> {
                   controller: _phone,
                   keyboardType: TextInputType.phone,
                   style: TextStyle(fontSize: 22, color: c.textPrimary),
-                  decoration: const InputDecoration(
-                    hintText: '手机号（含国家区号）',
+                  decoration: InputDecoration(
+                    hintText: AppStrings.t(
+                      AppStringKeys.loginPhoneNumberWithCountryCode,
+                    ),
                     border: InputBorder.none,
                   ),
                   onChanged: (v) {
@@ -351,13 +360,18 @@ class _LoginViewState extends State<LoginView> {
           ),
         ),
         const SizedBox(height: 20),
-        _primaryButton(auth, '获取验证码', _phoneDigits.length >= 7, () {
-          auth.submitPhone('+$_phoneDigits');
-          if (_forcePhone) setState(() => _forcePhone = false);
-        }),
+        _primaryButton(
+          auth,
+          AppStrings.t(AppStringKeys.loginGetVerificationCode),
+          _phoneDigits.length >= 7,
+          () {
+            auth.submitPhone('+$_phoneDigits');
+            if (_forcePhone) setState(() => _forcePhone = false);
+          },
+        ),
         const SizedBox(height: 20),
         Text(
-          '我们会向该号码发送一次性登录验证码',
+          AppStrings.t(AppStringKeys.loginCodeWillBeSentToNumber),
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 12, color: c.textTertiary),
         ),
@@ -442,7 +456,7 @@ class _LoginViewState extends State<LoginView> {
         const SizedBox(height: 16),
         InputField(
           systemImage: FontAwesomeIcons.shieldHalved.data,
-          placeholder: '验证码',
+          placeholder: AppStrings.t(AppStringKeys.loginVerificationCode),
           controller: _code,
           keyboardType: TextInputType.number,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
@@ -451,7 +465,7 @@ class _LoginViewState extends State<LoginView> {
         const SizedBox(height: 16),
         _primaryButton(
           auth,
-          '登录',
+          AppStrings.t(AppStringKeys.loginSubmit),
           _code.text.isNotEmpty,
           () => auth.submitCode(_code.text),
         ),
@@ -466,7 +480,7 @@ class _LoginViewState extends State<LoginView> {
             ),
           ),
           child: Text(
-            '重新发送验证码',
+            AppStrings.t(AppStringKeys.loginResendVerificationCode),
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w500,
@@ -487,14 +501,14 @@ class _LoginViewState extends State<LoginView> {
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              '密码提示：$hint',
+              AppStrings.t(AppStringKeys.loginPasswordHint, {'value1': hint}),
               style: TextStyle(fontSize: 13, color: c.textSecondary),
             ),
           ),
         const SizedBox(height: 16),
         InputField(
           systemImage: FontAwesomeIcons.lock.data,
-          placeholder: '两步验证密码',
+          placeholder: AppStrings.t(AppStringKeys.loginTwoStepPassword),
           controller: _password,
           secure: true,
           onChanged: (_) => setState(() {}),
@@ -502,7 +516,7 @@ class _LoginViewState extends State<LoginView> {
         const SizedBox(height: 16),
         _primaryButton(
           auth,
-          '验证',
+          AppStrings.t(AppStringKeys.loginVerify),
           _password.text.isNotEmpty,
           () => auth.submitPassword(_password.text),
         ),
@@ -518,27 +532,27 @@ class _LoginViewState extends State<LoginView> {
         Align(
           alignment: Alignment.centerLeft,
           child: Text(
-            '这是一个新账号，请填写昵称',
+            AppStrings.t(AppStringKeys.loginNewAccountNicknamePrompt),
             style: TextStyle(fontSize: 13, color: c.textSecondary),
           ),
         ),
         const SizedBox(height: 16),
         InputField(
           systemImage: FontAwesomeIcons.solidCircleUser.data,
-          placeholder: '名字',
+          placeholder: AppStrings.t(AppStringKeys.loginFirstName),
           controller: _firstName,
           onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 16),
         InputField(
           systemImage: FontAwesomeIcons.circleUser.data,
-          placeholder: '姓氏（可选）',
+          placeholder: AppStrings.t(AppStringKeys.loginLastNameOptional),
           controller: _lastName,
         ),
         const SizedBox(height: 16),
         _primaryButton(
           auth,
-          '完成注册',
+          AppStrings.t(AppStringKeys.loginCompleteRegistration),
           _firstName.text.isNotEmpty,
           () => auth.register(_firstName.text, _lastName.text),
         ),
@@ -559,7 +573,7 @@ class _LoginViewState extends State<LoginView> {
           ),
           const SizedBox(height: 12),
           Text(
-            '尚未配置 Telegram API 凭证',
+            AppStrings.t(AppStringKeys.loginTelegramApiCredentialsMissing),
             style: TextStyle(
               fontSize: 17,
               fontWeight: FontWeight.w600,
@@ -568,8 +582,8 @@ class _LoginViewState extends State<LoginView> {
           ),
           const SizedBox(height: 8),
           Text(
-            '请在 lib/config/secrets.dart 中填入你的 api_id 与 api_hash'
-            '（在 my.telegram.org 获取），然后重新运行。',
+            AppStrings.t(AppStringKeys.loginTelegramApiSecretsInstructions) +
+                AppStrings.t(AppStringKeys.loginTelegramApiPortalInstructions),
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 13, color: c.textSecondary),
           ),

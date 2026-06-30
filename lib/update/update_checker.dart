@@ -16,6 +16,7 @@ import 'package:flutter/widgets.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../components/confirm_dialog.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class UpdateChecker {
   UpdateChecker._();
@@ -59,10 +60,13 @@ class UpdateChecker {
       if (!context.mounted) return;
       final ok = await confirmDialog(
         context,
-        title: '发现新版本',
-        message: '当前版本 $current，最新 $remote。是否前往下载更新？',
-        confirmText: '更新',
-        cancelText: '稍后',
+        title: AppStrings.t(AppStringKeys.updateNewVersionFound),
+        message: AppStrings.t(AppStringKeys.updateVersionPrompt, {
+          'value1': current,
+          'value2': remote,
+        }),
+        confirmText: AppStrings.t(AppStringKeys.updateAction),
+        cancelText: AppStrings.t(AppStringKeys.updateLater),
       );
       if (ok && context.mounted) {
         await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);

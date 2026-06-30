@@ -43,6 +43,7 @@ import 'rich_text_composer_view.dart';
 import 'rich_text_format.dart';
 import 'sticker_preview.dart';
 import 'sticker_store.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 enum _Panel { none, function, emoji, sticker, voice }
 
@@ -164,7 +165,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
       if (!mounted) return;
       showToast(
         context,
-        status.isPermanentlyDenied ? '请在系统设置中允许麦克风权限' : '需要麦克风权限',
+        status.isPermanentlyDenied
+            ? AppStrings.t(AppStringKeys.composerMicrophonePermissionSettings)
+            : AppStrings.t(AppStringKeys.composerMicrophonePermissionRequired),
       );
       if (status.isPermanentlyDenied) unawaited(openAppSettings());
       return;
@@ -264,7 +267,12 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   void _pickFailed(String what) {
     setState(() => _panel = _Panel.none);
-    showToast(context, '无法打开$what');
+    showToast(
+      context,
+      AppStrings.t(AppStringKeys.composerOpenAttachmentFailed, {
+        'value1': what,
+      }),
+    );
   }
 
   Future<void> _sendCurrentText() async {
@@ -272,9 +280,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
     if (vm.requiresPaidMessage) {
       final ok = await confirmDialog(
         context,
-        title: '发送付费消息？',
-        message: '发送这条消息需要 ${vm.paidMessageStarCount} 星。',
-        confirmText: '发送',
+        title: AppStrings.t(AppStringKeys.composerSendPaidMessageQuestion),
+        message: AppStrings.t(AppStringKeys.composerPaidMessageCost, {
+          'value1': vm.paidMessageStarCount,
+        }),
+        confirmText: AppStrings.t(AppStringKeys.composerSend),
       );
       if (!mounted || !ok) return;
     }
@@ -290,9 +300,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
         fullscreenDialog: true,
         builder: (_) => RichTextComposerView(
           initialText: _controller.text,
-          title: '富文本消息',
-          submitText: '发送',
-          hintText: '支持 Markdown：**粗体**、*斜体*、`代码`、引用等',
+          title: AppStrings.t(AppStringKeys.composerRichTextMessageTitle),
+          submitText: AppStrings.t(AppStringKeys.composerSend),
+          hintText: AppStrings.t(AppStringKeys.composerMarkdownSupportHint),
           allowMedia: false,
         ),
       ),
@@ -303,9 +313,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
     if (vm.requiresPaidMessage) {
       final ok = await confirmDialog(
         context,
-        title: '发送付费消息？',
-        message: '发送这条消息需要 ${vm.paidMessageStarCount} 星。',
-        confirmText: '发送',
+        title: AppStrings.t(AppStringKeys.composerSendPaidMessageQuestion),
+        message: AppStrings.t(AppStringKeys.composerPaidMessageCost, {
+          'value1': vm.paidMessageStarCount,
+        }),
+        confirmText: AppStrings.t(AppStringKeys.composerSend),
       );
       if (!mounted || !ok) return;
     }
@@ -398,11 +410,25 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   String _replyPreview(ChatMessage m) {
-    if (m.document != null) return '[文件]${m.document!.fileName}';
-    if (m.voice != null) return '[语音]';
-    if (m.location != null) return '[位置]';
-    if (m.animatedSticker != null) return '[动画表情]';
-    if (m.image != null) return m.text.isEmpty ? '[图片]' : m.text;
+    if (m.document != null) {
+      return AppStrings.t(AppStringKeys.composerFilePreview, {
+        'value1': m.document!.fileName,
+      });
+    }
+    if (m.voice != null) {
+      return AppStrings.t(AppStringKeys.composerVoicePreview);
+    }
+    if (m.location != null) {
+      return AppStrings.t(AppStringKeys.composerLocationPreview);
+    }
+    if (m.animatedSticker != null) {
+      return AppStrings.t(AppStringKeys.composerAnimatedEmojiPreview);
+    }
+    if (m.image != null) {
+      return m.text.isEmpty
+          ? AppStrings.t(AppStringKeys.composerImagePreview)
+          : m.text;
+    }
     return m.text;
   }
 
@@ -467,7 +493,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
                 if (menu?.isWebApp ?? false) ...[
                   _botMenuRow(
                     icon: FontAwesomeIcons.tableCells.data,
-                    title: menu!.text.isEmpty ? '打开菜单' : menu.text,
+                    title: menu!.text.isEmpty
+                        ? AppStrings.t(AppStringKeys.composerOpenMenu)
+                        : menu.text,
                     subtitle: menu.url,
                     onTap: () {
                       Navigator.of(context).pop();
@@ -582,7 +610,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
               ),
               if (option.needsPremium)
                 Text(
-                  'Premium',
+                  AppStringKeys.premiumLabel.l10n(context),
                   style: TextStyle(fontSize: 13, color: AppTheme.brand),
                 )
               else if (selected)
@@ -714,7 +742,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
                                 items.insert(
                                   0,
                                   ContextMenuButtonItem(
-                                    label: '富文本',
+                                    label: AppStrings.t(
+                                      AppStringKeys.composerRichText,
+                                    ),
                                     onPressed: () {
                                       ContextMenuController.removeAny();
                                       unawaited(_openRichTextComposer());
@@ -861,7 +891,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
         }
       }
     } catch (_) {
-      _pickFailed('图片');
+      _pickFailed(AppStrings.t(AppStringKeys.composerImage));
     }
   }
 
@@ -875,7 +905,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
         widget.vm.sendPhoto(edited.path, caption: edited.caption);
       }
     } catch (_) {
-      _pickFailed('相机');
+      _pickFailed(AppStrings.t(AppStringKeys.composerCamera));
     }
   }
 
@@ -896,7 +926,12 @@ class _ChatInputBarState extends State<ChatInputBar> {
     if (!content.mimeType.toLowerCase().startsWith('image/')) return;
     final data = content.data;
     if (data == null || data.isEmpty) {
-      if (mounted) showToast(context, '无法读取粘贴的图片');
+      if (mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.composerPastedImageReadFailed),
+        );
+      }
       return;
     }
     if (_isGifMime(content.mimeType)) {
@@ -913,7 +948,12 @@ class _ChatInputBarState extends State<ChatInputBar> {
       );
       final data = image?['data'];
       if (data is! Uint8List || data.isEmpty) {
-        if (showNoImageToast && mounted) showToast(context, '剪贴板没有图片');
+        if (showNoImageToast && mounted) {
+          showToast(
+            context,
+            AppStrings.t(AppStringKeys.composerClipboardNoImage),
+          );
+        }
         return false;
       }
       final mimeType = (image?['mimeType'] as String?) ?? 'image/png';
@@ -926,7 +966,12 @@ class _ChatInputBarState extends State<ChatInputBar> {
       _restoreKeyboardFocus();
       return true;
     } catch (_) {
-      if (showNoImageToast && mounted) showToast(context, '无法读取粘贴的图片');
+      if (showNoImageToast && mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.composerPastedImageReadFailed),
+        );
+      }
       return false;
     }
   }
@@ -989,7 +1034,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
         }
       }
     } catch (_) {
-      _pickFailed('文件');
+      _pickFailed(AppStrings.t(AppStringKeys.topicPostContentFile));
     }
   }
 
@@ -1048,7 +1093,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
       final path = result?.files.single.path;
       if (path != null) widget.vm.sendAudio(path);
     } catch (_) {
-      _pickFailed('音频');
+      _pickFailed(AppStrings.t(AppStringKeys.composerAudio));
     }
   }
 
@@ -1079,13 +1124,41 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   Widget _functionPanel() {
     final items = [
-      (FontAwesomeIcons.phone.data, '语音通话', () => widget.onStartCall(false)),
-      (FontAwesomeIcons.video.data, '视频通话', () => widget.onStartCall(true)),
-      (FontAwesomeIcons.locationDot.data, '位置', _sendLocation),
-      (FontAwesomeIcons.solidFolder.data, '文件', _pickFile),
-      (FontAwesomeIcons.grip.data, '投票', _createPoll),
-      (FontAwesomeIcons.music.data, '音频', _pickAudio),
-      (FontAwesomeIcons.listCheck.data, '清单', _createChecklist),
+      (
+        FontAwesomeIcons.phone.data,
+        AppStrings.t(AppStringKeys.composerVoiceCall),
+        () => widget.onStartCall(false),
+      ),
+      (
+        FontAwesomeIcons.video.data,
+        AppStrings.t(AppStringKeys.composerVideoCall),
+        () => widget.onStartCall(true),
+      ),
+      (
+        FontAwesomeIcons.locationDot.data,
+        AppStrings.t(AppStringKeys.composerLocation),
+        _sendLocation,
+      ),
+      (
+        FontAwesomeIcons.solidFolder.data,
+        AppStrings.t(AppStringKeys.topicPostContentFile),
+        _pickFile,
+      ),
+      (
+        FontAwesomeIcons.grip.data,
+        AppStrings.t(AppStringKeys.composerPoll),
+        _createPoll,
+      ),
+      (
+        FontAwesomeIcons.music.data,
+        AppStrings.t(AppStringKeys.composerAudio),
+        _pickAudio,
+      ),
+      (
+        FontAwesomeIcons.listCheck.data,
+        AppStrings.t(AppStringKeys.composerChecklist),
+        _createChecklist,
+      ),
     ];
     final c = context.colors;
     return Container(
@@ -1117,7 +1190,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   ),
                   const SizedBox(height: 5),
                   Text(
-                    item.$2,
+                    item.$2.l10n(context),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 11, color: c.textSecondary),
@@ -1297,10 +1370,12 @@ class _ChatInputBarState extends State<ChatInputBar> {
     final c = context.colors;
     final granted = _recorder != null;
     final label = !granted
-        ? '需要麦克风权限'
+        ? AppStrings.t(AppStringKeys.composerMicrophonePermissionRequired)
         : !_recording
-        ? '按住说话'
-        : (_recordCancelled ? '松开手指，取消发送' : '松开发送，上滑取消');
+        ? AppStrings.t(AppStringKeys.composerHoldToTalk)
+        : (_recordCancelled
+              ? AppStrings.t(AppStringKeys.composerReleaseFingerToCancel)
+              : AppStrings.t(AppStringKeys.composerReleaseToSendSlideToCancel));
     return Container(
       height: 240,
       width: double.infinity,
@@ -1397,7 +1472,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
     if (packs.isEmpty) {
       return Center(
         child: Text(
-          store.loading ? '正在加载表情…' : '暂无表情',
+          store.loading
+              ? AppStrings.t(AppStringKeys.composerLoadingEmoji)
+              : AppStrings.t(AppStringKeys.composerNoEmoji),
           style: TextStyle(fontSize: 13, color: context.colors.textSecondary),
         ),
       );

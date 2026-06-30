@@ -15,9 +15,13 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class ChatPickerView extends StatefulWidget {
-  const ChatPickerView({super.key, this.title = '选择聊天'});
+  const ChatPickerView({
+    super.key,
+    this.title = AppStringKeys.chatPickerChooseChat,
+  });
   final String title;
 
   @override
@@ -106,7 +110,7 @@ class _ChatPickerViewState extends State<ChatPickerView> {
                   ),
                 ),
                 Text(
-                  widget.title,
+                  widget.title.l10n(context),
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
@@ -138,8 +142,8 @@ class _ChatPickerViewState extends State<ChatPickerView> {
                       controller: _controller,
                       autocorrect: false,
                       style: TextStyle(fontSize: 15, color: c.textPrimary),
-                      decoration: const InputDecoration(
-                        hintText: '搜索',
+                      decoration: InputDecoration(
+                        hintText: AppStrings.t(AppStringKeys.topicChatSearch),
                         border: InputBorder.none,
                         isCollapsed: true,
                       ),

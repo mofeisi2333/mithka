@@ -14,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import 'chat_view.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 Future<void> openLink(BuildContext context, String url) async {
   final nav = Navigator.of(context);
@@ -67,12 +68,18 @@ Future<void> openLink(BuildContext context, String url) async {
         if (context.mounted) await _joinInvite(context, nav, link);
       default:
         if (!await _openTelegramFallback(nav, link) && context.mounted) {
-          showToast(context, '暂不支持打开此 Telegram 链接');
+          showToast(
+            context,
+            AppStrings.t(AppStringKeys.linkHandlerUnsupportedTelegramLink),
+          );
         }
     }
   } catch (_) {
     if (!await _openTelegramFallback(nav, link) && context.mounted) {
-      showToast(context, '无法打开 Telegram 链接');
+      showToast(
+        context,
+        AppStrings.t(AppStringKeys.linkHandlerOpenTelegramLinkFailed),
+      );
     }
   }
 }
@@ -238,12 +245,15 @@ Future<void> _joinInvite(
     return;
   }
   if (!context.mounted) return;
-  final title = info.str('title') ?? '群组';
+  final title =
+      info.str('title') ?? AppStrings.t(AppStringKeys.linkHandlerGroupLabel);
   final ok = await confirmDialog(
     context,
-    title: '加入',
-    message: '加入「$title」？',
-    confirmText: '加入',
+    title: AppStrings.t(AppStringKeys.linkHandlerJoin),
+    message: AppStrings.t(AppStringKeys.linkHandlerJoinNamedGroupQuestion, {
+      'value1': title,
+    }),
+    confirmText: AppStrings.t(AppStringKeys.linkHandlerJoin),
   );
   if (!ok) return;
   try {

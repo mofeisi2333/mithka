@@ -14,21 +14,28 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../settings/translation_controller.dart';
 import '../tdlib/td_models.dart';
 import 'emoji_store.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 enum MessageAction {
-  copy(FontAwesomeIcons.file, '复制'),
-  edit(FontAwesomeIcons.pen, '编辑'),
-  translate(FontAwesomeIcons.language, '翻译'),
-  reply(FontAwesomeIcons.quoteLeft, '引用'),
-  forward(FontAwesomeIcons.share, '转发'),
-  playMuted(FontAwesomeIcons.volumeXmark, '静音播放'),
-  multiSelect(FontAwesomeIcons.circleCheck, '多选'),
-  pinTodo(FontAwesomeIcons.thumbtack, '设为待办'),
-  unpinTodo(FontAwesomeIcons.thumbtack, '撤回待办'),
-  save(FontAwesomeIcons.solidStar, '收藏'),
-  saveSticker(FontAwesomeIcons.circlePlus, '添加'),
-  viewStickerSet(FontAwesomeIcons.tableCells, '表情包'),
-  delete(FontAwesomeIcons.trash, '删除');
+  copy(FontAwesomeIcons.file, AppStringKeys.messageActionCopy),
+  edit(FontAwesomeIcons.pen, AppStringKeys.messageActionEdit),
+  translate(FontAwesomeIcons.language, AppStringKeys.messageActionTranslate),
+  reply(FontAwesomeIcons.quoteLeft, AppStringKeys.messageActionQuote),
+  forward(FontAwesomeIcons.share, AppStringKeys.messageActionForward),
+  playMuted(FontAwesomeIcons.volumeXmark, AppStringKeys.messageActionPlayMuted),
+  multiSelect(
+    FontAwesomeIcons.circleCheck,
+    AppStringKeys.messageActionMultiSelect,
+  ),
+  pinTodo(FontAwesomeIcons.thumbtack, AppStringKeys.messageActionSetTodo),
+  unpinTodo(FontAwesomeIcons.thumbtack, AppStringKeys.messageActionUnsetTodo),
+  save(FontAwesomeIcons.solidStar, AppStringKeys.messageActionFavorite),
+  saveSticker(FontAwesomeIcons.circlePlus, AppStringKeys.imageEditAdd),
+  viewStickerSet(
+    FontAwesomeIcons.tableCells,
+    AppStringKeys.messageActionSticker,
+  ),
+  delete(FontAwesomeIcons.trash, AppStringKeys.chatDelete);
 
   const MessageAction(this.glyph, this.label);
   final FaIconData glyph;
@@ -141,7 +148,7 @@ class MessageActionMenu extends StatelessWidget {
                       ),
                       const SizedBox(height: 7),
                       Text(
-                        action.label,
+                        action.label.l10n(context),
                         maxLines: 1,
                         style: TextStyle(
                           fontSize: 12,

@@ -19,6 +19,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../components/ui_components.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class LocationDetailView extends StatefulWidget {
   const LocationDetailView({super.key, required this.location});
@@ -42,7 +43,7 @@ class _LocationDetailViewState extends State<LocationDetailView> {
     if (t != null && t.isNotEmpty) return t;
     final resolved = _resolvedAddress.trim();
     if (resolved.isNotEmpty) return resolved.split('，').first;
-    return '位置';
+    return AppStrings.t(AppStringKeys.composerLocation);
   }
 
   String get _subtitle {
@@ -163,7 +164,10 @@ class _LocationDetailViewState extends State<LocationDetailView> {
       backgroundColor: c.background,
       body: Column(
         children: [
-          NavHeader(title: '位置', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.composerLocation),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(child: _mapWidget()),
           Container(
             width: double.infinity,
@@ -201,7 +205,9 @@ class _LocationDetailViewState extends State<LocationDetailView> {
                       const SizedBox(height: 4),
                       Text(
                         _geocoding && _subtitle.isEmpty
-                            ? '正在获取位置…'
+                            ? AppStrings.t(
+                                AppStringKeys.locationDetailFetchingLocation,
+                              )
                             : (_subtitle.isEmpty
                                   ? '${widget.location.latitude.toStringAsFixed(6)}, ${widget.location.longitude.toStringAsFixed(6)}'
                                   : _subtitle),

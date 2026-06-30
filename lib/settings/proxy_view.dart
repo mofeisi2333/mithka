@@ -21,6 +21,7 @@ import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../theme/app_theme.dart';
 import 'proxy_config.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class ProxyView extends StatefulWidget {
   const ProxyView({super.key});
@@ -79,8 +80,8 @@ class _ProxyViewState extends State<ProxyView> {
   Future<void> _remove(int id) async {
     final ok = await confirmDialog(
       context,
-      title: '删除代理',
-      confirmText: '删除',
+      title: AppStrings.t(AppStringKeys.proxyDeleteProxy),
+      confirmText: AppStrings.t(AppStringKeys.chatDelete),
       destructive: true,
     );
     if (!ok) return;
@@ -112,7 +113,7 @@ class _ProxyViewState extends State<ProxyView> {
       'proxyTypeSocks5' => 'SOCKS5',
       'proxyTypeHttp' => 'HTTP',
       'proxyTypeMtproto' => 'MTProto',
-      _ => '代理',
+      _ => AppStrings.t(AppStringKeys.proxyTitle),
     };
   }
 
@@ -123,7 +124,10 @@ class _ProxyViewState extends State<ProxyView> {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '代理', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.proxyTitle),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(
             child: _loading
                 ? const Center(
@@ -151,7 +155,7 @@ class _ProxyViewState extends State<ProxyView> {
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                         child: Text(
-                          '代理仅用于连接 Telegram，可能会降低连接速度。',
+                          AppStrings.t(AppStringKeys.proxyDescription),
                           style: TextStyle(
                             fontSize: 13,
                             color: c.textSecondary,
@@ -190,7 +194,7 @@ class _ProxyViewState extends State<ProxyView> {
           child: Row(
             children: [
               Text(
-                '不使用代理',
+                AppStrings.t(AppStringKeys.proxyDisabled),
                 style: TextStyle(fontSize: 16, color: c.textPrimary),
               ),
               const Spacer(),
@@ -274,7 +278,7 @@ class _ProxyViewState extends State<ProxyView> {
               FaIcon(FontAwesomeIcons.plus, size: 18, color: AppTheme.brand),
               const SizedBox(width: 10),
               Text(
-                '添加代理',
+                AppStrings.t(AppStringKeys.proxyAddProxy),
                 style: TextStyle(fontSize: 16, color: AppTheme.brand),
               ),
             ],
@@ -357,7 +361,7 @@ class _ProxyEditViewState extends State<ProxyEditView> {
       debugPrint('🌐 [Mithka] add proxy failed: $error');
       if (mounted) {
         setState(() => _saving = false);
-        showToast(context, '添加代理失败');
+        showToast(context, AppStrings.t(AppStringKeys.proxyAddFailed));
       }
     }
   }
@@ -371,7 +375,7 @@ class _ProxyEditViewState extends State<ProxyEditView> {
       body: Column(
         children: [
           NavHeader(
-            title: '添加代理',
+            title: AppStrings.t(AppStringKeys.proxyAddProxy),
             onBack: () => Navigator.of(context).pop(),
             trailing: GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -379,7 +383,7 @@ class _ProxyEditViewState extends State<ProxyEditView> {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: Text(
-                  '保存',
+                  AppStrings.t(AppStringKeys.accentColorPickerSave),
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
@@ -398,18 +402,42 @@ class _ProxyEditViewState extends State<ProxyEditView> {
                 _segments(),
                 const SizedBox(height: 14),
                 _card([
-                  _field(_server, '服务器', '主机或 IP'),
+                  _field(
+                    _server,
+                    AppStrings.t(AppStringKeys.proxyServer),
+                    AppStrings.t(AppStringKeys.proxyHostOrIp),
+                  ),
                   const InsetDivider(leadingInset: 16),
-                  _field(_port, '端口', '0-65535', number: true),
+                  _field(
+                    _port,
+                    AppStrings.t(AppStringKeys.proxyPort),
+                    '0-65535',
+                    number: true,
+                  ),
                 ]),
                 const SizedBox(height: 14),
                 if (mtproto)
-                  _card([_field(_secret, '密钥', 'secret')])
+                  _card([
+                    _field(
+                      _secret,
+                      AppStrings.t(AppStringKeys.proxySecret),
+                      'secret',
+                    ),
+                  ])
                 else
                   _card([
-                    _field(_username, '用户名', '可选'),
+                    _field(
+                      _username,
+                      AppStrings.t(AppStringKeys.editProfileUsername),
+                      AppStrings.t(AppStringKeys.proxyOptional),
+                    ),
                     const InsetDivider(leadingInset: 16),
-                    _field(_password, '密码', '可选', secure: true),
+                    _field(
+                      _password,
+                      AppStrings.t(AppStringKeys.proxyPassword),
+                      AppStrings.t(AppStringKeys.proxyOptional),
+                      secure: true,
+                    ),
                   ]),
               ],
             ),

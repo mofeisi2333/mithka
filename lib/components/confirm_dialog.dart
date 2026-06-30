@@ -13,8 +13,8 @@ Future<bool> confirmDialog(
   BuildContext context, {
   required String title,
   String? message,
-  String confirmText = '确定',
-  String cancelText = '取消',
+  String confirmText = AppStringKeys.confirmOk,
+  String cancelText = AppStringKeys.countryPickerCancel,
   bool destructive = false,
 }) async {
   final ok = await showCupertinoDialog<bool>(

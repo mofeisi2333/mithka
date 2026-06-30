@@ -14,6 +14,7 @@ import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class AddMembersView extends StatefulWidget {
   const AddMembersView({super.key, required this.chatId});
@@ -82,7 +83,10 @@ class _AddMembersViewState extends State<AddMembersView> {
     } catch (_) {
       if (mounted) {
         setState(() => _adding = false);
-        showToast(context, '邀请失败，可能没有权限');
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.addMembersInvitePermissionError),
+        );
       }
     }
   }
@@ -131,7 +135,7 @@ class _AddMembersViewState extends State<AddMembersView> {
               ),
             ),
             Text(
-              '邀请成员',
+              AppStrings.t(AppStringKeys.addMembersInviteMembersTitle),
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
@@ -146,7 +150,11 @@ class _AddMembersViewState extends State<AddMembersView> {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 14),
                   child: Text(
-                    _selected.isEmpty ? '完成' : '完成(${_selected.length})',
+                    _selected.isEmpty
+                        ? AppStrings.t(AppStringKeys.addMembersDone)
+                        : AppStrings.t(AppStringKeys.addMembersDoneWithCount, {
+                            'value1': _selected.length,
+                          }),
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,

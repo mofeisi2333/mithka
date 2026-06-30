@@ -17,6 +17,7 @@ import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import 'sticker_item.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class _SenderInfo {
   _SenderInfo(
@@ -118,7 +119,7 @@ class ChatViewModel extends ChangeNotifier {
   bool isGroup = false;
   int memberCount = 0;
   int? peerUserId; // private chat → call target
-  String meName = '我';
+  String meName = AppStrings.t(AppStringKeys.chatMeLabel);
   int? meId;
   TdFileRef? mePhoto;
   String draft = '';
@@ -189,14 +190,22 @@ class ChatViewModel extends ChangeNotifier {
   /// (private). Group member count lives in the title, not here.
   String get subtitle {
     if (_typing.isNotEmpty) {
-      if (!isGroup) return '正在输入…';
+      if (!isGroup) return AppStrings.t(AppStringKeys.chatTyping);
       final names = _typing.values.where((n) => n.isNotEmpty).toList();
-      if (names.length == 1) return '${names.first} 正在输入…';
-      if (names.isNotEmpty) return '${names.length} 人正在输入…';
-      return '正在输入…';
+      if (names.length == 1) {
+        return AppStrings.t(AppStringKeys.chatUserTyping, {
+          'value1': names.first,
+        });
+      }
+      if (names.isNotEmpty) {
+        return AppStrings.t(AppStringKeys.chatPeopleTyping, {
+          'value1': names.length,
+        });
+      }
+      return AppStrings.t(AppStringKeys.chatTyping);
     }
     if (isGroup) return '';
-    if (peerOnline) return '在线';
+    if (peerOnline) return AppStrings.t(AppStringKeys.chatOnline);
     return peerStatusText;
   }
 
@@ -206,8 +215,10 @@ class ChatViewModel extends ChangeNotifier {
       !_isLoadingOlder && _allMessages.isNotEmpty && _hasOlderHistory;
   bool get requiresPaidMessage => paidMessageStarCount > 0;
   String get inputPlaceholder => messageAutoDeleteTime > 0
-      ? '消息将在${TDParse.formatDuration(messageAutoDeleteTime)}后自动删除'
-      : '发送消息…';
+      ? AppStrings.t(AppStringKeys.chatAutoDeleteCountdown, {
+          'value1': TDParse.formatDuration(messageAutoDeleteTime),
+        })
+      : AppStrings.t(AppStringKeys.chatMessageInputPlaceholder);
 
   final Map<int, _SenderInfo> _senderCache = {};
   final Set<int> _resolvingSenders = {};
@@ -346,7 +357,7 @@ class ChatViewModel extends ChangeNotifier {
           return MessageSenderOption(
             sender: sender,
             id: senderChatId,
-            title: chat.str('title') ?? '频道',
+            title: chat.str('title') ?? AppStrings.t(AppStringKeys.tabChannels),
             photo: TDParse.smallPhoto(chat.obj('photo')),
             needsPremium: needsPremium,
           );
@@ -354,7 +365,7 @@ class ChatViewModel extends ChangeNotifier {
           return MessageSenderOption(
             sender: sender,
             id: senderChatId,
-            title: '频道',
+            title: AppStrings.t(AppStringKeys.tabChannels),
             needsPremium: needsPremium,
           );
         }
@@ -1235,7 +1246,10 @@ class ChatViewModel extends ChangeNotifier {
         final id =
             info.int64('message_thread_id') ?? topic.int64('message_thread_id');
         if (id == null || id == 0) continue;
-        final name = info.str('name') ?? topic.str('name') ?? '话题';
+        final name =
+            info.str('name') ??
+            topic.str('name') ??
+            AppStrings.t(AppStringKeys.topicChatTopicTitle);
         topics.add(ForumTopicOption(id: id, name: name));
       }
       forumTopics = topics;
@@ -1304,7 +1318,7 @@ class ChatViewModel extends ChangeNotifier {
       case 'botMenuButton':
         return BotMenuInfo(
           type: menu.type!,
-          text: menu.str('text') ?? '菜单',
+          text: menu.str('text') ?? AppStrings.t(AppStringKeys.chatMenu),
           url: menu.str('url') ?? '',
         );
       case 'botMenuButtonCommands':
@@ -1326,7 +1340,9 @@ class ChatViewModel extends ChangeNotifier {
         isMember = true;
         canSendMessages = isChannel ? false : _chatCanSend;
         if (!canSendMessages) {
-          sendDisabledReason = isChannel ? '只有管理员可以发布内容' : '已被全员禁言';
+          sendDisabledReason = isChannel
+              ? AppStrings.t(AppStringKeys.chatAdminsOnlyPosting)
+              : AppStrings.t(AppStringKeys.chatAllMembersMuted);
         }
       case 'chatMemberStatusRestricted':
         isMember = status?.boolean('is_member') ?? true;
@@ -1334,7 +1350,9 @@ class ChatViewModel extends ChangeNotifier {
             status?.obj('permissions')?.boolean('can_send_basic_messages') ??
             false;
         if (!isMember) canJoin = true;
-        if (!canSendMessages) sendDisabledReason = '您已被禁言';
+        if (!canSendMessages) {
+          sendDisabledReason = AppStrings.t(AppStringKeys.chatYouAreMuted);
+        }
       case 'chatMemberStatusLeft':
         isMember = false;
         canSendMessages = false;
@@ -1342,7 +1360,9 @@ class ChatViewModel extends ChangeNotifier {
       case 'chatMemberStatusBanned':
         isMember = false;
         canSendMessages = false;
-        sendDisabledReason = '您已被移出该群组';
+        sendDisabledReason = AppStrings.t(
+          AppStringKeys.chatYouWereRemovedFromGroup,
+        );
     }
   }
 
@@ -1387,7 +1407,9 @@ class ChatViewModel extends ChangeNotifier {
         canJoin = false;
         canSendMessages = isChannel ? false : _chatCanSend;
         if (!canSendMessages && isChannel) {
-          sendDisabledReason = '只有管理员可以发布内容';
+          sendDisabledReason = AppStrings.t(
+            AppStringKeys.chatAdminsOnlyPosting,
+          );
         }
       }
       notifyListeners();
@@ -1829,15 +1851,15 @@ class ChatViewModel extends ChangeNotifier {
   String _statusLabel(String? type) {
     switch (type) {
       case 'userStatusOnline':
-        return '在线';
+        return AppStrings.t(AppStringKeys.chatOnline);
       case 'userStatusRecently':
-        return '最近在线';
+        return AppStrings.t(AppStringKeys.chatRecentlyOnline);
       case 'userStatusLastWeek':
-        return '一周内在线';
+        return AppStrings.t(AppStringKeys.chatOnlineWithinWeek);
       case 'userStatusLastMonth':
-        return '一个月内在线';
+        return AppStrings.t(AppStringKeys.chatOnlineWithinMonth);
       default:
-        return '离线';
+        return AppStrings.t(AppStringKeys.chatOffline);
     }
   }
 
@@ -1873,6 +1895,7 @@ class ChatViewModel extends ChangeNotifier {
 
   void _applyReply(ChatMessage m, ChatMessage quoted) {
     m.replyToPreview = _replyPreview(quoted);
+    m.replyToDate = quoted.date;
     if (quoted.isOutgoing) {
       m.replyToSender = meName;
       return;
@@ -1927,11 +1950,25 @@ class ChatViewModel extends ChangeNotifier {
   }
 
   String _replyPreview(ChatMessage q) {
-    if (q.document != null) return '[文件]${q.document!.fileName}';
-    if (q.voice != null) return '[语音]';
-    if (q.location != null) return '[位置]';
-    if (q.animatedSticker != null) return '[动画表情]';
-    if (q.image != null) return q.text.isEmpty ? '[图片]' : q.text;
+    if (q.document != null) {
+      return AppStrings.t(AppStringKeys.composerFilePreview, {
+        'value1': q.document!.fileName,
+      });
+    }
+    if (q.voice != null) {
+      return AppStrings.t(AppStringKeys.composerVoicePreview);
+    }
+    if (q.location != null) {
+      return AppStrings.t(AppStringKeys.composerLocationPreview);
+    }
+    if (q.animatedSticker != null) {
+      return AppStrings.t(AppStringKeys.composerAnimatedEmojiPreview);
+    }
+    if (q.image != null) {
+      return q.text.isEmpty
+          ? AppStrings.t(AppStringKeys.composerImagePreview)
+          : q.text;
+    }
     return q.text;
   }
 
@@ -2214,9 +2251,14 @@ class ChatViewModel extends ChangeNotifier {
     }
     if (names.isEmpty) return;
     final suffix = message.serviceUserIds.length > names.length
-        ? ' 等${message.serviceUserIds.length}人'
+        ? AppStrings.t(AppStringKeys.chatAndOthersCount, {
+            'value1': message.serviceUserIds.length,
+          })
         : '';
-    final text = '${names.join('、')}$suffix加入了群聊';
+    final text = AppStrings.t(AppStringKeys.chatUsersJoinedGroup, {
+      'value1': names.join(AppStrings.t(AppStringKeys.listSeparator)),
+      'value2': suffix,
+    });
     final index = messages.indexWhere((m) => m.id == message.id);
     if (index < 0 || messages[index].text == text) return;
     messages[index].text = text;
@@ -2232,7 +2274,9 @@ class ChatViewModel extends ChangeNotifier {
       });
       final name = TDParse.userName(user);
       if (name.isEmpty) return;
-      final text = '$name离开了群聊';
+      final text = AppStrings.t(AppStringKeys.chatUserLeftGroup, {
+        'value1': name,
+      });
       final index = messages.indexWhere((m) => m.id == message.id);
       if (index < 0 || messages[index].text == text) return;
       messages[index].text = text;
@@ -2262,7 +2306,9 @@ class ChatViewModel extends ChangeNotifier {
             user.obj('emoji_status')?.int64('custom_emoji_id') ??
             0;
       } catch (_) {
-        name = '用户 $senderId';
+        name = AppStrings.t(AppStringKeys.chatUserFallbackName, {
+          'value1': senderId,
+        });
         photo = null;
       }
       final role = isChannel
@@ -2284,13 +2330,18 @@ class ChatViewModel extends ChangeNotifier {
           'chat_id': senderId,
         });
         info = _SenderInfo(
-          chat.str('title') ?? '群成员',
+          chat.str('title') ?? AppStrings.t(AppStringKeys.chatInfoGroupMembers),
           TDParse.smallPhoto(chat.obj('photo')),
           MemberRole.member,
           null,
         );
       } catch (_) {
-        info = _SenderInfo('群成员', null, MemberRole.member, null);
+        info = _SenderInfo(
+          AppStrings.t(AppStringKeys.chatInfoGroupMembers),
+          null,
+          MemberRole.member,
+          null,
+        );
       }
     }
     if (_isDisposed) return;

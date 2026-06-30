@@ -21,6 +21,7 @@ import '../app/video_split_controller.dart';
 import '../call/call_manager.dart';
 import '../channels/topic_chat_view.dart';
 import '../components/confirm_dialog.dart';
+import '../components/drawer_controller.dart' as dc;
 import '../components/photo_avatar.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../components/ui_components.dart';
@@ -46,6 +47,7 @@ import 'message_bubble.dart';
 import 'sticker_set_detail_view.dart';
 import 'sticker_viewer.dart';
 import 'video_player_view.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class ChatView extends StatefulWidget {
   const ChatView({
@@ -123,6 +125,7 @@ class _ChatViewState extends State<ChatView> {
   bool _backSwipePopping = false;
   bool _loadingOlderFromScroll = false;
   VelocityTracker? _backSwipeVelocity;
+  dc.TabBarVisibility? _tabBarVisibility;
 
   /// Gap (seconds) between messages that triggers a fresh time separator.
   static const _separatorGap = 300;
@@ -140,9 +143,26 @@ class _ChatViewState extends State<ChatView> {
     _scroll.addListener(_onScroll);
     _scrollTargetId = widget.initialMessageId;
     _vm.onAppear();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _retainTabBarSuppression();
+    });
     // Load premium status early so the message menu can correctly hide the
     // emoji add/表情包 actions for non-premium users (the menu reads it).
     EmojiStore.shared.loadIfNeeded();
+  }
+
+  void _retainTabBarSuppression() {
+    if (!mounted) return;
+    dc.TabBarVisibility? tabBarVisibility;
+    try {
+      tabBarVisibility = context.read<dc.TabBarVisibility>();
+    } on ProviderNotFoundException {
+      tabBarVisibility = null;
+    }
+    if (identical(_tabBarVisibility, tabBarVisibility)) return;
+    _tabBarVisibility?.releaseChatSuppression();
+    _tabBarVisibility = tabBarVisibility;
+    _tabBarVisibility?.retainChatSuppression();
   }
 
   void _onScroll() {
@@ -665,17 +685,28 @@ class _ChatViewState extends State<ChatView> {
     final ids = _orderedSelectedIds();
     if (ids.isEmpty) return;
     final target = await Navigator.of(context).push<ChatSummary>(
-      MaterialPageRoute(builder: (_) => const ChatPickerView(title: '转发到')),
+      MaterialPageRoute(
+        builder: (_) =>
+            const ChatPickerView(title: AppStringKeys.chatForwardToTitle),
+      ),
     );
     if (target == null || !mounted) return;
     try {
       await _vm.forwardMany(ids, target.id);
       if (!mounted) return;
-      showToast(context, '已转发 ${ids.length} 条消息');
+      showToast(
+        context,
+        AppStrings.t(AppStringKeys.chatMessagesForwardedCount, {
+          'value1': ids.length,
+        }),
+      );
       _exitSelection();
     } catch (e) {
       if (!mounted) return;
-      showToast(context, '转发失败：$e');
+      showToast(
+        context,
+        AppStrings.t(AppStringKeys.chatForwardFailed, {'value1': e}),
+      );
     }
   }
 
@@ -685,11 +716,19 @@ class _ChatViewState extends State<ChatView> {
     try {
       await _vm.saveToFavoritesMany(ids);
       if (!mounted) return;
-      showToast(context, '已保存 ${ids.length} 条消息');
+      showToast(
+        context,
+        AppStrings.t(AppStringKeys.chatMessagesSavedCount, {
+          'value1': ids.length,
+        }),
+      );
       _exitSelection();
     } catch (e) {
       if (!mounted) return;
-      showToast(context, '保存失败：$e');
+      showToast(
+        context,
+        AppStrings.t(AppStringKeys.chatSaveFailed, {'value1': e}),
+      );
     }
   }
 
@@ -698,9 +737,12 @@ class _ChatViewState extends State<ChatView> {
     if (ids.isEmpty) return;
     final confirmed = await confirmDialog(
       context,
-      title: '删除消息？',
-      message: '确定要删除选中的 ${ids.length} 条消息吗？',
-      confirmText: '删除',
+      title: AppStringKeys.chatDeleteMessagesQuestion,
+      message: AppStrings.t(
+        AppStringKeys.chatDeleteSelectedMessagesConfirmation,
+        {'value1': ids.length},
+      ),
+      confirmText: AppStringKeys.chatDelete,
       destructive: true,
     );
     if (!mounted || !confirmed) return;
@@ -710,6 +752,7 @@ class _ChatViewState extends State<ChatView> {
 
   @override
   void dispose() {
+    _tabBarVisibility?.releaseChatSuppression();
     _bannerTimer?.cancel();
     _vm.removeListener(_onModel);
     _vm.onDisappear();
@@ -738,7 +781,7 @@ class _ChatViewState extends State<ChatView> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10),
             child: Text(
-              '以下为新消息',
+              AppStringKeys.chatNewMessagesDivider.l10n(context),
               style: TextStyle(fontSize: 12, color: c.textSecondary),
             ),
           ),
@@ -1098,7 +1141,9 @@ class _ChatViewState extends State<ChatView> {
     final copyText = button.copyText;
     if (copyText != null && copyText.isNotEmpty) {
       await Clipboard.setData(ClipboardData(text: copyText));
-      if (mounted) showToast(context, '已复制');
+      if (mounted) {
+        showToast(context, AppStringKeys.topicPostContentCopied);
+      }
       return;
     }
     if (button.isCallback) {
@@ -1116,7 +1161,7 @@ class _ChatViewState extends State<ChatView> {
         }
       } catch (e) {
         if (!mounted) return;
-        showToast(context, '按钮操作失败');
+        showToast(context, AppStringKeys.topicPostContentActionFailed);
       }
       return;
     }
@@ -1125,10 +1170,10 @@ class _ChatViewState extends State<ChatView> {
       return;
     }
     if (button.switchInlineQuery != null) {
-      showToast(context, '暂不支持内联切换按钮');
+      showToast(context, AppStringKeys.chatInlineSwitchButtonUnsupported);
       return;
     }
-    showToast(context, '暂不支持这个按钮');
+    showToast(context, AppStringKeys.chatButtonUnsupported);
   }
 
   Future<void> _perform(MessageAction action, ChatMessage message) async {
@@ -1155,34 +1200,43 @@ class _ChatViewState extends State<ChatView> {
         try {
           await _vm.pinTodo(message);
           if (!mounted) return;
-          showToast(context, '已设为群待办');
+          showToast(context, AppStringKeys.chatTodoSetSuccess);
         } catch (e) {
           if (!mounted) return;
-          showToast(context, '设置失败：$e');
+          showToast(
+            context,
+            AppStrings.t(AppStringKeys.chatTodoSetFailed, {'value1': e}),
+          );
         }
       case MessageAction.unpinTodo:
         try {
           await _vm.unpinTodo(message);
           if (!mounted) return;
-          showToast(context, '已撤回群待办');
+          showToast(context, AppStringKeys.chatTodoUnsetSuccess);
         } catch (e) {
           if (!mounted) return;
-          showToast(context, '撤回失败：$e');
+          showToast(
+            context,
+            AppStrings.t(AppStringKeys.chatTodoUnsetFailed, {'value1': e}),
+          );
         }
       case MessageAction.save:
         try {
           await _vm.saveToFavorites(message.id);
           if (!mounted) return;
-          showToast(context, '已保存到 Saved Messages');
+          showToast(context, AppStringKeys.chatSavedToSavedMessages);
         } catch (e) {
           if (!mounted) return;
-          showToast(context, '保存失败：$e');
+          showToast(
+            context,
+            AppStrings.t(AppStringKeys.chatSaveFailed, {'value1': e}),
+          );
         }
       case MessageAction.saveSticker:
         final id = message.stickerFileId ?? message.animatedSticker?.id;
         if (id != null) {
           _vm.saveFavoriteSticker(id);
-          showToast(context, '已添加到表情');
+          showToast(context, AppStringKeys.chatStickerAddSuccess);
         }
       case MessageAction.viewStickerSet:
         final sid = message.stickerSetId;
@@ -1194,9 +1248,9 @@ class _ChatViewState extends State<ChatView> {
       case MessageAction.delete:
         final confirmed = await confirmDialog(
           context,
-          title: '删除消息？',
-          message: '确定要删除这条消息吗？',
-          confirmText: '删除',
+          title: AppStringKeys.chatDeleteMessagesQuestion,
+          message: AppStringKeys.chatDeleteSingleMessageQuestion,
+          confirmText: AppStringKeys.chatDelete,
           destructive: true,
         );
         if (!mounted || !confirmed) return;
@@ -1246,7 +1300,12 @@ class _ChatViewState extends State<ChatView> {
       return true;
     } catch (e) {
       if (!mounted) return false;
-      if (showErrors) showToast(context, '翻译失败：$e');
+      if (showErrors) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.chatTranslateFailed, {'value1': e}),
+        );
+      }
       return false;
     }
   }
@@ -1279,9 +1338,9 @@ class _ChatViewState extends State<ChatView> {
     final edited = await Navigator.of(context).push<String>(
       MaterialPageRoute(
         builder: (_) => EditFieldView(
-          title: '编辑消息',
+          title: AppStringKeys.chatEditMessageTitle,
           initial: message.text,
-          hint: '消息',
+          hint: AppStringKeys.tabMessages,
           multiline: true,
           maxLength: 4096,
         ),
@@ -1289,7 +1348,7 @@ class _ChatViewState extends State<ChatView> {
     );
     if (!mounted || edited == null || edited == message.text) return;
     if (edited.trim().isEmpty) {
-      showToast(context, '消息不能为空');
+      showToast(context, AppStringKeys.chatMessageRequired);
       return;
     }
     _vm.editMessageText(message.id, edited);
@@ -1315,7 +1374,7 @@ class _ChatViewState extends State<ChatView> {
   void _startCall(bool isVideo) {
     final uid = _vm.peerUserId;
     if (uid == null) {
-      showToast(context, '仅支持与联系人通话');
+      showToast(context, AppStringKeys.chatContactCallsOnly);
       return;
     }
     context.read<CallManager>().startCall(uid, isVideo);
@@ -1323,16 +1382,27 @@ class _ChatViewState extends State<ChatView> {
 
   Future<void> _forwardMessage(ChatMessage message) async {
     final target = await Navigator.of(context).push<ChatSummary>(
-      MaterialPageRoute(builder: (_) => const ChatPickerView(title: '转发到')),
+      MaterialPageRoute(
+        builder: (_) =>
+            const ChatPickerView(title: AppStringKeys.chatForwardToTitle),
+      ),
     );
     if (target == null || !mounted) return;
     try {
       await _vm.forward(message.id, target.id);
       if (!mounted) return;
-      showToast(context, '已转发到 ${target.title}');
+      showToast(
+        context,
+        AppStrings.t(AppStringKeys.chatForwardedToName, {
+          'value1': target.title,
+        }),
+      );
     } catch (e) {
       if (!mounted) return;
-      showToast(context, '转发失败：$e');
+      showToast(
+        context,
+        AppStrings.t(AppStringKeys.chatForwardFailed, {'value1': e}),
+      );
     }
   }
 
@@ -1473,7 +1543,9 @@ class _ChatViewState extends State<ChatView> {
             FaIcon(FontAwesomeIcons.arrowUp, size: 14, color: AppTheme.brand),
             const SizedBox(width: 5),
             Text(
-              '$count条新消息',
+              AppStrings.t(AppStringKeys.chatNewMessagesCount, {
+                'value1': count,
+              }),
               style: TextStyle(
                 fontSize: 13,
                 color: c.textPrimary,
@@ -1528,8 +1600,8 @@ class _ChatViewState extends State<ChatView> {
             gradient: AppTheme.brandGradient,
             borderRadius: BorderRadius.circular(23),
           ),
-          child: const Text(
-            'Start',
+          child: Text(
+            AppStringKeys.startButton.l10n(context),
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,
@@ -1566,7 +1638,9 @@ class _ChatViewState extends State<ChatView> {
             FaIcon(FontAwesomeIcons.solidBell, size: 18, color: AppTheme.brand),
             const SizedBox(width: 8),
             Text(
-              muted ? '取消静音' : '静音',
+              (muted ? AppStringKeys.chatUnmute : AppStringKeys.callMute).l10n(
+                context,
+              ),
               style: TextStyle(fontSize: 16, color: AppTheme.brand),
             ),
           ],
@@ -1579,7 +1653,11 @@ class _ChatViewState extends State<ChatView> {
   Widget _joinBar() {
     final c = context.colors;
     final requested = _vm.joinRequested;
-    final label = requested ? '已申请加入' : (_vm.joinByRequest ? '申请加入' : '加入群组');
+    final label = requested
+        ? AppStringKeys.chatJoinRequestSent
+        : (_vm.joinByRequest
+              ? AppStringKeys.chatRequestToJoin
+              : AppStringKeys.chatJoinGroup);
     return Container(
       padding: EdgeInsets.fromLTRB(
         16,
@@ -1632,7 +1710,9 @@ class _ChatViewState extends State<ChatView> {
       ),
       alignment: Alignment.center,
       child: Text(
-        reason.isEmpty ? '你无法在此聊天中发送消息' : reason,
+        (reason.isEmpty ? AppStringKeys.chatCannotSendMessages : reason).l10n(
+          context,
+        ),
         style: TextStyle(fontSize: 14, color: c.textSecondary),
       ),
     );
@@ -1643,8 +1723,10 @@ class _ChatViewState extends State<ChatView> {
     final c = context.colors;
     final requested = _vm.joinRequested;
     final label = requested
-        ? '已申请加入，等待审核'
-        : (_vm.joinByRequest ? '申请加入' : '加入群组');
+        ? AppStringKeys.chatJoinRequestPending
+        : (_vm.joinByRequest
+              ? AppStringKeys.chatRequestToJoin
+              : AppStringKeys.chatJoinGroup);
     return Column(
       children: [
         _header(),
@@ -1676,7 +1758,9 @@ class _ChatViewState extends State<ChatView> {
                   if (_vm.memberCount > 0) ...[
                     const SizedBox(height: 6),
                     Text(
-                      '${_vm.memberCount} 名成员',
+                      AppStrings.t(AppStringKeys.chatMemberCount, {
+                        'value1': _vm.memberCount,
+                      }),
                       style: TextStyle(fontSize: 14, color: c.textSecondary),
                     ),
                   ],
@@ -1716,7 +1800,7 @@ class _ChatViewState extends State<ChatView> {
   Widget _header() {
     final c = context.colors;
     final subtitle = _vm.subtitle;
-    final typing = subtitle.endsWith('正在输入…');
+    final typing = subtitle.endsWith(AppStringKeys.chatTyping);
     return Container(
       padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
       decoration: BoxDecoration(
@@ -1865,7 +1949,12 @@ class _ChatViewState extends State<ChatView> {
     if (!mounted) return;
     final topics = _vm.forumTopics;
     if (topics.isEmpty) {
-      showToast(context, _vm.forumTopicsLoading ? '正在加载话题' : '暂无话题');
+      showToast(
+        context,
+        _vm.forumTopicsLoading
+            ? AppStringKeys.chatLoadingTopics
+            : AppStringKeys.chatNoTopics,
+      );
       return;
     }
     final c = context.colors;
@@ -1893,7 +1982,9 @@ class _ChatViewState extends State<ChatView> {
                 color: all ? AppTheme.brand : c.textSecondary,
               ),
               title: Text(
-                all ? '全部话题' : topic!.name,
+                (all ? AppStringKeys.topicChatAllTopics : topic!.name).l10n(
+                  context,
+                ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: c.textPrimary, fontSize: 16),
@@ -1928,14 +2019,16 @@ class _ChatViewState extends State<ChatView> {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Text(
-                  '取消',
+                  AppStringKeys.countryPickerCancel.l10n(context),
                   style: TextStyle(fontSize: 16, color: c.textPrimary),
                 ),
               ),
             ),
             Expanded(
               child: Text(
-                '已选择 $count 条消息',
+                AppStrings.t(AppStringKeys.chatSelectedMessagesCount, {
+                  'value1': count,
+                }),
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 17,
@@ -2001,7 +2094,7 @@ class _ChatViewState extends State<ChatView> {
                 ),
                 const SizedBox(width: 5),
                 Text(
-                  '选择到这里',
+                  AppStringKeys.chatSelectUntilHere.l10n(context),
                   style: TextStyle(fontSize: 15, color: AppTheme.brand),
                 ),
               ],
@@ -2041,7 +2134,8 @@ class _ChatViewState extends State<ChatView> {
             button(FontAwesomeIcons.trash.data, _deleteSelected),
             button(
               FontAwesomeIcons.ellipsis.data,
-              () => showToast(context, '暂未支持更多操作'),
+              () =>
+                  showToast(context, AppStringKeys.chatMoreActionsUnsupported),
             ),
           ],
         ),
@@ -2052,7 +2146,7 @@ class _ChatViewState extends State<ChatView> {
   Widget _pinnedBar(ChatMessage pinned) {
     final c = context.colors;
     final text = pinned.text.trim().isEmpty
-        ? '[消息]'
+        ? AppStringKeys.chatSearchMessageResultLabel
         : pinned.text.replaceAll('\n', ' ');
     final canPrevious = _vm.hasPreviousPinnedMessage;
     final canNext = _vm.hasNextPinnedMessage;
@@ -2473,7 +2567,12 @@ class _ChatViewState extends State<ChatView> {
         : (_vm.isGroup ? first.senderPhoto : _vm.peerPhoto);
     final captions = group
         .map((m) => m.text.trim())
-        .where((text) => text.isNotEmpty && text != '[图片]' && text != '[视频]')
+        .where(
+          (text) =>
+              text.isNotEmpty &&
+              text != AppStringKeys.composerImagePreview &&
+              text != AppStringKeys.chatVideoPlaceholder,
+        )
         .toList();
     Widget avatar() => GestureDetector(
       behavior: HitTestBehavior.opaque,

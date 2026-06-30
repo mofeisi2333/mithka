@@ -22,6 +22,7 @@ import '../tdlib/json_helpers.dart';
 import '../tdlib/td_image_loader.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class _TdVideoStreamServer {
   _TdVideoStreamServer(this.fileId);
@@ -301,14 +302,14 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     }
     if (uri == null) {
       setState(() => _failed = true);
-      showToast(context, '视频加载失败');
+      showToast(context, AppStringKeys.videoPlayerLoadFailed);
       return;
     }
     _localPath = uri.toString();
     final initialized = await _initializeFromUri(uri);
     if (initialized || !mounted) return;
     setState(() => _failed = true);
-    showToast(context, '视频无法播放');
+    showToast(context, AppStringKeys.videoPlayerCannotPlay);
   }
 
   Future<bool> _initializeFromUri(Uri uri) async {
@@ -736,9 +737,9 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
           ),
         ),
         if (_failed)
-          const Center(
+          Center(
             child: Text(
-              '视频加载失败',
+              AppStringKeys.videoPlayerLoadFailed.l10n(context),
               style: TextStyle(color: Colors.white, fontSize: 15),
             ),
           )
@@ -846,7 +847,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         bottom: 10,
         child: Row(
           children: [
-            const Text(
+            Text(
               '00:00',
               style: TextStyle(color: Colors.white70, fontSize: 11),
             ),
@@ -1199,7 +1200,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   Widget _loadingDebugText() {
     final progress = _progress;
     final text = progress == null
-        ? '等待视频文件'
+        ? AppStringKeys.videoPlayerWaitingForFile
         : '${_byteString(progress.downloaded)} / ${_byteString(progress.total)} · ${_speedString(_downloadSpeed)}/s';
     return DefaultTextStyle(
       style: const TextStyle(
@@ -1229,7 +1230,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   Widget _speedMenu({bool compact = false}) {
     return PopupMenuButton<double>(
       initialValue: _speed,
-      tooltip: '播放速度',
+      tooltip: AppStringKeys.videoPlayerPlaybackSpeed.l10n(context),
       color: const Color(0xFF1C1C1E),
       onSelected: _setSpeed,
       itemBuilder: (_) => [
@@ -1337,7 +1338,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     final callback = widget.onSwitchMode;
     if (callback == null) return const SizedBox.shrink();
     return PopupMenuButton<VideoDisplayMode>(
-      tooltip: '切换显示模式',
+      tooltip: AppStringKeys.videoPlayerToggleDisplayMode.l10n(context),
       color: const Color(0xFF1C1C1E),
       onOpened: () {
         setState(() => _controlsVisible = true);
@@ -1349,9 +1350,15 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         _scheduleHide();
       },
       itemBuilder: (_) => [
-        _modeItem(VideoDisplayMode.fullscreen, '全屏播放'),
-        _modeItem(VideoDisplayMode.pictureInPicture, '画中画'),
-        _modeItem(VideoDisplayMode.split, '分屏'),
+        _modeItem(
+          VideoDisplayMode.fullscreen,
+          AppStringKeys.videoPlayerFullscreen,
+        ),
+        _modeItem(
+          VideoDisplayMode.pictureInPicture,
+          AppStringKeys.videoPlayerPictureInPicture,
+        ),
+        _modeItem(VideoDisplayMode.split, AppStringKeys.videoPlayerSplitScreen),
       ],
       child: SizedBox(
         width: size,
@@ -1434,11 +1441,11 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     final path = _localPath;
     final progress = _progress;
     if (progress?.isCompleted == true) {
-      showToast(context, '视频已缓存到本地');
+      showToast(context, AppStringKeys.videoPlayerCachedLocally);
     } else if (path != null) {
-      showToast(context, '正在边下边播');
+      showToast(context, AppStringKeys.videoPlayerStreamingWhileDownloading);
     } else {
-      showToast(context, '正在加载视频');
+      showToast(context, AppStringKeys.videoPlayerLoading);
     }
   }
 
@@ -1446,11 +1453,14 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     final sourceChatId = widget.sourceChatId;
     final messageId = widget.messageId;
     if (sourceChatId == null || messageId == null) {
-      showToast(context, '无法转发此视频');
+      showToast(context, AppStringKeys.videoPlayerForwardUnsupported);
       return;
     }
     final target = await Navigator.of(context).push<ChatSummary>(
-      MaterialPageRoute(builder: (_) => const ChatPickerView(title: '转发到')),
+      MaterialPageRoute(
+        builder: (_) =>
+            const ChatPickerView(title: AppStringKeys.chatForwardToTitle),
+      ),
     );
     if (target == null || !mounted) return;
     try {
@@ -1463,9 +1473,21 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         'send_copy': false,
         'remove_caption': false,
       });
-      if (mounted) showToast(context, '已转发到 ${target.title}');
+      if (mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.chatForwardedToName, {
+            'value1': target.title,
+          }),
+        );
+      }
     } catch (e) {
-      if (mounted) showToast(context, '转发失败：$e');
+      if (mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.chatForwardFailed, {'value1': e}),
+        );
+      }
     }
   }
 

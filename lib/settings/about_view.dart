@@ -12,6 +12,7 @@ import '../chat/link_handler.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class AboutView extends StatelessWidget {
   const AboutView({super.key});
@@ -26,7 +27,10 @@ class AboutView extends StatelessWidget {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '关于', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.aboutTitle),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(12, 32, 12, 24),
@@ -64,7 +68,9 @@ class AboutView extends StatelessWidget {
                         builder: (context, snapshot) {
                           final version = snapshot.data?.display ?? '...';
                           return Text(
-                            '版本 $version',
+                            AppStrings.t(AppStringKeys.aboutVersion, {
+                              'value1': version,
+                            }),
                             style: TextStyle(
                               fontSize: 13,
                               color: c.textSecondary,
@@ -86,7 +92,7 @@ class AboutView extends StatelessWidget {
                     children: [
                       _AboutLinkRow(
                         icon: FontAwesomeIcons.solidPaperPlane.data,
-                        title: 'Telegram 频道',
+                        title: AppStrings.t(AppStringKeys.aboutTelegramChannel),
                         value: 't.me/mithka',
                         onTap: () => openLink(context, _channelUrl),
                       ),

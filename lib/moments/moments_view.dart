@@ -207,7 +207,7 @@ class _MomentsViewState extends State<MomentsView> {
       color: c.groupedBackground,
       child: Column(
         children: [
-          NavHeader(title: '动态'),
+          NavHeader(title: AppStringKeys.tabMoments),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.only(top: AppSpacing.md),
@@ -219,12 +219,14 @@ class _MomentsViewState extends State<MomentsView> {
                       _menuRow(
                         icon: FontAwesomeIcons.star.data,
                         iconColor: const Color(0xFFFFBE00),
-                        title: '动态',
+                        title: AppStrings.t(AppStringKeys.tabMoments),
                         trailing: _channelActivity(),
                         onTap: () => _openDetail(
                           ChannelMomentsView(
                             isRootTab: widget.onOpenDetail != null,
-                            title: widget.onOpenDetail == null ? '动态' : '好友动态',
+                            title: widget.onOpenDetail == null
+                                ? AppStrings.t(AppStringKeys.tabMoments)
+                                : AppStrings.t(AppStringKeys.tabFriendMoments),
                             initialChannels: _allChannels,
                           ),
                         ),
@@ -232,7 +234,7 @@ class _MomentsViewState extends State<MomentsView> {
                       _menuRow(
                         icon: FontAwesomeIcons.wandMagicSparkles.data,
                         iconColor: const Color(0xFFFFBE00),
-                        title: '故事',
+                        title: AppStrings.t(AppStringKeys.momentsStories),
                         onTap: () => _openDetail(
                           StoriesView(
                             showBackButton: widget.onOpenDetail == null,
@@ -304,7 +306,9 @@ class _MomentsViewState extends State<MomentsView> {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          AppLocalizations.of(context).format('newPosts', '$_newPostCount'),
+          AppLocalizations.of(
+            context,
+          ).format(AppStringKeys.momentsNewPostsCount, '$_newPostCount'),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(fontSize: 14, color: c.textSecondary),
@@ -345,7 +349,7 @@ class ChannelMomentsView extends StatefulWidget {
   const ChannelMomentsView({
     super.key,
     this.isRootTab = false,
-    this.title = '动态',
+    this.title = AppStringKeys.tabMoments,
     this.initialChannels = const [],
     this.onOpenDetail,
   });
@@ -381,7 +385,7 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
   ChannelPost? _replyPost;
   int? _meUserId;
   int? _selectedPostChannelId;
-  String _meName = '我';
+  String _meName = AppStringKeys.chatMeLabel;
   TdFileRef? _mePhoto;
   int _meAccentColorId = -1;
   int _meProfileAccentColorId = -1;
@@ -881,7 +885,7 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
           ChannelPostComment(
             chatId: entry.chatId,
             messageId: message.id,
-            senderName: senderName ?? '用户',
+            senderName: senderName ?? AppStringKeys.topicChatUsers,
             text: _commentText(message),
             entities: _commentEntities(message),
           ),
@@ -903,18 +907,34 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
   }
 
   String _replyPreview(ChatMessage message) {
-    if (message.document != null) return '[文件]${message.document!.fileName}';
-    if (message.voice != null) return '[语音]';
-    if (message.location != null) return '[位置]';
-    if (message.animatedSticker != null) return '[动画表情]';
+    if (message.document != null) {
+      return AppStrings.t(AppStringKeys.composerFilePreview, {
+        'value1': message.document!.fileName,
+      });
+    }
+    if (message.voice != null) {
+      return AppStrings.t(AppStringKeys.composerVoicePreview);
+    }
+    if (message.location != null) {
+      return AppStrings.t(AppStringKeys.composerLocationPreview);
+    }
+    if (message.animatedSticker != null) {
+      return AppStrings.t(AppStringKeys.composerAnimatedEmojiPreview);
+    }
     if (message.video != null) {
-      return message.text.isEmpty ? '[视频]' : message.text;
+      return message.text.isEmpty
+          ? AppStrings.t(AppStringKeys.chatVideoPlaceholder)
+          : message.text;
     }
     if (message.image != null) {
-      return message.text.isEmpty ? '[图片]' : message.text;
+      return message.text.isEmpty
+          ? AppStrings.t(AppStringKeys.composerImagePreview)
+          : message.text;
     }
     final text = message.text.trim();
-    return text.isEmpty ? '[消息]' : text;
+    return text.isEmpty
+        ? AppStrings.t(AppStringKeys.chatSearchMessageResultLabel)
+        : text;
   }
 
   List<MessageTextEntity> _commentEntities(ChatMessage message) {
@@ -1149,14 +1169,21 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
     try {
       final target = await _resolveThreadTarget(post);
       if (target == null) {
-        if (mounted) showToast(context, '这条动态暂不能回复');
+        if (mounted) {
+          showToast(context, AppStringKeys.momentsReplyUnavailable);
+        }
         return;
       }
       await _sendThreadReply(target, text);
       _replyController.clear();
-      if (mounted) showToast(context, '已回复');
+      if (mounted) showToast(context, AppStringKeys.momentsReplied);
     } catch (e) {
-      if (mounted) showToast(context, '回复失败：$e');
+      if (mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.momentsReplyFailed, {'value1': e}),
+        );
+      }
     }
   }
 
@@ -1261,7 +1288,7 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
       child: Column(
         children: [
           NavHeader(
-            title: widget.title,
+            title: widget.title.l10n(context),
             onBack: widget.isRootTab ? null : () => Navigator.of(context).pop(),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
@@ -1411,7 +1438,10 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
                         decoration: InputDecoration(
                           border: InputBorder.none,
                           isCollapsed: true,
-                          hintText: '回复 ${post.channel.title}…',
+                          hintText: AppStrings.t(
+                            AppStringKeys.momentsReplyToPlaceholder,
+                            {'value1': post.channel.title},
+                          ),
                           hintStyle: TextStyle(color: c.textTertiary),
                         ),
                       ),
@@ -1454,7 +1484,10 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
                 ),
           const SizedBox(height: 12),
           Text(
-            (loading ? '加载频道…' : '暂无频道内容').l10n(context),
+            (loading
+                    ? AppStrings.t(AppStringKeys.channelsLoading)
+                    : AppStringKeys.momentsNoChannelContent)
+                .l10n(context),
             style: TextStyle(fontSize: 15, color: c.textSecondary),
           ),
         ],
@@ -1544,7 +1577,9 @@ class _MomentsComposerHeader extends StatelessWidget {
                     child: Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        '分享新鲜事...',
+                        AppStringKeys.momentsShareSomethingPlaceholder.l10n(
+                          context,
+                        ),
                         style: TextStyle(fontSize: 14, color: c.textTertiary),
                       ),
                     ),
@@ -1789,7 +1824,9 @@ class _ChannelMomentsSearchViewState extends State<ChannelMomentsSearchView> {
                           textInputAction: TextInputAction.search,
                           style: TextStyle(fontSize: 15, color: c.textPrimary),
                           decoration: InputDecoration(
-                            hintText: '搜索频道动态'.l10n(context),
+                            hintText: AppStrings.t(
+                              AppStringKeys.momentsSearchChannelPosts,
+                            ).l10n(context),
                             hintStyle: TextStyle(color: c.textTertiary),
                             border: InputBorder.none,
                             isCollapsed: true,
@@ -1827,7 +1864,7 @@ class _ChannelMomentsSearchViewState extends State<ChannelMomentsSearchView> {
     if (_channels.isEmpty) {
       return Center(
         child: Text(
-          '没有可搜索的频道'.l10n(context),
+          AppStringKeys.momentsNoSearchableChannels.l10n(context),
           style: TextStyle(fontSize: 14, color: c.textSecondary),
         ),
       );
@@ -1844,7 +1881,7 @@ class _ChannelMomentsSearchViewState extends State<ChannelMomentsSearchView> {
     if (_query.trim().isEmpty) {
       return Center(
         child: Text(
-          '搜索已加入频道的动态'.l10n(context),
+          AppStringKeys.momentsSearchJoinedChannelPosts.l10n(context),
           style: TextStyle(fontSize: 14, color: c.textSecondary),
         ),
       );
@@ -1852,7 +1889,10 @@ class _ChannelMomentsSearchViewState extends State<ChannelMomentsSearchView> {
     if (_results.isEmpty) {
       return Center(
         child: Text(
-          (_loading ? '搜索中…' : '没有找到相关动态').l10n(context),
+          (_loading
+                  ? AppStringKeys.momentsSearching
+                  : AppStringKeys.momentsNoPostsFound)
+              .l10n(context),
           style: TextStyle(fontSize: 14, color: c.textSecondary),
         ),
       );
@@ -1898,7 +1938,7 @@ Future<void> showChannelPostMenu(BuildContext context, ChannelPost post) {
   return showGeneralDialog<void>(
     context: context,
     barrierDismissible: true,
-    barrierLabel: '关闭',
+    barrierLabel: AppStringKeys.chatInfoAutoDeleteOff.l10n(context),
     barrierColor: Colors.black.withValues(alpha: 0.12),
     transitionDuration: const Duration(milliseconds: 120),
     pageBuilder: (dialogContext, _, _) {
@@ -1962,7 +2002,7 @@ class _ChannelPostMenu extends StatelessWidget {
                   ),
                   const SizedBox(width: AppSpacing.xl),
                   Text(
-                    '打开原消息',
+                    AppStringKeys.momentsOpenOriginalMessage.l10n(context),
                     style: TextStyle(
                       fontSize: AppTextSize.bodyLarge,
                       color: c.textPrimary,
@@ -2000,7 +2040,7 @@ class _ChannelPostDetailViewState extends State<ChannelPostDetailView> {
   ChannelPostThreadTarget? _target;
   List<ChannelPostComment> _comments = const [];
   ChannelPostComment? _replyTo;
-  String _meName = '我';
+  String _meName = AppStringKeys.chatMeLabel;
   TdFileRef? _mePhoto;
   bool _loading = true;
   bool _sending = false;
@@ -2159,7 +2199,7 @@ class _ChannelPostDetailViewState extends State<ChannelPostDetailView> {
         });
         final name = TDParse.userName(user).trim();
         return _CommentSender(
-          name: name.isNotEmpty ? name : title ?? '用户',
+          name: name.isNotEmpty ? name : title ?? AppStringKeys.topicChatUsers,
           photo: TDParse.smallPhoto(user.obj('profile_photo')),
         );
       }
@@ -2170,12 +2210,18 @@ class _ChannelPostDetailViewState extends State<ChannelPostDetailView> {
         });
         final name = chat.str('title')?.trim();
         return _CommentSender(
-          name: name == null || name.isEmpty ? title ?? '用户' : name,
+          name: name == null || name.isEmpty
+              ? title ?? AppStringKeys.topicChatUsers
+              : name,
           photo: TDParse.smallPhoto(chat.obj('photo')),
         );
       }
     } catch (_) {}
-    return _CommentSender(name: title == null || title.isEmpty ? '用户' : title);
+    return _CommentSender(
+      name: title == null || title.isEmpty
+          ? AppStringKeys.topicChatUsers
+          : title,
+    );
   }
 
   void _beginReply([ChannelPostComment? comment]) {
@@ -2237,7 +2283,12 @@ class _ChannelPostDetailViewState extends State<ChannelPostDetailView> {
       setState(() => _replyTo = null);
       await _loadComments();
     } catch (e) {
-      if (mounted) showToast(context, '回复失败：$e');
+      if (mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.momentsReplyFailed, {'value1': e}),
+        );
+      }
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -2255,7 +2306,12 @@ class _ChannelPostDetailViewState extends State<ChannelPostDetailView> {
       });
       _loadComments();
     } catch (e) {
-      if (mounted) showToast(context, '点赞失败：$e');
+      if (mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.momentsLikeFailed, {'value1': e}),
+        );
+      }
     }
   }
 
@@ -2267,7 +2323,7 @@ class _ChannelPostDetailViewState extends State<ChannelPostDetailView> {
       body: Column(
         children: [
           NavHeader(
-            title: '详情',
+            title: AppStringKeys.momentsDetails,
             onBack: widget.showBackButton
                 ? () => Navigator.of(context).pop()
                 : null,
@@ -2338,7 +2394,9 @@ class _ChannelPostDetailViewState extends State<ChannelPostDetailView> {
                   children: [
                     Expanded(
                       child: Text(
-                        '回复 ${replyTo.senderName}',
+                        AppStrings.t(AppStringKeys.momentsReplyToUser, {
+                          'value1': replyTo.senderName,
+                        }),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(fontSize: 13, color: c.linkBlue),
@@ -2381,8 +2439,13 @@ class _ChannelPostDetailViewState extends State<ChannelPostDetailView> {
                         border: InputBorder.none,
                         isCollapsed: true,
                         hintText: replyTo == null
-                            ? '说点什么吧...'
-                            : '回复 ${replyTo.senderName}...',
+                            ? AppStrings.t(
+                                AppStringKeys.momentsCommentPlaceholder,
+                              )
+                            : AppStrings.t(
+                                AppStringKeys.momentsReplyToUserPlaceholder,
+                                {'value1': replyTo.senderName},
+                              ),
                         hintStyle: TextStyle(color: c.textTertiary),
                       ),
                     ),
@@ -2438,7 +2501,7 @@ class _CommentThreadList extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 28),
         child: Center(
           child: Text(
-            '暂无评论',
+            AppStringKeys.momentsNoComments.l10n(context),
             style: TextStyle(fontSize: 14, color: context.colors.textTertiary),
           ),
         ),
@@ -2505,7 +2568,9 @@ class _CommentThreadList extends StatelessWidget {
     if (replyTo == null || replyTo == root.messageId) return null;
     final parent = byId[replyTo];
     if (parent == null) return null;
-    return '回复 ${parent.senderName}: ';
+    return AppStrings.t(AppStringKeys.momentsReplyPrefix, {
+      'value1': parent.senderName,
+    });
   }
 }
 
@@ -2709,11 +2774,14 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () => Navigator.of(context).pop(false),
-            child: Text('取消', style: AppTextStyle.bodyLarge(c.textPrimary)),
+            child: Text(
+              AppStringKeys.countryPickerCancel.l10n(context),
+              style: AppTextStyle.bodyLarge(c.textPrimary),
+            ),
           ),
           const Spacer(),
           Text(
-            '发布动态',
+            AppStringKeys.momentsCreatePostTitle.l10n(context),
             style: AppTextStyle.title(
               c.textPrimary,
               weight: AppTextWeight.semibold,
@@ -2734,7 +2802,10 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
                 borderRadius: BorderRadius.circular(AppRadius.md + 1),
               ),
               child: Text(
-                _sending ? '发送中' : '发表',
+                (_sending
+                        ? AppStringKeys.momentsSending
+                        : AppStringKeys.momentsPostAction)
+                    .l10n(context),
                 style: AppTextStyle.bodyLarge(
                   Colors.white,
                   weight: AppTextWeight.medium,
@@ -2773,7 +2844,9 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
             style: AppTextStyle.bodyLarge(c.textPrimary).copyWith(height: 1.4),
             decoration: InputDecoration(
               border: InputBorder.none,
-              hintText: '分享新鲜事...',
+              hintText: AppStringKeys.momentsShareSomethingPlaceholder.l10n(
+                context,
+              ),
               hintStyle: AppTextStyle.bodyLarge(c.textTertiary),
             ),
             onChanged: (_) => setState(() {}),
@@ -2870,7 +2943,10 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
               color: c.textTertiary,
             ),
             const SizedBox(height: AppSpacing.md),
-            Text('照片/视频', style: AppTextStyle.footnote(c.textTertiary)),
+            Text(
+              AppStringKeys.richTextComposerPhotoVideo.l10n(context),
+              style: AppTextStyle.footnote(c.textTertiary),
+            ),
           ],
         ),
       ),
@@ -2891,7 +2967,10 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
         const SizedBox(width: AppSpacing.md),
         _formatButton('•', () => _prefixLine('- ')),
         const Spacer(),
-        Text('Markdown', style: AppTextStyle.caption(c.textTertiary)),
+        Text(
+          AppStringKeys.markdownLabel.l10n(context),
+          style: AppTextStyle.caption(c.textTertiary),
+        ),
       ],
     );
   }
@@ -2934,8 +3013,8 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
             size: AppIconSize.nav,
             color: c.textPrimary,
           ),
-          title: '发布至',
-          value: _channel?.title ?? '选择频道',
+          title: AppStringKeys.momentsPublishTo,
+          value: _channel?.title ?? AppStringKeys.momentsSelectChannel,
           onTap: _selectChannel,
           leadingInset: AppSpacing.xxl + AppSpacing.xxs,
           height: AppMetric.settingsRowHeight - AppSpacing.xxs,
@@ -2947,7 +3026,7 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
             size: AppIconSize.nav,
             color: c.textPrimary,
           ),
-          title: '通知订阅者',
+          title: AppStringKeys.momentsNotifySubscribers,
           value: _notifySubscribers,
           onChanged: (value) => setState(() => _notifySubscribers = value),
           leadingInset: AppSpacing.xxl + AppSpacing.xxs,
@@ -2968,7 +3047,7 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
       final remaining = 9 - _pickedImages.length;
       setState(() => _pickedImages.addAll(images.take(remaining)));
     } catch (_) {
-      if (mounted) showToast(context, '无法选择照片');
+      if (mounted) showToast(context, AppStringKeys.momentsPickPhotoFailed);
     }
   }
 
@@ -3012,7 +3091,7 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
 
   Future<void> _selectChannel() async {
     if (widget.channels.isEmpty) {
-      showToast(context, '没有可发布的频道');
+      showToast(context, AppStringKeys.momentsNoPostableChannels);
       return;
     }
     final selected = await showModalBottomSheet<ChatSummary>(
@@ -3075,10 +3154,18 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
         }
       }
       if (!mounted) return;
-      showToast(context, '已发表到 ${channel.title}');
+      showToast(
+        context,
+        AppStrings.t(AppStringKeys.momentsPostedTo, {'value1': channel.title}),
+      );
       Navigator.of(context).pop(true);
     } catch (e) {
-      if (mounted) showToast(context, '发表失败：$e');
+      if (mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.momentsPostFailed, {'value1': e}),
+        );
+      }
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -3386,7 +3473,7 @@ class _InlineQuickReply extends StatelessWidget {
             PhotoAvatar(title: meName, photo: mePhoto, size: 26),
             const SizedBox(width: 9),
             Text(
-              '说点什么吧...',
+              AppStringKeys.momentsCommentPlaceholder.l10n(context),
               style: TextStyle(fontSize: 14, color: c.textTertiary),
             ),
           ],
@@ -3407,7 +3494,9 @@ class _InlineComments extends StatelessWidget {
     final comments = post.comments ?? const <ChannelPostComment>[];
     if (comments.isEmpty) {
       return Text(
-        '${post.message.commentCount} 条评论',
+        AppStrings.t(AppStringKeys.momentsCommentCount, {
+          'value1': post.message.commentCount,
+        }),
         style: TextStyle(fontSize: 13, color: c.linkBlue),
       );
     }
@@ -3459,7 +3548,7 @@ class _InlineComments extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(top: 3),
             child: Text(
-              '更多',
+              AppStringKeys.momentsMore.l10n(context),
               style: TextStyle(fontSize: 13, color: c.linkBlue),
             ),
           ),
@@ -3721,12 +3810,19 @@ class _PostActions extends StatelessWidget {
   String _likeText(int reactionCount) {
     if (reactionCount <= 0) return '';
     final names = post.likeNames;
-    if (names == null || names.isEmpty) return '$reactionCount 人赞了';
+    if (names == null || names.isEmpty) {
+      return AppStrings.t(AppStringKeys.momentsLikedByCount, {
+        'value1': reactionCount,
+      });
+    }
     final shown = names.take(3).join('、');
     if (reactionCount > names.length || names.length > 3) {
-      return '$shown、...等$reactionCount人赞了';
+      return AppStrings.t(AppStringKeys.momentsLikedByListWithOthers, {
+        'value1': shown,
+        'value2': reactionCount,
+      });
     }
-    return '$shown赞了';
+    return AppStrings.t(AppStringKeys.momentsUserLiked, {'value1': shown});
   }
 
   Future<void> _react(BuildContext context) async {
@@ -3739,15 +3835,25 @@ class _PostActions extends StatelessWidget {
         'is_big': false,
         'update_recent_reactions': true,
       });
-      if (context.mounted) showToast(context, '已赞');
+      if (context.mounted) {
+        showToast(context, AppStringKeys.momentsLiked);
+      }
     } catch (e) {
-      if (context.mounted) showToast(context, '点赞失败：$e');
+      if (context.mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.momentsLikeFailed, {'value1': e}),
+        );
+      }
     }
   }
 
   Future<void> _forward(BuildContext context) async {
     final target = await Navigator.of(context).push<ChatSummary>(
-      MaterialPageRoute(builder: (_) => const ChatPickerView(title: '转发到')),
+      MaterialPageRoute(
+        builder: (_) =>
+            const ChatPickerView(title: AppStringKeys.chatForwardToTitle),
+      ),
     );
     if (target == null || !context.mounted) return;
     try {
@@ -3760,9 +3866,21 @@ class _PostActions extends StatelessWidget {
         'send_copy': false,
         'remove_caption': false,
       });
-      if (context.mounted) showToast(context, '已转发到 ${target.title}');
+      if (context.mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.chatForwardedToName, {
+            'value1': target.title,
+          }),
+        );
+      }
     } catch (e) {
-      if (context.mounted) showToast(context, '转发失败：$e');
+      if (context.mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.chatForwardFailed, {'value1': e}),
+        );
+      }
     }
   }
 }
@@ -3802,7 +3920,7 @@ class _StoriesViewState extends State<StoriesView> {
       child: Column(
         children: [
           NavHeader(
-            title: '故事',
+            title: AppStringKeys.momentsStories,
             onBack: widget.showBackButton
                 ? () => Navigator.of(context).pop()
                 : null,
@@ -3822,7 +3940,7 @@ class _StoriesViewState extends State<StoriesView> {
           children: [
             const CircularProgressIndicator(),
             const SizedBox(height: 12),
-            Text('加载动态…'.l10n(context)),
+            Text(AppStrings.t(AppStringKeys.momentsLoadingPosts).l10n(context)),
           ],
         ),
       );
@@ -3839,7 +3957,7 @@ class _StoriesViewState extends State<StoriesView> {
             ),
             const SizedBox(height: 12),
             Text(
-              '暂无好友动态'.l10n(context),
+              AppStrings.t(AppStringKeys.momentsNoFriendPosts).l10n(context),
               style: TextStyle(fontSize: 15, color: c.textSecondary),
             ),
           ],
@@ -3913,7 +4031,9 @@ class _StoriesViewState extends State<StoriesView> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${group.storyIds.length} 条新动态',
+                    AppStrings.t(AppStringKeys.momentsNewPostsCount, {
+                      'value1': group.storyIds.length,
+                    }),
                     style: TextStyle(fontSize: 13, color: c.textSecondary),
                   ),
                 ],
@@ -4009,7 +4129,9 @@ class MomentsViewModel extends ChangeNotifier {
       name = chat.str('title') ?? '';
       photo = TDParse.smallPhoto(chat.obj('photo'));
     } catch (_) {}
-    if (name.isEmpty) name = _map[chatId]?.name ?? '未知';
+    if (name.isEmpty) {
+      name = _map[chatId]?.name ?? AppStringKeys.momentsUnknown;
+    }
 
     _map[chatId] = StoryGroup(
       chatId: chatId,

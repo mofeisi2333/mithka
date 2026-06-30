@@ -186,7 +186,9 @@ class _EditFieldViewState extends State<EditFieldView> {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Text(
-                    '保存'.l10n(context),
+                    AppStrings.t(
+                      AppStringKeys.accentColorPickerSave,
+                    ).l10n(context),
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,

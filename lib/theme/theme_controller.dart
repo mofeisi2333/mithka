@@ -17,11 +17,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app_theme.dart';
 import 'emoji_font_catalog.dart';
 import 'system_font_catalog.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 enum AppearanceMode {
-  system('跟随系统', FontAwesomeIcons.circleHalfStroke),
-  light('浅色', FontAwesomeIcons.solidSun),
-  dark('深色', FontAwesomeIcons.solidMoon);
+  system(
+    AppStringKeys.appLocaleFollowSystem,
+    FontAwesomeIcons.circleHalfStroke,
+  ),
+  light(AppStringKeys.themeModeLight, FontAwesomeIcons.solidSun),
+  dark(AppStringKeys.themeModeDark, FontAwesomeIcons.solidMoon);
 
   const AppearanceMode(this.label, this._icon);
   final String label;
@@ -37,8 +41,11 @@ enum AppearanceMode {
 }
 
 enum UnreadBadgeMode {
-  messages('未读消息数', FontAwesomeIcons.solidMessage),
-  chats('未读会话数', FontAwesomeIcons.comments);
+  messages(
+    AppStringKeys.themeUnreadMessageCount,
+    FontAwesomeIcons.solidMessage,
+  ),
+  chats(AppStringKeys.themeUnreadChatCount, FontAwesomeIcons.comments);
 
   const UnreadBadgeMode(this.label, this._icon);
   final String label;
@@ -48,8 +55,8 @@ enum UnreadBadgeMode {
 }
 
 enum UnreadBadgeOverflowMode {
-  capped('超过 99 显示 99+', FontAwesomeIcons.solidBell),
-  exact('超过 99 显示实际数字', FontAwesomeIcons.thumbtack);
+  capped(AppStringKeys.themeUnreadCountCapAt99, FontAwesomeIcons.solidBell),
+  exact(AppStringKeys.themeUnreadCountShowActual, FontAwesomeIcons.thumbtack);
 
   const UnreadBadgeOverflowMode(this.label, this._icon);
   final String label;
@@ -64,9 +71,15 @@ enum UnreadBadgeOverflowMode {
 }
 
 enum GroupAssistantPlacement {
-  top('顶部折叠', FontAwesomeIcons.arrowUp),
-  chronological('按时间排序', FontAwesomeIcons.clock),
-  secondScreen('第二屏首位', FontAwesomeIcons.arrowDown);
+  top(AppStringKeys.themeGroupAssistantTopCollapsed, FontAwesomeIcons.arrowUp),
+  chronological(
+    AppStringKeys.themeGroupAssistantSortByTime,
+    FontAwesomeIcons.clock,
+  ),
+  secondScreen(
+    AppStringKeys.themeGroupAssistantSecondPageFirst,
+    FontAwesomeIcons.arrowDown,
+  );
 
   const GroupAssistantPlacement(this.label, this._icon);
   final String label;
@@ -76,13 +89,37 @@ enum GroupAssistantPlacement {
 }
 
 enum AppFontChoice {
-  system('系统默认', '消息预览 Aa 123', cjk: true),
-  apple('Apple / 苹方', '消息预览 Aa 123', cjk: true),
-  pingFang('苹方简体 [CN]', 'CN 简体 门 说 线 骨 令', cjk: true),
-  pingFangHk('苹方香港 [HK]', 'HK 繁體 門 說 綫 骨 令', cjk: true),
-  pingFangTw('苹方繁体 [TW]', 'TW 正體 門 說 線 骨 令', cjk: true),
-  hiraginoSansJp('Hiragino [JP]', 'JP 日本語 門 説 線 骨 令', cjk: true),
-  customCjk('Custom Font', '自定义汉字字体 门 門 戸', cjk: true),
+  system(
+    AppStringKeys.emojiFontCatalogSystemDefault,
+    AppStringKeys.themeMessagePreviewSample,
+    cjk: true,
+  ),
+  apple(
+    AppStringKeys.themeApplePingFangFamily,
+    AppStringKeys.themeMessagePreviewSample,
+    cjk: true,
+  ),
+  pingFang(
+    AppStringKeys.themePingFangSimplifiedChinese,
+    AppStringKeys.themeSimplifiedChinesePreview,
+    cjk: true,
+  ),
+  pingFangHk(
+    AppStringKeys.themePingFangHongKong,
+    AppStringKeys.themeTraditionalHongKongPreview,
+    cjk: true,
+  ),
+  pingFangTw(
+    AppStringKeys.themePingFangTraditionalChinese,
+    AppStringKeys.themeTraditionalTaiwanPreview,
+    cjk: true,
+  ),
+  hiraginoSansJp(
+    'Hiragino [JP]',
+    AppStringKeys.themeJapanesePreview,
+    cjk: true,
+  ),
+  customCjk('Custom Font', AppStringKeys.themeCustomHanFontPreview, cjk: true),
   helvetica('Helvetica Neue', 'Message preview Aa 123'),
   avenirNext('Avenir Next', 'Avenir Next Aa 123'),
   avenir('Avenir', 'Avenir Aa 123'),
@@ -96,14 +133,18 @@ enum AppFontChoice {
   gillSans('Gill Sans', 'Gill Sans Aa 123'),
   didot('Didot', 'Didot Aa 123'),
   americanTypewriter('American Typewriter', 'American Typewriter Aa 123'),
-  menlo('Menlo', 'Menlo Aa 123 代码'),
-  courierNew('Courier New', 'Courier New Aa 123 代码'),
+  menlo('Menlo', AppStringKeys.themeMenloCodePreview),
+  courierNew('Courier New', AppStringKeys.themeCourierNewCodePreview),
   custom('Custom Font', 'Custom Font Aa 123'),
   noteworthy('Noteworthy', 'Noteworthy Aa 123'),
   markerFelt('Marker Felt', 'Marker Felt Aa 123'),
   roboto('Roboto', 'Message preview Aa 123'),
-  notoSans('Noto Sans', '消息预览 Aa 123'),
-  notoSansCjk('Noto Sans CJK [CN]', 'CN/HK/TW/JP 门 門 戸 說 説', cjk: true),
+  notoSans('Noto Sans', AppStringKeys.themeMessagePreviewSample),
+  notoSansCjk(
+    'Noto Sans CJK [CN]',
+    AppStringKeys.themeCjkVariantPreview,
+    cjk: true,
+  ),
   googleInter('Inter', 'Inter Aa 123', googleFamily: 'Inter'),
   googleOpenSans('Open Sans', 'Open Sans Aa 123', googleFamily: 'Open Sans'),
   googleLato('Lato', 'Lato Aa 123', googleFamily: 'Lato'),
@@ -137,68 +178,72 @@ enum AppFontChoice {
   ),
   googleKleeOne(
     'Klee One [JP]',
-    'Klee One 日本語 門 説 線',
+    AppStringKeys.themeKleeOnePreview,
     googleFamily: 'Klee One',
     cjk: true,
   ),
   googleDotGothic16(
     'DotGothic16 [JP]',
-    'DotGothic16 日本語 門 説 線',
+    AppStringKeys.themeDotGothic16Preview,
     googleFamily: 'DotGothic16',
     cjk: true,
   ),
   googleStick(
     'Stick [JP]',
-    'Stick 日本語 門 説 線',
+    AppStringKeys.themeStickPreview,
     googleFamily: 'Stick',
     cjk: true,
   ),
   googleMPlus1p(
     'M PLUS 1p [JP]',
-    'M PLUS 1p 日本語 門 説 線',
+    AppStringKeys.themeMPlus1pPreview,
     googleFamily: 'M PLUS 1p',
     cjk: true,
   ),
-  lineSeedJp('LINE Seed JP [JP]', 'Aa123 日本語門説線', cjk: true),
+  lineSeedJp(
+    'LINE Seed JP [JP]',
+    AppStringKeys.themeAa123JapanesePreview,
+    cjk: true,
+  ),
   googleChocolateClassicalSans(
     'Chocolate Classical Sans [TW]',
-    'Chocolate Classical Sans 門 說 線',
+    AppStringKeys.themeChocolateClassicalSansPreview,
     googleFamily: 'Chocolate Classical Sans',
     cjk: true,
   ),
   googleNotoSansSc(
     'Noto Sans SC [CN]',
-    'CN 简体 门 说 线 骨 令',
+    AppStringKeys.themeSimplifiedChinesePreview,
     googleFamily: 'Noto Sans SC',
     cjk: true,
   ),
   googleNotoSansHk(
     'Noto Sans HK [HK]',
-    'HK 繁體 門 說 綫 骨 令',
+    AppStringKeys.themeTraditionalHongKongPreview,
     googleFamily: 'Noto Sans HK',
     cjk: true,
   ),
   googleNotoSansTc(
     'Noto Sans TC [TW]',
-    'TW 正體 門 說 線 骨 令',
+    AppStringKeys.themeTraditionalTaiwanPreview,
     googleFamily: 'Noto Sans TC',
     cjk: true,
   ),
   googleNotoSansJp(
     'Noto Sans JP [JP]',
-    'JP 日本語 門 説 線 骨 令',
+    AppStringKeys.themeJapanesePreview,
     googleFamily: 'Noto Sans JP',
     cjk: true,
   ),
   googleLxgwWenKaiTc(
     'LXGW WenKai TC [TW]',
-    '霞鹜文楷 門 說 線',
+    AppStringKeys.themeLXGWWenKaiPreview,
     googleFamily: 'LXGW WenKai TC',
     cjk: true,
   ),
   googleZcoolXiaoWei(
     'ZCOOL XiaoWei [CN]',
-    '站酷小薇 门 說 線',
+    AppStringKeys.themeZcoolXiaoWeiPreview,
     googleFamily: 'ZCOOL XiaoWei',
     cjk: true,
   );
@@ -636,7 +681,7 @@ String displayStoredFontFamily(String value) =>
     decodeGoogleFontFamily(value) ?? value.trim();
 
 enum AppMonospaceFontChoice {
-  system('系统等宽', 'final count = 123;'),
+  system(AppStringKeys.themeSystemMonospace, 'final count = 123;'),
   sfMono('SF Mono', 'final count = 123;'),
   menlo('Menlo', 'final count = 123;'),
   monaco('Monaco', 'final count = 123;'),
@@ -902,17 +947,19 @@ class ThemeController extends ChangeNotifier {
   String get effectivePrimaryFontLabel =>
       _fontChoice.isCustom && _customPrimaryFontFamily.isNotEmpty
       ? _customPrimaryFontFamily
-      : _fontChoice.label;
+      : AppStrings.t(_fontChoice.label);
   String get effectiveCjkFontLabel =>
       _cjkFontChoice.isCustom && _customCjkFontFamily.isNotEmpty
       ? _customCjkFontFamily
-      : _cjkFontChoice.label;
+      : AppStrings.t(_cjkFontChoice.label);
   String get effectiveMonospaceFontLabel =>
       _monospaceFontChoice.isCustom && _customMonospaceFontFamily.isNotEmpty
       ? displayStoredFontFamily(_customMonospaceFontFamily)
-      : _monospaceFontChoice.label;
+      : AppStrings.t(_monospaceFontChoice.label);
   String get effectiveFontChainLabel {
-    if (_fontFallbackChain.isEmpty) return '未设置';
+    if (_fontFallbackChain.isEmpty) {
+      return AppStrings.t(AppStringKeys.groupManagementNotSet);
+    }
     if (_fontFallbackChain.length == 1) return _fontFallbackChain.first;
     final head = _fontFallbackChain.take(2).join(' / ');
     return _fontFallbackChain.length > 2

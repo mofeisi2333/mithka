@@ -19,6 +19,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../components/ui_components.dart';
 import '../profile/profile_detail_view.dart';
 import '../theme/app_theme.dart';
+import '../theme/date_text.dart';
 import '../theme/theme_controller.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
@@ -31,6 +32,7 @@ import 'video_sticker_view.dart';
 import 'link_handler.dart';
 import 'location_detail_view.dart';
 import 'voice_audio.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 const List<Color> _telegramAccentColors = [
   Color(0xFFCC5049),
@@ -49,7 +51,7 @@ class MessageBubble extends StatefulWidget {
     required this.peerTitle,
     this.peerPhoto,
     required this.isGroup,
-    this.meName = '我',
+    this.meName = AppStringKeys.chatMeLabel,
     this.mePhoto,
     this.showRepeat = false,
     this.onRepeat,
@@ -282,7 +284,7 @@ class _MessageBubbleState extends State<MessageBubble>
                   behavior: HitTestBehavior.opaque,
                   onTap: () => widget.onAvatarTap?.call(message),
                   child: PhotoAvatar(
-                    title: widget.meName,
+                    title: widget.meName.l10n(context),
                     photo: widget.mePhoto,
                     size: 38,
                   ),
@@ -738,7 +740,10 @@ class _MessageBubbleState extends State<MessageBubble>
                   ),
                 ),
                 const SizedBox(width: 8),
-                Text('正在翻译…', style: TextStyle(fontSize: 13, color: secondary)),
+                Text(
+                  AppStringKeys.messageBubbleTranslating.l10n(context),
+                  style: TextStyle(fontSize: 13, color: secondary),
+                ),
               ],
             )
           : Column(
@@ -746,7 +751,7 @@ class _MessageBubbleState extends State<MessageBubble>
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  '翻译',
+                  AppStringKeys.messageActionTranslate.l10n(context),
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -1047,7 +1052,7 @@ class _MessageBubbleState extends State<MessageBubble>
           ),
           const SizedBox(width: 7),
           Text(
-            'Netemo music',
+            AppStringKeys.netemoMusicLabel.l10n(context),
             style: TextStyle(fontSize: 14, color: c.textSecondary),
           ),
         ],
@@ -1198,17 +1203,27 @@ class _MessageBubbleState extends State<MessageBubble>
     String label;
     bool missed = false;
     if (connected) {
-      label = '通话时长 ${_formatCallDuration(message.callDuration)}';
+      label = AppStrings.t(AppStringKeys.messageBubbleCallDuration, {
+        'value1': _formatCallDuration(message.callDuration),
+      });
     } else {
       switch (message.callDiscardReason) {
         case 'callDiscardReasonDeclined':
-          label = outgoing ? '对方已拒绝' : '已拒绝';
+          label = AppStrings.t(
+            outgoing
+                ? AppStringKeys.messageBubbleCallDeclinedByOther
+                : AppStringKeys.messageBubbleCallDeclined,
+          );
           missed = !outgoing;
         case 'callDiscardReasonMissed':
-          label = outgoing ? '无人接听' : '未接听';
+          label = AppStrings.t(
+            outgoing
+                ? AppStringKeys.messageBubbleCallNoAnswer
+                : AppStringKeys.messageBubbleCallMissed,
+          );
           missed = !outgoing;
         default: // HungUp / Empty / Disconnected with no duration
-          label = '已取消';
+          label = AppStrings.t(AppStringKeys.messageBubbleCallCanceled);
       }
     }
     final accent = missed ? const Color(0xFFFF3B30) : baseColor;
@@ -1266,7 +1281,9 @@ class _MessageBubbleState extends State<MessageBubble>
         const SizedBox(width: 4),
         Flexible(
           child: Text(
-            '转发自 ${message.forwardOrigin}',
+            AppStrings.t(AppStringKeys.messageBubbleForwardedFrom, {
+              'value1': message.forwardOrigin,
+            }),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
@@ -1280,44 +1297,63 @@ class _MessageBubbleState extends State<MessageBubble>
     );
   }
 
-  /// 引用 quote block shown above a reply's text: accent bar + sender + preview.
+  /// 引用 quote block shown above a reply's text.
   Widget _replyQuote(bool outgoing) {
     final c = context.colors;
-    final accent = outgoing ? Colors.white : AppTheme.brand;
-    final faded = outgoing ? Colors.white70 : c.textSecondary;
+    final labelColor = c.textPrimary;
+    final faded = c.textSecondary;
+    final sender = message.replyToSender ?? '';
+    final time = DateText.quoteLabel(message.replyToDate ?? 0);
     final targetId = message.replyToMessageId;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: targetId == null ? null : () => widget.onOpenReply?.call(targetId),
       child: Container(
-        padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(12, 8, 10, 9),
         decoration: BoxDecoration(
-          color: (outgoing ? Colors.white : AppTheme.brand).withValues(
-            alpha: 0.12,
+          color: Color.alphaBlend(
+            c.textPrimary.withValues(alpha: 0.08),
+            c.bubbleIncoming,
           ),
-          borderRadius: BorderRadius.circular(4),
-          border: Border(left: BorderSide(color: accent, width: 2.5)),
+          borderRadius: BorderRadius.circular(8),
         ),
-        child: Column(
+        child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              message.replyToSender ?? '',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: accent,
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text.rich(
+                    TextSpan(
+                      children: [
+                        if (sender.isNotEmpty)
+                          TextSpan(
+                            text: sender,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        if (time.isNotEmpty)
+                          TextSpan(text: sender.isEmpty ? time : ' $time'),
+                      ],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 14, color: labelColor),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    message.replyToPreview ?? '',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 14, height: 1.22, color: faded),
+                  ),
+                ],
               ),
             ),
-            Text(
-              message.replyToPreview ?? '',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, color: faded),
-            ),
+            const SizedBox(width: 10),
+            FaIcon(FontAwesomeIcons.arrowUp, size: 18, color: faded),
           ],
         ),
       ),
@@ -1367,7 +1403,7 @@ class _MessageBubbleState extends State<MessageBubble>
     bool outgoing,
     bool appendMeta, [
     List<MessageTextEntity>? entities,
-    double fontSize = 16,
+    double fontSize = 14,
   ]) {
     final sourceEntities = entities ?? message.textEntities;
     final blocks =
@@ -1457,7 +1493,7 @@ class _MessageBubbleState extends State<MessageBubble>
     bool appendMeta, {
     int? maxLines,
     List<MessageTextEntity>? entities,
-    double fontSize = 16,
+    double fontSize = 14,
   }) {
     final children = _entitySpans(
       text,
@@ -1529,7 +1565,11 @@ class _MessageBubbleState extends State<MessageBubble>
             if (quote.isExpandableBlockQuote) ...[
               const SizedBox(height: 4),
               Text(
-                expanded ? '收起' : '展开引用',
+                AppStrings.t(
+                  expanded
+                      ? AppStringKeys.messageBubbleCollapse
+                      : AppStringKeys.messageBubbleExpandQuote,
+                ),
                 style: TextStyle(
                   fontSize: 12,
                   color: AppTheme.brand,
@@ -2315,7 +2355,7 @@ class _MessageBubbleState extends State<MessageBubble>
                   Text(
                     (location.title?.isNotEmpty ?? false)
                         ? location.title!
-                        : '位置',
+                        : AppStrings.t(AppStringKeys.composerLocation),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(

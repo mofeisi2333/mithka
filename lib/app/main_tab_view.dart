@@ -131,10 +131,10 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
   );
 
   static const _allTabs = [
-    _MainTabItem(0, '消息', FontAwesomeIcons.solidMessage),
-    _MainTabItem(1, '频道', FontAwesomeIcons.hashtag),
-    _MainTabItem(2, '联系人', FontAwesomeIcons.users),
-    _MainTabItem(3, '动态', FontAwesomeIcons.circleNotch),
+    _MainTabItem(0, AppStringKeys.tabMessages, FontAwesomeIcons.solidMessage),
+    _MainTabItem(1, AppStringKeys.tabChannels, FontAwesomeIcons.hashtag),
+    _MainTabItem(2, AppStringKeys.tabContacts, FontAwesomeIcons.users),
+    _MainTabItem(3, AppStringKeys.tabMoments, FontAwesomeIcons.circleNotch),
   ];
 
   List<_MainTabItem> _visibleTabs(ThemeController theme) => [
@@ -678,7 +678,8 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
         Expanded(child: _stack(tabs)),
         Consumer<dc.TabBarVisibility>(
           builder: (context, vis, _) {
-            final hidden = vis.depth(activeTabIndex) > 0;
+            final hidden =
+                vis.depth(activeTabIndex) > 0 || vis.isChatSuppressed;
             return AnimatedSize(
               duration: const Duration(milliseconds: 200),
               curve: Curves.easeInOut,
@@ -721,15 +722,25 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
                   builder: (tab) => _tabletSidebarRoot(tab.index),
                 ),
               ),
-              AnimatedBuilder(
-                animation: _unread,
-                builder: (context, _) => _ClassicTabBar(
-                  selection: selection,
-                  onSelect: _select,
-                  items: tabs,
-                  onClearUnread: _chatListController.markAllRead,
-                  unread: _unread.countFor(theme.unreadBadgeMode),
-                ),
+              Consumer<dc.TabBarVisibility>(
+                builder: (context, vis, _) {
+                  return AnimatedSize(
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeInOut,
+                    child: vis.isChatSuppressed
+                        ? const SizedBox(width: double.infinity)
+                        : AnimatedBuilder(
+                            animation: _unread,
+                            builder: (context, _) => _ClassicTabBar(
+                              selection: selection,
+                              onSelect: _select,
+                              items: tabs,
+                              onClearUnread: _chatListController.markAllRead,
+                              unread: _unread.countFor(theme.unreadBadgeMode),
+                            ),
+                          ),
+                  );
+                },
               ),
             ],
           ),
@@ -770,16 +781,19 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
       _selectedChannelDetail ??
           const _SplitEmptyPane(
             icon: FontAwesomeIcons.hashtag,
-            title: '选择频道内容',
+            title: AppStringKeys.tabSelectChannelContent,
           ),
     2 =>
       _selectedContactDetail ??
-          const _SplitEmptyPane(icon: FontAwesomeIcons.users, title: '选择联系人'),
+          const _SplitEmptyPane(
+            icon: FontAwesomeIcons.users,
+            title: AppStringKeys.tabSelectContact,
+          ),
     _ =>
       _selectedMomentDetail ??
           ChannelMomentsView(
             isRootTab: true,
-            title: '好友动态',
+            title: AppStringKeys.tabFriendMoments,
             onOpenDetail: (detail) {
               setState(() => _selectedMomentDetail = detail);
             },

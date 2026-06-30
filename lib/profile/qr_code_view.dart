@@ -18,11 +18,12 @@ import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class QRCodeView extends StatefulWidget {
   const QRCodeView({
     super.key,
-    this.name = '我',
+    this.name = AppStringKeys.chatMeLabel,
     this.chatId,
     this.isGroup = false,
   });
@@ -143,7 +144,9 @@ class _QRCodeViewState extends State<QRCodeView> {
         child: Column(
           children: [
             NavHeader(
-              title: widget.isGroup ? '群二维码' : '我的二维码',
+              title: widget.isGroup
+                  ? AppStringKeys.qrCodeGroupTitle
+                  : AppStringKeys.qrCodeMineTitle,
               onBack: () => Navigator.of(context).pop(),
             ),
             Expanded(
@@ -183,7 +186,10 @@ class _QRCodeViewState extends State<QRCodeView> {
           Padding(
             padding: const EdgeInsets.only(bottom: 26, left: 16, right: 16),
             child: Text(
-              widget.isGroup ? '扫一扫上面的二维码图案，加入群聊' : '扫一扫上面的二维码图案，加我为好友',
+              (widget.isGroup
+                      ? AppStringKeys.qrCodeScanToJoinGroup
+                      : AppStringKeys.qrCodeScanToAddFriend)
+                  .l10n(context),
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 13, color: c.textSecondary),
             ),
@@ -214,7 +220,7 @@ class _QRCodeViewState extends State<QRCodeView> {
               ),
             ),
             child: PhotoAvatar(
-              title: _name,
+              title: _name.l10n(context),
               photo: _photo,
               size: 50,
               square: squareGroupAvatar,
@@ -227,7 +233,7 @@ class _QRCodeViewState extends State<QRCodeView> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _name,
+                  _name.l10n(context),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -267,7 +273,7 @@ class _QRCodeViewState extends State<QRCodeView> {
         child: Center(
           child: _loadDone
               ? Text(
-                  '暂无群二维码',
+                  AppStringKeys.qrCodeNoGroupQrCode.l10n(context),
                   style: TextStyle(fontSize: 14, color: c.textSecondary),
                 )
               : const SizedBox(
@@ -310,7 +316,7 @@ class _QRCodeViewState extends State<QRCodeView> {
               border: Border.all(color: Colors.white, width: 3),
             ),
             child: PhotoAvatar(
-              title: _name,
+              title: _name.l10n(context),
               photo: _photo,
               size: 46,
               square: squareGroupAvatar,

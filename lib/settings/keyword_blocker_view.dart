@@ -11,6 +11,7 @@ import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
 import 'keyword_blocker.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class KeywordBlockerView extends StatefulWidget {
   const KeywordBlockerView({super.key});
@@ -55,9 +56,23 @@ class _KeywordBlockerViewState extends State<KeywordBlockerView> {
     setState(() => _refreshing = true);
     try {
       final added = await _blocker.refreshFromUrl();
-      if (mounted) showToast(context, added > 0 ? '已添加 $added 条规则' : '规则已是最新');
+      if (mounted) {
+        showToast(
+          context,
+          added > 0
+              ? AppStrings.t(AppStringKeys.keywordBlockerRulesAdded, {
+                  'value1': added,
+                })
+              : AppStrings.t(AppStringKeys.keywordBlockerRulesUpToDate),
+        );
+      }
     } catch (_) {
-      if (mounted) showToast(context, '下载关键词列表失败');
+      if (mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.keywordBlockerDownloadFailed),
+        );
+      }
     } finally {
       if (mounted) setState(() => _refreshing = false);
     }
@@ -71,7 +86,10 @@ class _KeywordBlockerViewState extends State<KeywordBlockerView> {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '关键词屏蔽', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.keywordBlockerTitle),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(12, 14, 12, 24),
@@ -87,7 +105,7 @@ class _KeywordBlockerViewState extends State<KeywordBlockerView> {
                       vertical: 20,
                     ),
                     child: Text(
-                      '添加关键词后，匹配的消息将不会在聊天中显示，也不会触发本地通知。支持普通关键词、re:正则、regex:正则、/正则/i。远程列表每行一条规则，# 或 // 开头为注释。',
+                      AppStrings.t(AppStringKeys.keywordBlockerDescription),
                       style: TextStyle(fontSize: 14, color: c.textSecondary),
                     ),
                   )
@@ -120,7 +138,9 @@ class _KeywordBlockerViewState extends State<KeywordBlockerView> {
               decoration: InputDecoration(
                 border: InputBorder.none,
                 isCollapsed: true,
-                hintText: '输入关键词',
+                hintText: AppStrings.t(
+                  AppStringKeys.keywordBlockerInputPlaceholder,
+                ),
                 hintStyle: TextStyle(color: c.textTertiary),
               ),
             ),
@@ -137,8 +157,8 @@ class _KeywordBlockerViewState extends State<KeywordBlockerView> {
                 color: AppTheme.brand,
                 borderRadius: BorderRadius.circular(17),
               ),
-              child: const Text(
-                '添加',
+              child: Text(
+                AppStrings.t(AppStringKeys.imageEditAdd),
                 style: TextStyle(
                   fontSize: 14,
                   color: Colors.white,
@@ -174,7 +194,7 @@ class _KeywordBlockerViewState extends State<KeywordBlockerView> {
               decoration: InputDecoration(
                 border: InputBorder.none,
                 isCollapsed: true,
-                hintText: '关键词列表 URL',
+                hintText: AppStrings.t(AppStringKeys.keywordBlockerListUrl),
                 hintStyle: TextStyle(color: c.textTertiary),
               ),
             ),
@@ -197,8 +217,8 @@ class _KeywordBlockerViewState extends State<KeywordBlockerView> {
                       height: 15,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text(
-                      '下载',
+                  : Text(
+                      AppStrings.t(AppStringKeys.keywordBlockerDownload),
                       style: TextStyle(
                         fontSize: 14,
                         color: Colors.white,

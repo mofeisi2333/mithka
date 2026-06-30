@@ -16,6 +16,7 @@ import '../tdlib/chat_membership.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class ChatFilterOption {
   const ChatFilterOption({required this.title, this.folderId});
@@ -29,8 +30,12 @@ class ChatFilterOption {
 class ChatListViewModel extends ChangeNotifier {
   List<ChatSummary> _chats = [];
   List<ChatSummary> _archived = [];
-  List<ChatFilterOption> _filters = const [ChatFilterOption(title: '全部')];
-  ChatFilterOption _selectedFilter = const ChatFilterOption(title: '全部');
+  List<ChatFilterOption> _filters = const [
+    ChatFilterOption(title: AppStringKeys.topicChatAllFilter),
+  ];
+  ChatFilterOption _selectedFilter = const ChatFilterOption(
+    title: AppStringKeys.topicChatAllFilter,
+  );
   String? notice;
   bool _initialLoading = true;
   Timer? _resortTimer;
@@ -99,7 +104,9 @@ class ChatListViewModel extends ChangeNotifier {
         object.objects('chat_folders') ??
         object.objects('chat_folder_infos') ??
         const <Map<String, dynamic>>[];
-    final folders = <ChatFilterOption>[const ChatFilterOption(title: '全部')];
+    final folders = <ChatFilterOption>[
+      const ChatFilterOption(title: AppStringKeys.topicChatAllFilter),
+    ];
     for (final folder in raw) {
       final id = folder.integer('id') ?? folder.integer('chat_folder_id');
       if (id == null) continue;
@@ -122,11 +129,17 @@ class ChatListViewModel extends ChangeNotifier {
       folder.obj('title')?.str('text') ??
       folder.str('title') ??
       folder.str('name') ??
-      '分组 $id';
+      AppStrings.t(AppStringKeys.chatInfoFolderName, {'value1': id});
 
   void _ensureFolderOption(int id) {
     if (_filters.any((f) => f.folderId == id)) return;
-    _filters = [..._filters, ChatFilterOption(title: '分组 $id', folderId: id)];
+    _filters = [
+      ..._filters,
+      ChatFilterOption(
+        title: AppStrings.t(AppStringKeys.chatInfoFolderName, {'value1': id}),
+        folderId: id,
+      ),
+    ];
     notifyListeners();
     if (_resolvingFolders.contains(id)) return;
     _resolvingFolders.add(id);
@@ -620,7 +633,9 @@ class ChatListViewModel extends ChangeNotifier {
   }
 
   String _previewText(String text) {
-    return KeywordBlocker.shared.matches(text) ? '[已屏蔽]' : text;
+    return KeywordBlocker.shared.matches(text)
+        ? AppStringKeys.chatListBlockedPlaceholder
+        : text;
   }
 
   // MARK: - Sorting
@@ -798,15 +813,21 @@ class ChatListViewModel extends ChangeNotifier {
     final hitPinned =
         normalized.contains('pin') ||
         normalized.contains('pinned') ||
-        normalized.contains('置顶');
+        normalized.contains(AppStringKeys.chatInfoPin);
     final hitLimit =
         normalized.contains('limit') ||
         normalized.contains('too many') ||
         normalized.contains('too much') ||
         normalized.contains('many') ||
         normalized.contains('much') ||
-        normalized.contains('上限');
-    if (hitPinned && hitLimit) return '置顶失败：置顶数量已达上限';
-    return text.isEmpty ? '置顶失败' : '置顶失败：$text';
+        normalized.contains(AppStringKeys.chatInfoPinLimit);
+    if (hitPinned && hitLimit) {
+      return AppStringKeys.chatInfoPinLimitReachedError;
+    }
+    return text.isEmpty
+        ? AppStringKeys.chatInfoPinFailed
+        : AppStrings.t(AppStringKeys.chatInfoPinFailedWithReason, {
+            'value1': text,
+          });
   }
 }

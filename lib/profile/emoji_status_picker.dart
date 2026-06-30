@@ -9,6 +9,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../theme/app_theme.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 Future<void> showEmojiStatusPicker(
   BuildContext context, {
@@ -28,7 +29,10 @@ Future<void> showEmojiStatusPicker(
         if (!sheetContext.mounted) return;
         Navigator.of(sheetContext).pop();
         if (!ok && context.mounted) {
-          showToast(context, '设置状态失败（需要 Premium）');
+          showToast(
+            context,
+            AppStrings.t(AppStringKeys.emojiStatusSetRequiresPremiumFailed),
+          );
         }
       }
 
@@ -36,7 +40,7 @@ Future<void> showEmojiStatusPicker(
         if (ids.isEmpty) {
           return Center(
             child: Text(
-              '该表情包暂无可用状态',
+              AppStrings.t(AppStringKeys.emojiStatusNoAvailableStatuses),
               style: TextStyle(fontSize: 13, color: c.textSecondary),
             ),
           );
@@ -94,7 +98,9 @@ Future<void> showEmojiStatusPicker(
                               child: Row(
                                 children: [
                                   Text(
-                                    '设置状态',
+                                    AppStrings.t(
+                                      AppStringKeys.emojiStatusSetTitle,
+                                    ),
                                     style: TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.w600,
@@ -107,7 +113,9 @@ Future<void> showEmojiStatusPicker(
                                       behavior: HitTestBehavior.opaque,
                                       onTap: () => pick(0),
                                       child: Text(
-                                        '清除',
+                                        AppStrings.t(
+                                          AppStringKeys.emojiStatusClear,
+                                        ),
                                         style: TextStyle(
                                           fontSize: 14,
                                           color: AppTheme.tagRed,
@@ -144,7 +152,10 @@ Future<void> showEmojiStatusPicker(
                                           if (ids.isEmpty && packs.isEmpty) {
                                             return Center(
                                               child: Text(
-                                                '暂无可用状态（需要 Premium）',
+                                                AppStrings.t(
+                                                  AppStringKeys
+                                                      .emojiStatusNoAvailableStatusesPremiumRequired,
+                                                ),
                                                 style: TextStyle(
                                                   fontSize: 13,
                                                   color: c.textSecondary,

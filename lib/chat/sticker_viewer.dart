@@ -17,6 +17,7 @@ import '../theme/app_theme.dart';
 import 'animated_sticker_view.dart';
 import 'sticker_set_detail_view.dart';
 import 'video_sticker_view.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class StickerViewer extends StatefulWidget {
   const StickerViewer({super.key, required this.message});
@@ -28,7 +29,7 @@ class StickerViewer extends StatefulWidget {
 }
 
 class _StickerViewerState extends State<StickerViewer> {
-  String _setTitle = '表情包';
+  String _setTitle = AppStrings.t(AppStringKeys.messageActionSticker);
   bool _installed = false;
 
   ChatMessage get _message => widget.message;
@@ -185,7 +186,9 @@ class _StickerViewerState extends State<StickerViewer> {
               if (canOpen) ...[
                 const SizedBox(width: 12),
                 Text(
-                  _installed ? '已添加' : '查看',
+                  _installed
+                      ? AppStrings.t(AppStringKeys.stickerViewerInCollection)
+                      : AppStrings.t(AppStringKeys.stickerViewerView),
                   style: TextStyle(fontSize: 16, color: c.textSecondary),
                 ),
                 const SizedBox(width: 8),

@@ -1,3 +1,5 @@
+import 'package:mithka/l10n/app_localizations.dart';
+
 //
 //  emoji_catalog.dart
 //
@@ -13,7 +15,7 @@ class EmojiCategory {
 
 abstract final class EmojiCatalog {
   static const List<EmojiCategory> categories = [
-    EmojiCategory('笑脸与情感', [
+    EmojiCategory(AppStringKeys.emojiCategorySmileysAndEmotion, [
       '😀',
       '😃',
       '😄',
@@ -122,7 +124,7 @@ abstract final class EmojiCatalog {
       '😿',
       '😾',
     ]),
-    EmojiCategory('手势与身体', [
+    EmojiCategory(AppStringKeys.emojiCategoryPeopleAndBody, [
       '👋',
       '🤚',
       '🖐',
@@ -169,7 +171,7 @@ abstract final class EmojiCatalog {
       '💋',
       '🩸',
     ]),
-    EmojiCategory('动物与自然', [
+    EmojiCategory(AppStringKeys.emojiCategoryAnimalsAndNature, [
       '🐶',
       '🐱',
       '🐭',
@@ -264,7 +266,7 @@ abstract final class EmojiCatalog {
       '💧',
       '🌊',
     ]),
-    EmojiCategory('食物与饮品', [
+    EmojiCategory(AppStringKeys.emojiCategoryFoodAndDrink, [
       '🍏',
       '🍎',
       '🍐',
@@ -353,7 +355,7 @@ abstract final class EmojiCatalog {
       '🍹',
       '🍾',
     ]),
-    EmojiCategory('活动与运动', [
+    EmojiCategory(AppStringKeys.emojiCategoryActivitiesAndSports, [
       '⚽️',
       '🏀',
       '🏈',
@@ -420,7 +422,7 @@ abstract final class EmojiCatalog {
       '🎨',
       '🎭',
     ]),
-    EmojiCategory('旅行与地点', [
+    EmojiCategory(AppStringKeys.emojiCategoryTravelAndPlaces, [
       '🚗',
       '🚕',
       '🚙',
@@ -497,7 +499,7 @@ abstract final class EmojiCatalog {
       '🌉',
       '🌁',
     ]),
-    EmojiCategory('物品', [
+    EmojiCategory(AppStringKeys.emojiCategoryObjects, [
       '⌚️',
       '📱',
       '💻',
@@ -593,7 +595,7 @@ abstract final class EmojiCatalog {
       '🔖',
       '🔗',
     ]),
-    EmojiCategory('符号', [
+    EmojiCategory(AppStringKeys.emojiCategorySymbols, [
       '❤️',
       '🧡',
       '💛',

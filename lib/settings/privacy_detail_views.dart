@@ -16,6 +16,7 @@ import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 // MARK: - Privacy rule chooser (所有人 / 我的联系人 / 没有人)
 
@@ -38,7 +39,11 @@ class _PrivacyRuleViewState extends State<PrivacyRuleView> {
   int _value = 0;
   bool _loading = true;
 
-  static const _labels = ['所有人', '我的联系人', '没有人'];
+  static const _labels = [
+    AppStringKeys.privacyVisibilityEveryone,
+    AppStringKeys.privacyVisibilityContacts,
+    AppStringKeys.privacyVisibilityNobody,
+  ];
 
   @override
   void initState() {
@@ -235,7 +240,10 @@ class _ActiveSessionsViewState extends State<ActiveSessionsView> {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '已登录设备', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.privacyLoggedInDevices),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           if (_loading)
             const Expanded(
               child: Center(
@@ -252,7 +260,9 @@ class _ActiveSessionsViewState extends State<ActiveSessionsView> {
                 padding: const EdgeInsets.fromLTRB(12, 14, 12, 24),
                 children: [
                   if (_current != null) ...[
-                    _sectionLabel('当前设备'),
+                    _sectionLabel(
+                      AppStrings.t(AppStringKeys.privacyCurrentDevice),
+                    ),
                     _card([_sessionRow(_current!, current: true)]),
                     const SizedBox(height: 14),
                   ],
@@ -265,7 +275,9 @@ class _ActiveSessionsViewState extends State<ActiveSessionsView> {
                           height: 50,
                           child: Center(
                             child: Text(
-                              '终止其他所有会话',
+                              AppStrings.t(
+                                AppStringKeys.privacyTerminateAllOtherSessions,
+                              ),
                               style: TextStyle(
                                 fontSize: 16,
                                 color: AppTheme.tagRed,
@@ -276,7 +288,9 @@ class _ActiveSessionsViewState extends State<ActiveSessionsView> {
                       ]),
                     ),
                     const SizedBox(height: 14),
-                    _sectionLabel('其他设备'),
+                    _sectionLabel(
+                      AppStrings.t(AppStringKeys.privacyOtherDevices),
+                    ),
                     _card([
                       for (var i = 0; i < _others.length; i++) ...[
                         _sessionRow(_others[i]),
@@ -333,7 +347,9 @@ class _ActiveSessionsViewState extends State<ActiveSessionsView> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    app.isEmpty ? '应用' : app,
+                    app.isEmpty
+                        ? AppStrings.t(AppStringKeys.privacyDeviceApp)
+                        : app,
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w500,
@@ -354,7 +370,7 @@ class _ActiveSessionsViewState extends State<ActiveSessionsView> {
             ),
             if (!current)
               Text(
-                '终止',
+                AppStrings.t(AppStringKeys.privacyTerminateSession),
                 style: TextStyle(fontSize: 14, color: AppTheme.tagRed),
               ),
           ],
@@ -436,7 +452,10 @@ class _BlockedUsersViewState extends State<BlockedUsersView> {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '黑名单', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.privacyBlockedUsers),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           if (_loading)
             const Expanded(
               child: Center(
@@ -451,7 +470,7 @@ class _BlockedUsersViewState extends State<BlockedUsersView> {
             Expanded(
               child: Center(
                 child: Text(
-                  '黑名单为空',
+                  AppStrings.t(AppStringKeys.privacyBlockedUsersEmpty),
                   style: TextStyle(fontSize: 14, color: c.textSecondary),
                 ),
               ),
@@ -499,7 +518,7 @@ class _BlockedUsersViewState extends State<BlockedUsersView> {
                 borderRadius: BorderRadius.circular(14),
               ),
               child: Text(
-                '解除',
+                AppStrings.t(AppStringKeys.privacyUnblock),
                 style: TextStyle(fontSize: 13, color: AppTheme.brand),
               ),
             ),

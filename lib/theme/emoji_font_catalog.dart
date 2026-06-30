@@ -12,6 +12,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class EmojiFontChoice {
   const EmojiFontChoice({
@@ -21,7 +22,10 @@ class EmojiFontChoice {
     this.fontFamily,
   });
 
-  static const system = EmojiFontChoice(key: 'system', label: '系统默认');
+  static const system = EmojiFontChoice(
+    key: 'system',
+    label: AppStringKeys.emojiFontCatalogSystemDefault,
+  );
 
   final String key;
   final String label;

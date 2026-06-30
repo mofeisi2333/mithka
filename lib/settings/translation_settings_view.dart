@@ -15,6 +15,7 @@ import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
 import 'translation_api.dart';
 import 'translation_controller.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class TranslationSettingsView extends StatelessWidget {
   const TranslationSettingsView({super.key});
@@ -27,7 +28,10 @@ class TranslationSettingsView extends StatelessWidget {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '翻译', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.messageActionTranslate),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(12, 14, 12, 24),
@@ -36,7 +40,7 @@ class TranslationSettingsView extends StatelessWidget {
                   _switchRow(
                     context,
                     icon: FontAwesomeIcons.language.data,
-                    title: '消息翻译',
+                    title: AppStrings.t(AppStringKeys.translationSettingsTitle),
                     value: translation.enabled,
                     onChanged: (v) => translation.enabled = v,
                   ),
@@ -46,7 +50,9 @@ class TranslationSettingsView extends StatelessWidget {
                   _navRow(
                     context,
                     icon: FontAwesomeIcons.networkWired.data,
-                    title: '翻译服务',
+                    title: AppStrings.t(
+                      AppStringKeys.translationSettingsService,
+                    ),
                     trailing: translation.providerLabel,
                     onTap: () => _showProviderPicker(context),
                   ),
@@ -54,7 +60,9 @@ class TranslationSettingsView extends StatelessWidget {
                   _navRow(
                     context,
                     icon: FontAwesomeIcons.globe.data,
-                    title: '目标语言',
+                    title: AppStrings.t(
+                      AppStringKeys.translationSettingsTargetLanguage,
+                    ),
                     trailing: translation.targetLanguageLabel,
                     onTap: () => _showTargetPicker(context),
                   ),
@@ -122,7 +130,7 @@ class TranslationSettingsView extends StatelessWidget {
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Text(
-                                  provider.label,
+                                  provider.label.l10n(context),
                                   style: TextStyle(
                                     fontSize: 16,
                                     color: c.textPrimary,
@@ -193,7 +201,7 @@ class TranslationSettingsView extends StatelessWidget {
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(
-                              language.label,
+                              language.label.l10n(context),
                               style: TextStyle(
                                 fontSize: 16,
                                 color: c.textPrimary,
@@ -244,7 +252,10 @@ class TranslationSettingsView extends StatelessWidget {
           children: [
             _iconBadge(context, icon, const Color(0xFF34A2DF)),
             const SizedBox(width: 12),
-            Text(title, style: TextStyle(fontSize: 16, color: c.textPrimary)),
+            Text(
+              title.l10n(context),
+              style: TextStyle(fontSize: 16, color: c.textPrimary),
+            ),
             const Spacer(),
             CupertinoSwitch(
               value: value,
@@ -278,7 +289,7 @@ class TranslationSettingsView extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  title,
+                  title.l10n(context),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 16, color: c.textPrimary),
@@ -288,7 +299,7 @@ class TranslationSettingsView extends StatelessWidget {
               SizedBox(
                 width: math.min(MediaQuery.sizeOf(context).width * 0.42, 190),
                 child: Text(
-                  trailing,
+                  trailing.l10n(context),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.right,

@@ -33,6 +33,7 @@ import 'archived_chats_view.dart';
 import 'chat_list_view_model.dart';
 import 'chat_row_view.dart';
 import 'search_view.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class ChatListController extends ChangeNotifier {
   int _scrollToFirstUnreadRequests = 0;
@@ -87,7 +88,7 @@ class ChatListView extends StatefulWidget {
 class _ChatListViewState extends State<ChatListView> {
   final ChatListViewModel _model = ChatListViewModel();
   late ScrollController _scrollController = _newScrollController();
-  String _meName = '我';
+  String _meName = AppStringKeys.chatMeLabel;
   TdFileRef? _mePhoto;
   int _meStatusId = 0; // current emoji status, shown after the name
   bool _meIsPremium = false;
@@ -213,8 +214,11 @@ class _ChatListViewState extends State<ChatListView> {
   Future<void> _createChannel() async {
     final title = await Navigator.of(context).push<String>(
       MaterialPageRoute(
-        builder: (_) =>
-            const EditFieldView(title: '创建频道', initial: '', hint: '频道名称'),
+        builder: (_) => EditFieldView(
+          title: AppStringKeys.chatListCreateChannel,
+          initial: '',
+          hint: AppStringKeys.chatListChannelName,
+        ),
       ),
     );
     if (title == null || title.isEmpty) return;
@@ -238,18 +242,20 @@ class _ChatListViewState extends State<ChatListView> {
         ),
       );
     } catch (_) {
-      if (mounted) showToast(context, '创建频道失败');
+      if (mounted) {
+        showToast(context, AppStringKeys.chatListCreateChannelFailed);
+      }
     }
   }
 
   void _selectPlusMenuItem(String label) {
     setState(() => _showPlusMenu = false);
     switch (label) {
-      case '创建群聊':
+      case AppStringKeys.chatListCreateGroup:
         _createGroup();
-      case '创建频道':
+      case AppStringKeys.chatListCreateChannel:
         _createChannel();
-      case '加好友/群':
+      case AppStringKeys.chatListAddFriendOrGroup:
         _showAddMenu();
     }
   }
@@ -447,7 +453,7 @@ class _ChatListViewState extends State<ChatListView> {
                       ),
                       const SizedBox(width: AppSpacing.xs),
                       Text(
-                        '在线',
+                        AppStringKeys.chatOnline.l10n(context),
                         style: TextStyle(
                           fontSize: AppTextSize.caption,
                           color: c.textSecondary,
@@ -463,7 +469,7 @@ class _ChatListViewState extends State<ChatListView> {
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 132),
                 child: Text(
-                  activeFilter.title,
+                  activeFilter.title.l10n(context),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.right,
@@ -547,7 +553,7 @@ class _ChatListViewState extends State<ChatListView> {
               ),
               const SizedBox(width: AppSpacing.sm),
               Text(
-                '搜索',
+                AppStringKeys.topicChatSearch.l10n(context),
                 style: TextStyle(
                   fontSize: AppTextSize.callout,
                   color: c.textTertiary,
@@ -677,17 +683,19 @@ class _ChatListViewState extends State<ChatListView> {
       onTap: () => _openChat(chat),
       actions: [
         SwipeActionItem(
-          title: chat.isPinned ? '取消置顶' : '置顶',
+          title: chat.isPinned
+              ? AppStringKeys.chatListUnpin
+              : AppStringKeys.chatInfoPin,
           color: const Color(0xFF3C8CF0),
           onTap: () => _model.togglePin(chat),
         ),
         SwipeActionItem(
-          title: '标为未读',
+          title: AppStringKeys.chatListMarkUnread,
           color: const Color(0xFFF5A623),
           onTap: () => _model.markUnread(chat),
         ),
         SwipeActionItem(
-          title: '删除',
+          title: AppStringKeys.chatDelete,
           color: const Color(0xFFFA5151),
           onTap: () => _model.deleteChat(chat),
         ),
@@ -846,9 +854,9 @@ class PlusMenu extends StatelessWidget {
   final ValueChanged<String> onSelect;
 
   static const _items = [
-    (FontAwesomeIcons.circlePlus, '创建群聊'),
-    (FontAwesomeIcons.grip, '创建频道'),
-    (FontAwesomeIcons.userPlus, '加好友/群'),
+    (FontAwesomeIcons.circlePlus, AppStringKeys.chatListCreateGroup),
+    (FontAwesomeIcons.grip, AppStringKeys.chatListCreateChannel),
+    (FontAwesomeIcons.userPlus, AppStringKeys.chatListAddFriendOrGroup),
   ];
 
   @override
@@ -894,7 +902,7 @@ class PlusMenu extends StatelessWidget {
                         ),
                         const SizedBox(width: AppSpacing.xl),
                         Text(
-                          item.$2,
+                          item.$2.l10n(context),
                           style: TextStyle(
                             fontSize: AppTextSize.bodyLarge,
                             color: c.textPrimary,
@@ -971,7 +979,7 @@ class ChatFilterMenu extends StatelessWidget {
                       const SizedBox(width: AppSpacing.xl),
                       Expanded(
                         child: Text(
-                          filter.title,
+                          filter.title.l10n(context),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -1147,7 +1155,7 @@ class _ChatSwipeRowState extends State<ChatSwipeRow>
                           color: item.color,
                           alignment: Alignment.center,
                           child: Text(
-                            item.title,
+                            item.title.l10n(context),
                             style: const TextStyle(
                               fontSize: AppTextSize.body,
                               color: Colors.white,

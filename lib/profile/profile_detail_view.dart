@@ -29,6 +29,7 @@ import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class ProfileDetailView extends StatefulWidget {
   const ProfileDetailView({
@@ -178,20 +179,20 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
               Navigator.of(sheet).pop();
               _call(false);
             },
-            child: const Text('语音通话'),
+            child: Text(AppStrings.t(AppStringKeys.composerVoiceCall)),
           ),
           CupertinoActionSheetAction(
             onPressed: () {
               Navigator.of(sheet).pop();
               _call(true);
             },
-            child: const Text('视频通话'),
+            child: Text(AppStrings.t(AppStringKeys.composerVideoCall)),
           ),
         ],
         cancelButton: CupertinoActionSheetAction(
           isDefaultAction: true,
           onPressed: () => Navigator.of(sheet).pop(),
-          child: const Text('取消'),
+          child: Text(AppStrings.t(AppStringKeys.countryPickerCancel)),
         ),
       ),
     );
@@ -222,7 +223,7 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
         ? 'https://t.me/$_username'
         : 'tg://user?id=${widget.userId}';
     Clipboard.setData(ClipboardData(text: link));
-    showToast(context, '已复制名片链接');
+    showToast(context, AppStrings.t(AppStringKeys.profileDetailCardLinkCopied));
   }
 
   Future<void> _openMusicSearch() async {
@@ -285,9 +286,11 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
   }
 
   List<(String, String)> get _infoRows => [
-    if (_bio.isNotEmpty) ('个性签名', _bio),
-    if (_birthday.isNotEmpty) ('生日', _birthday),
-    if (_location.isNotEmpty) ('所在地', _location),
+    if (_bio.isNotEmpty) (AppStrings.t(AppStringKeys.profileDetailBio), _bio),
+    if (_birthday.isNotEmpty)
+      (AppStrings.t(AppStringKeys.profileDetailBirthday), _birthday),
+    if (_location.isNotEmpty)
+      (AppStrings.t(AppStringKeys.profileDetailLocation), _location),
   ];
 
   static const _defaultOwnMusicTitle = 'SEKAI NO OWARI - The Peak';
@@ -298,8 +301,16 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
     final m = bd.integer('month') ?? 0;
     final y = bd.integer('year') ?? 0;
     if (d == 0 || m == 0) return '';
-    final md = '$m月$d日';
-    return y > 0 ? '$y年$md' : md;
+    final md = AppStrings.t(AppStringKeys.profileDetailMonthDayDate, {
+      'value1': m,
+      'value2': d,
+    });
+    return y > 0
+        ? AppStrings.t(AppStringKeys.profileDetailYearMonthDate, {
+            'value1': y,
+            'value2': md,
+          })
+        : md;
   }
 
   String _extractMusicTitle(Map<String, dynamic> full, String bio) {
@@ -311,7 +322,7 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
       final value = source?.trim();
       if (value == null || value.isEmpty) continue;
       final match = RegExp(
-        r'(?:音乐|music)\s*[:：]\s*(.+)',
+        r'(?:\u97f3\u4e50|music)\s*[:\uff1a]\s*(.+)',
         caseSensitive: false,
       ).firstMatch(value);
       if (match != null) return match.group(1)!.trim();
@@ -358,7 +369,9 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
   Widget _header() {
     final top = MediaQuery.of(context).padding.top;
     final bannerH = top + 232;
-    final status = _isOnline ? '在线' : _statusText;
+    final status = _isOnline
+        ? AppStrings.t(AppStringKeys.chatOnline)
+        : _statusText;
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -608,8 +621,8 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
           const InsetDivider(leadingInset: 56),
           _profileRow(
             FontAwesomeIcons.magnifyingGlass.data,
-            '查找聊天记录',
-            trailing: '图片、视频、文件等',
+            AppStrings.t(AppStringKeys.chatInfoSearchHistory),
+            trailing: AppStrings.t(AppStringKeys.profileDetailMediaFiles),
             onTap: _openSearch,
           ),
         ],
@@ -650,7 +663,7 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
               color: _musicPressed
                   ? c.textPrimary.withValues(alpha: 0.06)
                   : Colors.transparent,
-              padding: const EdgeInsets.fromLTRB(20, 0, 10, 0),
+              padding: const EdgeInsets.fromLTRB(20, 0, 16, 0),
               child: Row(
                 children: [
                   FaIcon(
@@ -665,7 +678,7 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '音乐',
+                          AppStrings.t(AppStringKeys.profileDetailMusic),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -697,7 +710,9 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                   SizedBox(
                     width: MediaQuery.sizeOf(context).width * 0.34,
                     child: Text(
-                      title.isEmpty ? '未设置' : title,
+                      title.isEmpty
+                          ? AppStrings.t(AppStringKeys.groupManagementNotSet)
+                          : title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.right,
@@ -705,30 +720,37 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  if (loading)
-                    const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator.adaptive(strokeWidth: 2),
-                    )
-                  else if (canPlay)
-                    GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: toggle,
-                      child: FaIcon(
-                        playing
-                            ? FontAwesomeIcons.pause
-                            : FontAwesomeIcons.play,
-                        size: 18,
-                        color: AppTheme.brand,
-                      ),
-                    )
-                  else
-                    FaIcon(
-                      FontAwesomeIcons.chevronRight,
-                      size: 16,
-                      color: c.textTertiary,
+                  SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: Center(
+                      child: loading
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator.adaptive(
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : canPlay
+                          ? GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: toggle,
+                              child: FaIcon(
+                                playing
+                                    ? FontAwesomeIcons.pause
+                                    : FontAwesomeIcons.play,
+                                size: 18,
+                                color: AppTheme.brand,
+                              ),
+                            )
+                          : FaIcon(
+                              FontAwesomeIcons.chevronRight,
+                              size: 16,
+                              color: c.textTertiary,
+                            ),
                     ),
+                  ),
                 ],
               ),
             ),
@@ -794,7 +816,7 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
       child: SizedBox(
         height: 56,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 0, 0),
+          padding: const EdgeInsets.fromLTRB(20, 0, 16, 0),
           child: Row(
             children: [
               Icon(icon, size: 22, color: c.textPrimary),
@@ -825,14 +847,19 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                 ),
               ],
               const SizedBox(width: 10),
-              if (showChevron)
-                FaIcon(
-                  FontAwesomeIcons.chevronRight,
-                  size: 16,
-                  color: c.textTertiary,
-                )
-              else
-                const SizedBox(width: 16),
+              SizedBox(
+                width: 24,
+                height: 24,
+                child: Center(
+                  child: showChevron
+                      ? FaIcon(
+                          FontAwesomeIcons.chevronRight,
+                          size: 16,
+                          color: c.textTertiary,
+                        )
+                      : const SizedBox.shrink(),
+                ),
+              ),
             ],
           ),
         ),
@@ -854,11 +881,19 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
           child: Row(
             children: [
               Expanded(
-                child: _barButton('音视频通话', primary: false, onTap: _callMenu),
+                child: _barButton(
+                  AppStrings.t(AppStringKeys.profileDetailAudioVideoCall),
+                  primary: false,
+                  onTap: _callMenu,
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: _barButton('发消息', primary: true, onTap: _openChat),
+                child: _barButton(
+                  AppStrings.t(AppStringKeys.profileDetailSendMessage),
+                  primary: true,
+                  onTap: _openChat,
+                ),
               ),
             ],
           ),
@@ -917,7 +952,7 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
           Row(
             children: [
               Text(
-                '精选照片',
+                AppStrings.t(AppStringKeys.profileDetailFeaturedPhotos),
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w500,

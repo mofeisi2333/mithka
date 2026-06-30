@@ -18,6 +18,7 @@ import '../settings/keyword_blocker.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class NotificationController with WidgetsBindingObserver {
   NotificationController._();
@@ -155,7 +156,9 @@ class NotificationController with WidgetsBindingObserver {
 
   String _notificationText(Map<String, dynamic> content) {
     final text = TDParse.messageText(content).replaceAll('\n', ' ').trim();
-    return text.isEmpty ? '[消息]' : text;
+    return text.isEmpty
+        ? AppStrings.t(AppStringKeys.chatSearchMessageResultLabel)
+        : text;
   }
 
   Future<void> _openNotification(NotificationResponse? response) async {

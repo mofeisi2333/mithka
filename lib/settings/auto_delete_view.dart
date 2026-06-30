@@ -15,6 +15,7 @@ import '../components/ui_components.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../theme/app_theme.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 /// One radio choice: a display title and its auto-delete duration in seconds
 /// (0 = off).
@@ -25,10 +26,10 @@ class _Option {
 }
 
 const List<_Option> _options = [
-  _Option('关闭', 0),
-  _Option('1 天', 86400),
-  _Option('1 周', 604800),
-  _Option('1 个月', 2592000),
+  _Option(AppStringKeys.chatInfoAutoDeleteOff, 0),
+  _Option(AppStringKeys.autoDeleteAfterOneDay, 86400),
+  _Option(AppStringKeys.autoDeleteAfterOneWeek, 604800),
+  _Option(AppStringKeys.autoDeleteAfterOneMonth, 2592000),
 ];
 
 class AutoDeleteView extends StatefulWidget {
@@ -86,7 +87,10 @@ class _AutoDeleteViewState extends State<AutoDeleteView> {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '自动删除消息', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStringKeys.chatInfoAutoDeleteMessages,
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(
             child: _loading
                 ? const Center(
@@ -103,7 +107,7 @@ class _AutoDeleteViewState extends State<AutoDeleteView> {
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                         child: Text(
-                          '新消息将在设定时间后自动从聊天中删除。',
+                          AppStrings.t(AppStringKeys.autoDeleteDescription),
                           style: TextStyle(
                             fontSize: 13,
                             color: c.textSecondary,
@@ -139,7 +143,7 @@ class _AutoDeleteViewState extends State<AutoDeleteView> {
                   child: Row(
                     children: [
                       Text(
-                        o.title,
+                        o.title.l10n(context),
                         style: TextStyle(fontSize: 16, color: c.textPrimary),
                       ),
                       const Spacer(),

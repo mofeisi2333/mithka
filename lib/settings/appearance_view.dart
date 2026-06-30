@@ -21,6 +21,7 @@ import '../theme/app_theme.dart';
 import '../theme/emoji_font_catalog.dart';
 import '../theme/system_font_catalog.dart';
 import '../theme/theme_controller.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class AppearanceView extends StatelessWidget {
   const AppearanceView({super.key});
@@ -33,7 +34,10 @@ class AppearanceView extends StatelessWidget {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '外观', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.appearanceTitle),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(
@@ -43,7 +47,7 @@ class AppearanceView extends StatelessWidget {
                 AppSpacing.section,
               ),
               children: [
-                _label(context, '模式'),
+                _label(context, AppStrings.t(AppStringKeys.appearanceMode)),
                 _card(context, [
                   for (final m in AppearanceMode.values)
                     _choiceRow(
@@ -55,11 +59,11 @@ class AppearanceView extends StatelessWidget {
                     ),
                 ]),
                 const SizedBox(height: AppSpacing.xl),
-                _label(context, '字体'),
+                _label(context, AppStrings.t(AppStringKeys.appearanceFont)),
                 _card(context, [
                   _navigationRow(
                     context,
-                    '字体',
+                    AppStrings.t(AppStringKeys.appearanceFont),
                     theme.effectiveFontChainLabel,
                     () => Navigator.of(context).push(
                       MaterialPageRoute(
@@ -70,10 +74,10 @@ class AppearanceView extends StatelessWidget {
                   ),
                 ]),
                 const SizedBox(height: AppSpacing.xl),
-                _label(context, '颜色'),
+                _label(context, AppStrings.t(AppStringKeys.appearanceColor)),
                 _colorCard(context, theme),
                 const SizedBox(height: AppSpacing.xl),
-                _label(context, '大小'),
+                _label(context, AppStrings.t(AppStringKeys.appearanceSize)),
                 _fontSizeCard(context, theme),
               ],
             ),
@@ -95,7 +99,10 @@ class DisplaySettingsView extends StatelessWidget {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '显示', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.appearanceDisplay),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(
@@ -105,96 +112,104 @@ class DisplaySettingsView extends StatelessWidget {
                 AppSpacing.section,
               ),
               children: [
-                _label(context, '显示'),
                 _card(context, [
                   _toggleRow(
                     context,
                     FontAwesomeIcons.users.data,
-                    '群聊头像显示为圆形',
+                    AppStrings.t(AppStringKeys.appearanceRoundGroupAvatars),
                     theme.circularGroupAvatars,
                     (v) => theme.circularGroupAvatars = v,
                   ),
                   _toggleRow(
                     context,
                     FontAwesomeIcons.eyeSlash.data,
-                    '侧边栏隐藏手机号',
+                    AppStrings.t(AppStringKeys.appearanceHidePhoneInSidebar),
                     theme.hideSidebarPhone,
                     (v) => theme.hideSidebarPhone = v,
                   ),
                 ]),
                 const SizedBox(height: AppSpacing.xl),
-                _label(context, '聊天界面'),
+                _label(context, AppStrings.t(AppStringKeys.appearanceChatView)),
                 _card(context, [
                   _toggleRow(
                     context,
                     FontAwesomeIcons.idBadge.data,
-                    '群成员显示头衔',
+                    AppStrings.t(AppStringKeys.appearanceShowGroupMemberTitles),
                     theme.showMemberTags,
                     (v) => theme.showMemberTags = v,
                   ),
                   _toggleRow(
                     context,
                     FontAwesomeIcons.images.data,
-                    '连续图片合并显示',
+                    AppStrings.t(
+                      AppStringKeys.appearanceMergeConsecutiveImages,
+                    ),
                     theme.groupImageMessages,
                     (v) => theme.groupImageMessages = v,
                   ),
                   _toggleRow(
                     context,
                     FontAwesomeIcons.palette.data,
-                    '显示 Premium 名字颜色',
+                    AppStrings.t(AppStringKeys.appearanceShowPremiumNameColor),
                     theme.showChatPremiumNameColors,
                     (v) => theme.showChatPremiumNameColors = v,
                   ),
                   _toggleRow(
                     context,
                     FontAwesomeIcons.solidFaceSmile.data,
-                    '显示 Premium 状态表情',
+                    AppStrings.t(
+                      AppStringKeys.appearanceShowPremiumStatusEmoji,
+                    ),
                     theme.showChatPremiumEmojiStatus,
                     (v) => theme.showChatPremiumEmojiStatus = v,
                   ),
                   _toggleRow(
                     context,
                     FontAwesomeIcons.penToSquare.data,
-                    '显示编辑和已读标记',
+                    AppStrings.t(AppStringKeys.appearanceShowEditAndReadMarks),
                     theme.showMessageMetaIndicators,
                     (v) => theme.showMessageMetaIndicators = v,
                   ),
                 ]),
                 const SizedBox(height: AppSpacing.xl),
-                _label(context, '聊天列表'),
+                _label(context, AppStrings.t(AppStringKeys.appearanceChatList)),
                 _card(context, [
                   _toggleRow(
                     context,
                     FontAwesomeIcons.filter.data,
-                    '顶部显示聊天分组筛选',
+                    AppStrings.t(AppStringKeys.appearanceShowChatFiltersOnTop),
                     theme.showChatFolderFilter,
                     (v) => theme.showChatFolderFilter = v,
                   ),
                   _toggleRow(
                     context,
                     FontAwesomeIcons.magnifyingGlass.data,
-                    '显示聊天列表搜索',
+                    AppStrings.t(AppStringKeys.appearanceShowChatListSearch),
                     theme.showChatListSearch,
                     (v) => theme.showChatListSearch = v,
                   ),
                   _toggleRow(
                     context,
                     FontAwesomeIcons.palette.data,
-                    '显示 Premium 名字颜色',
+                    AppStrings.t(AppStringKeys.appearanceShowPremiumNameColor),
                     theme.showPremiumNameColors,
                     (v) => theme.showPremiumNameColors = v,
                   ),
                   _toggleRow(
                     context,
                     FontAwesomeIcons.solidFaceSmile.data,
-                    '显示 Premium 状态表情',
+                    AppStrings.t(
+                      AppStringKeys.appearanceShowPremiumStatusEmoji,
+                    ),
                     theme.showPremiumEmojiStatus,
                     (v) => theme.showPremiumEmojiStatus = v,
                   ),
                 ]),
                 const SizedBox(height: AppSpacing.xl),
-                _label(context, '群助手位置'),
+                _label(
+                  context,
+                  AppStrings.t(AppStringKeys.appearanceGroupAssistantPosition),
+                ),
                 _card(context, [
                   for (final m in GroupAssistantPlacement.values)
                     _choiceRow(
@@ -206,19 +221,22 @@ class DisplaySettingsView extends StatelessWidget {
                     ),
                 ]),
                 const SizedBox(height: AppSpacing.xl),
-                _label(context, '消息红点'),
+                _label(
+                  context,
+                  AppStrings.t(AppStringKeys.appearanceUnreadBadge),
+                ),
                 _card(context, [
                   _toggleRow(
                     context,
                     FontAwesomeIcons.message.data,
-                    '显示未读会话数',
+                    AppStrings.t(AppStringKeys.appearanceShowUnreadChatCount),
                     theme.unreadBadgeShowsChatCount,
                     (v) => theme.unreadBadgeShowsChatCount = v,
                   ),
                   _toggleRow(
                     context,
                     FontAwesomeIcons.solidBell.data,
-                    '超过 99 显示为 99+',
+                    AppStrings.t(AppStringKeys.appearanceCapUnreadCountAt99),
                     theme.capUnreadBadgeAt99,
                     (v) => theme.capUnreadBadgeAt99 = v,
                   ),
@@ -346,7 +364,7 @@ extension _DisplayAppearanceHelpers on AppearanceView {
           _scaleSlider(
             context,
             icon: FontAwesomeIcons.font.data,
-            title: '字体大小',
+            title: AppStrings.t(AppStringKeys.appearanceFontSize),
             value: theme.fontScale,
             min: ThemeController.minFontScale,
             max: ThemeController.maxFontScale,
@@ -371,7 +389,7 @@ extension _DisplayAppearanceHelpers on AppearanceView {
           _scaleSlider(
             context,
             icon: FontAwesomeIcons.tableCells.data,
-            title: '界面大小',
+            title: AppStrings.t(AppStringKeys.appearanceInterfaceSize),
             value: theme.interfaceScale,
             min: ThemeController.minInterfaceScale,
             max: ThemeController.maxInterfaceScale,
@@ -514,7 +532,7 @@ extension _DisplayAppearanceHelpers on AppearanceView {
               Icon(icon, size: AppIconSize.xl, color: AppTheme.brand),
               const SizedBox(width: AppSpacing.xl),
               Text(
-                label,
+                label.l10n(context),
                 style: TextStyle(
                   fontSize: AppTextSize.bodyLarge,
                   color: c.textPrimary,
@@ -635,7 +653,10 @@ class FontSettingsView extends StatelessWidget {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '字体', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.appearanceFont),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(
@@ -648,7 +669,7 @@ class FontSettingsView extends StatelessWidget {
                 SettingsCard(
                   children: [
                     SettingsRow(
-                      title: '文本字体',
+                      title: AppStrings.t(AppStringKeys.appearanceTextFont),
                       value: theme.effectiveFontChainLabel,
                       height: AppMetric.compactSettingsRowHeight,
                       onTap: () => Navigator.of(context).push(
@@ -657,7 +678,9 @@ class FontSettingsView extends StatelessWidget {
                     ),
                     const InsetDivider(leadingInset: AppSpacing.xxl),
                     SettingsRow(
-                      title: '等宽字体',
+                      title: AppStrings.t(
+                        AppStringKeys.appearanceMonospaceFont,
+                      ),
                       value: theme.effectiveMonospaceFontLabel,
                       height: AppMetric.compactSettingsRowHeight,
                       onTap: () => Navigator.of(context).push(
@@ -668,7 +691,7 @@ class FontSettingsView extends StatelessWidget {
                     ),
                     const InsetDivider(leadingInset: AppSpacing.xxl),
                     SettingsRow(
-                      title: '表情字体',
+                      title: AppStrings.t(AppStringKeys.appearanceEmojiFont),
                       value: theme.emojiFontChoice.label,
                       height: AppMetric.compactSettingsRowHeight,
                       onTap: () => Navigator.of(context).push(
@@ -679,8 +702,8 @@ class FontSettingsView extends StatelessWidget {
                     ),
                     const InsetDivider(leadingInset: AppSpacing.xxl),
                     SettingsRow(
-                      title: '字体缓存',
-                      value: '管理',
+                      title: AppStrings.t(AppStringKeys.appearanceFontCache),
+                      value: AppStrings.t(AppStringKeys.appearanceManage),
                       height: AppMetric.compactSettingsRowHeight,
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute(
@@ -696,7 +719,7 @@ class FontSettingsView extends StatelessWidget {
                     horizontal: AppSpacing.xxl,
                   ),
                   child: Text(
-                    '文本字体按顺序用于整个界面的字体链；表情字体优先用于 emoji；等宽字体用于代码块。',
+                    AppStrings.t(AppStringKeys.appearanceFontChainDescription),
                     style: TextStyle(
                       fontSize: AppTextSize.footnote,
                       color: c.textTertiary,
@@ -731,7 +754,10 @@ class _FontCacheManagementViewState extends State<FontCacheManagementView> {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '字体缓存', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.appearanceFontCache),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(
             child: FutureBuilder<_FontCacheSnapshot>(
               future: _snapshot,
@@ -759,7 +785,9 @@ class _FontCacheManagementViewState extends State<FontCacheManagementView> {
                         horizontal: AppSpacing.xxl,
                       ),
                       child: Text(
-                        '只管理运行时下载的 Google 字体缓存；当前字体链、等宽字体和表情字体正在使用的文件会被保留。',
+                        AppStrings.t(
+                          AppStringKeys.appearanceFontCacheDescription,
+                        ),
                         style: TextStyle(
                           fontSize: AppTextSize.footnote,
                           color: c.textTertiary,
@@ -821,10 +849,32 @@ class _FontCacheManagementViewState extends State<FontCacheManagementView> {
 
   Widget _summaryCard(BuildContext context, _FontCacheSnapshot data) {
     return _cacheCard(context, [
-      _plainRow(context, '缓存文件', '${data.entries.length} 个'),
-      _plainRow(context, '总大小', _formatBytes(data.totalBytes)),
-      _plainRow(context, '正在使用', '${data.activeCount} 个'),
-      _plainRow(context, '可清理', '${data.unusedCount} 个'),
+      _plainRow(
+        context,
+        AppStrings.t(AppStringKeys.appearanceCacheFiles),
+        AppStrings.t(AppStringKeys.appearanceFileCount, {
+          'value1': data.entries.length,
+        }),
+      ),
+      _plainRow(
+        context,
+        AppStrings.t(AppStringKeys.appearanceTotalSize),
+        _formatBytes(data.totalBytes),
+      ),
+      _plainRow(
+        context,
+        AppStrings.t(AppStringKeys.appearanceInUseSize),
+        AppStrings.t(AppStringKeys.appearanceFileCount, {
+          'value1': data.activeCount,
+        }),
+      ),
+      _plainRow(
+        context,
+        AppStrings.t(AppStringKeys.appearanceCleanableSize),
+        AppStrings.t(AppStringKeys.appearanceFileCount, {
+          'value1': data.unusedCount,
+        }),
+      ),
     ]);
   }
 
@@ -833,23 +883,25 @@ class _FontCacheManagementViewState extends State<FontCacheManagementView> {
     return _cacheCard(context, [
       _actionRow(
         context,
-        '刷新缓存列表',
+        AppStrings.t(AppStringKeys.appearanceRefreshCacheList),
         FontAwesomeIcons.arrowsRotate.data,
         busy ? null : _refreshSnapshot,
         busy: _operation == _FontCacheOperation.refreshing,
-        status: _operation == _FontCacheOperation.refreshed ? '已刷新' : null,
+        status: _operation == _FontCacheOperation.refreshed
+            ? AppStrings.t(AppStringKeys.appearanceCacheRefreshed)
+            : null,
       ),
       _actionRow(
         context,
-        '清理未使用字体',
+        AppStrings.t(AppStringKeys.appearanceCleanUnusedFonts),
         FontAwesomeIcons.trash.data,
         busy || data.unusedCount == 0 ? null : () => _deleteUnused(data),
         destructive: true,
         busy: _operation == _FontCacheOperation.deletingUnused,
         status: _operation == _FontCacheOperation.deletedUnused
-            ? '已清理'
+            ? AppStrings.t(AppStringKeys.appearanceCacheCleaned)
             : data.unusedCount == 0
-            ? '无可清理'
+            ? AppStrings.t(AppStringKeys.appearanceNoCleanableFonts)
             : null,
       ),
     ]);
@@ -868,7 +920,7 @@ class _FontCacheManagementViewState extends State<FontCacheManagementView> {
           vertical: AppSpacing.xxl,
         ),
         child: Text(
-          '没有已下载的字体缓存。',
+          AppStrings.t(AppStringKeys.appearanceNoDownloadedFontCache),
           style: TextStyle(fontSize: AppTextSize.body, color: c.textSecondary),
         ),
       );
@@ -1038,7 +1090,9 @@ class _FontCacheManagementViewState extends State<FontCacheManagementView> {
             ),
             const SizedBox(width: AppSpacing.md),
             Text(
-              entry.active ? '使用中' : '未使用',
+              entry.active
+                  ? AppStrings.t(AppStringKeys.appearanceFontInUse)
+                  : AppStrings.t(AppStringKeys.appearanceFontUnused),
               textAlign: TextAlign.right,
               style: TextStyle(
                 fontSize: AppTextSize.footnote,
@@ -1284,7 +1338,7 @@ Future<Set<String>> _cachedGoogleFontFamilies() async {
 }
 
 const _latinFontPreview = 'Aa 123';
-const _cjkFontPreview = '中文 日本語 門 説 線';
+final _cjkFontPreview = AppStrings.t(AppStringKeys.appearanceCjkFontPreview);
 
 List<String> _fontTitleFallback() {
   return switch (defaultTargetPlatform) {
@@ -1508,7 +1562,10 @@ class TextFontView extends StatelessWidget {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '文本字体', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.appearanceTextFont),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(
@@ -1527,7 +1584,7 @@ class TextFontView extends StatelessWidget {
                     horizontal: AppSpacing.xxl,
                   ),
                   child: Text(
-                    '按顺序应用文本字体；未覆盖的字符继续使用系统字体。',
+                    AppStrings.t(AppStringKeys.appearanceTextFontOrderHint),
                     style: TextStyle(
                       fontSize: AppTextSize.footnote,
                       color: c.textTertiary,
@@ -1555,7 +1612,7 @@ class TextFontView extends StatelessWidget {
           vertical: AppSpacing.xxl,
         ),
         child: Text(
-          '未设置文本字体，当前使用系统默认。',
+          AppStrings.t(AppStringKeys.appearanceTextFontUnsetHint),
           style: TextStyle(fontSize: AppTextSize.body, color: c.textSecondary),
         ),
       );
@@ -1681,18 +1738,23 @@ class TextFontView extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
-          _actionRow(context, '添加文本字体', FontAwesomeIcons.plus.data, () async {
-            final family = await Navigator.of(context).push<String>(
-              MaterialPageRoute(builder: (_) => const FontAddView()),
-            );
-            if (family == null || !context.mounted) return;
-            context.read<ThemeController>().addFontToFallbackChain(family);
-          }),
+          _actionRow(
+            context,
+            AppStrings.t(AppStringKeys.appearanceAddTextFont),
+            FontAwesomeIcons.plus.data,
+            () async {
+              final family = await Navigator.of(context).push<String>(
+                MaterialPageRoute(builder: (_) => const FontAddView()),
+              );
+              if (family == null || !context.mounted) return;
+              context.read<ThemeController>().addFontToFallbackChain(family);
+            },
+          ),
           if (theme.fontFallbackChain.isNotEmpty) ...[
             const InsetDivider(leadingInset: AppSpacing.xxl),
             _actionRow(
               context,
-              '清空文本字体',
+              AppStrings.t(AppStringKeys.appearanceClearTextFonts),
               FontAwesomeIcons.xmark.data,
               () => context.read<ThemeController>().setFontFallbackChain(
                 const <String>[],
@@ -1780,7 +1842,10 @@ class _EmojiFontPickerViewState extends State<EmojiFontPickerView> {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '表情字体', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.appearanceEmojiFont),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(
             child: FutureBuilder<List<EmojiFontManifestEntry>>(
               future: _fonts,
@@ -1791,7 +1856,7 @@ class _EmojiFontPickerViewState extends State<EmojiFontPickerView> {
                 if (snapshot.hasError && !snapshot.hasData) {
                   return Center(
                     child: Text(
-                      '加载失败',
+                      AppStrings.t(AppStringKeys.appearanceFontLoadFailed),
                       style: TextStyle(
                         fontSize: AppTextSize.bodyLarge,
                         color: c.textSecondary,
@@ -1834,7 +1899,9 @@ class _EmojiFontPickerViewState extends State<EmojiFontPickerView> {
                         horizontal: AppSpacing.xxl,
                       ),
                       child: Text(
-                        '字体列表来自 iebb/emojifonts manifest；选择时从 GitHub Releases 下载。预览图来自 Emojipedia。',
+                        AppStrings.t(
+                          AppStringKeys.appearanceEmojiFontCatalogDescription,
+                        ),
                         style: TextStyle(
                           fontSize: AppTextSize.footnote,
                           color: c.textTertiary,
@@ -1855,7 +1922,7 @@ class _EmojiFontPickerViewState extends State<EmojiFontPickerView> {
     return _row(
       context,
       title: EmojiFontChoice.system.label,
-      subtitle: '系统 emoji 字体',
+      subtitle: AppStrings.t(AppStringKeys.appearanceSystemEmojiFont),
       previewAsset: _previewAssetForKey(EmojiFontChoice.system.key),
       selected: theme.emojiFontChoice.isSystem,
       loading: false,
@@ -1926,7 +1993,9 @@ class _EmojiFontPickerViewState extends State<EmojiFontPickerView> {
               SizedBox(
                 width: 30,
                 child: Semantics(
-                  label: 'Face with Tears of Joy',
+                  label: AppStringKeys.emojiPreviewFaceWithTearsOfJoy.l10n(
+                    context,
+                  ),
                   image: true,
                   child: _EmojiPreviewImage(asset: previewAsset),
                 ),
@@ -1938,7 +2007,7 @@ class _EmojiFontPickerViewState extends State<EmojiFontPickerView> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      title,
+                      title.l10n(context),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -1949,7 +2018,12 @@ class _EmojiFontPickerViewState extends State<EmojiFontPickerView> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      failed ? '$subtitle · 下载失败' : subtitle,
+                      failed
+                          ? AppStrings.t(
+                              AppStringKeys.appearanceFontDownloadFailedName,
+                              {'value1': subtitle},
+                            )
+                          : subtitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -2116,7 +2190,7 @@ class _FontAddViewState extends State<FontAddView> {
           label: font,
           family: font,
           preview: _fontPreviewSample(font),
-          source: '系统',
+          source: AppStringKeys.appearanceSystem,
           priority: _popularSystemFontPriority(font),
         ),
       for (final family in GoogleFonts.asMap().keys)
@@ -2146,7 +2220,10 @@ class _FontAddViewState extends State<FontAddView> {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '添加字体', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.appearanceAddFont),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(
               AppSpacing.lg,
@@ -2155,7 +2232,7 @@ class _FontAddViewState extends State<FontAddView> {
               AppSpacing.sm,
             ),
             child: CupertinoSearchTextField(
-              placeholder: '搜索字体',
+              placeholder: AppStrings.t(AppStringKeys.appearanceSearchFont),
               itemColor: c.textTertiary,
               prefixIcon: FaIcon(
                 FontAwesomeIcons.magnifyingGlass,
@@ -2213,7 +2290,7 @@ class _FontAddViewState extends State<FontAddView> {
             ),
             padding: const EdgeInsets.all(AppSpacing.xxl),
             child: Text(
-              '没有匹配的字体',
+              AppStrings.t(AppStringKeys.appearanceNoMatchingFonts),
               style: TextStyle(
                 fontSize: AppTextSize.body,
                 color: c.textSecondary,
@@ -2279,7 +2356,7 @@ class _FontAddViewState extends State<FontAddView> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      font.label,
+                      font.label.l10n(context),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: font.titleStyle(
@@ -2308,10 +2385,10 @@ class _FontAddViewState extends State<FontAddView> {
               const SizedBox(width: AppSpacing.md),
               Text(
                 failed
-                    ? '下载失败'
+                    ? AppStrings.t(AppStringKeys.appearanceDownloadFailed)
                     : font.google && font.downloaded
-                    ? 'Google 已下载'
-                    : font.source,
+                    ? AppStrings.t(AppStringKeys.appearanceGoogleDownloaded)
+                    : font.source.l10n(context),
                 style: TextStyle(
                   fontSize: AppTextSize.footnote,
                   color: c.textTertiary,
@@ -2400,7 +2477,7 @@ class _FontCandidate {
   }
 
   int get sourceOrder => switch (source) {
-    '系统' => 0,
+    AppStringKeys.appearanceSystem => 0,
     'Google' => 1,
     _ => 4,
   };
@@ -2476,7 +2553,10 @@ class _MonospaceFontPickerViewState extends State<MonospaceFontPickerView> {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '等宽字体', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.appearanceMonospaceFont),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           Expanded(
             child: FutureBuilder<List<_MonoFontCandidate>>(
               future: _fonts,
@@ -2504,7 +2584,7 @@ class _MonospaceFontPickerViewState extends State<MonospaceFontPickerView> {
           label: family,
           family: family,
           preview: 'final count = 123;',
-          source: '系统',
+          source: AppStringKeys.appearanceSystem,
           priority: _systemMonospacePriority(family),
         ),
     ];
@@ -2543,7 +2623,7 @@ class _MonospaceFontPickerViewState extends State<MonospaceFontPickerView> {
           label: choices[i].label,
           family: choices[i].fontFamily,
           preview: choices[i].previewText,
-          source: '系统',
+          source: AppStringKeys.appearanceSystem,
           choice: choices[i],
           priority: i,
         ),
@@ -2724,7 +2804,7 @@ class _MonospaceFontPickerViewState extends State<MonospaceFontPickerView> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      font.label,
+                      font.label.l10n(context),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: font.titleStyle(
@@ -2755,10 +2835,10 @@ class _MonospaceFontPickerViewState extends State<MonospaceFontPickerView> {
               const SizedBox(width: AppSpacing.md),
               Text(
                 failed
-                    ? '下载失败'
+                    ? AppStrings.t(AppStringKeys.appearanceDownloadFailed)
                     : font.google && font.downloaded
-                    ? 'Google 已下载'
-                    : font.source,
+                    ? AppStrings.t(AppStringKeys.appearanceGoogleDownloaded)
+                    : font.source.l10n(context),
                 style: TextStyle(
                   fontSize: AppTextSize.footnote,
                   color: c.textTertiary,
@@ -2778,7 +2858,7 @@ class _MonospaceFontPickerViewState extends State<MonospaceFontPickerView> {
               ],
               if (!loading && failed) ...[
                 Text(
-                  '下载失败',
+                  AppStrings.t(AppStringKeys.appearanceDownloadFailed),
                   style: TextStyle(
                     fontSize: AppTextSize.footnote,
                     color: c.textTertiary,

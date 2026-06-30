@@ -19,6 +19,7 @@ import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class FileDetailView extends StatefulWidget {
   const FileDetailView({super.key, required this.doc});
@@ -100,7 +101,10 @@ class _FileDetailViewState extends State<FileDetailView> {
     if (p == null) return;
     final r = await OpenFilex.open(p);
     if (r.type != ResultType.done && mounted) {
-      showToast(context, '没有可打开此文件的应用');
+      showToast(
+        context,
+        AppStrings.t(AppStringKeys.fileDetailNoAppCanOpenFile),
+      );
     }
   }
 
@@ -192,7 +196,10 @@ class _FileDetailViewState extends State<FileDetailView> {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          '文件下载中…(${_bytes(_downloaded)}/${_bytes(_total)})',
+          AppStrings.t(AppStringKeys.fileDetailDownloadProgress, {
+            'value1': _bytes(_downloaded),
+            'value2': _bytes(_total),
+          }),
           style: TextStyle(fontSize: 13, color: c.textSecondary),
         ),
         const SizedBox(height: 14),
@@ -243,8 +250,8 @@ class _FileDetailViewState extends State<FileDetailView> {
           gradient: AppTheme.brandGradient,
           borderRadius: BorderRadius.circular(25),
         ),
-        child: const Text(
-          '打开',
+        child: Text(
+          AppStrings.t(AppStringKeys.fileDetailOpen),
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w600,

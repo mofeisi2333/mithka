@@ -18,6 +18,7 @@ import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import '../theme/date_text.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class AudioSearchView extends StatefulWidget {
   const AudioSearchView({
@@ -133,7 +134,7 @@ class _AudioSearchViewState extends State<AudioSearchView> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _loading = false);
-      showToast(context, '音频搜索失败');
+      showToast(context, AppStrings.t(AppStringKeys.audioSearchFailed));
     }
   }
 
@@ -142,7 +143,7 @@ class _AudioSearchViewState extends State<AudioSearchView> {
     try {
       final chat = await _client.query({'@type': 'getChat', 'chat_id': chatId});
       final info = _SourceInfo(
-        chat.str('title') ?? '聊天',
+        chat.str('title') ?? AppStrings.t(AppStringKeys.audioSearchChatTab),
         TDParse.smallPhoto(chat.obj('photo')),
       );
       if (!mounted) return;
@@ -165,7 +166,10 @@ class _AudioSearchViewState extends State<AudioSearchView> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _sendingMessageId = null);
-      showToast(context, '发送音频失败');
+      showToast(
+        context,
+        AppStrings.t(AppStringKeys.audioSearchSendAudioFailed),
+      );
     }
   }
 
@@ -260,8 +264,10 @@ class _AudioSearchViewState extends State<AudioSearchView> {
               autocorrect: false,
               textInputAction: TextInputAction.search,
               style: TextStyle(fontSize: 15, color: c.textPrimary),
-              decoration: const InputDecoration(
-                hintText: '搜索 Telegram 音频',
+              decoration: InputDecoration(
+                hintText: AppStrings.t(
+                  AppStringKeys.audioSearchTelegramAudioTitle,
+                ),
                 border: InputBorder.none,
                 isCollapsed: true,
               ),
@@ -300,7 +306,7 @@ class _AudioSearchViewState extends State<AudioSearchView> {
     if (_query.trim().isEmpty) {
       return Center(
         child: Text(
-          '搜索歌曲、歌手或文件名',
+          AppStrings.t(AppStringKeys.audioSearchPlaceholder),
           style: TextStyle(fontSize: 14, color: c.textSecondary),
         ),
       );
@@ -308,7 +314,7 @@ class _AudioSearchViewState extends State<AudioSearchView> {
     if (_results.isEmpty) {
       return Center(
         child: Text(
-          '没有找到音频',
+          AppStrings.t(AppStringKeys.audioSearchNoResults),
           style: TextStyle(fontSize: 14, color: c.textSecondary),
         ),
       );
@@ -365,14 +371,19 @@ class _AudioSearchViewState extends State<AudioSearchView> {
                   Row(
                     children: [
                       PhotoAvatar(
-                        title: source?.title ?? '聊天',
+                        title:
+                            source?.title ??
+                            AppStrings.t(AppStringKeys.audioSearchChatTab),
                         photo: source?.photo,
                         size: 16,
                       ),
                       const SizedBox(width: 5),
                       Expanded(
                         child: Text(
-                          source?.title ?? '正在获取来源…',
+                          source?.title ??
+                              AppStrings.t(
+                                AppStringKeys.audioSearchFetchingSource,
+                              ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(fontSize: 12, color: c.textTertiary),

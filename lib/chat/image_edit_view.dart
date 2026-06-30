@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../theme/app_theme.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 enum _EditTool { crop, mask, draw, text }
 
@@ -449,25 +450,30 @@ class _ImageEditViewState extends State<ImageEditView> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1C1C1E),
-        title: const Text('添加文字', style: TextStyle(color: Colors.white)),
+        title: Text(
+          AppStrings.t(AppStringKeys.imageEditAddText),
+          style: TextStyle(color: Colors.white),
+        ),
         content: TextField(
           controller: controller,
           autofocus: true,
           maxLines: 3,
           style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
-            hintText: '输入标注',
+          decoration: InputDecoration(
+            hintText: AppStrings.t(
+              AppStringKeys.imageEditCaptionInputPlaceholder,
+            ),
             hintStyle: TextStyle(color: Colors.white54),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('取消'),
+            child: Text(AppStrings.t(AppStringKeys.countryPickerCancel)),
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(controller.text),
-            child: const Text('添加'),
+            child: Text(AppStrings.t(AppStringKeys.imageEditAdd)),
           ),
         ],
       ),
@@ -556,7 +562,7 @@ class _ImageEditViewState extends State<ImageEditView> {
         textInputAction: TextInputAction.newline,
         style: const TextStyle(color: Colors.white, fontSize: 15),
         decoration: InputDecoration(
-          hintText: '添加说明…',
+          hintText: AppStrings.t(AppStringKeys.imageEditDescriptionPlaceholder),
           hintStyle: const TextStyle(color: Colors.white54),
           filled: true,
           fillColor: Colors.white.withValues(alpha: 0.08),
@@ -584,7 +590,9 @@ class _ImageEditViewState extends State<ImageEditView> {
             icon: FaIcon(FontAwesomeIcons.xmark, color: Colors.white),
           ),
           Text(
-            widget.avatar ? '裁剪头像' : '编辑图片',
+            widget.avatar
+                ? AppStrings.t(AppStringKeys.imageEditCropAvatar)
+                : AppStrings.t(AppStringKeys.imageEditTitle),
             style: const TextStyle(
               color: Colors.white,
               fontSize: 17,
@@ -593,13 +601,13 @@ class _ImageEditViewState extends State<ImageEditView> {
           ),
           const Spacer(),
           IconButton(
-            tooltip: '重置裁剪',
+            tooltip: AppStrings.t(AppStringKeys.imageEditResetCrop),
             onPressed: _resetCrop,
             icon: FaIcon(FontAwesomeIcons.rotate, color: Colors.white),
           ),
           if (!widget.avatar)
             IconButton(
-              tooltip: '旋转',
+              tooltip: AppStrings.t(AppStringKeys.imageEditRotate),
               onPressed: _saving ? null : _rotateRight,
               icon: FaIcon(
                 FontAwesomeIcons.rotateRight,
@@ -609,7 +617,9 @@ class _ImageEditViewState extends State<ImageEditView> {
           TextButton(
             onPressed: _saving ? null : _done,
             child: Text(
-              _saving ? '处理中…' : '完成',
+              _saving
+                  ? AppStrings.t(AppStringKeys.imageEditProcessing)
+                  : AppStrings.t(AppStringKeys.addMembersDone),
               style: TextStyle(
                 color: _saving ? Colors.white54 : AppTheme.brand,
                 fontWeight: FontWeight.w600,
@@ -637,15 +647,27 @@ class _ImageEditViewState extends State<ImageEditView> {
           children: [
             Row(
               children: [
-                _toolButton(_EditTool.crop, FontAwesomeIcons.crop.data, '裁剪'),
+                _toolButton(
+                  _EditTool.crop,
+                  FontAwesomeIcons.crop.data,
+                  AppStrings.t(AppStringKeys.imageEditCrop),
+                ),
                 if (!widget.avatar) ...[
                   _toolButton(
                     _EditTool.mask,
                     FontAwesomeIcons.droplet.data,
-                    '遮挡',
+                    AppStrings.t(AppStringKeys.imageEditObscure),
                   ),
-                  _toolButton(_EditTool.draw, FontAwesomeIcons.pen.data, '画笔'),
-                  _toolButton(_EditTool.text, FontAwesomeIcons.font.data, '文字'),
+                  _toolButton(
+                    _EditTool.draw,
+                    FontAwesomeIcons.pen.data,
+                    AppStrings.t(AppStringKeys.imageEditBrush),
+                  ),
+                  _toolButton(
+                    _EditTool.text,
+                    FontAwesomeIcons.font.data,
+                    AppStrings.t(AppStringKeys.imageEditTextTool),
+                  ),
                 ],
                 const Spacer(),
                 IconButton(

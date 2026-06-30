@@ -230,7 +230,7 @@ class _TopicChannelsViewState extends State<TopicChannelsView> {
       child: Column(
         children: [
           NavHeader(
-            title: '频道',
+            title: AppStrings.t(AppStringKeys.tabChannels),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -285,7 +285,10 @@ class _TopicChannelsViewState extends State<TopicChannelsView> {
                 ),
           const SizedBox(height: 12),
           Text(
-            (_loading ? '加载频道…' : '暂无话题频道').l10n(context),
+            (_loading
+                    ? AppStrings.t(AppStringKeys.channelsLoading)
+                    : AppStrings.t(AppStringKeys.channelsNoTopicChannels))
+                .l10n(context),
             style: TextStyle(fontSize: 15, color: c.textSecondary),
           ),
         ],
@@ -387,7 +390,10 @@ class _TopicPostRow extends StatelessWidget {
   String get _displayText {
     final text = post.message.text.trim();
     if (text.startsWith('[') && text.endsWith(']')) return '';
-    if (post.message.document != null && text.startsWith('[文件]')) return '';
+    if (post.message.document != null &&
+        text.startsWith(AppStrings.t(AppStringKeys.channelsFileAttachment))) {
+      return '';
+    }
     return text;
   }
 

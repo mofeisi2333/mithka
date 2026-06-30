@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mithka/chat/poll_composer_view.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 import 'package:mithka/theme/theme_controller.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -37,28 +38,54 @@ void main() {
 
       // Full-page composer, not an AlertDialog.
       expect(find.byType(AlertDialog), findsNothing);
-      expect(find.text('发起投票'), findsOneWidget);
-      expect(find.text('发送'), findsOneWidget);
-      expect(find.text('添加选项'), findsOneWidget);
-      expect(find.text('选项 1'), findsOneWidget);
-      expect(find.text('选项 2'), findsOneWidget);
+      expect(
+        find.text(AppStrings.t(AppStringKeys.pollComposerCreatePollTitle)),
+        findsOneWidget,
+      );
+      expect(
+        find.text(AppStrings.t(AppStringKeys.composerSend)),
+        findsOneWidget,
+      );
+      expect(
+        find.text(AppStrings.t(AppStringKeys.pollComposerAddOption)),
+        findsOneWidget,
+      );
+      expect(
+        find.text(
+          AppStrings.t(AppStringKeys.pollComposerOptionLabel, {'value1': 1}),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.text(
+          AppStrings.t(AppStringKeys.pollComposerOptionLabel, {'value1': 2}),
+        ),
+        findsOneWidget,
+      );
 
       // Add an option → a third row appears.
-      await tester.tap(find.text('添加选项'));
+      await tester.tap(
+        find.text(AppStrings.t(AppStringKeys.pollComposerAddOption)),
+      );
       await tester.pumpAndSettle();
-      expect(find.text('选项 3'), findsOneWidget);
+      expect(
+        find.text(
+          AppStrings.t(AppStringKeys.pollComposerOptionLabel, {'value1': 3}),
+        ),
+        findsOneWidget,
+      );
 
       // Fill question + two options, send returns (question, options).
-      await tester.enterText(find.byType(TextField).at(0), '晚饭吃什么');
-      await tester.enterText(find.byType(TextField).at(1), '火锅');
-      await tester.enterText(find.byType(TextField).at(2), '烧烤');
+      await tester.enterText(find.byType(TextField).at(0), 'Dinner plan');
+      await tester.enterText(find.byType(TextField).at(1), 'Hotpot');
+      await tester.enterText(find.byType(TextField).at(2), 'Barbecue');
       await tester.pumpAndSettle();
-      await tester.tap(find.text('发送'));
+      await tester.tap(find.text(AppStrings.t(AppStringKeys.composerSend)));
       await tester.pumpAndSettle();
 
       expect(result, isNotNull);
-      expect(result!.$1, '晚饭吃什么');
-      expect(result!.$2, ['火锅', '烧烤']);
+      expect(result!.$1, 'Dinner plan');
+      expect(result!.$2, ['Hotpot', 'Barbecue']);
     },
   );
 }

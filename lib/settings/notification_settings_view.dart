@@ -14,6 +14,7 @@ import '../components/ui_components.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../theme/app_theme.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class NotificationSettingsView extends StatefulWidget {
   const NotificationSettingsView({super.key});
@@ -111,7 +112,10 @@ class _NotificationSettingsViewState extends State<NotificationSettingsView> {
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
-          NavHeader(title: '消息通知', onBack: () => Navigator.of(context).pop()),
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.notificationTitle),
+            onBack: () => Navigator.of(context).pop(),
+          ),
           if (_loading)
             const Expanded(
               child: Center(
@@ -131,7 +135,7 @@ class _NotificationSettingsViewState extends State<NotificationSettingsView> {
                     _toggle(
                       FontAwesomeIcons.circleUser.data,
                       const Color(0xFF3C8CF0),
-                      '私聊消息',
+                      AppStrings.t(AppStringKeys.notificationPrivateMessages),
                       _enabled(_private),
                       (v) => _toggleMute(_private, v),
                     ),
@@ -139,7 +143,7 @@ class _NotificationSettingsViewState extends State<NotificationSettingsView> {
                     _toggle(
                       FontAwesomeIcons.users.data,
                       const Color(0xFF16B05A),
-                      '群组消息',
+                      AppStrings.t(AppStringKeys.notificationGroupMessages),
                       _enabled(_group),
                       (v) => _toggleMute(_group, v),
                     ),
@@ -147,7 +151,7 @@ class _NotificationSettingsViewState extends State<NotificationSettingsView> {
                     _toggle(
                       FontAwesomeIcons.grip.data,
                       const Color(0xFFFF9D2E),
-                      '频道消息',
+                      AppStrings.t(AppStringKeys.topicChatChannelMessages),
                       _enabled(_channel),
                       (v) => _toggleMute(_channel, v),
                     ),
@@ -157,7 +161,7 @@ class _NotificationSettingsViewState extends State<NotificationSettingsView> {
                     _toggle(
                       FontAwesomeIcons.file.data,
                       const Color(0xFF8E7BFF),
-                      '通知预览',
+                      AppStrings.t(AppStringKeys.notificationPreview),
                       _preview(_private),
                       (v) => _togglePreview(_private, v),
                     ),
@@ -165,7 +169,7 @@ class _NotificationSettingsViewState extends State<NotificationSettingsView> {
                     _toggle(
                       FontAwesomeIcons.volumeHigh.data,
                       const Color(0xFFF5A623),
-                      '声音',
+                      AppStrings.t(AppStringKeys.notificationSound),
                       _hasSound(_private),
                       (v) => _toggleSound(_private, v),
                     ),

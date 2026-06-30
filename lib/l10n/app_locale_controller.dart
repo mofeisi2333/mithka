@@ -21,18 +21,27 @@ class AppLocaleController extends ChangeNotifier {
   static const options = <AppLocaleOption>[
     AppLocaleOption(
       locale: Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
-      label: '简体中文',
+      label: AppStringKeys.appLocaleSimplifiedChinese,
     ),
     AppLocaleOption(
       locale: Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hant'),
-      label: '繁體中文',
+      label: AppStringKeys.appLocaleTraditionalChinese,
     ),
-    AppLocaleOption(locale: Locale('ja'), label: '日本語'),
-    AppLocaleOption(locale: Locale('ko'), label: '한국어'),
-    AppLocaleOption(locale: Locale('en'), label: 'English'),
-    AppLocaleOption(locale: Locale('fr'), label: 'Français'),
-    AppLocaleOption(locale: Locale('es'), label: 'Español'),
-    AppLocaleOption(locale: Locale('de'), label: 'Deutsch'),
+    AppLocaleOption(
+      locale: Locale('ja'),
+      label: AppStringKeys.appLocaleJapanese,
+    ),
+    AppLocaleOption(locale: Locale('ko'), label: AppStringKeys.appLocaleKorean),
+    AppLocaleOption(
+      locale: Locale('en'),
+      label: AppStringKeys.appLocaleEnglish,
+    ),
+    AppLocaleOption(locale: Locale('fr'), label: AppStringKeys.appLocaleFrench),
+    AppLocaleOption(
+      locale: Locale('es'),
+      label: AppStringKeys.appLocaleSpanish,
+    ),
+    AppLocaleOption(locale: Locale('de'), label: AppStringKeys.appLocaleGerman),
   ];
 
   final SharedPreferences _prefs;
@@ -42,7 +51,9 @@ class AppLocaleController extends ChangeNotifier {
   bool get followsSystem => _locale == null;
 
   String selectedLabel(BuildContext context) {
-    if (_locale == null) return '跟随系统'.l10n(context);
+    if (_locale == null) {
+      return AppStringKeys.appLocaleFollowSystem.l10n(context);
+    }
     return labelFor(_locale!);
   }
 
@@ -60,12 +71,11 @@ class AppLocaleController extends ChangeNotifier {
 
   static String labelFor(Locale locale) {
     final normalized = AppLocalizations.resolve(locale);
-    return options
-        .firstWhere(
-          (option) => _sameLocale(option.locale, normalized),
-          orElse: () => options.first,
-        )
-        .label;
+    final option = options.firstWhere(
+      (option) => _sameLocale(option.locale, normalized),
+      orElse: () => options.first,
+    );
+    return AppStrings.t(option.label);
   }
 
   static Locale? _localeFromTag(String? tag) {

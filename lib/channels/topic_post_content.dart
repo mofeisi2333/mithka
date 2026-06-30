@@ -11,6 +11,7 @@ import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 class TopicPostContent extends StatelessWidget {
   const TopicPostContent({
@@ -155,7 +156,9 @@ class _TopicFileCard extends StatelessWidget {
   }
 
   String _byteString(int bytes) {
-    if (bytes <= 0) return '文件';
+    if (bytes <= 0) {
+      return AppStrings.t(AppStringKeys.topicPostContentFile);
+    }
     const units = ['B', 'KB', 'MB', 'GB'];
     var value = bytes.toDouble();
     var unit = 0;
@@ -292,7 +295,9 @@ class _TopicButtonRows extends StatelessWidget {
     final copyText = button.copyText;
     if (copyText != null && copyText.isNotEmpty) {
       await Clipboard.setData(ClipboardData(text: copyText));
-      if (context.mounted) showToast(context, '已复制');
+      if (context.mounted) {
+        showToast(context, AppStrings.t(AppStringKeys.topicPostContentCopied));
+      }
       return;
     }
     if (button.isCallback) {
@@ -315,14 +320,24 @@ class _TopicButtonRows extends StatelessWidget {
         final text = answer.str('text');
         if (text != null && text.isNotEmpty) showToast(context, text);
       } catch (_) {
-        if (context.mounted) showToast(context, '按钮操作失败');
+        if (context.mounted) {
+          showToast(
+            context,
+            AppStrings.t(AppStringKeys.topicPostContentActionFailed),
+          );
+        }
       }
       return;
     }
     final query = button.switchInlineQuery;
     if (query != null && query.isNotEmpty) {
       await Clipboard.setData(ClipboardData(text: query));
-      if (context.mounted) showToast(context, '已复制查询内容');
+      if (context.mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.topicPostContentCopiedQuery),
+        );
+      }
       return;
     }
   }
