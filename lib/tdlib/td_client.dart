@@ -458,6 +458,12 @@ class TdClient {
 
   /// A fresh stream of the ACTIVE account's TDLib updates.
   Stream<Map<String, dynamic>> subscribe() => _updates.stream;
+
+  /// Broadcasts a local state correction to the same subscribers as TDLib
+  /// updates. Use this only after sending the corresponding TDLib request, so
+  /// list and badge UI can converge immediately while waiting for TDLib's
+  /// eventual aggregate updates.
+  void emitLocalUpdate(Map<String, dynamic> update) => _updates.add(update);
 }
 
 // MARK: - Receive isolate

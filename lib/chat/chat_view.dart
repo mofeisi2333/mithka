@@ -195,6 +195,7 @@ class _ChatViewState extends State<ChatView> {
         _bannerDismissed = true;
       });
     }
+    if (nearBottom) _markReadAtBottomIfNeeded();
     // Show the jump-to-bottom button once scrolled up from the newest message.
     final show = _vm.anchoredHistory || pos.maxScrollExtent - pos.pixels > 120;
     if (show != _showJumpDown) setState(() => _showJumpDown = show);
@@ -302,6 +303,7 @@ class _ChatViewState extends State<ChatView> {
         });
       }
       _animateToBottom(force: true);
+      unawaited(_vm.markLoadedMessagesRead());
       return;
     }
     _loadingLatestFromAnchor = true;
@@ -314,9 +316,17 @@ class _ChatViewState extends State<ChatView> {
         _bannerDismissed = _vm.unreadCount <= 0;
       });
       _scheduleScrollToBottom(animated: true, force: true);
+      unawaited(_vm.markLoadedMessagesRead());
     } finally {
       _loadingLatestFromAnchor = false;
     }
+  }
+
+  void _markReadAtBottomIfNeeded() {
+    if (!_vm.initialLoaded || _vm.messages.isEmpty || _vm.anchoredHistory) {
+      return;
+    }
+    unawaited(_vm.markLoadedMessagesRead());
   }
 
   /// Jump to the first unread incoming message (where the "以下为新消息" divider
@@ -450,6 +460,7 @@ class _ChatViewState extends State<ChatView> {
     }
     if (_openAtLatest) {
       _scrollToBottom(settle: true, forceSettle: true);
+      unawaited(_vm.markLoadedMessagesRead());
       return;
     }
     final i = _firstUnreadIndex();
@@ -481,6 +492,7 @@ class _ChatViewState extends State<ChatView> {
   void _scrollToBottom({bool settle = false, bool forceSettle = false}) {
     if (!_scroll.hasClients) return;
     _scroll.jumpTo(_scroll.position.maxScrollExtent);
+    _markReadAtBottomIfNeeded();
     if (settle) {
       _settleAtBottom(keyboardSettle: true, force: forceSettle);
     }
@@ -512,6 +524,7 @@ class _ChatViewState extends State<ChatView> {
         if (!mounted || generation != _bottomSettleGeneration) return;
         if (_scroll.hasClients && (force || _isNearBottom(420))) {
           _scroll.jumpTo(_scroll.position.maxScrollExtent);
+          _markReadAtBottomIfNeeded();
         }
       }
     }();

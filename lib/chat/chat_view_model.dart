@@ -138,6 +138,7 @@ class ChatViewModel extends ChangeNotifier {
   int lastReadOutboxId = 0; // outgoing messages with id <= this are read
   int lastReadInboxId = 0; // incoming messages with id <= this are read
   int unreadCount = 0; // unread incoming messages on entry (for the divider)
+  bool isMarkedUnread = false; // manual unread marker on the chat row
   bool initialLoaded = false; // first history page (+ unread boundary) is in
   bool anchoredHistory = false; // transcript is centered on an arbitrary target
 
@@ -175,6 +176,8 @@ class ChatViewModel extends ChangeNotifier {
   bool _hasOlderHistory = true;
   int? _restoreTopId;
   int? _pendingScrollToId;
+  int? _lastForcedReadMessageId;
+  bool _markReadInFlight = false;
   final Set<int> _blockedReadIds = {};
 
   // Typing: sender ids currently acting, auto-cleared after a few seconds.
@@ -1130,6 +1133,7 @@ class ChatViewModel extends ChangeNotifier {
     lastReadOutboxId = chat.int64('last_read_outbox_message_id') ?? 0;
     lastReadInboxId = chat.int64('last_read_inbox_message_id') ?? 0;
     unreadCount = chat.integer('unread_count') ?? 0;
+    isMarkedUnread = chat.boolean('is_marked_as_unread') ?? false;
     isMuted = (chat.obj('notification_settings')?.integer('mute_for') ?? 0) > 0;
     isForum = chat.boolean('view_as_topics') ?? false;
     messageAutoDeleteTime = _autoDeleteSeconds(chat);
@@ -1663,6 +1667,85 @@ class ChatViewModel extends ChangeNotifier {
     return true;
   }
 
+  Future<void> markLoadedMessagesRead() async {
+    if (_markReadInFlight) return;
+    _markReadInFlight = true;
+    try {
+      final latestLoadedId = _allMessages.isNotEmpty ? _allMessages.last.id : 0;
+      var messageId = latestLoadedId;
+      final previousUnreadCount = unreadCount;
+      final previousMarkedUnread = isMarkedUnread;
+      if (previousUnreadCount > 0 || previousMarkedUnread || messageId <= 0) {
+        try {
+          final raw = await _client.query({
+            '@type': 'getChat',
+            'chat_id': chatId,
+          });
+          final latestRaw = raw.obj('last_message');
+          final latest = latestRaw == null ? null : TDParse.message(latestRaw);
+          messageId = math.max(messageId, latest?.id ?? 0);
+        } catch (_) {}
+      }
+
+      final shouldClearMarker = previousMarkedUnread;
+      final shouldForceRead =
+          messageId > 0 &&
+          (previousUnreadCount > 0 ||
+              messageId > lastReadInboxId ||
+              _lastForcedReadMessageId != messageId);
+      if (!shouldClearMarker && !shouldForceRead) return;
+
+      if (shouldClearMarker) isMarkedUnread = false;
+      if (messageId > lastReadInboxId) lastReadInboxId = messageId;
+      if (unreadCount != 0) unreadCount = 0;
+      notifyListeners();
+
+      if (shouldClearMarker) {
+        _client.send({
+          '@type': 'toggleChatIsMarkedAsUnread',
+          'chat_id': chatId,
+          'is_marked_as_unread': false,
+        });
+        _client.emitLocalUpdate({
+          '@type': 'updateChatIsMarkedAsUnread',
+          'chat_id': chatId,
+          'is_marked_as_unread': false,
+        });
+      }
+      if (shouldForceRead) {
+        _lastForcedReadMessageId = messageId;
+        _client.send({
+          '@type': 'viewMessages',
+          'chat_id': chatId,
+          'message_ids': [messageId],
+          'force_read': true,
+        });
+        _client.emitLocalUpdate({
+          '@type': 'updateChatReadInbox',
+          'chat_id': chatId,
+          'last_read_inbox_message_id': messageId,
+          'unread_count': 0,
+        });
+      }
+      final chatDelta =
+          !isMuted && (previousUnreadCount > 0 || shouldClearMarker) ? -1 : 0;
+      final messageDelta = !isMuted && previousUnreadCount > 0
+          ? -previousUnreadCount
+          : 0;
+      if (chatDelta != 0 || messageDelta != 0) {
+        _client.emitLocalUpdate({
+          '@type': 'mithkaUnreadDelta',
+          'chat_list': {'@type': 'chatListMain'},
+          'chat_id': chatId,
+          'chat_delta': chatDelta,
+          'message_delta': messageDelta,
+        });
+      }
+    } finally {
+      _markReadInFlight = false;
+    }
+  }
+
   // MARK: - Live updates
 
   void _subscribeToUpdates() {
@@ -1750,6 +1833,18 @@ class ChatViewModel extends ChangeNotifier {
         if (update.int64('chat_id') != chatId) return;
         lastReadOutboxId =
             update.int64('last_read_outbox_message_id') ?? lastReadOutboxId;
+        notifyListeners();
+
+      case 'updateChatReadInbox':
+        if (update.int64('chat_id') != chatId) return;
+        lastReadInboxId =
+            update.int64('last_read_inbox_message_id') ?? lastReadInboxId;
+        unreadCount = update.integer('unread_count') ?? unreadCount;
+        notifyListeners();
+
+      case 'updateChatIsMarkedAsUnread':
+        if (update.int64('chat_id') != chatId) return;
+        isMarkedUnread = update.boolean('is_marked_as_unread') ?? false;
         notifyListeners();
 
       case 'updateChatAction':

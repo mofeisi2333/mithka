@@ -57,6 +57,14 @@ class UnreadBadgeModel extends ChangeNotifier {
           if (update.obj('chat_list')?.type != 'chatListMain') return;
           _messageCount = update.integer('unread_unmuted_count') ?? 0;
           notifyListeners();
+        case 'mithkaUnreadDelta':
+          if (update.obj('chat_list')?.type != 'chatListMain') return;
+          final chatDelta = update.integer('chat_delta') ?? 0;
+          final messageDelta = update.integer('message_delta') ?? 0;
+          if (chatDelta == 0 && messageDelta == 0) return;
+          _chatCount = math.max(0, _chatCount + chatDelta);
+          _messageCount = math.max(0, _messageCount + messageDelta);
+          notifyListeners();
       }
     });
   }
