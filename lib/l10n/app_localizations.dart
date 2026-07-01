@@ -1,9 +1,6 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:intl/intl.dart';
-import 'package:sentry_flutter/sentry_flutter.dart';
 
 class AppLocalizations {
   const AppLocalizations(this.locale);
@@ -1228,8 +1225,6 @@ abstract final class AppStringKeys {
 }
 
 abstract final class AppStrings {
-  static final Set<String> _reportedMissingKeys = {};
-
   static String t(String key, [Map<String, Object?> placeholders = const {}]) {
     final locale = AppLocalizations.resolve(Locale(Intl.getCurrentLocale()));
     return tForLocale(AppLocalizations.localeKeyFor(locale), key, placeholders);
@@ -1243,34 +1238,12 @@ abstract final class AppStrings {
     final localeMessages = _messages[localeKey];
     final localeValue = localeMessages?[key];
     final fallbackValue = _messages['en']?[key];
-    if (localeValue == null && fallbackValue == null && _looksLikeKey(key)) {
-      _reportMissing(localeKey, key);
-    }
     var value = localeValue ?? fallbackValue ?? key;
     placeholders.forEach((placeholder, replacement) {
       value = value.replaceAll('{$placeholder}', '$replacement');
     });
     return value;
   }
-
-  static void _reportMissing(String localeKey, String key) {
-    final reportKey = '$localeKey:$key';
-    if (!_reportedMissingKeys.add(reportKey)) return;
-    unawaited(
-      Sentry.captureMessage(
-        'Missing localization: $key',
-        level: SentryLevel.warning,
-        withScope: (scope) {
-          scope.setTag('localization.locale', localeKey);
-          scope.setTag('localization.key', key);
-          scope.setContexts('localization', {'locale': localeKey, 'key': key});
-        },
-      ),
-    );
-  }
-
-  static bool _looksLikeKey(String key) =>
-      RegExp(r'^[a-z][A-Za-z0-9]*$').hasMatch(key);
 }
 
 class _AppLocalizationsDelegate
