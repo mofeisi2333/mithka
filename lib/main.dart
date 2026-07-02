@@ -262,7 +262,13 @@ class _MithkaAppState extends State<MithkaApp> {
               final appChild = Stack(
                 children: [
                   Positioned.fill(child: themedChild),
-                  const GlobalMusicPlayerOverlay(),
+                  Overlay(
+                    initialEntries: [
+                      OverlayEntry(
+                        builder: (_) => const GlobalMusicPlayerOverlay(),
+                      ),
+                    ],
+                  ),
                 ],
               );
               return _ScaledAppView(

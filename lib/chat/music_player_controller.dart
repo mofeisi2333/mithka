@@ -710,8 +710,11 @@ class _MiniButton extends StatelessWidget {
 }
 
 void _showMusicQueue(BuildContext context, MusicPlayerController controller) {
+  final navigatorContext = appNavigatorKey.currentContext;
+  if (navigatorContext == null) return;
   showModalBottomSheet<void>(
-    context: context,
+    context: navigatorContext,
+    useRootNavigator: true,
     backgroundColor: Colors.transparent,
     builder: (sheetContext) => StatefulBuilder(
       builder: (sheetContext, setSheetState) {
