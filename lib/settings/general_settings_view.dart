@@ -18,6 +18,7 @@ import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
+import 'api_credentials_view.dart';
 import 'language_settings_view.dart';
 
 class GeneralSettingsView extends StatefulWidget {
@@ -110,6 +111,8 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
                 const SizedBox(height: 14),
                 _languageCard(),
                 const SizedBox(height: 14),
+                _accelerationCard(),
+                const SizedBox(height: 14),
                 _chatCard(),
               ],
             ),
@@ -141,6 +144,20 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
         () => Navigator.of(
           context,
         ).push(MaterialPageRoute(builder: (_) => const LanguageSettingsView())),
+      ),
+    ]);
+  }
+
+  Widget _accelerationCard() {
+    return _card([
+      _navRow(
+        HeroAppIcons.cloudArrowDown.data,
+        const Color(0xFF2FBF71),
+        AppStrings.t(AppStringKeys.apiCredentialsTitle),
+        AppStrings.t(AppStringKeys.apiCredentialsCustomClientApi),
+        () => Navigator.of(
+          context,
+        ).push(MaterialPageRoute(builder: (_) => const ApiCredentialsView())),
       ),
     ]);
   }
