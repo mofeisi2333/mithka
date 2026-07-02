@@ -164,6 +164,7 @@ class _SearchViewState extends State<SearchView> {
     return Container(
       color: c.background,
       child: ListView.builder(
+        padding: EdgeInsets.zero,
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         itemCount: _vm.results.length,
         itemBuilder: (context, i) {

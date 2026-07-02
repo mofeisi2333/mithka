@@ -6,10 +6,13 @@
 //  lists. Opened from the chat-info screen.
 //
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../components/photo_avatar.dart';
 import '../components/app_icons.dart';
+import '../components/toast.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
@@ -27,6 +30,28 @@ class _MediaTab {
   final String filter;
   final bool grid;
   final bool videoOnly;
+}
+
+enum _SharedMediaFileFilter { all, downloaded, notDownloaded }
+
+class _SharedFileState {
+  const _SharedFileState({
+    required this.fileId,
+    this.downloaded = 0,
+    this.total = 0,
+    this.completed = false,
+    this.active = false,
+    this.path,
+  });
+
+  final int fileId;
+  final int downloaded;
+  final int total;
+  final bool completed;
+  final bool active;
+  final String? path;
+
+  bool get hasLocalBytes => downloaded > 0 || completed;
 }
 
 class SharedMediaView extends StatefulWidget {
@@ -78,21 +103,41 @@ class _SharedMediaViewState extends State<SharedMediaView> {
   late int _tab = widget.initialTab;
   final Map<int, List<ChatMessage>> _cache = {};
   final Set<int> _loading = {};
+  final Map<int, _SharedFileState> _files = {};
+  final TextEditingController _search = TextEditingController();
+  StreamSubscription? _fileSub;
+  Timer? _searchDebounce;
+  String _query = '';
+  _SharedMediaFileFilter _fileFilter = _SharedMediaFileFilter.all;
 
   @override
   void initState() {
     super.initState();
+    _fileSub = _client.subscribe().listen((update) {
+      if (update.type != 'updateFile') return;
+      final file = update.obj('file');
+      if (file != null) _applyFile(file);
+    });
     _load(_tab);
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _fileSub?.cancel();
+    _search.dispose();
+    super.dispose();
   }
 
   Future<void> _load(int tab) async {
     if (_cache.containsKey(tab) || _loading.contains(tab)) return;
     _loading.add(tab);
+    final query = _query.trim();
     try {
       final res = await _client.query({
         '@type': 'searchChatMessages',
         'chat_id': widget.chatId,
-        'query': '',
+        'query': query,
         'sender_id': null,
         'from_message_id': 0,
         'offset': 0,
@@ -109,6 +154,7 @@ class _SharedMediaViewState extends State<SharedMediaView> {
         _cache[tab] = parsed;
         _loading.remove(tab);
       });
+      _primeFileStates(parsed);
     } catch (_) {
       if (mounted) setState(() => _loading.remove(tab));
     }
@@ -119,6 +165,87 @@ class _SharedMediaViewState extends State<SharedMediaView> {
     _load(tab);
   }
 
+  void _onSearchChanged(String value) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 260), () {
+      if (!mounted) return;
+      setState(() {
+        _query = value;
+        _cache.clear();
+      });
+      _load(_tab);
+    });
+  }
+
+  void _setFileFilter(_SharedMediaFileFilter filter) {
+    if (_fileFilter == filter) return;
+    setState(() => _fileFilter = filter);
+    _primeFileStates(_cache[_tab] ?? const <ChatMessage>[]);
+  }
+
+  void _applyFile(Map<String, dynamic> file) {
+    final id = file.integer('id');
+    if (id == null) return;
+    final local = file.obj('local');
+    final expected = file.integer('expected_size') ?? 0;
+    final size = file.integer('size') ?? 0;
+    final total = expected > 0 ? expected : size;
+    final downloadedSize = local?.integer('downloaded_size') ?? 0;
+    final downloadedPrefix = local?.integer('downloaded_prefix_size') ?? 0;
+    final completed = local?.boolean('is_downloading_completed') == true;
+    final downloaded = completed
+        ? total
+        : (downloadedSize > downloadedPrefix
+              ? downloadedSize
+              : downloadedPrefix);
+    final path = local?.str('path');
+    if (!mounted) return;
+    setState(() {
+      _files[id] = _SharedFileState(
+        fileId: id,
+        downloaded: downloaded,
+        total: total,
+        completed: completed,
+        active: local?.boolean('is_downloading_active') == true,
+        path: path?.isEmpty == true ? null : path,
+      );
+    });
+  }
+
+  void _primeFileStates(Iterable<ChatMessage> messages) {
+    for (final message in messages) {
+      final id = _fileId(message);
+      if (id == null || _files.containsKey(id)) continue;
+      unawaited(_loadFileState(id));
+    }
+  }
+
+  Future<void> _loadFileState(int fileId) async {
+    try {
+      final file = await _client.query({'@type': 'getFile', 'file_id': fileId});
+      _applyFile(file);
+    } catch (_) {}
+  }
+
+  Future<void> _deleteLocalCache(ChatMessage message) async {
+    final id = _fileId(message);
+    if (id == null) return;
+    try {
+      await _client.query({'@type': 'deleteFile', 'file_id': id});
+      if (!mounted) return;
+      setState(() {
+        final previous = _files[id];
+        _files[id] = _SharedFileState(
+          fileId: id,
+          total: previous?.total ?? _declaredSize(message),
+        );
+      });
+      showToast(context, '已删除本地缓存');
+    } catch (_) {
+      if (mounted) showToast(context, '删除缓存失败');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
@@ -127,6 +254,7 @@ class _SharedMediaViewState extends State<SharedMediaView> {
       body: Column(
         children: [
           _header(),
+          _toolbar(),
           if (!widget.lockedTab) _tabStrip(),
           Expanded(child: _body()),
         ],
@@ -217,6 +345,104 @@ class _SharedMediaViewState extends State<SharedMediaView> {
     );
   }
 
+  Widget _toolbar() {
+    final c = context.colors;
+    final showFileFilters = _tabs[_tab].videoOnly || _tab == 1;
+    return Container(
+      color: c.navBar,
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      child: Column(
+        children: [
+          Container(
+            height: 36,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: c.searchFill,
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Row(
+              children: [
+                AppIcon(
+                  HeroAppIcons.magnifyingGlass,
+                  size: 15,
+                  color: c.textTertiary,
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: TextField(
+                    controller: _search,
+                    autocorrect: false,
+                    textInputAction: TextInputAction.search,
+                    style: TextStyle(fontSize: 15, color: c.textPrimary),
+                    decoration: InputDecoration(
+                      hintText: _tabs[_tab].videoOnly
+                          ? '搜索视频、群组、名称或 #hashtag'
+                          : '搜索文件名、聊天或发送人',
+                      border: InputBorder.none,
+                      isCollapsed: true,
+                    ),
+                    onChanged: _onSearchChanged,
+                  ),
+                ),
+                if (_search.text.isNotEmpty)
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {
+                      _search.clear();
+                      _onSearchChanged('');
+                    },
+                    child: AppIcon(
+                      HeroAppIcons.xmark,
+                      size: 16,
+                      color: c.textTertiary,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (showFileFilters) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                _filterChip('全部', _SharedMediaFileFilter.all),
+                const SizedBox(width: 8),
+                _filterChip('已下载', _SharedMediaFileFilter.downloaded),
+                const SizedBox(width: 8),
+                _filterChip('未下载', _SharedMediaFileFilter.notDownloaded),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _filterChip(String label, _SharedMediaFileFilter filter) {
+    final c = context.colors;
+    final selected = _fileFilter == filter;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _setFileFilter(filter),
+      child: Container(
+        height: 28,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.brand : c.searchFill,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+            color: selected ? Colors.white : c.textSecondary,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _body() {
     final c = context.colors;
     final items = _cache[_tab];
@@ -237,7 +463,46 @@ class _SharedMediaViewState extends State<SharedMediaView> {
         ),
       );
     }
-    return _tabs[_tab].grid ? _grid(items) : _list(items);
+    final filtered = _filteredItems(items);
+    if (filtered.isEmpty) {
+      return Center(
+        child: Text(
+          '没有匹配的内容',
+          style: TextStyle(fontSize: 14, color: c.textSecondary),
+        ),
+      );
+    }
+    return _tabs[_tab].grid && !_tabs[_tab].videoOnly
+        ? _grid(filtered)
+        : _list(filtered);
+  }
+
+  List<ChatMessage> _filteredItems(List<ChatMessage> items) {
+    final query = _query.trim().toLowerCase();
+    return items.where((message) {
+      if ((_tabs[_tab].videoOnly || _tab == 1) &&
+          !_matchesFileFilter(message)) {
+        return false;
+      }
+      if (query.isEmpty) return true;
+      final fields = [
+        message.text,
+        message.senderName ?? '',
+        widget.title,
+        message.document?.fileName ?? '',
+      ].join(' ').toLowerCase();
+      return fields.contains(query);
+    }).toList();
+  }
+
+  bool _matchesFileFilter(ChatMessage message) {
+    final id = _fileId(message);
+    final state = id == null ? null : _files[id];
+    return switch (_fileFilter) {
+      _SharedMediaFileFilter.all => true,
+      _SharedMediaFileFilter.downloaded => state?.completed == true,
+      _SharedMediaFileFilter.notDownloaded => state?.completed != true,
+    };
   }
 
   Widget _grid(List<ChatMessage> items) {
@@ -359,6 +624,7 @@ class _SharedMediaViewState extends State<SharedMediaView> {
 
   Widget _listRow(ChatMessage m) {
     final c = context.colors;
+    if (_tabs[_tab].videoOnly && m.video != null) return _videoRow(m);
     final isVoice = m.voice != null;
     final isLink = m.document == null && !isVoice;
     final title =
@@ -367,7 +633,7 @@ class _SharedMediaViewState extends State<SharedMediaView> {
             ? AppStringKeys.sharedMediaVoiceMessages
             : (m.text.isEmpty ? AppStringKeys.sharedMediaLinks : m.text));
     final subtitle = m.document != null
-        ? _fileSize(m.document!.size)
+        ? _fileSubtitle(m)
         : DateText.listLabel(m.date);
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -388,23 +654,7 @@ class _SharedMediaViewState extends State<SharedMediaView> {
         ),
         child: Row(
           children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: AppTheme.brand.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                isVoice
-                    ? HeroAppIcons.microphone.data
-                    : isLink
-                    ? HeroAppIcons.link.data
-                    : HeroAppIcons.solidFile.data,
-                size: 20,
-                color: AppTheme.brand,
-              ),
-            ),
+            _fileThumb(m, isVoice: isVoice, isLink: isLink),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -424,10 +674,291 @@ class _SharedMediaViewState extends State<SharedMediaView> {
                 ],
               ),
             ),
+            if (m.document != null) _rowMenu(m),
           ],
         ),
       ),
     );
+  }
+
+  Widget _videoRow(ChatMessage message) {
+    final c = context.colors;
+    final state = _stateFor(message);
+    final title = _videoTitle(message);
+    final subtitle = [
+      DateText.listLabel(message.date),
+      if ((message.videoDuration ?? 0) > 0) _duration(message.videoDuration!),
+      _downloadLabel(message, state),
+    ].join(' · ');
+    final caption = message.text.trim();
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        final video = message.video;
+        if (video == null) return;
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            fullscreenDialog: true,
+            builder: (_) => VideoPlayerView(
+              video: video,
+              thumb: message.image,
+              width: message.imageWidth,
+              height: message.imageHeight,
+              sourceChatId: widget.chatId,
+              messageId: message.id,
+            ),
+          ),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: c.background,
+          border: Border(bottom: BorderSide(color: c.divider, width: 0.5)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 86,
+              height: 56,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(7),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    TDImage(photo: message.image, fit: BoxFit.cover),
+                    Container(color: Colors.black.withValues(alpha: 0.12)),
+                    Center(
+                      child: Container(
+                        width: 28,
+                        height: 28,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.52),
+                          shape: BoxShape.circle,
+                        ),
+                        child: AppIcon(
+                          HeroAppIcons.play,
+                          size: 14,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    if ((message.videoDuration ?? 0) > 0)
+                      Positioned(
+                        right: 5,
+                        bottom: 5,
+                        child: _overlayPill(_duration(message.videoDuration!)),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: c.textPrimary,
+                          ),
+                        ),
+                      ),
+                      _downloadBadge(state),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: c.textTertiary),
+                  ),
+                  if (caption.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      caption,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 13, color: c.textSecondary),
+                    ),
+                  ],
+                  const SizedBox(height: 3),
+                  Text(
+                    '来自 ${widget.title}${(message.senderName ?? '').isEmpty ? '' : ' | ${message.senderName}'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: c.textTertiary),
+                  ),
+                ],
+              ),
+            ),
+            _rowMenu(message),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _fileThumb(
+    ChatMessage m, {
+    required bool isVoice,
+    required bool isLink,
+  }) {
+    final c = context.colors;
+    final state = _stateFor(m);
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: state?.completed == true
+                ? const Color(0xFF1ABC7B).withValues(alpha: 0.16)
+                : AppTheme.brand.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: Icon(
+            isVoice
+                ? HeroAppIcons.microphone.data
+                : isLink
+                ? HeroAppIcons.link.data
+                : HeroAppIcons.solidFile.data,
+            size: 21,
+            color: state?.completed == true
+                ? const Color(0xFF1ABC7B)
+                : AppTheme.brand,
+          ),
+        ),
+        if (state?.completed == true)
+          Positioned(
+            right: -4,
+            bottom: -4,
+            child: Container(
+              width: 18,
+              height: 18,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: const Color(0xFF1ABC7B),
+                shape: BoxShape.circle,
+                border: Border.all(color: c.background, width: 2),
+              ),
+              child: const Icon(Icons.check, size: 11, color: Colors.white),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _downloadBadge(_SharedFileState? state) {
+    if (state?.completed != true) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(left: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1ABC7B).withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: const Text(
+        '已下载',
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: Color(0xFF1ABC7B),
+        ),
+      ),
+    );
+  }
+
+  Widget _overlayPill(String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.62),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(fontSize: 10, color: Colors.white),
+      ),
+    );
+  }
+
+  Widget _rowMenu(ChatMessage message) {
+    final c = context.colors;
+    final state = _stateFor(message);
+    return PopupMenuButton<String>(
+      icon: Icon(Icons.more_vert, size: 18, color: c.textTertiary),
+      color: c.background,
+      onSelected: (value) {
+        if (value == 'delete-cache') _deleteLocalCache(message);
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          enabled: state?.hasLocalBytes == true,
+          value: 'delete-cache',
+          child: Text(
+            '删除本地缓存',
+            style: TextStyle(
+              color: state?.hasLocalBytes == true
+                  ? Colors.redAccent
+                  : c.textTertiary,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _fileSubtitle(ChatMessage message) {
+    final state = _stateFor(message);
+    return [
+      DateText.listLabel(message.date),
+      _downloadLabel(message, state),
+      if ((message.senderName ?? '').isNotEmpty) '来自 ${message.senderName}',
+    ].join(' · ');
+  }
+
+  String _downloadLabel(ChatMessage message, _SharedFileState? state) {
+    final declared = _declaredSize(message);
+    final total = state?.total == 0 ? declared : (state?.total ?? declared);
+    final downloaded = state?.completed == true
+        ? total
+        : (state?.downloaded ?? 0);
+    if (state?.completed == true) {
+      return '已下载 ${_fileSize(total)}';
+    }
+    if (downloaded > 0) {
+      return '已下载 ${_fileSize(downloaded)} / ${_fileSize(total)}';
+    }
+    return '未下载 · ${_fileSize(total)}';
+  }
+
+  String _videoTitle(ChatMessage message) {
+    final text = message.text.trim().replaceAll('\n', ' ');
+    if (text.isNotEmpty) return text;
+    return '${DateText.listLabel(message.date)} 视频';
+  }
+
+  int? _fileId(ChatMessage message) =>
+      message.document?.file?.id ?? message.video?.id;
+
+  int _declaredSize(ChatMessage message) => message.document?.size ?? 0;
+
+  _SharedFileState? _stateFor(ChatMessage message) {
+    final id = _fileId(message);
+    return id == null ? null : _files[id];
   }
 
   String _fileSize(int bytes) {

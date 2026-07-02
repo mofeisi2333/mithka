@@ -428,6 +428,23 @@ class _ChatInfoViewState extends State<ChatInfoView> {
                 ),
               ),
             ),
+            const InsetDivider(leadingInset: 14),
+            _infoRow(
+              AppStrings.t(AppStringKeys.chatInfoGroupVideos),
+              () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => SharedMediaView(
+                    chatId: widget.chatId,
+                    title: widget.title,
+                    initialTab: 4,
+                    displayTitle: AppStrings.t(
+                      AppStringKeys.chatInfoGroupVideos,
+                    ),
+                    lockedTab: true,
+                  ),
+                ),
+              ),
+            ),
           ],
           if (_vm.isGroup && _vm.canManageGroup) ...[
             const InsetDivider(leadingInset: 14),
