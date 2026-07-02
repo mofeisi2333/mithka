@@ -29,6 +29,20 @@ set -e
 FLUTTER_VERSION="3.44.2"
 TDJSON_URL="${TDJSON_XCFRAMEWORK_URL:-https://github.com/iebb/mithka-tdjson/releases/latest/download/tdjson-ios.xcframework.zip}"
 
+decode_base64_to_file() {
+  data="$1"
+  output="$2"
+  tmp="${output}.tmp"
+  if printf '%s' "$data" | base64 --decode > "$tmp" 2>/dev/null ||
+    printf '%s' "$data" | base64 -D > "$tmp" 2>/dev/null ||
+    printf '%s' "$data" | base64 -d > "$tmp"; then
+    mv "$tmp" "$output"
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
+
 # Xcode Cloud checks the repo out here; fall back to walking up from this script.
 REPO="${CI_PRIMARY_REPOSITORY_PATH:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$REPO"
@@ -80,10 +94,16 @@ class Secrets {
 EOF
 
 # --- Firebase config → ios/Runner/GoogleService-Info.plist ------------------
-: "${FIREBASE_IOS_GOOGLESERVICE_INFO_PLIST_B64:?set FIREBASE_IOS_GOOGLESERVICE_INFO_PLIST_B64 in the Xcode Cloud workflow environment}"
-echo "▸ writing ios/Runner/GoogleService-Info.plist"
 mkdir -p ios/Runner
-printf '%s' "$FIREBASE_IOS_GOOGLESERVICE_INFO_PLIST_B64" | base64 -d > ios/Runner/GoogleService-Info.plist
+if [ -n "${FIREBASE_IOS_GOOGLESERVICE_INFO_PLIST_B64:-}" ]; then
+  echo "▸ writing ios/Runner/GoogleService-Info.plist"
+  decode_base64_to_file "$FIREBASE_IOS_GOOGLESERVICE_INFO_PLIST_B64" ios/Runner/GoogleService-Info.plist
+elif [ -f ios/Runner/GoogleService-Info.plist ]; then
+  echo "▸ using existing ios/Runner/GoogleService-Info.plist"
+else
+  echo "error: set FIREBASE_IOS_GOOGLESERVICE_INFO_PLIST_B64 in the Xcode Cloud workflow environment" >&2
+  exit 1
+fi
 
 # --- Native TDLib framework (git-ignored; prebuilt on a public release) ------
 if [ ! -d "ios/tdjson/tdjson.xcframework" ]; then
