@@ -51,8 +51,10 @@ class ChatListViewModel extends ChangeNotifier {
   final Map<int, ChatSummary> _map = {};
   final Map<int, Map<int, int>> _folderOrders = {};
   final Map<int, bool> _joinedChatCache = {};
-  final Map<int, String> _senderNames = {};
-  final Set<int> _resolvingSenders = {};
+  final Map<String, String> _senderNames = {};
+  final Map<String, Set<int>> _pendingSenderTargets = {};
+  final Map<int, String?> _lastSenderKeys = {};
+  final Set<String> _resolvingSenders = {};
   final Set<int> _resolvingPeers = {};
   final Set<int> _resolvingFolders = {};
 
@@ -435,6 +437,7 @@ class ChatListViewModel extends ChangeNotifier {
             s.lastMessageId = 0;
             s.date = 0;
             s.lastSender = null;
+            _lastSenderKeys[id] = null;
           }
         });
         _resolveSenderIfNeeded(id, update.obj('last_message'));
@@ -737,33 +740,51 @@ class ChatListViewModel extends ChangeNotifier {
     if (summary.kind != ChatKind.group && summary.kind != ChatKind.channel) {
       return;
     }
+    if (summary.kind == ChatKind.group &&
+        lastMessage?.boolean('is_outgoing') == true) {
+      _lastSenderKeys[id] = 'self';
+      _setLastSender('我', id);
+      return;
+    }
     final sender = lastMessage?.obj('sender_id');
-    if (sender == null) return;
+    if (sender == null) {
+      _lastSenderKeys[id] = null;
+      _setLastSender(null, id);
+      return;
+    }
 
     switch (sender.type) {
       case 'messageSenderUser':
         final userId = sender.int64('user_id');
         if (userId == null) return;
-        final name = _senderNames[userId];
+        final key = _senderKey('user', userId);
+        _lastSenderKeys[id] = key;
+        final name = _senderNames[key];
         if (name != null) {
           _setLastSender(name, id);
         } else {
-          _resolveUserName(userId, id);
+          _setLastSender(null, id);
+          _resolveUserName(userId, id, key);
         }
       case 'messageSenderChat':
         final senderChatId = sender.int64('chat_id');
         if (senderChatId == null) return;
         if (senderChatId == id) {
+          _lastSenderKeys[id] = null;
           _setLastSender(null, id);
           return;
         }
-        final name = _senderNames[senderChatId];
+        final key = _senderKey('chat', senderChatId);
+        _lastSenderKeys[id] = key;
+        final name = _senderNames[key];
         if (name != null) {
           _setLastSender(name, id);
         } else {
-          _resolveChatTitle(senderChatId, id);
+          _setLastSender(null, id);
+          _resolveChatTitle(senderChatId, id, key);
         }
       default:
+        _lastSenderKeys[id] = null;
         _setLastSender(null, id);
     }
   }
@@ -771,38 +792,55 @@ class ChatListViewModel extends ChangeNotifier {
   void _setLastSender(String? name, int id) =>
       _mutate(id, (s) => s.lastSender = name);
 
-  void _resolveUserName(int userId, int id) {
-    if (_resolvingSenders.contains(userId)) return;
-    _resolvingSenders.add(userId);
+  String _senderKey(String type, int id) => '$type:$id';
+
+  void _resolveUserName(int userId, int id, String key) {
+    _pendingSenderTargets.putIfAbsent(key, () => <int>{}).add(id);
+    if (_resolvingSenders.contains(key)) return;
+    _resolvingSenders.add(key);
     _client
         .query({'@type': 'getUser', 'user_id': userId})
         .then((user) {
-          _resolvingSenders.remove(userId);
+          _resolvingSenders.remove(key);
           final name = TDParse.userName(user);
-          _senderNames[userId] = name;
-          _setLastSender(name, id);
+          _senderNames[key] = name;
+          final targets = _pendingSenderTargets.remove(key) ?? {id};
+          for (final chatId in targets) {
+            if (_lastSenderKeys[chatId] != key) continue;
+            _setLastSender(name, chatId);
+          }
           _scheduleResort();
         })
         .catchError((_) {
-          _resolvingSenders.remove(userId);
+          _resolvingSenders.remove(key);
+          _pendingSenderTargets.remove(key);
         });
   }
 
-  void _resolveChatTitle(int senderChatId, int id) {
-    if (_resolvingSenders.contains(senderChatId)) return;
-    _resolvingSenders.add(senderChatId);
+  void _resolveChatTitle(int senderChatId, int id, String key) {
+    _pendingSenderTargets.putIfAbsent(key, () => <int>{}).add(id);
+    if (_resolvingSenders.contains(key)) return;
+    _resolvingSenders.add(key);
     _client
         .query({'@type': 'getChat', 'chat_id': senderChatId})
         .then((chat) {
-          _resolvingSenders.remove(senderChatId);
+          _resolvingSenders.remove(key);
           final title = chat.str('title');
-          if (title == null) return;
-          _senderNames[senderChatId] = title;
-          _setLastSender(title, id);
+          if (title == null) {
+            _pendingSenderTargets.remove(key);
+            return;
+          }
+          _senderNames[key] = title;
+          final targets = _pendingSenderTargets.remove(key) ?? {id};
+          for (final chatId in targets) {
+            if (_lastSenderKeys[chatId] != key) continue;
+            _setLastSender(title, chatId);
+          }
           _scheduleResort();
         })
         .catchError((_) {
-          _resolvingSenders.remove(senderChatId);
+          _resolvingSenders.remove(key);
+          _pendingSenderTargets.remove(key);
         });
   }
 
