@@ -23,6 +23,7 @@ import 'file_detail_view.dart';
 import 'full_image_viewer.dart';
 import 'link_handler.dart';
 import 'video_player_view.dart';
+import 'voice_audio.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 
 class _MediaTab {
@@ -121,6 +122,7 @@ class _SharedMediaViewState extends State<SharedMediaView> {
   final Map<int, String> _sourceTitles = {};
   List<ChatMessage> _recentGlobalVideos = const [];
   final TextEditingController _search = TextEditingController();
+  final VoicePlayer _voice = VoicePlayer();
   StreamSubscription? _fileSub;
   Timer? _searchDebounce;
   String _query = '';
@@ -141,6 +143,7 @@ class _SharedMediaViewState extends State<SharedMediaView> {
   void dispose() {
     _searchDebounce?.cancel();
     _fileSub?.cancel();
+    _voice.dispose();
     _search.dispose();
     super.dispose();
   }
@@ -722,6 +725,7 @@ class _SharedMediaViewState extends State<SharedMediaView> {
                 ),
               ),
           ],
+          Positioned(top: 4, right: 4, child: _overlayMenu(message)),
         ],
       ),
     );
@@ -740,15 +744,11 @@ class _SharedMediaViewState extends State<SharedMediaView> {
     if (_tabs[_tab].videoOnly && m.video != null) return _videoRow(m);
     if (_tabs[_tab].musicOnly && m.music != null) return _musicRow(m);
     final isVoice = m.voice != null;
+    if (isVoice) return _voiceRow(m);
     final isLink = m.document == null && !isVoice;
-    final title =
-        m.document?.fileName ??
-        (isVoice
-            ? AppStringKeys.sharedMediaVoiceMessages
-            : (m.text.isEmpty ? AppStringKeys.sharedMediaLinks : m.text));
-    final subtitle = m.document != null
-        ? _fileSubtitle(m)
-        : DateText.listLabel(m.date);
+    final title = m.document?.fileName ?? _linkTitle(m);
+    final subtitle = m.document != null ? _fileSubtitle(m) : _linkUrl(m);
+    final meta = m.document == null ? _messageMeta(m) : '';
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {
@@ -783,15 +783,132 @@ class _SharedMediaViewState extends State<SharedMediaView> {
                   const SizedBox(height: 2),
                   Text(
                     subtitle,
+                    maxLines: isLink ? 2 : 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 12, color: c.textTertiary),
                   ),
+                  if (meta.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      meta,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: c.textTertiary),
+                    ),
+                  ],
                 ],
               ),
             ),
-            if (m.document != null) _rowMenu(m),
+            _rowMenu(m),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _voiceRow(ChatMessage message) {
+    final c = context.colors;
+    final voice = message.voice;
+    if (voice == null) return const SizedBox.shrink();
+    return AnimatedBuilder(
+      animation: _voice,
+      builder: (context, _) {
+        final active = _voice.isActive(voice.file);
+        final total = active && _voice.total.inMilliseconds > 0
+            ? _voice.total
+            : Duration(seconds: voice.duration);
+        final position = active ? _voice.position : Duration.zero;
+        final fraction = total.inMilliseconds > 0
+            ? (position.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0)
+            : 0.0;
+        final durationText = active && position > Duration.zero
+            ? '${_duration(position.inSeconds)} / ${_duration(voice.duration)}'
+            : _duration(voice.duration);
+        final sender = _senderLabel(message);
+        final subtitle = [
+          durationText,
+          DateText.listLabel(message.date),
+          if (_usesGlobalSearch(_tab) && _sourceTitleFor(message).isNotEmpty)
+            '来自 ${_sourceTitleFor(message)}',
+        ].join(' · ');
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _voice.toggleVoice(voice.file),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: c.background,
+              border: Border(bottom: BorderSide(color: c.divider, width: 0.5)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: AppTheme.brand.withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: _voice.isLoading && active
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator.adaptive(
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : AppIcon(
+                          active && _voice.isPlaying
+                              ? HeroAppIcons.pause
+                              : HeroAppIcons.play,
+                          size: 16,
+                          color: AppTheme.brand,
+                        ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        sender,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: c.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        child: LinearProgressIndicator(
+                          value: fraction,
+                          minHeight: 3,
+                          backgroundColor: c.searchFill,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            AppTheme.brand,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 12, color: c.textTertiary),
+                      ),
+                    ],
+                  ),
+                ),
+                _rowMenu(message),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -859,6 +976,7 @@ class _SharedMediaViewState extends State<SharedMediaView> {
                 ],
               ),
             ),
+            _rowMenu(message),
           ],
         ),
       ),
@@ -1086,22 +1204,57 @@ class _SharedMediaViewState extends State<SharedMediaView> {
       icon: Icon(Icons.more_vert, size: 18, color: c.textTertiary),
       color: c.background,
       onSelected: (value) {
+        if (value == 'open-original') _openSourceMessage(message);
         if (value == 'delete-cache') _deleteLocalCache(message);
       },
       itemBuilder: (context) => [
         PopupMenuItem(
-          enabled: state?.hasLocalBytes == true,
-          value: 'delete-cache',
-          child: Text(
-            '删除本地缓存',
-            style: TextStyle(
-              color: state?.hasLocalBytes == true
-                  ? Colors.redAccent
-                  : c.textTertiary,
+          enabled: _canOpenSourceMessage(message),
+          value: 'open-original',
+          child: Text(AppStrings.t(AppStringKeys.momentsOpenOriginalMessage)),
+        ),
+        if (_fileId(message) != null) ...[
+          const PopupMenuDivider(),
+          PopupMenuItem(
+            enabled: state?.hasLocalBytes == true,
+            value: 'delete-cache',
+            child: Text(
+              '删除本地缓存',
+              style: TextStyle(
+                color: state?.hasLocalBytes == true
+                    ? Colors.redAccent
+                    : c.textTertiary,
+              ),
             ),
           ),
-        ),
+        ],
       ],
+    );
+  }
+
+  Widget _overlayMenu(ChatMessage message) {
+    return Container(
+      width: 30,
+      height: 30,
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.42),
+        shape: BoxShape.circle,
+      ),
+      child: PopupMenuButton<String>(
+        padding: EdgeInsets.zero,
+        icon: const Icon(Icons.more_horiz, size: 18, color: Colors.white),
+        color: context.colors.background,
+        onSelected: (value) {
+          if (value == 'open-original') _openSourceMessage(message);
+        },
+        itemBuilder: (context) => [
+          PopupMenuItem(
+            enabled: _canOpenSourceMessage(message),
+            value: 'open-original',
+            child: Text(AppStrings.t(AppStringKeys.momentsOpenOriginalMessage)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1115,6 +1268,48 @@ class _SharedMediaViewState extends State<SharedMediaView> {
       if (!_usesGlobalSearch(_tab) && (message.senderName ?? '').isNotEmpty)
         '来自 ${message.senderName}',
     ].join(' · ');
+  }
+
+  String _linkTitle(ChatMessage message) {
+    final preview = message.linkPreview;
+    final title = preview?.title.trim() ?? '';
+    if (title.isNotEmpty) return title;
+    final siteName = preview?.siteName.trim() ?? '';
+    if (siteName.isNotEmpty) return siteName;
+    final text = message.text.trim().replaceAll('\n', ' ');
+    return text.isEmpty ? AppStrings.t(AppStringKeys.sharedMediaLinks) : text;
+  }
+
+  String _linkUrl(ChatMessage message) {
+    final previewUrl = message.linkPreview?.url.trim() ?? '';
+    if (previewUrl.isNotEmpty) return previewUrl;
+    final displayUrl = message.linkPreview?.displayUrl.trim() ?? '';
+    if (displayUrl.isNotEmpty) return displayUrl;
+    final text = message.text.trim();
+    final match = RegExp(r'https?://\S+').firstMatch(text);
+    if (match != null) return match.group(0)!;
+    return text;
+  }
+
+  String _messageMeta(ChatMessage message) {
+    final parts = [
+      DateText.listLabel(message.date),
+      if (_usesGlobalSearch(_tab) && _sourceTitleFor(message).isNotEmpty)
+        '来自 ${_sourceTitleFor(message)}',
+      if (!_usesGlobalSearch(_tab) && (message.senderName ?? '').isNotEmpty)
+        '来自 ${message.senderName}',
+    ].where((item) => item.isNotEmpty).toList();
+    return parts.join(' · ');
+  }
+
+  String _senderLabel(ChatMessage message) {
+    final sender = message.senderName?.trim();
+    if (sender != null && sender.isNotEmpty) return sender;
+    if (message.isOutgoing) return AppStrings.t(AppStringKeys.chatMeLabel);
+    final source = _sourceTitleFor(message).trim();
+    return source.isEmpty
+        ? AppStrings.t(AppStringKeys.sharedMediaVoiceMessages)
+        : source;
   }
 
   String _downloadLabel(ChatMessage message, _SharedFileState? state) {
@@ -1138,9 +1333,12 @@ class _SharedMediaViewState extends State<SharedMediaView> {
     return '${DateText.listLabel(message.date)} 视频';
   }
 
+  bool _canOpenSourceMessage(ChatMessage message) =>
+      _sourceChatIdFor(message) != 0 && message.id != 0;
+
   void _openSourceMessage(ChatMessage message) {
-    final sourceChatId = message.chatId;
-    if (sourceChatId == null) return;
+    if (!_canOpenSourceMessage(message)) return;
+    final sourceChatId = _sourceChatIdFor(message);
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ChatView(
