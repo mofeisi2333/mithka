@@ -450,71 +450,75 @@ class _GlobalMusicPlayerOverlayState extends State<GlobalMusicPlayerOverlay> {
   Widget build(BuildContext context) {
     final controller = MusicPlayerController.shared;
     return Positioned.fill(
-      child: AnimatedBuilder(
-        animation: controller,
-        builder: (context, _) {
-          if (!controller.isVisible) return const SizedBox.shrink();
-          final width = MediaQuery.sizeOf(context).width;
-          final deleteOpacity = controller.collapsed
-              ? 0.0
-              : (-_dragX / (width * 0.5)).clamp(0.0, 1.0);
-          final duration = _dragging
-              ? Duration.zero
-              : const Duration(milliseconds: 220);
-          return Stack(
-            children: [
-              if (deleteOpacity > 0)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: _bottomOffset,
-                  child: SafeArea(
-                    top: false,
-                    child: Opacity(
-                      opacity: deleteOpacity,
-                      child: Container(
-                        height: 70,
-                        alignment: Alignment.centerRight,
-                        padding: const EdgeInsets.only(right: 22),
-                        color: const Color(0xFFFF3B30),
-                        child: AppIcon(
-                          HeroAppIcons.trash,
-                          size: 24,
-                          color: Colors.white.withValues(alpha: 0.95),
+      child: Material(
+        type: MaterialType.transparency,
+        child: AnimatedBuilder(
+          animation: controller,
+          builder: (context, _) {
+            if (!controller.isVisible) return const SizedBox.shrink();
+            final width = MediaQuery.sizeOf(context).width;
+            final deleteOpacity = controller.collapsed
+                ? 0.0
+                : (-_dragX / (width * 0.5)).clamp(0.0, 1.0);
+            final duration = _dragging
+                ? Duration.zero
+                : const Duration(milliseconds: 220);
+            return Stack(
+              children: [
+                if (deleteOpacity > 0)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: _bottomOffset,
+                    child: SafeArea(
+                      top: false,
+                      child: Opacity(
+                        opacity: deleteOpacity,
+                        child: Container(
+                          height: 70,
+                          alignment: Alignment.centerRight,
+                          padding: const EdgeInsets.only(right: 22),
+                          color: const Color(0xFFFF3B30),
+                          child: AppIcon(
+                            HeroAppIcons.trash,
+                            size: 24,
+                            color: Colors.white.withValues(alpha: 0.95),
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              AnimatedPositioned(
-                duration: duration,
-                curve: Curves.easeOutCubic,
-                left: controller.collapsed ? null : 0,
-                right: controller.collapsed ? 0 : 0,
-                bottom: _bottomOffset,
-                child: AnimatedSlide(
+                AnimatedPositioned(
                   duration: duration,
                   curve: Curves.easeOutCubic,
-                  offset: Offset(
-                    controller.collapsed ? _dragX / 52 : _dragX / width,
-                    0,
-                  ),
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onPanUpdate: (details) => _onPanUpdate(details, controller),
-                    onPanEnd: (details) => _onPanEnd(details, controller),
-                    child: controller.collapsed
-                        ? _CollapsedMusicPlayer(controller: controller)
-                        : _ExpandedMusicPlayer(
-                            controller: controller,
-                            closing: _closing,
-                          ),
+                  left: controller.collapsed ? null : 0,
+                  right: controller.collapsed ? 0 : 0,
+                  bottom: _bottomOffset,
+                  child: AnimatedSlide(
+                    duration: duration,
+                    curve: Curves.easeOutCubic,
+                    offset: Offset(
+                      controller.collapsed ? _dragX / 52 : _dragX / width,
+                      0,
+                    ),
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onPanUpdate: (details) =>
+                          _onPanUpdate(details, controller),
+                      onPanEnd: (details) => _onPanEnd(details, controller),
+                      child: controller.collapsed
+                          ? _CollapsedMusicPlayer(controller: controller)
+                          : _ExpandedMusicPlayer(
+                              controller: controller,
+                              closing: _closing,
+                            ),
+                    ),
                   ),
                 ),
-              ),
-            ],
-          );
-        },
+              ],
+            );
+          },
+        ),
       ),
     );
   }

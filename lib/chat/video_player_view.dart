@@ -31,6 +31,7 @@ class _TdVideoStreamServer {
   HttpServer? _server;
   String? _path;
   int _total = 0;
+  Future<void> _downloadQueue = Future<void>.value();
 
   static const _chunkSize = 2 * 1024 * 1024;
 
@@ -43,8 +44,8 @@ class _TdVideoStreamServer {
       _updateFileInfo(file);
     } catch (_) {}
 
-    if (_path == null || _path!.isEmpty) {
-      _path = await TdFileCenter.shared.playbackPath(fileId);
+    if (_path == null || _path!.isEmpty || _total <= 0) {
+      await _primePlaybackFile();
     }
     if (_total <= 0) {
       try {
@@ -85,6 +86,20 @@ class _TdVideoStreamServer {
     }
     final path = file.obj('local')?.str('path');
     if (path != null && path.isNotEmpty) _path = path;
+  }
+
+  Future<void> _primePlaybackFile() async {
+    try {
+      final file = await TdClient.shared.query({
+        '@type': 'downloadFile',
+        'file_id': fileId,
+        'priority': 30,
+        'offset': 0,
+        'limit': _chunkSize,
+        'synchronous': false,
+      });
+      _updateFileInfo(file);
+    } catch (_) {}
   }
 
   Future<void> _handleRequest(HttpRequest request) async {
@@ -173,22 +188,36 @@ class _TdVideoStreamServer {
   Future<bool> _ensureRange(int start, int end) async {
     final length = end - start + 1;
     try {
-      final file = await TdFileCenter.shared.downloadPriorityRange(
-        fileId,
-        offset: start,
-        length: length,
-        priority: 32,
-        timeout: const Duration(seconds: 45),
-      );
+      final file = await _downloadPlaybackRange(start, length);
       if (file != null) _updateFileInfo(file);
       if (_path == null || _path!.isEmpty) {
-        final path = await TdFileCenter.shared.playbackPath(fileId);
-        if (path != null && path.isNotEmpty) _path = path;
+        await _primePlaybackFile();
       }
       return _waitForReadableRange(start, end);
     } catch (_) {
       return _waitForReadableRange(start, end);
     }
+  }
+
+  Future<Map<String, dynamic>?> _downloadPlaybackRange(int offset, int length) {
+    final task = _downloadQueue.then((_) async {
+      try {
+        return await TdClient.shared
+            .query({
+              '@type': 'downloadFile',
+              'file_id': fileId,
+              'priority': 32,
+              'offset': offset,
+              'limit': length,
+              'synchronous': true,
+            })
+            .timeout(const Duration(seconds: 45));
+      } catch (_) {
+        return null;
+      }
+    });
+    _downloadQueue = task.then<void>((_) {}, onError: (_) {});
+    return task;
   }
 
   Future<bool> _waitForReadableRange(int start, int end) async {
