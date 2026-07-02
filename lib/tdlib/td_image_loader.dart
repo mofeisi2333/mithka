@@ -56,6 +56,8 @@ class TdFileCenter {
   final Map<String, StreamController<TdFileProgress>> _progressControllers = {};
   bool _started = false;
   static const _playbackInitialPrefix = 2 * 1024 * 1024;
+  static const _priorityChunkSize = 512 * 1024;
+  static const _priorityParallelism = 4;
 
   String _key(int slot, int fileId) => '$slot:$fileId';
 
@@ -179,21 +181,15 @@ class TdFileCenter {
     } catch (_) {}
 
     try {
-      final response = await _client.query({
-        '@type': 'downloadFile',
-        'file_id': fileId,
-        'priority': 30,
-        'offset': 0,
-        'limit': _playbackInitialPrefix,
-        'synchronous': false,
-      });
-      _ingest(response);
-      final local = response.obj('local');
-      final localPath = local?.str('path');
-      if (localPath != null && localPath.isNotEmpty) {
-        _playbackWaiters.remove(k);
-        return localPath;
-      }
+      unawaited(
+        downloadPriorityRange(
+          fileId,
+          offset: 0,
+          length: _playbackInitialPrefix,
+          priority: 30,
+          timeout: const Duration(seconds: 25),
+        ),
+      );
     } catch (_) {}
 
     return completer.future.timeout(
@@ -208,16 +204,102 @@ class TdFileCenter {
   Future<void> requestPlaybackPrefix(int fileId, int bytes) async {
     _startIfNeeded();
     try {
-      final response = await _client.query({
-        '@type': 'downloadFile',
-        'file_id': fileId,
-        'priority': 30,
-        'offset': 0,
-        'limit': bytes,
-        'synchronous': false,
-      });
-      _ingest(response);
+      await downloadPriorityRange(
+        fileId,
+        offset: 0,
+        length: bytes,
+        priority: 30,
+        timeout: const Duration(seconds: 25),
+      );
     } catch (_) {}
+  }
+
+  Future<Map<String, dynamic>?> downloadPriorityRange(
+    int fileId, {
+    required int offset,
+    required int length,
+    int priority = 32,
+    int parallelism = _priorityParallelism,
+    int chunkSize = _priorityChunkSize,
+    Duration timeout = const Duration(seconds: 45),
+  }) async {
+    _startIfNeeded();
+    if (fileId == 0 || length <= 0) return null;
+    final chunks = <MapEntry<int, int>>[];
+    var cursor = offset;
+    final endExclusive = offset + length;
+    while (cursor < endExclusive) {
+      final nextLength = math.min(chunkSize, endExclusive - cursor);
+      chunks.add(MapEntry(cursor, nextLength));
+      cursor += nextLength;
+    }
+    if (chunks.isEmpty) return null;
+
+    var nextIndex = 0;
+    var completed = 0;
+    Map<String, dynamic>? latest;
+
+    Future<void> worker() async {
+      while (true) {
+        final index = nextIndex++;
+        if (index >= chunks.length) return;
+        final chunk = chunks[index];
+        try {
+          final file = await _client
+              .query({
+                '@type': 'downloadFile',
+                'file_id': fileId,
+                'priority': priority,
+                'offset': chunk.key,
+                'limit': chunk.value,
+                'synchronous': true,
+              })
+              .timeout(timeout);
+          _ingest(file);
+          latest = file;
+          completed++;
+        } catch (_) {}
+      }
+    }
+
+    final workerCount = math.min(parallelism, chunks.length);
+    await Future.wait([for (var i = 0; i < workerCount; i++) worker()]);
+    return completed == chunks.length ? latest : null;
+  }
+
+  Future<Map<String, dynamic>?> downloadPriorityFile(
+    int fileId, {
+    required int total,
+    int priority = 32,
+    int parallelism = _priorityParallelism,
+    int chunkSize = 2 * 1024 * 1024,
+  }) async {
+    _startIfNeeded();
+    if (fileId == 0) return null;
+    if (total <= 0) {
+      try {
+        final response = await _client.query({
+          '@type': 'downloadFile',
+          'file_id': fileId,
+          'priority': priority,
+          'offset': 0,
+          'limit': 0,
+          'synchronous': false,
+        });
+        _ingest(response);
+        return response;
+      } catch (_) {}
+      return null;
+    }
+    return downloadPriorityRange(
+      fileId,
+      offset: 0,
+      length: total,
+      priority: priority,
+      parallelism: parallelism,
+      chunkSize: chunkSize,
+      timeout: const Duration(seconds: 90),
+    );
   }
 
   void cancelDownload(int fileId) {

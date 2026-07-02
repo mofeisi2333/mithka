@@ -6,15 +6,18 @@
 //
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:dlibphonenumber/dlibphonenumber.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../components/app_icons.dart';
 import '../settings/api_credentials_view.dart';
+import '../settings/account_backup_view.dart';
 import '../settings/proxy_config.dart';
 import '../settings/proxy_view.dart';
 import '../tdlib/td_client.dart';
@@ -99,6 +102,7 @@ class _LoginViewState extends State<LoginView> {
     final c = context.colors;
     final beyondPhone =
         auth.step is AuthWaitCode ||
+        auth.step is AuthWaitQrCode ||
         auth.step is AuthWaitPassword ||
         auth.step is AuthWaitRegistration;
     // True when the phone-entry step is on screen (the natural state, or because
@@ -242,6 +246,7 @@ class _LoginViewState extends State<LoginView> {
     if (_forcePhone) return _phoneStep(auth);
     return switch (auth.step) {
       AuthMissingCredentials() => _credentialsNotice(auth),
+      AuthWaitQrCode(:final link) => _qrCodeStep(auth, link),
       AuthWaitCode(:final info) => _codeStep(auth, info),
       AuthWaitPassword(:final hint) => _passwordStep(auth, hint),
       AuthWaitRegistration() => _registrationStep(auth),
@@ -370,6 +375,12 @@ class _LoginViewState extends State<LoginView> {
             if (_forcePhone) setState(() => _forcePhone = false);
           },
         ),
+        const SizedBox(height: 12),
+        _qrLoginButton(auth),
+        if (Platform.isIOS) ...[
+          const SizedBox(height: 12),
+          _restoreAccountButton(auth),
+        ],
         const SizedBox(height: 20),
         Text(
           AppStrings.t(AppStringKeys.loginCodeWillBeSentToNumber),
@@ -377,6 +388,59 @@ class _LoginViewState extends State<LoginView> {
           style: TextStyle(fontSize: 12, color: c.textTertiary),
         ),
       ],
+    );
+  }
+
+  Widget _qrLoginButton(AuthManager auth) {
+    final c = context.colors;
+    return OutlinedButton.icon(
+      onPressed: auth.isWorking
+          ? null
+          : () {
+              if (_forcePhone) setState(() => _forcePhone = false);
+              auth.requestQrLogin();
+            },
+      icon: AppIcon(
+        HeroAppIcons.qrcode,
+        size: 18,
+        color: auth.isWorking ? c.textTertiary : AppTheme.brand,
+      ),
+      label: Text(AppStrings.t(AppStringKeys.loginWithQrCode)),
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size.fromHeight(46),
+        side: BorderSide(color: AppTheme.brand.withValues(alpha: 0.45)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        foregroundColor: auth.isWorking ? c.textTertiary : AppTheme.brand,
+      ),
+    );
+  }
+
+  Widget _restoreAccountButton(AuthManager auth) {
+    final c = context.colors;
+    return OutlinedButton.icon(
+      onPressed: auth.isWorking
+          ? null
+          : () => Navigator.of(context).push(
+              MaterialPageRoute(
+                fullscreenDialog: true,
+                builder: (_) => const AccountBackupView(
+                  showCreateAction: false,
+                  closeAfterRestore: true,
+                ),
+              ),
+            ),
+      icon: AppIcon(
+        HeroAppIcons.key,
+        size: 18,
+        color: auth.isWorking ? c.textTertiary : AppTheme.brand,
+      ),
+      label: Text(AppStrings.t(AppStringKeys.accountBackupRestoreAccount)),
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size.fromHeight(46),
+        side: BorderSide(color: AppTheme.brand.withValues(alpha: 0.45)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        foregroundColor: auth.isWorking ? c.textTertiary : AppTheme.brand,
+      ),
     );
   }
 
@@ -439,6 +503,82 @@ class _LoginViewState extends State<LoginView> {
         fullscreenDialog: true,
         builder: (_) => CountryPickerView(onSelect: _selectCountry),
       ),
+    );
+  }
+
+  Widget _qrCodeStep(AuthManager auth, String link) {
+    final c = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          AppStrings.t(AppStringKeys.loginQrCodeTitle),
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: c.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          AppStrings.t(AppStringKeys.loginQrCodeSubtitle),
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 13, color: c.textSecondary),
+        ),
+        const SizedBox(height: 22),
+        Center(
+          child: Container(
+            width: 244,
+            height: 244,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(22),
+            ),
+            child: link.isEmpty
+                ? const Center(
+                    child: SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator.adaptive(strokeWidth: 2),
+                    ),
+                  )
+                : QrImageView(
+                    data: link,
+                    version: QrVersions.auto,
+                    backgroundColor: Colors.white,
+                    eyeStyle: const QrEyeStyle(
+                      eyeShape: QrEyeShape.square,
+                      color: Colors.black,
+                    ),
+                    dataModuleStyle: const QrDataModuleStyle(
+                      dataModuleShape: QrDataModuleShape.square,
+                      color: Colors.black,
+                    ),
+                  ),
+          ),
+        ),
+        const SizedBox(height: 18),
+        OutlinedButton(
+          onPressed: auth.isWorking ? null : auth.requestQrLogin,
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(44),
+            side: BorderSide(color: AppTheme.brand.withValues(alpha: 0.45)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          child: Text(
+            AppStrings.t(AppStringKeys.loginRefreshQrCode),
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: auth.isWorking ? c.textTertiary : AppTheme.brand,
+            ),
+          ),
+        ),
+      ],
     );
   }
 

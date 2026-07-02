@@ -1,4 +1,5 @@
 import Flutter
+import Security
 import Sentry
 import SwiftUI
 import Translation
@@ -106,6 +107,15 @@ import UIKit
       result(Array(names).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending })
     }
 
+    let accountBackupChannel = FlutterMethodChannel(
+      name: "mithka/account_backup",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    let accountBackup = AccountSessionBackupKeychain()
+    accountBackupChannel.setMethodCallHandler { call, result in
+      accountBackup.handle(call: call, result: result)
+    }
+
     let nativeTranslationChannel = FlutterMethodChannel(
       name: "mithka/native_translation",
       binaryMessenger: engineBridge.applicationRegistrar.messenger()
@@ -139,6 +149,143 @@ import UIKit
           )
         )
       }
+    }
+  }
+}
+
+private final class AccountSessionBackupKeychain {
+  private let service: String
+
+  init() {
+    let bundleId = Bundle.main.bundleIdentifier ?? "ad.neko.mithka"
+    self.service = "\(bundleId).sessionsbackup"
+  }
+
+  func handle(call: FlutterMethodCall, result: FlutterResult) {
+    do {
+      switch call.method {
+      case "isSupported":
+        result(true)
+      case "saveSession":
+        guard
+          let args = call.arguments as? [String: Any],
+          let id = args["id"] as? String,
+          !id.isEmpty,
+          let data = args["data"] as? FlutterStandardTypedData
+        else {
+          throw AccountSessionBackupError.invalidArguments
+        }
+        try saveSession(id: id, data: data.data)
+        result(nil)
+      case "getAllSessions":
+        result(try getAllSessions().map { FlutterStandardTypedData(bytes: $0) })
+      case "deleteSession":
+        guard
+          let args = call.arguments as? [String: Any],
+          let id = args["id"] as? String,
+          !id.isEmpty
+        else {
+          throw AccountSessionBackupError.invalidArguments
+        }
+        try deleteSession(id: id)
+        result(nil)
+      case "deleteAllSessions":
+        try deleteAllSessions()
+        result(nil)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    } catch {
+      result(
+        FlutterError(
+          code: "account_backup_failed",
+          message: error.localizedDescription,
+          details: nil
+        )
+      )
+    }
+  }
+
+  private func saveSession(id: String, data: Data) throws {
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service,
+      kSecAttrAccount as String: id,
+      kSecValueData as String: data,
+      kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlocked
+    ]
+
+    let status = SecItemAdd(query as CFDictionary, nil)
+    if status == errSecDuplicateItem {
+      let updateQuery: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: service,
+        kSecAttrAccount as String: id
+      ]
+      let updateStatus = SecItemUpdate(
+        updateQuery as CFDictionary,
+        [kSecValueData as String: data] as CFDictionary
+      )
+      guard updateStatus == errSecSuccess else {
+        throw AccountSessionBackupError.keychain(updateStatus)
+      }
+    } else if status != errSecSuccess {
+      throw AccountSessionBackupError.keychain(status)
+    }
+  }
+
+  private func getAllSessions() throws -> [Data] {
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service,
+      kSecReturnData as String: true,
+      kSecMatchLimit as String: kSecMatchLimitAll
+    ]
+    var result: AnyObject?
+    let status = SecItemCopyMatching(query as CFDictionary, &result)
+    if status == errSecItemNotFound {
+      return []
+    }
+    guard status == errSecSuccess else {
+      throw AccountSessionBackupError.keychain(status)
+    }
+    return result as? [Data] ?? []
+  }
+
+  private func deleteSession(id: String) throws {
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service,
+      kSecAttrAccount as String: id
+    ]
+    let status = SecItemDelete(query as CFDictionary)
+    guard status == errSecSuccess || status == errSecItemNotFound else {
+      throw AccountSessionBackupError.keychain(status)
+    }
+  }
+
+  private func deleteAllSessions() throws {
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service
+    ]
+    let status = SecItemDelete(query as CFDictionary)
+    guard status == errSecSuccess || status == errSecItemNotFound else {
+      throw AccountSessionBackupError.keychain(status)
+    }
+  }
+}
+
+private enum AccountSessionBackupError: LocalizedError {
+  case invalidArguments
+  case keychain(OSStatus)
+
+  var errorDescription: String? {
+    switch self {
+    case .invalidArguments:
+      return "Invalid account backup arguments"
+    case let .keychain(status):
+      return "Keychain error \(status)"
     }
   }
 }

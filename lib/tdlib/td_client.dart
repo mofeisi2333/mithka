@@ -149,8 +149,7 @@ class TdClient {
   /// Creates a fresh account slot (a new TDLib client + database directory)
   /// and returns its slot index. Does not change the active account.
   int addSlot() {
-    final newSlot =
-        (_slots.isEmpty ? -1 : _slots.reduce((a, b) => a > b ? a : b)) + 1;
+    final newSlot = _nextSlot();
     final cid = _bindings.createClientId();
     _slots.add(newSlot);
     _clientForSlot[newSlot] = cid;
@@ -159,6 +158,65 @@ class TdClient {
     if (kDebugMode) unawaited(_persistDebugLiveClientIds());
     _bindings.send(cid, jsonEncode({'@type': 'getOption', 'name': 'version'}));
     return newSlot;
+  }
+
+  Future<int> restoreSessionSlot(Uint8List tdBinlog) async {
+    if (tdBinlog.isEmpty) {
+      throw ArgumentError.value(tdBinlog.length, 'tdBinlog', 'is empty');
+    }
+    final newSlot = _nextSlot();
+    final dbDir = Directory(_databaseDirectory(newSlot));
+    await dbDir.create(recursive: true);
+    final sessionFile = File('${dbDir.path}/td.binlog');
+    await sessionFile.writeAsBytes(tdBinlog, flush: true);
+
+    final cid = _bindings.createClientId();
+    _slots.add(newSlot);
+    _clientForSlot[newSlot] = cid;
+    _slotForClient[cid] = newSlot;
+    setActive(newSlot);
+    _persist();
+    if (kDebugMode) unawaited(_persistDebugLiveClientIds());
+    _bindings.send(cid, jsonEncode({'@type': 'getOption', 'name': 'version'}));
+    return newSlot;
+  }
+
+  Future<File> sessionFileForSlot(int slot) async {
+    if (_supportDir.isEmpty) {
+      _supportDir = (await getApplicationSupportDirectory()).path;
+    }
+    return File('${_databaseDirectory(slot)}/td.binlog');
+  }
+
+  Future<TdSessionBackupExport> exportSessionBackupForSlot(int slot) async {
+    final source = await sessionFileForSlot(slot);
+    if (!await source.exists()) {
+      throw StateError('No TDLib session file found for account slot $slot');
+    }
+
+    if (!_bindings.supportsCompactSessionBackup) {
+      return TdSessionBackupExport(
+        bytes: await source.readAsBytes(),
+        isCompact: false,
+      );
+    }
+
+    final tempDir = await getTemporaryDirectory();
+    final destination = File(
+      '${tempDir.path}/mithka-td-session-$slot-${DateTime.now().microsecondsSinceEpoch}.binlog',
+    );
+    try {
+      _bindings.writeCompactSessionBinlog(source.path, destination.path);
+      final bytes = await destination.readAsBytes();
+      if (bytes.isEmpty) {
+        throw StateError('Compact TDLib session backup is empty');
+      }
+      return TdSessionBackupExport(bytes: bytes, isCompact: true);
+    } finally {
+      if (await destination.exists()) {
+        await destination.delete();
+      }
+    }
   }
 
   /// Routes future query/send/broadcast to the given account slot.
@@ -210,6 +268,9 @@ class TdClient {
     _prefs.setStringList(_slotsKey, _slots.map((s) => s.toString()).toList());
     _prefs.setInt(_activeKey, _activeSlot);
   }
+
+  int _nextSlot() =>
+      (_slots.isEmpty ? -1 : _slots.reduce((a, b) => a > b ? a : b)) + 1;
 
   /// The database directory for a slot. Slot 0 keeps the legacy path so an
   /// existing single-account login is preserved.
@@ -464,6 +525,13 @@ class TdClient {
   /// list and badge UI can converge immediately while waiting for TDLib's
   /// eventual aggregate updates.
   void emitLocalUpdate(Map<String, dynamic> update) => _updates.add(update);
+}
+
+class TdSessionBackupExport {
+  const TdSessionBackupExport({required this.bytes, required this.isCompact});
+
+  final Uint8List bytes;
+  final bool isCompact;
 }
 
 // MARK: - Receive isolate

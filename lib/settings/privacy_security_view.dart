@@ -13,6 +13,7 @@ import '../components/ui_components.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../theme/app_theme.dart';
+import 'account_backup_view.dart';
 import 'auto_delete_view.dart';
 import 'keyword_blocker_view.dart';
 import 'privacy_detail_views.dart';
@@ -155,6 +156,12 @@ class _PrivacySecurityViewState extends State<PrivacySecurityView> {
                       AppStrings.t(AppStringKeys.privacyLoggedInDevices),
                       '',
                       () => _open(const ActiveSessionsView()),
+                    ),
+                    _Row(
+                      HeroAppIcons.key.data,
+                      AppStrings.t(AppStringKeys.accountBackupTitle),
+                      '',
+                      () => _open(const AccountBackupView()),
                     ),
                     _Row(
                       HeroAppIcons.users.data,

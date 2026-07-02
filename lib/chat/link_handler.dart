@@ -7,13 +7,19 @@
 //
 
 import 'package:flutter/material.dart';
+import '../chats/search_view.dart';
 import '../components/confirm_dialog.dart';
 import '../components/toast.dart';
+import '../settings/proxy_config.dart';
+import '../settings/proxy_view.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
+import '../tdlib/td_models.dart';
+import 'chat_picker_view.dart';
 import 'chat_view.dart';
+import 'sticker_set_detail_view.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 
 Future<void> openLink(BuildContext context, String url) async {
@@ -25,6 +31,12 @@ Future<void> openLink(BuildContext context, String url) async {
     return;
   }
 
+  final proxy = ProxyConfig.fromTelegramUrl(link);
+  if (proxy != null) {
+    if (context.mounted) await _addProxyFromLink(context, proxy);
+    return;
+  }
+
   try {
     final type = await TdClient.shared.query({
       '@type': 'getInternalLinkType',
@@ -33,11 +45,11 @@ Future<void> openLink(BuildContext context, String url) async {
     switch (type.type) {
       case 'internalLinkTypePublicChat':
         final username = type.str('chat_username') ?? '';
-        final chat = await TdClient.shared.query({
-          '@type': 'searchPublicChat',
-          'username': username,
-        });
-        await _openChat(nav, chat.int64('id'));
+        await _openPublicChat(
+          nav,
+          username,
+          draftText: type.str('draft_text') ?? '',
+        );
       case 'internalLinkTypeMessage':
         final info = await TdClient.shared.query({
           '@type': 'getMessageLinkInfo',
@@ -66,20 +78,106 @@ Future<void> openLink(BuildContext context, String url) async {
         }
       case 'internalLinkTypeChatInvite':
         if (context.mounted) await _joinInvite(context, nav, link);
-      default:
-        if (!await _openTelegramFallback(nav, link) && context.mounted) {
+      case 'internalLinkTypeChatFolderInvite':
+        if (context.mounted) await _joinFolderInvite(context, nav, link);
+      case 'internalLinkTypeBotStart':
+        await _openBotStart(nav, type);
+      case 'internalLinkTypeBotStartInGroup':
+        if (context.mounted) await _openBotStartInGroup(context, nav, type);
+      case 'internalLinkTypeMessageDraft':
+        if (context.mounted) await _shareDraft(context, nav, type);
+      case 'internalLinkTypeSavedMessages':
+        await _openSavedMessages(nav);
+      case 'internalLinkTypeStickerSet':
+        await _openStickerSet(nav, type.str('sticker_set_name') ?? '');
+      case 'internalLinkTypeSearch':
+        if (nav.mounted) {
+          nav.push(MaterialPageRoute(builder: (_) => const SearchView()));
+        }
+      case 'internalLinkTypeAuthenticationCode':
+        await TdClient.shared.query({
+          '@type': 'checkAuthenticationCode',
+          'code': type.str('code') ?? '',
+        });
+      case 'internalLinkTypeUserToken':
+        final user = await TdClient.shared.query({
+          '@type': 'searchUserByToken',
+          'token': type.str('token') ?? '',
+        });
+        final uid = user.int64('id');
+        if (uid != null) await _openUser(nav, uid);
+      case 'internalLinkTypeDirectMessagesChat':
+        await _openPublicChat(nav, type.str('channel_username') ?? '');
+      case 'internalLinkTypeBusinessChat':
+        await _openBusinessChat(nav, type.str('link_name') ?? '');
+      case 'internalLinkTypeProxy':
+        final proxy = type.obj('proxy');
+        if (proxy != null && context.mounted) {
+          await _addProxyFromLink(context, ProxyConfig.fromTdProxy(proxy));
+        } else if (context.mounted) {
+          showToast(context, AppStrings.t(AppStringKeys.proxyAddFailed));
+        }
+      case 'internalLinkTypeSettings':
+        if (!context.mounted) return;
+        final opened = await _openSettingsLink(context, type.obj('section'));
+        if (!context.mounted) return;
+        if (!opened) {
           showToast(
             context,
             AppStrings.t(AppStringKeys.linkHandlerUnsupportedTelegramLink),
           );
         }
+      case 'internalLinkTypeQrCodeAuthentication':
+        if (context.mounted) await _confirmQrAuthentication(context, link);
+      case 'internalLinkTypeUnknownDeepLink':
+        await _showDeepLinkInfoOrExternal(link);
+      default:
+        if (!await _openTelegramFallback(nav, link) && context.mounted) {
+          await _external(link);
+        }
     }
   } catch (_) {
     if (!await _openTelegramFallback(nav, link) && context.mounted) {
-      showToast(
-        context,
-        AppStrings.t(AppStringKeys.linkHandlerOpenTelegramLinkFailed),
-      );
+      await _external(link);
+    }
+  }
+}
+
+Future<bool> _openSettingsLink(
+  BuildContext context,
+  Map<String, dynamic>? section,
+) async {
+  if (section == null) return false;
+  final type = section.type;
+  final subsection = (section.str('subsection') ?? '').toLowerCase();
+  if (type == 'settingsSectionDataAndStorage' &&
+      subsection.startsWith('proxy')) {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => subsection == 'proxy/add-proxy'
+            ? const ProxyEditView()
+            : const ProxyView(),
+      ),
+    );
+    return true;
+  }
+  return false;
+}
+
+Future<void> _addProxyFromLink(BuildContext context, ProxyConfig config) async {
+  final ok = await confirmDialog(
+    context,
+    title: AppStrings.t(AppStringKeys.proxyAddProxy),
+    message: '${config.label} ${config.server}:${config.port}',
+    confirmText: AppStrings.t(AppStringKeys.proxyAddProxy),
+  );
+  if (!ok || !context.mounted) return;
+  try {
+    await TdClient.shared.applyProxyConfig(config);
+    await ProxyConfig.save(config);
+  } catch (_) {
+    if (context.mounted) {
+      showToast(context, AppStrings.t(AppStringKeys.proxyAddFailed));
     }
   }
 }
@@ -174,17 +272,193 @@ Future<bool> _openPublicChat(
   NavigatorState nav,
   String username, {
   int? initialMessageId,
+  String draftText = '',
 }) async {
   try {
     final chat = await TdClient.shared.query({
       '@type': 'searchPublicChat',
       'username': username,
     });
-    await _openChat(nav, chat.int64('id'), initialMessageId: initialMessageId);
+    final chatId = chat.int64('id');
+    if (chatId != null && draftText.trim().isNotEmpty) {
+      await _setChatDraft(chatId, {
+        '@type': 'formattedText',
+        'text': draftText.trim(),
+      });
+    }
+    await _openChat(nav, chatId, initialMessageId: initialMessageId);
     return true;
   } catch (_) {
     return false;
   }
+}
+
+Future<void> _openBotStart(
+  NavigatorState nav,
+  Map<String, dynamic> type,
+) async {
+  final username = type.str('bot_username') ?? '';
+  if (username.isEmpty) return;
+  final chat = await TdClient.shared.query({
+    '@type': 'searchPublicChat',
+    'username': username,
+  });
+  final chatId = chat.int64('id');
+  final botUserId = chat.obj('type')?.int64('user_id');
+  final parameter = type.str('start_parameter') ?? '';
+  final autostart = type.boolean('autostart') ?? false;
+  if (autostart && chatId != null && botUserId != null) {
+    await TdClient.shared.query({
+      '@type': 'sendBotStartMessage',
+      'bot_user_id': botUserId,
+      'chat_id': chatId,
+      'parameter': parameter,
+    });
+  }
+  await _openChat(nav, chatId);
+}
+
+Future<void> _openBotStartInGroup(
+  BuildContext context,
+  NavigatorState nav,
+  Map<String, dynamic> type,
+) async {
+  final username = type.str('bot_username') ?? '';
+  if (username.isEmpty) return;
+  final botChat = await TdClient.shared.query({
+    '@type': 'searchPublicChat',
+    'username': username,
+  });
+  final botUserId = botChat.obj('type')?.int64('user_id');
+  if (botUserId == null || !context.mounted) return;
+  final picked = await nav.push<ChatSummary>(
+    MaterialPageRoute(
+      builder: (_) =>
+          const ChatPickerView(title: AppStringKeys.chatPickerChooseChat),
+    ),
+  );
+  if (picked == null) return;
+  final parameter = type.str('start_parameter') ?? '';
+  if (parameter.isNotEmpty) {
+    await TdClient.shared.query({
+      '@type': 'sendBotStartMessage',
+      'bot_user_id': botUserId,
+      'chat_id': picked.id,
+      'parameter': parameter,
+    });
+  } else {
+    await TdClient.shared.query({
+      '@type': 'sendMessage',
+      'chat_id': picked.id,
+      'input_message_content': {
+        '@type': 'inputMessageText',
+        'text': {'@type': 'formattedText', 'text': '/start@$username'},
+      },
+    });
+  }
+  await _openChat(nav, picked.id);
+}
+
+Future<void> _shareDraft(
+  BuildContext context,
+  NavigatorState nav,
+  Map<String, dynamic> type,
+) async {
+  final text = type.obj('text');
+  final plain = text?.str('text') ?? '';
+  if (plain.trim().isEmpty || !context.mounted) return;
+  final picked = await nav.push<ChatSummary>(
+    MaterialPageRoute(
+      builder: (_) => const ChatPickerView(title: AppStringKeys.topicChatShare),
+    ),
+  );
+  if (picked == null) return;
+  await _setChatDraft(picked.id, text!);
+  await _openChat(nav, picked.id);
+}
+
+Future<void> _setChatDraft(
+  int chatId,
+  Map<String, dynamic> formattedText,
+) async {
+  await TdClient.shared.query({
+    '@type': 'setChatDraftMessage',
+    'chat_id': chatId,
+    'message_thread_id': 0,
+    'draft_message': {
+      '@type': 'draftMessage',
+      'date': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      'input_message_text': {
+        '@type': 'inputMessageText',
+        'text': formattedText,
+      },
+    },
+  });
+}
+
+Future<void> _openSavedMessages(NavigatorState nav) async {
+  final option = await TdClient.shared.query({
+    '@type': 'getOption',
+    'name': 'my_id',
+  });
+  final userId = option.int64('value');
+  if (userId == null) return;
+  final chat = await TdClient.shared.query({
+    '@type': 'createPrivateChat',
+    'user_id': userId,
+    'force': false,
+  });
+  await _openChat(nav, chat.int64('id'));
+}
+
+Future<void> _openStickerSet(NavigatorState nav, String name) async {
+  if (name.trim().isEmpty) return;
+  final set = await TdClient.shared.query({
+    '@type': 'searchStickerSet',
+    'name': name.trim(),
+    'ignore_cache': false,
+  });
+  final setId = set.int64('id');
+  if (setId == null || !nav.mounted) return;
+  nav.push(
+    MaterialPageRoute(builder: (_) => StickerSetDetailView(setId: setId)),
+  );
+}
+
+Future<void> _openBusinessChat(NavigatorState nav, String linkName) async {
+  if (linkName.trim().isEmpty) return;
+  final info = await TdClient.shared.query({
+    '@type': 'getBusinessChatLinkInfo',
+    'link_name': linkName.trim(),
+  });
+  final chatId = info.int64('chat_id');
+  final draft = info.obj('message') ?? info.obj('text');
+  if (chatId == null) return;
+  if (draft != null && (draft.str('text') ?? '').trim().isNotEmpty) {
+    await _setChatDraft(chatId, draft);
+  }
+  await _openChat(nav, chatId);
+}
+
+Future<void> _confirmQrAuthentication(BuildContext context, String link) async {
+  final ok = await confirmDialog(
+    context,
+    title: AppStrings.t(AppStringKeys.loginQrCodeTitle),
+    message: AppStrings.t(AppStringKeys.linkHandlerQrLoginWarning),
+    confirmText: AppStrings.t(AppStringKeys.confirmOk),
+  );
+  if (!ok) return;
+  await TdClient.shared.query({
+    '@type': 'confirmQrCodeAuthentication',
+    'link': link,
+  });
+}
+
+Future<void> _showDeepLinkInfoOrExternal(String link) async {
+  try {
+    await TdClient.shared.query({'@type': 'getDeepLinkInfo', 'link': link});
+  } catch (_) {}
+  await _external(link);
 }
 
 Future<bool> _openPrivateMessageLink(
@@ -263,6 +537,39 @@ Future<void> _joinInvite(
     });
     await _openChat(nav, chat.int64('id'));
   } catch (_) {}
+}
+
+Future<void> _joinFolderInvite(
+  BuildContext context,
+  NavigatorState nav,
+  String url,
+) async {
+  final info = await TdClient.shared.query({
+    '@type': 'checkChatFolderInviteLink',
+    'invite_link': url,
+  });
+  final folder = info.obj('chat_folder_info');
+  final title =
+      folder?.str('title') ?? AppStrings.t(AppStringKeys.chatInfoChatFolders);
+  if (!context.mounted) return;
+  final ok = await confirmDialog(
+    context,
+    title: AppStrings.t(AppStringKeys.linkHandlerJoin),
+    message: AppStrings.t(AppStringKeys.linkHandlerJoinNamedGroupQuestion, {
+      'value1': title,
+    }),
+    confirmText: AppStrings.t(AppStringKeys.linkHandlerJoin),
+  );
+  if (!ok) return;
+  try {
+    await TdClient.shared.query({
+      '@type': 'addChatFolderByInviteLink',
+      'invite_link': url,
+    });
+  } catch (_) {}
+  if (nav.mounted) {
+    nav.popUntil((route) => route.isFirst);
+  }
 }
 
 Future<void> _external(String url) async {

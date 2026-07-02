@@ -76,6 +76,7 @@ class HeroAppIcons {
   static const images = AppIconData(HeroiconsOutline.photo);
   static const inbox = AppIconData(HeroiconsOutline.inbox);
   static const language = AppIconData(HeroiconsOutline.language);
+  static const key = AppIconData(HeroiconsOutline.key);
   static const link = AppIconData(HeroiconsOutline.link);
   static const listCheck = AppIconData(HeroiconsOutline.listBullet);
   static const locationDot = AppIconData(HeroiconsOutline.mapPin);

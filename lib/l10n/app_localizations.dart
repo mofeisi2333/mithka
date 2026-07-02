@@ -86,6 +86,21 @@ abstract final class AppStringKeys {
   static const aboutTelegramChannel = 'aboutTelegramChannel';
   static const aboutTitle = 'aboutTitle';
   static const aboutVersion = 'aboutVersion';
+  static const accountBackupCreate = 'accountBackupCreate';
+  static const accountBackupDeleteMessage = 'accountBackupDeleteMessage';
+  static const accountBackupDeleteTitle = 'accountBackupDeleteTitle';
+  static const accountBackupEmpty = 'accountBackupEmpty';
+  static const accountBackupEnabled = 'accountBackupEnabled';
+  static const accountBackupIOSOnly = 'accountBackupIOSOnly';
+  static const accountBackupNotice = 'accountBackupNotice';
+  static const accountBackupRestore = 'accountBackupRestore';
+  static const accountBackupRestoreAccount = 'accountBackupRestoreAccount';
+  static const accountBackupRestored = 'accountBackupRestored';
+  static const accountBackupRestoreMessage = 'accountBackupRestoreMessage';
+  static const accountBackupRestoreTitle = 'accountBackupRestoreTitle';
+  static const accountBackupSaved = 'accountBackupSaved';
+  static const accountBackupSessions = 'accountBackupSessions';
+  static const accountBackupTitle = 'accountBackupTitle';
   static const accentColorPickerSave = 'accentColorPickerSave';
   static const apiCredentialsCustomClientApi = 'apiCredentialsCustomClientApi';
   static const apiCredentialsTitle = 'apiCredentialsTitle';
@@ -838,6 +853,7 @@ abstract final class AppStringKeys {
       'linkHandlerJoinNamedGroupQuestion';
   static const linkHandlerOpenTelegramLinkFailed =
       'linkHandlerOpenTelegramLinkFailed';
+  static const linkHandlerQrLoginWarning = 'linkHandlerQrLoginWarning';
   static const linkHandlerUnsupportedTelegramLink =
       'linkHandlerUnsupportedTelegramLink';
   static const listSeparator = 'listSeparator';
@@ -855,7 +871,10 @@ abstract final class AppStringKeys {
   static const loginPasswordHint = 'loginPasswordHint';
   static const loginPhoneNumberWithCountryCode =
       'loginPhoneNumberWithCountryCode';
+  static const loginQrCodeSubtitle = 'loginQrCodeSubtitle';
+  static const loginQrCodeTitle = 'loginQrCodeTitle';
   static const loginReenterPhoneNumber = 'loginReenterPhoneNumber';
+  static const loginRefreshQrCode = 'loginRefreshQrCode';
   static const loginResendVerificationCode = 'loginResendVerificationCode';
   static const loginSubmit = 'loginSubmit';
   static const loginSwitchAccount = 'loginSwitchAccount';
@@ -869,6 +888,7 @@ abstract final class AppStringKeys {
   static const loginTwoStepPassword = 'loginTwoStepPassword';
   static const loginVerificationCode = 'loginVerificationCode';
   static const loginVerify = 'loginVerify';
+  static const loginWithQrCode = 'loginWithQrCode';
   static const markdownLabel = 'markdownLabel';
   static const messageActionCopy = 'messageActionCopy';
   static const messageActionSelectText = 'messageActionSelectText';
@@ -1270,6 +1290,24 @@ const _messages = {
     'aboutTelegramChannel': "Telegram 频道",
     'aboutTitle': "关于",
     'aboutVersion': "版本 {value1}",
+    'accountBackupCreate': "Back up current account to Keychain",
+    'accountBackupDeleteMessage':
+        "This removes the saved session from Keychain. The Telegram session is not revoked.",
+    'accountBackupDeleteTitle': "Delete saved session?",
+    'accountBackupEmpty': "No account sessions are backed up yet.",
+    'accountBackupEnabled': "Back up accounts",
+    'accountBackupIOSOnly': "Account backup is available on iOS only.",
+    'accountBackupNotice':
+        "Only the TDLib session file is stored in the device Keychain. Message databases, media, logs, and caches are not backed up. To transfer this Keychain item to a new device, restore from an encrypted device backup.",
+    'accountBackupRestore': "Restore",
+    'accountBackupRestoreAccount': "Restore saved account",
+    'accountBackupRestored': "Restored to account slot {value1}",
+    'accountBackupRestoreMessage':
+        "This imports the saved session as a new account. The session must still be active on Telegram servers.",
+    'accountBackupRestoreTitle': "Restore saved session?",
+    'accountBackupSaved': "Session saved ({value1})",
+    'accountBackupSessions': "Saved Sessions",
+    'accountBackupTitle': "Accounts Backup",
     'accentColorPickerSave': "保存",
     'apiCredentialsCustomClientApi': "自定义客户端 API",
     'apiCredentialsTitle': "视频与下载加速",
@@ -1933,6 +1971,7 @@ const _messages = {
     'linkHandlerJoin': "加入",
     'linkHandlerJoinNamedGroupQuestion': "加入「{value1}」？",
     'linkHandlerOpenTelegramLinkFailed': "无法打开 Telegram 链接",
+    'linkHandlerQrLoginWarning': "此链接可用于批准另一台设备登录你的 Telegram 账号。请确认这是你本人正在登录。",
     'linkHandlerUnsupportedTelegramLink': "暂不支持打开此 Telegram 链接",
     'listSeparator': "、",
     'locationDetailFetchingLocation': "正在获取位置…",
@@ -1947,7 +1986,10 @@ const _messages = {
     'loginNewAccountNicknamePrompt': "这是一个新账号，请填写昵称",
     'loginPasswordHint': "密码提示：{value1}",
     'loginPhoneNumberWithCountryCode': "手机号（含国家区号）",
+    'loginQrCodeSubtitle': "用另一台已登录 Telegram 的手机扫描此二维码。",
+    'loginQrCodeTitle': "二维码登录",
     'loginReenterPhoneNumber': "重新输入手机号",
+    'loginRefreshQrCode': "刷新二维码",
     'loginResendVerificationCode': "重新发送验证码",
     'loginSubmit': "登录",
     'loginSwitchAccount': "切换账号",
@@ -1959,6 +2001,7 @@ const _messages = {
     'loginTwoStepPassword': "两步验证密码",
     'loginVerificationCode': "验证码",
     'loginVerify': "验证",
+    'loginWithQrCode': "使用二维码登录",
     'markdownLabel': "Markdown",
     'messageActionCopy': "复制",
     'messageActionSelectText': "选择文字",
@@ -2952,6 +2995,7 @@ const _messages = {
     'linkHandlerJoin': "加入",
     'linkHandlerJoinNamedGroupQuestion': "加入「{value1}」？",
     'linkHandlerOpenTelegramLinkFailed': "无法打开 Telegram 链接",
+    'linkHandlerQrLoginWarning': "此連結可用於批准另一台裝置登入你的 Telegram 帳號。請確認這是你本人正在登入。",
     'linkHandlerUnsupportedTelegramLink': "暂不支持打开此 Telegram 链接",
     'listSeparator': "、",
     'locationDetailFetchingLocation': "正在获取位置…",
@@ -2966,7 +3010,10 @@ const _messages = {
     'loginNewAccountNicknamePrompt': "这是一个新账号，请填写昵称",
     'loginPasswordHint': "密码提示：{value1}",
     'loginPhoneNumberWithCountryCode': "手机号（含国家区号）",
+    'loginQrCodeSubtitle': "用另一台已登入 Telegram 的手機掃描此 QR 碼。",
+    'loginQrCodeTitle': "QR 碼登入",
     'loginReenterPhoneNumber': "重新输入手机号",
+    'loginRefreshQrCode': "重新整理 QR 碼",
     'loginResendVerificationCode': "重新发送验证码",
     'loginSubmit': "登录",
     'loginSwitchAccount': "切换账号",
@@ -2978,6 +3025,7 @@ const _messages = {
     'loginTwoStepPassword': "两步验证密码",
     'loginVerificationCode': "验证码",
     'loginVerify': "验证",
+    'loginWithQrCode': "使用 QR 碼登入",
     'markdownLabel': "Markdown",
     'messageActionCopy': "复制",
     'messageActionSelectText': "选择文字",
@@ -3971,6 +4019,8 @@ const _messages = {
     'linkHandlerJoin': "加入",
     'linkHandlerJoinNamedGroupQuestion': "加入「{value1}」？",
     'linkHandlerOpenTelegramLinkFailed': "无法打开 Telegram 链接",
+    'linkHandlerQrLoginWarning':
+        "このリンクは別の端末であなたのTelegramアカウントにログインするための承認に使われます。自分のログイン操作であることを確認してください。",
     'linkHandlerUnsupportedTelegramLink': "暂不支持打开此 Telegram 链接",
     'listSeparator': "、",
     'locationDetailFetchingLocation': "正在获取位置…",
@@ -3985,7 +4035,10 @@ const _messages = {
     'loginNewAccountNicknamePrompt': "这是一个新账号，请填写昵称",
     'loginPasswordHint': "密码提示：{value1}",
     'loginPhoneNumberWithCountryCode': "手机号（含国家区号）",
+    'loginQrCodeSubtitle': "ログイン済みの別のスマートフォンでこのQRコードをスキャンしてください。",
+    'loginQrCodeTitle': "QRコードでログイン",
     'loginReenterPhoneNumber': "重新输入手机号",
+    'loginRefreshQrCode': "QRコードを更新",
     'loginResendVerificationCode': "重新发送验证码",
     'loginSubmit': "登录",
     'loginSwitchAccount': "切换账号",
@@ -3997,6 +4050,7 @@ const _messages = {
     'loginTwoStepPassword': "两步验证密码",
     'loginVerificationCode': "验证码",
     'loginVerify': "验证",
+    'loginWithQrCode': "QRコードでログイン",
     'markdownLabel': "Markdown",
     'messageActionCopy': "复制",
     'messageActionSelectText': "选择文字",
@@ -4990,6 +5044,8 @@ const _messages = {
     'linkHandlerJoin': "加入",
     'linkHandlerJoinNamedGroupQuestion': "加入「{value1}」？",
     'linkHandlerOpenTelegramLinkFailed': "无法打开 Telegram 链接",
+    'linkHandlerQrLoginWarning':
+        "이 링크는 다른 기기에서 내 Telegram 계정에 로그인하도록 승인하는 데 사용됩니다. 본인이 로그인 중인지 확인하세요.",
     'linkHandlerUnsupportedTelegramLink': "暂不支持打开此 Telegram 链接",
     'listSeparator': ", ",
     'locationDetailFetchingLocation': "正在获取位置…",
@@ -5004,7 +5060,10 @@ const _messages = {
     'loginNewAccountNicknamePrompt': "这是一个新账号，请填写昵称",
     'loginPasswordHint': "密码提示：{value1}",
     'loginPhoneNumberWithCountryCode': "手机号（含国家区号）",
+    'loginQrCodeSubtitle': "이미 Telegram에 로그인된 다른 휴대폰으로 이 QR 코드를 스캔하세요.",
+    'loginQrCodeTitle': "QR 코드로 로그인",
     'loginReenterPhoneNumber': "重新输入手机号",
+    'loginRefreshQrCode': "QR 코드 새로고침",
     'loginResendVerificationCode': "重新发送验证码",
     'loginSubmit': "登录",
     'loginSwitchAccount': "切换账号",
@@ -5016,6 +5075,7 @@ const _messages = {
     'loginTwoStepPassword': "两步验证密码",
     'loginVerificationCode': "验证码",
     'loginVerify': "验证",
+    'loginWithQrCode': "QR 코드로 로그인",
     'markdownLabel': "Markdown",
     'messageActionCopy': "复制",
     'messageActionSelectText': "选择文字",
@@ -5346,6 +5406,24 @@ const _messages = {
     'aboutTelegramChannel': "Telegram 频道",
     'aboutTitle': "关于",
     'aboutVersion': "版本 {value1}",
+    'accountBackupCreate': "Back up current account to Keychain",
+    'accountBackupDeleteMessage':
+        "This removes the saved session from Keychain. The Telegram session is not revoked.",
+    'accountBackupDeleteTitle': "Delete saved session?",
+    'accountBackupEmpty': "No account sessions are backed up yet.",
+    'accountBackupEnabled': "Back up accounts",
+    'accountBackupIOSOnly': "Account backup is available on iOS only.",
+    'accountBackupNotice':
+        "Only the TDLib session file is stored in the device Keychain. Message databases, media, logs, and caches are not backed up. To transfer this Keychain item to a new device, restore from an encrypted device backup.",
+    'accountBackupRestore': "Restore",
+    'accountBackupRestoreAccount': "Restore saved account",
+    'accountBackupRestored': "Restored to account slot {value1}",
+    'accountBackupRestoreMessage':
+        "This imports the saved session as a new account. The session must still be active on Telegram servers.",
+    'accountBackupRestoreTitle': "Restore saved session?",
+    'accountBackupSaved': "Session saved ({value1})",
+    'accountBackupSessions': "Saved Sessions",
+    'accountBackupTitle': "Accounts Backup",
     'accentColorPickerSave': "保存",
     'apiCredentialsCustomClientApi': "Custom client API",
     'apiCredentialsTitle': "Video & download acceleration",
@@ -6009,6 +6087,8 @@ const _messages = {
     'linkHandlerJoin': "加入",
     'linkHandlerJoinNamedGroupQuestion': "加入「{value1}」？",
     'linkHandlerOpenTelegramLinkFailed': "无法打开 Telegram 链接",
+    'linkHandlerQrLoginWarning':
+        "This link can approve logging in to your Telegram account on another device. Confirm only if this login is yours.",
     'linkHandlerUnsupportedTelegramLink': "暂不支持打开此 Telegram 链接",
     'listSeparator': "、",
     'locationDetailFetchingLocation': "正在获取位置…",
@@ -6023,7 +6103,11 @@ const _messages = {
     'loginNewAccountNicknamePrompt': "这是一个新账号，请填写昵称",
     'loginPasswordHint': "密码提示：{value1}",
     'loginPhoneNumberWithCountryCode': "手机号（含国家区号）",
+    'loginQrCodeSubtitle':
+        "Scan this QR code with another phone already logged in to Telegram.",
+    'loginQrCodeTitle': "Log in with QR code",
     'loginReenterPhoneNumber': "重新输入手机号",
+    'loginRefreshQrCode': "Refresh QR code",
     'loginResendVerificationCode': "重新发送验证码",
     'loginSubmit': "登录",
     'loginSwitchAccount': "切换账号",
@@ -6035,6 +6119,7 @@ const _messages = {
     'loginTwoStepPassword': "两步验证密码",
     'loginVerificationCode': "验证码",
     'loginVerify': "验证",
+    'loginWithQrCode': "Log in with QR code",
     'markdownLabel': "Markdown",
     'messageActionCopy': "复制",
     'messageActionSelectText': "选择文字",
@@ -7028,6 +7113,8 @@ const _messages = {
     'linkHandlerJoin': "加入",
     'linkHandlerJoinNamedGroupQuestion': "加入「{value1}」？",
     'linkHandlerOpenTelegramLinkFailed': "无法打开 Telegram 链接",
+    'linkHandlerQrLoginWarning':
+        "Ce lien peut approuver une connexion a votre compte Telegram sur un autre appareil. Confirmez seulement si cette connexion est la votre.",
     'linkHandlerUnsupportedTelegramLink': "暂不支持打开此 Telegram 链接",
     'listSeparator': "、",
     'locationDetailFetchingLocation': "正在获取位置…",
@@ -7042,7 +7129,11 @@ const _messages = {
     'loginNewAccountNicknamePrompt': "这是一个新账号，请填写昵称",
     'loginPasswordHint': "密码提示：{value1}",
     'loginPhoneNumberWithCountryCode': "手机号（含国家区号）",
+    'loginQrCodeSubtitle':
+        "Scannez ce QR code avec un autre telephone deja connecte a Telegram.",
+    'loginQrCodeTitle': "Connexion par QR code",
     'loginReenterPhoneNumber': "重新输入手机号",
+    'loginRefreshQrCode': "Actualiser le QR code",
     'loginResendVerificationCode': "重新发送验证码",
     'loginSubmit': "登录",
     'loginSwitchAccount': "切换账号",
@@ -7054,6 +7145,7 @@ const _messages = {
     'loginTwoStepPassword': "两步验证密码",
     'loginVerificationCode': "验证码",
     'loginVerify': "验证",
+    'loginWithQrCode': "Connexion par QR code",
     'markdownLabel': "Markdown",
     'messageActionCopy': "复制",
     'messageActionSelectText': "选择文字",
@@ -8047,6 +8139,8 @@ const _messages = {
     'linkHandlerJoin': "加入",
     'linkHandlerJoinNamedGroupQuestion': "加入「{value1}」？",
     'linkHandlerOpenTelegramLinkFailed': "无法打开 Telegram 链接",
+    'linkHandlerQrLoginWarning':
+        "Este enlace puede aprobar el inicio de sesion de tu cuenta de Telegram en otro dispositivo. Confirma solo si este inicio de sesion es tuyo.",
     'linkHandlerUnsupportedTelegramLink': "暂不支持打开此 Telegram 链接",
     'listSeparator': "、",
     'locationDetailFetchingLocation': "正在获取位置…",
@@ -8061,7 +8155,11 @@ const _messages = {
     'loginNewAccountNicknamePrompt': "这是一个新账号，请填写昵称",
     'loginPasswordHint': "密码提示：{value1}",
     'loginPhoneNumberWithCountryCode': "手机号（含国家区号）",
+    'loginQrCodeSubtitle':
+        "Escanea este codigo QR con otro telefono que ya tenga sesion en Telegram.",
+    'loginQrCodeTitle': "Iniciar sesion con QR",
     'loginReenterPhoneNumber': "重新输入手机号",
+    'loginRefreshQrCode': "Actualizar codigo QR",
     'loginResendVerificationCode': "重新发送验证码",
     'loginSubmit': "登录",
     'loginSwitchAccount': "切换账号",
@@ -8073,6 +8171,7 @@ const _messages = {
     'loginTwoStepPassword': "两步验证密码",
     'loginVerificationCode': "验证码",
     'loginVerify': "验证",
+    'loginWithQrCode': "Iniciar sesion con QR",
     'markdownLabel': "Markdown",
     'messageActionCopy': "复制",
     'messageActionSelectText': "选择文字",
@@ -9066,6 +9165,8 @@ const _messages = {
     'linkHandlerJoin': "加入",
     'linkHandlerJoinNamedGroupQuestion': "加入「{value1}」？",
     'linkHandlerOpenTelegramLinkFailed': "无法打开 Telegram 链接",
+    'linkHandlerQrLoginWarning':
+        "Dieser Link kann die Anmeldung bei deinem Telegram-Konto auf einem anderen Geraet genehmigen. Bestaetige nur, wenn diese Anmeldung von dir stammt.",
     'linkHandlerUnsupportedTelegramLink': "暂不支持打开此 Telegram 链接",
     'listSeparator': "、",
     'locationDetailFetchingLocation': "正在获取位置…",
@@ -9080,7 +9181,11 @@ const _messages = {
     'loginNewAccountNicknamePrompt': "这是一个新账号，请填写昵称",
     'loginPasswordHint': "密码提示：{value1}",
     'loginPhoneNumberWithCountryCode': "手机号（含国家区号）",
+    'loginQrCodeSubtitle':
+        "Scanne diesen QR-Code mit einem anderen Telefon, das bereits bei Telegram angemeldet ist.",
+    'loginQrCodeTitle': "Mit QR-Code anmelden",
     'loginReenterPhoneNumber': "重新输入手机号",
+    'loginRefreshQrCode': "QR-Code aktualisieren",
     'loginResendVerificationCode': "重新发送验证码",
     'loginSubmit': "登录",
     'loginSwitchAccount': "切换账号",
@@ -9092,6 +9197,7 @@ const _messages = {
     'loginTwoStepPassword': "两步验证密码",
     'loginVerificationCode': "验证码",
     'loginVerify': "验证",
+    'loginWithQrCode': "Mit QR-Code anmelden",
     'markdownLabel': "Markdown",
     'messageActionCopy': "复制",
     'messageActionSelectText': "选择文字",

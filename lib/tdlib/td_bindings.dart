@@ -31,6 +31,14 @@ typedef _ReceiveDart = Pointer<Utf8> Function(double timeout);
 typedef _ExecuteC = Pointer<Utf8> Function(Pointer<Utf8> request);
 typedef _ExecuteDart = Pointer<Utf8> Function(Pointer<Utf8> request);
 
+typedef _CompactSessionC =
+    Int32 Function(Pointer<Utf8> sourcePath, Pointer<Utf8> destinationPath);
+typedef _CompactSessionDart =
+    int Function(Pointer<Utf8> sourcePath, Pointer<Utf8> destinationPath);
+
+typedef _LastErrorC = Pointer<Utf8> Function();
+typedef _LastErrorDart = Pointer<Utf8> Function();
+
 /// Opens the tdjson library and binds its four entry points. Safe to construct
 /// in any isolate — `dlopen` reference-counts, so every isolate shares the same
 /// underlying (process-global) tdjson state.
@@ -42,7 +50,9 @@ class TdBindings {
           ),
       _send = lib.lookupFunction<_SendC, _SendDart>('td_send'),
       _receive = lib.lookupFunction<_ReceiveC, _ReceiveDart>('td_receive'),
-      _execute = lib.lookupFunction<_ExecuteC, _ExecuteDart>('td_execute');
+      _execute = lib.lookupFunction<_ExecuteC, _ExecuteDart>('td_execute'),
+      _compactSession = _lookupCompactSession(lib),
+      _lastError = _lookupLastError(lib);
 
   factory TdBindings.open() => TdBindings._(_openLibrary());
 
@@ -50,9 +60,34 @@ class TdBindings {
   final _SendDart _send;
   final _ReceiveDart _receive;
   final _ExecuteDart _execute;
+  final _CompactSessionDart? _compactSession;
+  final _LastErrorDart? _lastError;
 
   /// Creates a fresh per-process client id.
   int createClientId() => _createClientId();
+
+  bool get supportsCompactSessionBackup =>
+      _compactSession != null && _lastError != null;
+
+  static _CompactSessionDart? _lookupCompactSession(DynamicLibrary lib) {
+    try {
+      return lib.lookupFunction<_CompactSessionC, _CompactSessionDart>(
+        'td_mithka_write_compact_session_binlog',
+      );
+    } on ArgumentError {
+      return null;
+    }
+  }
+
+  static _LastErrorDart? _lookupLastError(DynamicLibrary lib) {
+    try {
+      return lib.lookupFunction<_LastErrorC, _LastErrorDart>(
+        'td_mithka_last_error',
+      );
+    } on ArgumentError {
+      return null;
+    }
+  }
 
   static DynamicLibrary _openLibrary() {
     if (Platform.isAndroid) {
@@ -97,6 +132,29 @@ class TdBindings {
       return out.toDartString();
     } finally {
       malloc.free(reqPtr);
+    }
+  }
+
+  void writeCompactSessionBinlog(String sourcePath, String destinationPath) {
+    final compactSession = _compactSession;
+    if (compactSession == null) {
+      throw UnsupportedError('Compact TDLib session backup is unavailable');
+    }
+
+    final sourcePtr = sourcePath.toNativeUtf8();
+    final destinationPtr = destinationPath.toNativeUtf8();
+    try {
+      final code = compactSession(sourcePtr, destinationPtr);
+      if (code != 0) {
+        final errorPtr = _lastError?.call();
+        final message = errorPtr == null || errorPtr == nullptr
+            ? 'Unknown compact TDLib session backup error'
+            : errorPtr.toDartString();
+        throw StateError(message);
+      }
+    } finally {
+      malloc.free(sourcePtr);
+      malloc.free(destinationPtr);
     }
   }
 }

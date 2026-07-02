@@ -77,9 +77,17 @@ class ProxyConfig {
     if ((details.integer('port') ?? 0) != port) return false;
     final tdType = details.obj('type');
     return switch (type) {
-      'http' => tdType?.type == 'proxyTypeHttp',
-      'mtproto' => tdType?.type == 'proxyTypeMtproto',
-      _ => tdType?.type == 'proxyTypeSocks5',
+      'http' =>
+        tdType?.type == 'proxyTypeHttp' &&
+            (tdType?.str('username') ?? '') == username &&
+            (tdType?.str('password') ?? '') == password,
+      'mtproto' =>
+        tdType?.type == 'proxyTypeMtproto' &&
+            (tdType?.str('secret') ?? '') == secret,
+      _ =>
+        tdType?.type == 'proxyTypeSocks5' &&
+            (tdType?.str('username') ?? '') == username &&
+            (tdType?.str('password') ?? '') == password,
     };
   }
 
@@ -100,6 +108,66 @@ class ProxyConfig {
       username: type?.str('username') ?? '',
       password: type?.str('password') ?? '',
       secret: type?.str('secret') ?? '',
+    );
+  }
+
+  static ProxyConfig? fromTelegramUrl(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return null;
+    final candidate = trimmed.contains('://') ? trimmed : 'https://$trimmed';
+    final uri = Uri.tryParse(candidate);
+    if (uri == null) return null;
+
+    final scheme = uri.scheme.toLowerCase();
+    final host = uri.host.toLowerCase();
+    String? kind;
+    if (scheme == 'tg') {
+      final tgTarget = host.isNotEmpty ? host : uri.path.toLowerCase();
+      kind = switch (tgTarget) {
+        'socks' => 'socks5',
+        'proxy' => 'mtproto',
+        _ => null,
+      };
+    } else {
+      final isTelegramHost =
+          host == 't.me' ||
+          host == 'telegram.me' ||
+          host == 'telegram.dog' ||
+          host == 'www.t.me' ||
+          host == 'www.telegram.me' ||
+          host == 'www.telegram.dog';
+      if (!isTelegramHost) return null;
+      final segments = uri.pathSegments
+          .where((segment) => segment.trim().isNotEmpty)
+          .toList();
+      final first = segments.isEmpty ? null : segments.first.toLowerCase();
+      kind = switch (first) {
+        'socks' => 'socks5',
+        'proxy' => 'mtproto',
+        _ => null,
+      };
+    }
+    if (kind == null) return null;
+
+    final params = uri.queryParameters;
+    final server = (params['server'] ?? '').trim();
+    final port = int.tryParse((params['port'] ?? '').trim()) ?? 0;
+    if (server.isEmpty || port <= 0 || port > 65535) return null;
+
+    final secret = (params['secret'] ?? '').trim();
+    if (kind == 'mtproto' && secret.isEmpty) return null;
+    final username = (params['user'] ?? params['username'] ?? '').trim();
+    final password = (params['pass'] ?? params['password'] ?? '').trim();
+
+    return ProxyConfig(
+      configured: true,
+      enabled: true,
+      type: kind,
+      server: server,
+      port: port,
+      username: username,
+      password: password,
+      secret: secret,
     );
   }
 

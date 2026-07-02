@@ -17,6 +17,7 @@ import '../components/app_icons.dart';
 import '../components/toast.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
+import '../tdlib/td_image_loader.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import 'package:mithka/l10n/app_localizations.dart';
@@ -54,15 +55,12 @@ class _FileDetailViewState extends State<FileDetailView> {
       if (f != null && f.integer('id') == id) _apply(f);
     });
     try {
-      final resp = await TdClient.shared.query({
-        '@type': 'downloadFile',
-        'file_id': id,
-        'priority': 32,
-        'offset': 0,
-        'limit': 0,
-        'synchronous': false,
-      });
-      _apply(resp);
+      final resp = await TdFileCenter.shared.downloadPriorityFile(
+        id,
+        total: _total,
+        priority: 32,
+      );
+      if (resp != null) _apply(resp);
     } catch (_) {}
   }
 

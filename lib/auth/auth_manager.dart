@@ -14,6 +14,7 @@ import '../config/secrets.dart';
 import '../settings/api_credentials_config.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
+import 'account_backup_service.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 
 sealed class AuthStep {
@@ -26,6 +27,11 @@ class AuthInitializing extends AuthStep {
 
 class AuthWaitPhoneNumber extends AuthStep {
   const AuthWaitPhoneNumber();
+}
+
+class AuthWaitQrCode extends AuthStep {
+  const AuthWaitQrCode(this.link);
+  final String link;
 }
 
 class AuthWaitCode extends AuthStep {
@@ -112,6 +118,8 @@ class AuthManager extends ChangeNotifier {
         _client.sendParametersForActiveClient();
       case 'authorizationStateWaitPhoneNumber':
         _set(const AuthWaitPhoneNumber());
+      case 'authorizationStateWaitOtherDeviceConfirmation':
+        _set(AuthWaitQrCode(state.str('link') ?? ''));
       case 'authorizationStateWaitCode':
         final info = state.obj('code_info');
         _set(AuthWaitCode(_codeDeliveryLabel(info?.obj('type'))));
@@ -122,6 +130,7 @@ class AuthManager extends ChangeNotifier {
       case 'authorizationStateReady':
         _errorMessage = null;
         _set(const AuthReady());
+        unawaited(AccountBackupService.shared.backupActiveAccountIfEnabled());
       case 'authorizationStateLoggingOut':
         _set(const AuthLoggingOut());
       case 'authorizationStateClosing':
@@ -152,6 +161,9 @@ class AuthManager extends ChangeNotifier {
     '@type': 'setAuthenticationPhoneNumber',
     'phone_number': phone.trim(),
   });
+
+  void requestQrLogin() =>
+      _run({'@type': 'requestQrCodeAuthentication', 'other_user_ids': []});
 
   void submitCode(String code) =>
       _run({'@type': 'checkAuthenticationCode', 'code': code.trim()});
