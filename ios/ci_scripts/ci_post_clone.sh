@@ -55,6 +55,7 @@ echo "▸ git commit: $GIT_COMMIT"
 # version sourced from pubspec.yaml by default, matching the Android/GitHub
 # release flow; release branches may pin an approved App Store version with
 # IOS_APP_BUILD_NAME_OVERRIDE.
+IOS_APP_BUILD_NAME_OVERRIDE="0.2.2"
 RAW_VERSION="$(awk '/^version:/ { print $2; exit }' pubspec.yaml)"
 test -n "$RAW_VERSION"
 APP_BUILD_NAME="${IOS_APP_BUILD_NAME_OVERRIDE:-${RAW_VERSION%%+*}}"
