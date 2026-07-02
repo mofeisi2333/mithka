@@ -577,7 +577,7 @@ class _SharedMediaViewState extends State<SharedMediaView> {
 
   List<ChatMessage> _filteredItems(List<ChatMessage> items) {
     final query = _query.trim().toLowerCase();
-    final filtered = items.where((message) {
+    var filtered = items.where((message) {
       if ((_tabs[_tab].videoOnly || _tab == 1) &&
           !_matchesFileFilter(message)) {
         return false;
@@ -600,7 +600,31 @@ class _SharedMediaViewState extends State<SharedMediaView> {
         return b.date.compareTo(a.date);
       });
     }
+    if (_tabs[_tab].musicOnly) {
+      filtered = _dedupeMusic(filtered);
+    }
     return filtered;
+  }
+
+  List<ChatMessage> _dedupeMusic(List<ChatMessage> items) {
+    final seen = <String>{};
+    final unique = <ChatMessage>[];
+    for (final message in items) {
+      final key = _musicDedupeKey(message);
+      if (seen.add(key)) unique.add(message);
+    }
+    return unique;
+  }
+
+  String _musicDedupeKey(ChatMessage message) {
+    final music = message.music;
+    if (music == null) return 'message:${message.chatId}:${message.id}';
+    final title = music.title.trim().toLowerCase();
+    final performer = (music.performer ?? '').trim().toLowerCase();
+    if (title.isEmpty && performer.isEmpty && music.duration <= 0) {
+      return 'file:${music.file?.id ?? message.id}';
+    }
+    return '$title|$performer|${music.duration}';
   }
 
   int _videoPriority(ChatMessage message) {
@@ -916,70 +940,140 @@ class _SharedMediaViewState extends State<SharedMediaView> {
     final c = context.colors;
     final music = message.music;
     if (music == null) return const SizedBox.shrink();
-    final subtitle = [
-      DateText.listLabel(message.date),
-      if ((music.performer ?? '').isNotEmpty) music.performer!,
-      if (_usesGlobalSearch(_tab) && _sourceTitleFor(message).isNotEmpty)
-        '来自 ${_sourceTitleFor(message)}',
-    ].join(' · ');
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () => _openSourceMessage(message),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: c.background,
-          border: Border(bottom: BorderSide(color: c.divider, width: 0.5)),
-        ),
-        child: Row(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
-                width: 48,
-                height: 48,
-                child: music.cover != null
-                    ? TDImage(photo: music.cover, fit: BoxFit.cover)
-                    : Container(
-                        alignment: Alignment.center,
-                        color: const Color(0xFFFF8A2A).withValues(alpha: 0.14),
-                        child: AppIcon(
-                          HeroAppIcons.music,
-                          size: 23,
-                          color: const Color(0xFFFF8A2A),
+    const accent = Color(0xFF22C7A9);
+    return AnimatedBuilder(
+      animation: _voice,
+      builder: (context, _) {
+        final active = _voice.isActive(music.file);
+        final total = active && _voice.total.inMilliseconds > 0
+            ? _voice.total
+            : Duration(seconds: music.duration);
+        final position = active ? _voice.position : Duration.zero;
+        final fraction = total.inMilliseconds > 0
+            ? (position.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0)
+            : 0.0;
+        final durationText = active && position > Duration.zero
+            ? '${_duration(position.inSeconds)} / ${_duration(total.inSeconds)}'
+            : _duration(music.duration);
+        final subtitle = [
+          durationText,
+          DateText.listLabel(message.date),
+          if (_usesGlobalSearch(_tab) && _sourceTitleFor(message).isNotEmpty)
+            '来自 ${_sourceTitleFor(message)}',
+        ].join(' · ');
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            if (music.file != null) {
+              _voice.toggleAudio(music.file);
+            } else {
+              _openSourceMessage(message);
+            }
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: c.background,
+              border: Border(bottom: BorderSide(color: c.divider, width: 0.5)),
+            ),
+            child: Row(
+              children: [
+                ClipOval(
+                  child: SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: music.cover != null
+                        ? TDImage(photo: music.cover, fit: BoxFit.cover)
+                        : Container(
+                            alignment: Alignment.center,
+                            color: accent.withValues(alpha: 0.14),
+                            child: AppIcon(
+                              HeroAppIcons.music,
+                              size: 23,
+                              color: accent,
+                            ),
+                          ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _musicTitle(music),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: c.textPrimary,
                         ),
                       ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    music.title.replaceAll('\n', ' '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: c.textPrimary,
-                    ),
+                      const SizedBox(height: 5),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        child: LinearProgressIndicator(
+                          value: fraction,
+                          minHeight: 3,
+                          backgroundColor: c.searchFill,
+                          valueColor: const AlwaysStoppedAnimation<Color>(
+                            accent,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 12, color: c.textTertiary),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 3),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 12, color: c.textTertiary),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 36,
+                  height: 36,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    tooltip: active && _voice.isPlaying ? '暂停' : '播放',
+                    onPressed: music.file == null
+                        ? null
+                        : () => _voice.toggleAudio(music.file),
+                    icon: _voice.isLoading && active
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator.adaptive(
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : Container(
+                            width: 30,
+                            height: 30,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              border: Border.all(color: accent, width: 2),
+                              shape: BoxShape.circle,
+                            ),
+                            child: AppIcon(
+                              active && _voice.isPlaying
+                                  ? HeroAppIcons.pause
+                                  : HeroAppIcons.play,
+                              size: 13,
+                              color: accent,
+                            ),
+                          ),
                   ),
-                ],
-              ),
+                ),
+                _rowMenu(message),
+              ],
             ),
-            _rowMenu(message),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -1331,6 +1425,15 @@ class _SharedMediaViewState extends State<SharedMediaView> {
     final text = message.text.trim().replaceAll('\n', ' ');
     if (text.isNotEmpty) return text;
     return '${DateText.listLabel(message.date)} 视频';
+  }
+
+  String _musicTitle(MessageMusic music) {
+    final title = music.title.trim().replaceAll('\n', ' ');
+    final performer = (music.performer ?? '').trim().replaceAll('\n', ' ');
+    if (title.isNotEmpty && performer.isNotEmpty) return '$title - $performer';
+    if (title.isNotEmpty) return title;
+    if (performer.isNotEmpty) return performer;
+    return AppStrings.t(AppStringKeys.profileDetailMusic);
   }
 
   bool _canOpenSourceMessage(ChatMessage message) =>
