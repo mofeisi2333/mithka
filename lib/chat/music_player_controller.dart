@@ -66,12 +66,13 @@ class MusicPlayerController extends ChangeNotifier {
   }
 
   bool togglePlaylist(ChatMessage message) {
+    _loadPlaylistIfNeeded();
     if (isInPlaylist(message)) {
       removeFromPlaylist(message);
       return false;
     }
     final item = _playlistCopyOf(message);
-    playlist = [...playlist, item];
+    playlist = _dedupeMusic([...playlist, item]);
     _savePlaylist();
     notifyListeners();
     return true;
@@ -80,19 +81,26 @@ class MusicPlayerController extends ChangeNotifier {
   void removeFromPlaylist(ChatMessage message) {
     final fileId = message.music?.file?.id;
     if (fileId == null) return;
-    playlist = playlist
-        .where((item) => item.music?.file?.id != fileId)
-        .toList();
+    final wasCurrent = current?.music?.file?.id == fileId;
+    playlist = _dedupeMusic(
+      playlist.where((item) => item.music?.file?.id != fileId).toList(),
+    );
     queue = queue.where((item) => item.music?.file?.id != fileId).toList();
+    if (wasCurrent) _stopPlayback(clearCurrent: true);
     _savePlaylist();
     notifyListeners();
   }
 
   void clearPlaylist() {
+    final currentFileId = current?.music?.file?.id;
+    final removedCurrent =
+        currentFileId != null &&
+        playlist.any((item) => item.music?.file?.id == currentFileId);
     playlist = const [];
     queue = queue
         .where((item) => item.music?.file?.id == current?.music?.file?.id)
         .toList();
+    if (removedCurrent) _stopPlayback(clearCurrent: true);
     _savePlaylist();
     notifyListeners();
   }
@@ -105,9 +113,11 @@ class MusicPlayerController extends ChangeNotifier {
     final music = message.music;
     if (music?.file == null) return;
     _loadPlaylistIfNeeded();
-    final nextQueue = isInPlaylist(message) && playlist.isNotEmpty
-        ? playlist.where((item) => item.music?.file != null).toList()
-        : visibleQueue.where((item) => item.music?.file != null).toList();
+    final nextQueue = _dedupeMusic(
+      isInPlaylist(message) && playlist.isNotEmpty
+          ? playlist.where((item) => item.music?.file != null).toList()
+          : visibleQueue.where((item) => item.music?.file != null).toList(),
+    );
     current = _playlistCopyOf(message);
     queue = nextQueue.isEmpty ? [current!] : nextQueue;
     if (reveal) {
@@ -152,8 +162,7 @@ class MusicPlayerController extends ChangeNotifier {
   }
 
   void closeWidget() {
-    hidden = true;
-    collapsed = false;
+    _stopPlayback(clearCurrent: true);
     notifyListeners();
   }
 
@@ -210,18 +219,30 @@ class MusicPlayerController extends ChangeNotifier {
     playlist = _dedupeMusic(
       rawItems.map(_messageFromPlaylistJson).whereType<ChatMessage>().toList(),
     );
+    if (rawItems.length != playlist.length) _savePlaylist();
     notifyListeners();
   }
 
   void _savePlaylist() {
     final prefs = _prefs;
     if (prefs == null) return;
+    playlist = _dedupeMusic(playlist);
     unawaited(
       prefs.setStringList(
         _playlistPrefsKey,
         playlist.map((message) => jsonEncode(_messageToJson(message))).toList(),
       ),
     );
+  }
+
+  void _stopPlayback({required bool clearCurrent}) {
+    unawaited(_player.stop());
+    hidden = true;
+    collapsed = false;
+    if (clearCurrent) {
+      current = null;
+      queue = const [];
+    }
   }
 
   List<ChatMessage> _dedupeMusic(List<ChatMessage> items) {

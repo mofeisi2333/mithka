@@ -61,6 +61,24 @@ class VoicePlayer extends ChangeNotifier {
   Future<void> toggleAudio(TdFileRef? file) =>
       _toggle(file, codec: Codec.defaultCodec);
 
+  Future<void> stop() async {
+    final player = _player;
+    if (player != null && (player.isPlaying || player.isPaused)) {
+      try {
+        await player.stopPlayer();
+      } catch (_) {}
+    }
+    _progress?.cancel();
+    _progress = null;
+    _fileId = null;
+    _path = null;
+    isPlaying = false;
+    isLoading = false;
+    position = Duration.zero;
+    total = Duration.zero;
+    notifyListeners();
+  }
+
   Future<void> _toggle(TdFileRef? file, {required Codec codec}) async {
     if (file == null) return;
 
