@@ -625,6 +625,45 @@ void main() {
   });
 
   group('AppLocaleController', () {
+    tearDown(() {
+      Intl.defaultLocale = null;
+    });
+
+    test('AppStrings follows script and regional locale tags', () {
+      Intl.defaultLocale = 'zh_Hans';
+      expect(AppStrings.t(AppStringKeys.apiCredentialsTitle), '视频与下载加速');
+
+      Intl.defaultLocale = 'zh-Hant';
+      expect(
+        AppLocalizations.localeKeyFor(
+          AppLocalizations.resolve(
+            AppLocalizations.localeFromTag(Intl.getCurrentLocale())!,
+          ),
+        ),
+        'zhHant',
+      );
+
+      Intl.defaultLocale = 'zh_HK';
+      expect(
+        AppLocalizations.localeKeyFor(
+          AppLocalizations.resolve(
+            AppLocalizations.localeFromTag(Intl.getCurrentLocale())!,
+          ),
+        ),
+        'zhHant',
+      );
+
+      Intl.defaultLocale = 'en_US';
+      expect(
+        AppLocalizations.localeKeyFor(
+          AppLocalizations.resolve(
+            AppLocalizations.localeFromTag(Intl.getCurrentLocale())!,
+          ),
+        ),
+        'en',
+      );
+    });
+
     test('defaults to system and persists explicit locale choices', () async {
       SharedPreferences.setMockInitialValues({});
       final prefs = await SharedPreferences.getInstance();

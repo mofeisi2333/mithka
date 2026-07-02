@@ -79,16 +79,8 @@ class AppLocaleController extends ChangeNotifier {
   }
 
   static Locale? _localeFromTag(String? tag) {
-    if (tag == null || tag.isEmpty || tag == 'system') return null;
-    final normalized = tag.replaceAll('_', '-');
-    if (normalized == 'zh-Hant') {
-      return const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hant');
-    }
-    if (normalized == 'zh-Hans' || normalized == 'zh') {
-      return const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans');
-    }
-    final language = normalized.split('-').first;
-    final locale = Locale(language);
+    final locale = AppLocalizations.localeFromTag(tag);
+    if (locale == null) return null;
     if (!AppLocalizations.isSupportedLocale(locale)) return null;
     return AppLocalizations.resolve(locale);
   }

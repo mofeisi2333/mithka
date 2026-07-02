@@ -49,6 +49,37 @@ class AppLocalizations {
     );
   }
 
+  static Locale? localeFromTag(String? tag) {
+    final normalized = tag?.trim().replaceAll('_', '-');
+    if (normalized == null || normalized.isEmpty || normalized == 'system') {
+      return null;
+    }
+    final parts = normalized
+        .split('-')
+        .where((part) => part.trim().isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return null;
+
+    final language = parts.first.toLowerCase();
+    String? script;
+    String? country;
+    for (final part in parts.skip(1)) {
+      if (part.length == 4 && script == null) {
+        script =
+            part.substring(0, 1).toUpperCase() +
+            part.substring(1).toLowerCase();
+      } else if ((part.length == 2 || part.length == 3) && country == null) {
+        country = part.toUpperCase();
+      }
+    }
+
+    return Locale.fromSubtags(
+      languageCode: language,
+      scriptCode: script,
+      countryCode: country,
+    );
+  }
+
   static AppLocalizations of(BuildContext context) =>
       Localizations.of<AppLocalizations>(context, AppLocalizations) ??
       const AppLocalizations(fallbackLocale);
@@ -1246,8 +1277,15 @@ abstract final class AppStringKeys {
 
 abstract final class AppStrings {
   static String t(String key, [Map<String, Object?> placeholders = const {}]) {
-    final locale = AppLocalizations.resolve(Locale(Intl.getCurrentLocale()));
-    return tForLocale(AppLocalizations.localeKeyFor(locale), key, placeholders);
+    final locale =
+        AppLocalizations.localeFromTag(Intl.getCurrentLocale()) ??
+        AppLocalizations.fallbackLocale;
+    final resolved = AppLocalizations.resolve(locale);
+    return tForLocale(
+      AppLocalizations.localeKeyFor(resolved),
+      key,
+      placeholders,
+    );
   }
 
   static String tForLocale(
