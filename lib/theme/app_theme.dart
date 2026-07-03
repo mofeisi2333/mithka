@@ -37,48 +37,56 @@ abstract final class AppTextStyle {
     fontSize: AppTextSize.tiny,
     fontWeight: weight ?? AppTextWeight.regular,
     color: color,
+    decoration: TextDecoration.none,
   );
 
   static TextStyle caption(Color color, {FontWeight? weight}) => TextStyle(
     fontSize: AppTextSize.caption,
     fontWeight: weight ?? AppTextWeight.regular,
     color: color,
+    decoration: TextDecoration.none,
   );
 
   static TextStyle footnote(Color color, {FontWeight? weight}) => TextStyle(
     fontSize: AppTextSize.footnote,
     fontWeight: weight ?? AppTextWeight.regular,
     color: color,
+    decoration: TextDecoration.none,
   );
 
   static TextStyle callout(Color color, {FontWeight? weight}) => TextStyle(
     fontSize: AppTextSize.callout,
     fontWeight: weight ?? AppTextWeight.regular,
     color: color,
+    decoration: TextDecoration.none,
   );
 
   static TextStyle body(Color color, {FontWeight? weight}) => TextStyle(
     fontSize: AppTextSize.body,
     fontWeight: weight ?? AppTextWeight.regular,
     color: color,
+    decoration: TextDecoration.none,
   );
 
   static TextStyle bodyLarge(Color color, {FontWeight? weight}) => TextStyle(
     fontSize: AppTextSize.bodyLarge,
     fontWeight: weight ?? AppTextWeight.regular,
     color: color,
+    decoration: TextDecoration.none,
   );
 
   static TextStyle title(Color color, {FontWeight? weight}) => TextStyle(
     fontSize: AppTextSize.title,
     fontWeight: weight ?? AppTextWeight.medium,
     color: color,
+    decoration: TextDecoration.none,
   );
 
   static TextStyle display(Color color, {FontWeight? weight}) => TextStyle(
     fontSize: AppTextSize.display,
     fontWeight: weight ?? AppTextWeight.semibold,
     color: color,
+    decoration: TextDecoration.none,
   );
 }
 

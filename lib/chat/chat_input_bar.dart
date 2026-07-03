@@ -143,7 +143,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   void _syncFromVm() {
-    if (vm.draft != _controller.text) {
+    final composing = _controller.value.composing;
+    final editing = _focus.hasFocus || composing.isValid;
+    if (!editing && vm.draft != _controller.text) {
       _controller.value = TextEditingValue(
         text: vm.draft,
         selection: TextSelection.collapsed(offset: vm.draft.length),

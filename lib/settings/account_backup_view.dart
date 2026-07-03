@@ -22,11 +22,13 @@ class AccountBackupView extends StatefulWidget {
     this.showCreateAction = true,
     this.closeAfterRestore = false,
     this.returnToPhoneOnBack = false,
+    this.excludeLoggedInBackups = false,
   });
 
   final bool showCreateAction;
   final bool closeAfterRestore;
   final bool returnToPhoneOnBack;
+  final bool excludeLoggedInBackups;
 
   @override
   State<AccountBackupView> createState() => _AccountBackupViewState();
@@ -50,7 +52,9 @@ class _AccountBackupViewState extends State<AccountBackupView> {
     setState(() => _loading = true);
     try {
       final enabled = await _service.isEnabled;
-      final backups = await _service.listBackups();
+      final backups = widget.excludeLoggedInBackups
+          ? await _service.listRestorableBackups()
+          : await _service.listBackups();
       if (mounted) {
         setState(() {
           _enabled = enabled;

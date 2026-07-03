@@ -73,6 +73,7 @@ class AuthManager extends ChangeNotifier {
   AuthStep _step = const AuthInitializing();
   String? _errorMessage;
   bool _isWorking = false;
+  int _actionSerial = 0;
   bool _useReviewCodeRelay = false;
   bool _reviewCodePollActive = false;
 
@@ -115,6 +116,10 @@ class AuthManager extends ChangeNotifier {
 
   void _handle(Map<String, dynamic> state) {
     debugPrint('🔑 [Mithka] authorizationState → ${state.type ?? 'nil'}');
+    if (_isWorking) {
+      _actionSerial += 1;
+      _isWorking = false;
+    }
     switch (state.type) {
       case 'authorizationStateWaitTdlibParameters':
         // The lower-level router normally sends these before broadcasting the
@@ -153,12 +158,19 @@ class AuthManager extends ChangeNotifier {
   /// Re-reads the active account's authorization state (after an account
   /// switch) and updates `step` so the UI gates on the right account.
   void reloadAuthState() {
-    _set(const AuthInitializing());
+    _actionSerial += 1;
+    _isWorking = false;
     _errorMessage = null;
+    _set(const AuthInitializing());
     _client
         .query({'@type': 'getAuthorizationState'})
+        .timeout(const Duration(seconds: 8))
         .then(_handle)
-        .catchError((_) {});
+        .catchError((Object error) {
+          debugPrint('Auth state reload failed: $error');
+          _client.sendParametersForActiveClient();
+          _set(const AuthWaitPhoneNumber());
+        });
   }
 
   // MARK: - User actions
@@ -190,6 +202,13 @@ class AuthManager extends ChangeNotifier {
 
   void logOut() => _run({'@type': 'logOut'});
 
+  void cancelPendingAction() {
+    if (!_isWorking) return;
+    _actionSerial += 1;
+    _isWorking = false;
+    notifyListeners();
+  }
+
   // MARK: - Helpers
 
   Future<void> _submitReviewCodeFromRelay() async {
@@ -220,16 +239,20 @@ class AuthManager extends ChangeNotifier {
   }
 
   void _run(Map<String, dynamic> request) {
+    final action = ++_actionSerial;
     _isWorking = true;
     _errorMessage = null;
     notifyListeners();
     _client
         .query(request)
+        .timeout(const Duration(seconds: 20))
         .then((_) {
+          if (action != _actionSerial) return;
           _isWorking = false;
           notifyListeners();
         })
         .catchError((error) {
+          if (action != _actionSerial) return;
           _report(error);
           _isWorking = false;
           notifyListeners();

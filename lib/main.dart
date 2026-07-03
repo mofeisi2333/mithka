@@ -186,6 +186,7 @@ class _MithkaAppState extends State<MithkaApp> {
     super.initState();
     _theme.loadSelectedEmojiFontIfAvailable();
     _auth.start();
+    unawaited(_accounts.recoverPendingAddOnStartup(_auth));
     NotificationController.shared.start();
   }
 
@@ -286,7 +287,10 @@ class _MithkaAppState extends State<MithkaApp> {
               return _ScaledAppView(
                 fontScale: theme.fontScale,
                 interfaceScale: theme.interfaceScale,
-                child: appChild,
+                child: DefaultTextStyle(
+                  style: AppTextStyle.body(context.colors.textPrimary),
+                  child: appChild,
+                ),
               );
             },
             // Rebuild the whole tree when the active account changes.

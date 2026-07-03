@@ -92,6 +92,42 @@ class AccountStore extends ChangeNotifier {
     return null;
   }
 
+  /// If the app was killed while adding an account, do not strand the next
+  /// launch on that empty login slot when the original account is still ready.
+  Future<void> recoverPendingAddOnStartup(AuthManager auth) async {
+    final pending = _pendingSlot;
+    if (pending == null) return;
+
+    for (var i = 0; i < 25; i += 1) {
+      if (TdClient.shared.configuredSlots.contains(pending)) break;
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+    if (_pendingSlot != pending ||
+        !TdClient.shared.configuredSlots.contains(pending)) {
+      return;
+    }
+    if (TdClient.shared.activeSlot != pending) return;
+
+    final preferredReturn =
+        TdClient.shared.configuredSlots.contains(_returnSlot) &&
+            _returnSlot != pending &&
+            await _slotIsReady(_returnSlot)
+        ? _returnSlot
+        : null;
+    final target = preferredReturn ?? await _nextReadySlot(after: pending);
+    if (target == null || target == pending) return;
+
+    _pendingSlot = null;
+    _persistPending();
+    TdClient.shared.setActive(target);
+    _activeSlot = target;
+    TdClient.shared.removeSlot(pending);
+    await TdClient.shared.deleteSlotData(pending);
+    notifyListeners();
+    auth.reloadAuthState();
+    await refresh();
+  }
+
   /// Re-reads each account's identity (getMe per client) for the switcher.
   Future<void> refresh() async {
     _activeSlot = TdClient.shared.activeSlot;

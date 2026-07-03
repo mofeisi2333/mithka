@@ -91,6 +91,33 @@ class AccountBackupService {
     return backups;
   }
 
+  Future<List<AccountSessionBackup>> listRestorableBackups() async {
+    final backups = await listBackups();
+    if (backups.isEmpty) return const [];
+    final loggedInIds = await _loggedInUserIds();
+    if (loggedInIds.isEmpty) return backups;
+    return backups.where((backup) {
+      final userId = backup.userId ?? int.tryParse(backup.id);
+      return userId == null || !loggedInIds.contains(userId);
+    }).toList();
+  }
+
+  Future<Set<int>> _loggedInUserIds() async {
+    final ids = <int>{};
+    for (final slot in TdClient.shared.configuredSlots) {
+      final cid = TdClient.shared.clientId(slot);
+      if (cid == null) continue;
+      try {
+        final me = await TdClient.shared
+            .queryTo({'@type': 'getMe'}, cid)
+            .timeout(const Duration(seconds: 2));
+        final userId = me.int64('id');
+        if (userId != null) ids.add(userId);
+      } catch (_) {}
+    }
+    return ids;
+  }
+
   Future<AccountSessionBackup> backupActiveAccount() async {
     if (!await isSupported) {
       throw UnsupportedError('Account session backup is only available on iOS');

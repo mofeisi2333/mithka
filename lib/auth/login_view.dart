@@ -22,6 +22,7 @@ import '../settings/proxy_config.dart';
 import '../settings/proxy_view.dart';
 import '../tdlib/td_client.dart';
 import '../theme/app_theme.dart';
+import 'account_backup_service.dart';
 import 'account_store.dart';
 import 'auth_manager.dart';
 import 'country_picker.dart';
@@ -41,6 +42,7 @@ class _LoginViewState extends State<LoginView> {
   final _firstName = TextEditingController();
   final _lastName = TextEditingController();
   ProxyConfig? _proxy;
+  int _restorableBackupCount = 0;
 
   // When true, show the phone-number step even though TDLib is still at a later
   // auth state — lets the user back out of QR / code / 2FA to fix the number.
@@ -53,6 +55,7 @@ class _LoginViewState extends State<LoginView> {
   void initState() {
     super.initState();
     _loadProxy();
+    if (Platform.isIOS) unawaited(_loadRestorableBackupCount());
   }
 
   @override
@@ -66,6 +69,15 @@ class _LoginViewState extends State<LoginView> {
   Future<void> _loadProxy() async {
     final proxy = await ProxyConfig.load();
     if (mounted) setState(() => _proxy = proxy);
+  }
+
+  Future<void> _loadRestorableBackupCount() async {
+    try {
+      final backups = await AccountBackupService.shared.listRestorableBackups();
+      if (mounted) setState(() => _restorableBackupCount = backups.length);
+    } catch (_) {
+      if (mounted) setState(() => _restorableBackupCount = 0);
+    }
   }
 
   /// Formats the input as `+<cc> <national groups>` via libphonenumber's
@@ -254,6 +266,7 @@ class _LoginViewState extends State<LoginView> {
   }
 
   void _showPhoneEntry() {
+    context.read<AuthManager>().cancelPendingAction();
     _code.clear();
     _password.clear();
     setState(() => _forcePhone = true);
@@ -418,6 +431,7 @@ class _LoginViewState extends State<LoginView> {
             icon: HeroAppIcons.key,
             tooltip: AppStrings.t(AppStringKeys.accountBackupRestoreAccount),
             enabled: !auth.isWorking,
+            badgeCount: _restorableBackupCount,
             onTap: _openAccountRestore,
           ),
         _proxyIconButton(),
@@ -430,8 +444,10 @@ class _LoginViewState extends State<LoginView> {
     required String tooltip,
     required bool enabled,
     required VoidCallback onTap,
+    int badgeCount = 0,
   }) {
     final c = context.colors;
+    final badgeText = badgeCount > 99 ? '99+' : '$badgeCount';
     return Tooltip(
       message: tooltip,
       child: GestureDetector(
@@ -439,10 +455,43 @@ class _LoginViewState extends State<LoginView> {
         onTap: enabled ? onTap : null,
         child: Padding(
           padding: const EdgeInsets.all(10),
-          child: AppIcon(
-            icon,
-            size: 25,
-            color: enabled ? c.textPrimary : c.textTertiary,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              AppIcon(
+                icon,
+                size: 25,
+                color: enabled ? c.textPrimary : c.textTertiary,
+              ),
+              if (badgeCount > 0)
+                Positioned(
+                  right: -8,
+                  top: -7,
+                  child: Container(
+                    constraints: const BoxConstraints(
+                      minWidth: 16,
+                      minHeight: 16,
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: AppTheme.unreadBadge,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: c.background, width: 1.2),
+                    ),
+                    child: Text(
+                      badgeText,
+                      style: const TextStyle(
+                        color: Color(0xFFFFFFFF),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        height: 1,
+                        decoration: TextDecoration.none,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       ),
@@ -462,9 +511,11 @@ class _LoginViewState extends State<LoginView> {
           showCreateAction: false,
           closeAfterRestore: true,
           returnToPhoneOnBack: true,
+          excludeLoggedInBackups: true,
         ),
       ),
     );
+    if (mounted) unawaited(_loadRestorableBackupCount());
     if (backToPhone == true && mounted) {
       _showPhoneEntry();
     }
@@ -609,13 +660,13 @@ class _LoginViewState extends State<LoginView> {
         ),
         const SizedBox(height: 10),
         TextButton(
-          onPressed: auth.isWorking ? null : _showPhoneEntry,
+          onPressed: _showPhoneEntry,
           child: Text(
             AppStrings.t(AppStringKeys.loginReenterPhoneNumber),
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w500,
-              color: auth.isWorking ? c.textTertiary : AppTheme.brand,
+              color: AppTheme.brand,
             ),
           ),
         ),
