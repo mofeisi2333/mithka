@@ -9,6 +9,8 @@ import UIKit
 @MainActor
 @objc class AppDelegate: FlutterAppDelegate, @preconcurrency FlutterImplicitEngineDelegate {
   private var nativeTranslationBridge: AnyObject?
+  private var pushChannel: FlutterMethodChannel?
+  private var apnsDeviceToken: String?
   private var didRegisterFlutterPlugins = false
 
   override func application(
@@ -128,6 +130,20 @@ import UIKit
       accountBackup.handle(call: call, result: result)
     }
 
+    let pushChannel = FlutterMethodChannel(
+      name: "mithka/push",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    self.pushChannel = pushChannel
+    pushChannel.setMethodCallHandler { [weak self] call, result in
+      guard call.method == "registerForRemoteNotifications" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      UIApplication.shared.registerForRemoteNotifications()
+      result(self?.apnsDeviceToken)
+    }
+
     let nativeTranslationChannel = FlutterMethodChannel(
       name: "mithka/native_translation",
       binaryMessenger: engineBridge.applicationRegistrar.messenger()
@@ -162,6 +178,24 @@ import UIKit
         )
       }
     }
+  }
+
+  override func application(
+    _ application: UIApplication,
+    didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+  ) {
+    let token = deviceToken.map { String(format: "%02x", $0) }.joined()
+    apnsDeviceToken = token
+    pushChannel?.invokeMethod("deviceToken", arguments: token)
+    super.application(application, didRegisterForRemoteNotificationsWithDeviceToken: deviceToken)
+  }
+
+  override func application(
+    _ application: UIApplication,
+    didFailToRegisterForRemoteNotificationsWithError error: Error
+  ) {
+    pushChannel?.invokeMethod("registrationError", arguments: error.localizedDescription)
+    super.application(application, didFailToRegisterForRemoteNotificationsWithError: error)
   }
 }
 

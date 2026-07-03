@@ -32,6 +32,7 @@ import 'components/drawer_controller.dart' as dc;
 import 'l10n/app_locale_controller.dart';
 import 'l10n/app_localizations.dart';
 import 'notifications/notification_controller.dart';
+import 'notifications/push_device_registrar.dart';
 import 'settings/keyword_blocker.dart';
 import 'settings/translation_controller.dart';
 import 'theme/app_theme.dart';
@@ -188,6 +189,7 @@ class _MithkaAppState extends State<MithkaApp> {
     _auth.start();
     unawaited(_accounts.recoverPendingAddOnStartup(_auth));
     NotificationController.shared.start();
+    PushDeviceRegistrar.shared.start();
   }
 
   ThemeData _themeData(Brightness brightness, ThemeController theme) {
