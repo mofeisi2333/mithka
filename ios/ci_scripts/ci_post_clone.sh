@@ -22,7 +22,7 @@
 #   REVIEW_RELAY             https://relay.example|sha256(normalized-phone-digits)
 #   SENTRY_AUTH_TOKEN        upload iOS dSYMs to Sentry when set
 #   SENTRY_ORG               Sentry org slug for dSYM upload; defaults to nekoko
-#   SENTRY_PROJECT           Sentry project slug/id for dSYM upload; defaults to 9
+#   SENTRY_PROJECT           Sentry project slug/id for dSYM upload; defaults to 10
 #   SENTRY_URL               Sentry base URL; defaults to https://sentry.nekoko.it
 #
 # The prebuilt tdjson.xcframework is hosted in the sibling mithka-tdjson repo

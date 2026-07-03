@@ -19,7 +19,7 @@ if [[ -z "${SENTRY_AUTH_TOKEN:-}" ]]; then
 fi
 
 SENTRY_ORG="${SENTRY_ORG:-nekoko}"
-SENTRY_PROJECT="${SENTRY_PROJECT:-9}"
+SENTRY_PROJECT="${SENTRY_PROJECT:-10}"
 SENTRY_URL="${SENTRY_URL:-https://sentry.nekoko.it}"
 
 if [[ -z "$SENTRY_PROJECT" ]]; then
