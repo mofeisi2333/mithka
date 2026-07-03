@@ -474,6 +474,7 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
   }
 
   void _onModel() {
+    _feedChatIds = null; // channel set may have changed
     if (mounted) setState(() {});
     _loadChannelPosts();
     _loadPostableChannels();
@@ -510,15 +511,23 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
     }
   }
 
+  // Message updates for EVERY chat flow through _handleTdUpdate. _channels is
+  // a computed getter and the thread-target scan walks all loaded posts, so
+  // doing both per update is an allocation storm during sync bursts — the
+  // relevant chat ids are cached until the feed or channel set changes.
+  Set<int>? _feedChatIds;
+
+  Set<int> get _feedChatIdSet => _feedChatIds ??= {
+    for (final chat in _channels) chat.id,
+    for (final post in _postsByChannel.values.expand((items) => items))
+      if (post.threadTarget != null) post.threadTarget!.chatId,
+  };
+
   bool _touchesMomentsFeed(Map<String, dynamic> update) {
     final rawMessage = update.obj('message');
     final chatId = update.int64('chat_id') ?? rawMessage?.int64('chat_id');
     if (chatId == null) return true;
-    if (_channels.any((chat) => chat.id == chatId)) return true;
-    for (final post in _postsByChannel.values.expand((items) => items)) {
-      if (post.threadTarget?.chatId == chatId) return true;
-    }
-    return false;
+    return _feedChatIdSet.contains(chatId);
   }
 
   void _invalidateCachedInteractions(Map<String, dynamic> update) {
@@ -593,6 +602,7 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
   void _invalidateFeed() {
     _postsCache = null;
     _postIndexByKey = null;
+    _feedChatIds = null;
   }
 
   List<ChannelPost> get _posts {
@@ -736,6 +746,7 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
     if (cached != null) return cached;
     final joined = await isJoinedGroupOrChannelChat(channel.id);
     _joinedChannelCache[channel.id] = joined;
+    _feedChatIds = null; // joined-state feeds the _channels filter
     if (!joined) {
       _postsByChannel.remove(channel.id);
       _invalidateFeed();
