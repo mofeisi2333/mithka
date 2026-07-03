@@ -106,7 +106,6 @@ class TdClient {
   static const _slotsKey = 'drachma.accountSlots';
   static const _activeKey = 'drachma.activeSlot';
   static const _liveClientIdsKey = 'drachma.debugLiveClientIds';
-  static const _databaseEncryptionKey = 'cucumber';
 
   int get activeSlot => _activeSlot;
   List<int> get configuredSlots => List.unmodifiable(_slots);
@@ -627,7 +626,6 @@ class TdClient {
     }
 
     final clientId = object.integer('@client_id') ?? -1;
-
     // Bootstrap ANY client that asks for parameters, so every account
     // initializes and stays logged in (not just the active one).
     if (object.type == 'updateAuthorizationState' &&
@@ -699,7 +697,6 @@ class TdClient {
         'use_secret_chats': false,
         'api_id': useCustomApi ? api.apiId : Secrets.apiId,
         'api_hash': useCustomApi ? api.apiHash.trim() : Secrets.apiHash,
-        'database_encryption_key': _databaseEncryptionKey,
         'system_language_code': Platform.localeName.split('_').first,
         'device_model': Platform.isIOS ? 'iPhone' : 'Android',
         'system_version': Platform.operatingSystemVersion,
