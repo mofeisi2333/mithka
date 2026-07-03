@@ -23,12 +23,14 @@
 #
 # The prebuilt tdjson.xcframework is hosted in the sibling mithka-tdjson repo
 # rather than rebuilt here, because building TDLib + OpenSSL for iOS takes
-# ~40 min. The default URL follows the latest published tdjson artifact.
+# ~40 min. The default URL is pinned so Xcode Cloud cannot pick a stale latest
+# artifact without the Mithka session string backup symbols.
 
 set -e
 
 FLUTTER_VERSION="3.44.2"
-TDJSON_URL="${TDJSON_XCFRAMEWORK_URL:-https://github.com/iebb/mithka-tdjson/releases/latest/download/tdjson-ios.xcframework.zip}"
+TDJSON_RELEASE_TAG="mithka-session-string-45df506"
+TDJSON_URL="${TDJSON_XCFRAMEWORK_URL:-https://github.com/iebb/mithka-tdjson/releases/download/${TDJSON_RELEASE_TAG}/tdjson-ios.xcframework.zip}"
 CURL_RETRY_FLAGS="-fL --retry 5 --retry-delay 2 --connect-timeout 20"
 if curl --help all 2>/dev/null | grep -q -- '--retry-all-errors'; then
   CURL_RETRY_FLAGS="$CURL_RETRY_FLAGS --retry-all-errors"
@@ -154,15 +156,15 @@ else
 fi
 
 # --- Native TDLib framework (git-ignored; prebuilt on a public release) ------
-if [ ! -d "ios/tdjson/tdjson.xcframework" ]; then
-  echo "▸ downloading tdjson.xcframework"
-  mkdir -p ios/tdjson
-  # shellcheck disable=SC2086 # CURL_RETRY_FLAGS is intentionally split.
-  retry 4 5 curl $CURL_RETRY_FLAGS "$TDJSON_URL" -o /tmp/tdjson.zip
-  unzip -q -o /tmp/tdjson.zip -d ios/tdjson
-fi
+echo "▸ downloading tdjson.xcframework"
+mkdir -p ios/tdjson
+rm -rf ios/tdjson/tdjson.xcframework /tmp/tdjson.zip
+# shellcheck disable=SC2086 # CURL_RETRY_FLAGS is intentionally split.
+retry 4 5 curl $CURL_RETRY_FLAGS "$TDJSON_URL" -o /tmp/tdjson.zip
+unzip -q -o /tmp/tdjson.zip -d ios/tdjson
 ls -d ios/tdjson/tdjson.xcframework
 "$REPO/scripts/wrap-tdjson-xcframework.sh" ios/tdjson/tdjson.xcframework
+"$REPO/scripts/check-tdjson-session-symbols.sh" ios/tdjson/tdjson.xcframework
 
 # --- Flutter iOS build inputs (Generated.xcconfig, plugin pods) --------------
 # Keep Swift Package Manager OFF: the project is CocoaPods-only on purpose (SPM
