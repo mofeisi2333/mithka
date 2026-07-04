@@ -1,7 +1,9 @@
 package ad.neko.mithka
 
 import android.content.ClipboardManager
+import android.content.ComponentName
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
 import com.google.mlkit.common.model.DownloadConditions
@@ -50,6 +52,25 @@ class MainActivity : FlutterActivity() {
                     )
                 } else {
                     result.notImplemented()
+                }
+            }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "mithka/app_icon")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "isSupported" -> result.success(true)
+                    "currentIcon" -> result.success(currentLauncherIcon())
+                    "setIcon" -> {
+                        val args = call.arguments as? Map<*, *>
+                        val name = args?.get("name") as? String ?: "default"
+                        try {
+                            setLauncherIcon(name)
+                            result.success(null)
+                        } catch (e: Exception) {
+                            result.error("app_icon_failed", e.localizedMessage, null)
+                        }
+                    }
+                    else -> result.notImplemented()
                 }
             }
 
@@ -123,6 +144,44 @@ class MainActivity : FlutterActivity() {
                     result.error("clipboard_unavailable", e.message, null)
                 }
             }
+    }
+
+    private fun launcherAliases(): Map<String, String> = mapOf(
+        "default" to "$packageName.MainActivityDefault",
+        "white" to "$packageName.MainActivityWhite",
+        "blue" to "$packageName.MainActivityBlue",
+        "purple" to "$packageName.MainActivityPurple",
+        "pixel" to "$packageName.MainActivityPixel",
+    )
+
+    private fun currentLauncherIcon(): String {
+        val aliases = launcherAliases()
+        for ((key, className) in aliases) {
+            val component = ComponentName(packageName, className)
+            val state = packageManager.getComponentEnabledSetting(component)
+            if (state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED) {
+                return key
+            }
+        }
+        return "default"
+    }
+
+    private fun setLauncherIcon(name: String) {
+        val aliases = launcherAliases()
+        val target = if (aliases.containsKey(name)) name else "default"
+        for ((key, className) in aliases) {
+            val component = ComponentName(packageName, className)
+            val state = if (key == target) {
+                PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+            } else {
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+            }
+            packageManager.setComponentEnabledSetting(
+                component,
+                state,
+                PackageManager.DONT_KILL_APP,
+            )
+        }
     }
 
     private fun listSystemFonts(): List<String> {

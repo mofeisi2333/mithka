@@ -16,11 +16,13 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../components/app_icons.dart';
+import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
 import '../theme/emoji_font_catalog.dart';
 import '../theme/system_font_catalog.dart';
 import '../theme/theme_controller.dart';
+import 'app_icon_controller.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:mithka/l10n/preview_texts.dart';
 
@@ -31,6 +33,7 @@ class AppearanceView extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     final theme = context.watch<ThemeController>();
+    final appIcons = context.watch<AppIconController>();
     return Scaffold(
       backgroundColor: c.groupedBackground,
       body: Column(
@@ -60,6 +63,25 @@ class AppearanceView extends StatelessWidget {
                     ),
                 ]),
                 const SizedBox(height: AppSpacing.xl),
+                _label(context, AppStrings.t(AppStringKeys.appIconTitle)),
+                _card(context, [
+                  _navigationRow(
+                    context,
+                    AppStrings.t(AppStringKeys.appIconTitle),
+                    AppStrings.t(appIcons.variant.labelKey),
+                    () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const AppIconSettingsView(),
+                      ),
+                    ),
+                    preview: Image.asset(
+                      appIcons.variant.asset,
+                      width: AppIconSize.nav,
+                      height: AppIconSize.nav,
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: AppSpacing.xl),
                 _label(context, AppStrings.t(AppStringKeys.appearanceFont)),
                 _card(context, [
                   _navigationRow(
@@ -84,6 +106,143 @@ class AppearanceView extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class AppIconSettingsView extends StatelessWidget {
+  const AppIconSettingsView({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final controller = context.watch<AppIconController>();
+    return Scaffold(
+      backgroundColor: c.groupedBackground,
+      body: Column(
+        children: [
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.appIconTitle),
+            onBack: () => Navigator.of(context).pop(),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.xl,
+                AppSpacing.lg,
+                AppSpacing.section,
+              ),
+              children: [
+                if (!controller.supported) ...[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.xxl,
+                    ),
+                    child: Text(
+                      AppStrings.t(AppStringKeys.appIconUnsupported),
+                      style: TextStyle(
+                        fontSize: AppTextSize.footnote,
+                        color: c.textTertiary,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                ],
+                Container(
+                  decoration: BoxDecoration(
+                    color: c.card,
+                    borderRadius: BorderRadius.circular(AppRadius.card),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    children: [
+                      for (
+                        var i = 0;
+                        i < AppIconVariant.values.length;
+                        i++
+                      ) ...[
+                        _AppIconVariantRow(
+                          variant: AppIconVariant.values[i],
+                          selected:
+                              controller.variant == AppIconVariant.values[i],
+                          loading: controller.loading,
+                        ),
+                        if (i < AppIconVariant.values.length - 1)
+                          const InsetDivider(leadingInset: 78),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AppIconVariantRow extends StatelessWidget {
+  const _AppIconVariantRow({
+    required this.variant,
+    required this.selected,
+    required this.loading,
+  });
+
+  final AppIconVariant variant;
+  final bool selected;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final controller = context.read<AppIconController>();
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: loading
+          ? null
+          : () async {
+              final ok = await controller.setVariant(variant);
+              if (!ok && context.mounted) {
+                showToast(context, AppStringKeys.appIconChangeFailed);
+              }
+            },
+      child: SizedBox(
+        height: AppMetric.menuRowHeight + AppSpacing.xl,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxl),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+                child: Image.asset(
+                  variant.asset,
+                  width: AppMetric.headerAvatarSize,
+                  height: AppMetric.headerAvatarSize,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.xl),
+              Expanded(
+                child: Text(
+                  AppStrings.t(variant.labelKey),
+                  style: TextStyle(
+                    fontSize: AppTextSize.bodyLarge,
+                    color: c.textPrimary,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+              ),
+              if (selected)
+                AppIcon(
+                  HeroAppIcons.check,
+                  size: AppIconSize.lg,
+                  color: AppTheme.brand,
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -339,7 +498,11 @@ extension _DisplayAppearanceHelpers on AppearanceView {
                   ],
                 ),
                 child: color.toARGB32() == selected
-                    ? const AppIcon(HeroAppIcons.check, size: 18, color: Colors.white)
+                    ? const AppIcon(
+                        HeroAppIcons.check,
+                        size: 18,
+                        color: Colors.white,
+                      )
                     : null,
               ),
             ),
@@ -590,6 +753,7 @@ extension _DisplayAppearanceHelpers on AppearanceView {
     String value,
     VoidCallback onTap, {
     IconData? icon,
+    Widget? preview,
   }) {
     final c = context.colors;
     return GestureDetector(
@@ -603,6 +767,12 @@ extension _DisplayAppearanceHelpers on AppearanceView {
             children: [
               if (icon != null) ...[
                 Icon(icon, size: AppIconSize.xl, color: AppTheme.brand),
+                const SizedBox(width: AppSpacing.xl),
+              ] else if (preview != null) ...[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                  child: preview,
+                ),
                 const SizedBox(width: AppSpacing.xl),
               ],
               Text(

@@ -199,6 +199,14 @@ abstract final class AppStringKeys {
   static const apiCredentialsCustomClientApi = 'apiCredentialsCustomClientApi';
   static const apiCredentialsDescription = 'apiCredentialsDescription';
   static const apiCredentialsTitle = 'apiCredentialsTitle';
+  static const appIconBlueGradient = 'appIconBlueGradient';
+  static const appIconChangeFailed = 'appIconChangeFailed';
+  static const appIconDefault = 'appIconDefault';
+  static const appIconPixel = 'appIconPixel';
+  static const appIconPurpleGradient = 'appIconPurpleGradient';
+  static const appIconTitle = 'appIconTitle';
+  static const appIconUnsupported = 'appIconUnsupported';
+  static const appIconWhite = 'appIconWhite';
   static const appearanceAddFont = 'appearanceAddFont';
   static const appearanceAddTextFont = 'appearanceAddTextFont';
   static const appearanceCacheCleaned = 'appearanceCacheCleaned';

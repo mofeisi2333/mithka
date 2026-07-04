@@ -53,6 +53,26 @@ import UIKit
     return "\(bundleId)@\(version)+\(build)"
   }
 
+  private static func nativeIconName(_ name: String) -> String? {
+    switch name {
+    case "white": return "MithkaWhite"
+    case "blue": return "MithkaBlue"
+    case "purple": return "MithkaPurple"
+    case "pixel": return "MithkaPixel"
+    default: return nil
+    }
+  }
+
+  private static func flutterIconName(_ name: String?) -> String {
+    switch name {
+    case "MithkaWhite": return "white"
+    case "MithkaBlue": return "blue"
+    case "MithkaPurple": return "purple"
+    case "MithkaPixel": return "pixel"
+    default: return "default"
+    }
+  }
+
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     // Flutter creates the implicit engine before FlutterViewController runs it.
     // Some plugins send an initial platform message during registration, so
@@ -119,6 +139,48 @@ import UIKit
         names.insert(family)
       }
       result(Array(names).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending })
+    }
+
+    let appIconChannel = FlutterMethodChannel(
+      name: "mithka/app_icon",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    appIconChannel.setMethodCallHandler { call, result in
+      switch call.method {
+      case "isSupported":
+        result(UIApplication.shared.supportsAlternateIcons)
+      case "currentIcon":
+        result(Self.flutterIconName(UIApplication.shared.alternateIconName))
+      case "setIcon":
+        guard UIApplication.shared.supportsAlternateIcons else {
+          result(
+            FlutterError(
+              code: "unsupported_platform",
+              message: "Alternate app icons are not supported on this device",
+              details: nil
+            )
+          )
+          return
+        }
+        let args = call.arguments as? [String: Any]
+        let requested = args?["name"] as? String ?? "default"
+        let nativeName = Self.nativeIconName(requested)
+        UIApplication.shared.setAlternateIconName(nativeName) { error in
+          if let error {
+            result(
+              FlutterError(
+                code: "app_icon_failed",
+                message: error.localizedDescription,
+                details: nil
+              )
+            )
+            return
+          }
+          result(nil)
+        }
+      default:
+        result(FlutterMethodNotImplemented)
+      }
     }
 
     let accountBackupChannel = FlutterMethodChannel(

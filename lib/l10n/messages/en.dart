@@ -65,6 +65,15 @@ const enMessages = <String, String>{
   'apiCredentialsDescription':
       "Off by default. When enabled, fill in your own Telegram client API credentials; they take effect on the next launch or after signing in again. Acceleration stays off until every field is filled in.",
   'apiCredentialsTitle': "Video and Download Acceleration",
+  'appIconBlueGradient': "Blue Gradient",
+  'appIconChangeFailed': "Failed to change app icon",
+  'appIconDefault': "Default",
+  'appIconPixel': "8-bit Pixel",
+  'appIconPurpleGradient': "Purple Gradient",
+  'appIconTitle': "App Icon",
+  'appIconUnsupported':
+      "This platform or launcher may not support changing the app icon.",
+  'appIconWhite': "Pure White",
   'appearanceAddFont': "Add Font",
   'appearanceAddTextFont': "Add Text Font",
   'appearanceCacheCleaned': "Cleaned",

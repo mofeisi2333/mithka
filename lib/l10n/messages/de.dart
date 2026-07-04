@@ -66,6 +66,15 @@ const deMessages = <String, String>{
   'apiCredentialsDescription':
       "Standardmäßig deaktiviert. Nach dem Aktivieren trage deine eigenen Telegram-Client-API-Zugangsdaten ein; sie gelten ab dem nächsten Start oder nach erneuter Anmeldung. Die Beschleunigung bleibt aus, bis alle Felder ausgefüllt sind.",
   'apiCredentialsTitle': "Video- und Downloadbeschleunigung",
+  'appIconBlueGradient': "Blauer Verlauf",
+  'appIconChangeFailed': "App-Symbol konnte nicht geändert werden",
+  'appIconDefault': "Standard",
+  'appIconPixel': "8-Bit-Pixel",
+  'appIconPurpleGradient': "Violetter Verlauf",
+  'appIconTitle': "App-Symbol",
+  'appIconUnsupported':
+      "Diese Plattform oder dieser Launcher unterstützt das Ändern des App-Symbols möglicherweise nicht.",
+  'appIconWhite': "Reines Weiß",
   'appearanceAddFont': "Schriftart hinzufügen",
   'appearanceAddTextFont': "Textschrift hinzufügen",
   'appearanceCacheCleaned': "Bereinigt",

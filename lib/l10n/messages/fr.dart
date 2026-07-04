@@ -68,6 +68,15 @@ const frMessages = <String, String>{
   'apiCredentialsDescription':
       "Désactivé par défaut. Une fois activé, renseignez vos propres identifiants d’API client Telegram ; ils prendront effet au prochain démarrage ou après une nouvelle connexion. L’accélération reste désactivée tant que tous les champs ne sont pas remplis.",
   'apiCredentialsTitle': "Vidéo et accélération des téléchargements",
+  'appIconBlueGradient': "Dégradé bleu",
+  'appIconChangeFailed': "Impossible de changer l’icône de l’app",
+  'appIconDefault': "Par défaut",
+  'appIconPixel': "Pixel 8-bit",
+  'appIconPurpleGradient': "Dégradé violet",
+  'appIconTitle': "Icône de l’app",
+  'appIconUnsupported':
+      "Cette plateforme ou ce lanceur peut ne pas prendre en charge le changement d’icône.",
+  'appIconWhite': "Blanc pur",
   'appearanceAddFont': "Ajouter une police",
   'appearanceAddTextFont': "Ajouter une police de texte",
   'appearanceCacheCleaned': "Nettoyé",

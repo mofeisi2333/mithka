@@ -36,6 +36,7 @@ import 'l10n/app_localizations.dart';
 import 'l10n/telegram_language_controller.dart';
 import 'notifications/notification_controller.dart';
 import 'notifications/push_device_registrar.dart';
+import 'settings/app_icon_controller.dart';
 import 'settings/keyword_blocker.dart';
 import 'settings/translation_controller.dart';
 import 'theme/app_theme.dart';
@@ -196,6 +197,7 @@ class _MithkaAppState extends State<MithkaApp> {
   late final dc.DrawerController _drawer = dc.DrawerController();
   late final ChatDeepLinkController _chatDeepLinks =
       ChatDeepLinkController.shared;
+  late final AppIconController _appIcons = AppIconController(widget.prefs);
 
   @override
   void initState() {
@@ -203,6 +205,7 @@ class _MithkaAppState extends State<MithkaApp> {
     _theme.loadSelectedEmojiFontIfAvailable();
     _auth.start();
     unawaited(_telegramLanguage.initialize(widget.prefs));
+    unawaited(_appIcons.initialize());
     unawaited(_accounts.recoverPendingAddOnStartup(_auth));
     NotificationController.shared.start();
     PushDeviceRegistrar.shared.start();
@@ -262,6 +265,7 @@ class _MithkaAppState extends State<MithkaApp> {
         ),
         ChangeNotifierProvider.value(value: _accounts),
         ChangeNotifierProvider.value(value: _chatDeepLinks),
+        ChangeNotifierProvider.value(value: _appIcons),
         ChangeNotifierProvider<dc.DrawerController>.value(value: _drawer),
       ],
       child: Consumer3<ThemeController, AccountStore, AppLocaleController>(
