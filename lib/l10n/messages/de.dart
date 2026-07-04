@@ -201,7 +201,13 @@ const deMessages = <String, String>{
   'chatCannotSendMessages': "Du kannst in diesem Chat keine Nachrichten senden",
   'chatContactCallsOnly': "Anrufe sind nur mit Kontakten möglich",
   'chatDelete': "Löschen",
+  'chatDeleteActionsDone': "Erledigt",
+  'chatDeleteActionsFailed': "Aktion konnte nicht ausgeführt werden: {value1}",
   'chatDeleteMessagesQuestion': "Nachrichten löschen?",
+  'chatDeleteOptionBlockSender': "Absender blockieren",
+  'chatDeleteOptionDeleteAllFromSender': "Alle von {value1} löschen",
+  'chatDeleteOptionDeleteMessage': "Diese Nachricht löschen",
+  'chatDeleteOptionReportSpam': "Spam melden",
   'chatDeleteSelectedMessagesConfirmation':
       "Möchtest du die ausgewählten {value1} Nachrichten löschen?",
   'chatDeleteSingleMessageQuestion': "Möchtest du diese Nachricht löschen?",

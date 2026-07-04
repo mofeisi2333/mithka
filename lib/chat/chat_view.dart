@@ -51,6 +51,222 @@ import 'sticker_viewer.dart';
 import 'video_player_view.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 
+class _MessageDeleteOptions {
+  const _MessageDeleteOptions({
+    required this.deleteMessage,
+    required this.reportSpam,
+    required this.blockSender,
+    required this.deleteAllFromSender,
+  });
+
+  final bool deleteMessage;
+  final bool reportSpam;
+  final bool blockSender;
+  final bool deleteAllFromSender;
+
+  bool get hasAny =>
+      deleteMessage || reportSpam || blockSender || deleteAllFromSender;
+}
+
+class _MessageDeleteOptionsDialog extends StatefulWidget {
+  const _MessageDeleteOptionsDialog({
+    required this.canActOnSender,
+    required this.senderName,
+  });
+
+  final bool canActOnSender;
+  final String senderName;
+
+  @override
+  State<_MessageDeleteOptionsDialog> createState() =>
+      _MessageDeleteOptionsDialogState();
+}
+
+class _MessageDeleteOptionsDialogState
+    extends State<_MessageDeleteOptionsDialog> {
+  bool _deleteMessage = true;
+  bool _reportSpam = false;
+  bool _blockSender = false;
+  bool _deleteAllFromSender = false;
+
+  _MessageDeleteOptions get _options => _MessageDeleteOptions(
+    deleteMessage: _deleteMessage,
+    reportSpam: _reportSpam,
+    blockSender: _blockSender,
+    deleteAllFromSender: _deleteAllFromSender,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final options = _options;
+    return Center(
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          width: math.min(MediaQuery.of(context).size.width - 40, 420),
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 18),
+          decoration: BoxDecoration(
+            color: c.card,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.2),
+                blurRadius: 26,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                AppStringKeys.chatDeleteSingleMessageQuestion.l10n(context),
+                style: TextStyle(
+                  fontSize: 19,
+                  height: 1.28,
+                  fontWeight: FontWeight.w700,
+                  color: c.textPrimary,
+                  decoration: TextDecoration.none,
+                ),
+              ),
+              const SizedBox(height: 22),
+              _optionRow(
+                label: AppStringKeys.chatDeleteOptionDeleteMessage.l10n(
+                  context,
+                ),
+                value: _deleteMessage,
+                onTap: () => setState(() => _deleteMessage = !_deleteMessage),
+              ),
+              if (widget.canActOnSender) ...[
+                _optionRow(
+                  label: AppStringKeys.chatDeleteOptionReportSpam.l10n(context),
+                  value: _reportSpam,
+                  onTap: () => setState(() => _reportSpam = !_reportSpam),
+                ),
+                _optionRow(
+                  label: AppStringKeys.chatDeleteOptionBlockSender.l10n(
+                    context,
+                  ),
+                  value: _blockSender,
+                  onTap: () => setState(() => _blockSender = !_blockSender),
+                ),
+                _optionRow(
+                  label: AppStrings.t(
+                    AppStringKeys.chatDeleteOptionDeleteAllFromSender,
+                    {'value1': widget.senderName},
+                  ),
+                  value: _deleteAllFromSender,
+                  onTap: () => setState(
+                    () => _deleteAllFromSender = !_deleteAllFromSender,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 14),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  _dialogButton(
+                    label: AppStringKeys.countryPickerCancel.l10n(context),
+                    color: c.textSecondary,
+                    onTap: () => Navigator.of(context).pop(),
+                  ),
+                  const SizedBox(width: 10),
+                  _dialogButton(
+                    label: AppStringKeys.chatDelete.l10n(context),
+                    color: options.hasAny
+                        ? const Color(0xFFFF6961)
+                        : c.textTertiary,
+                    onTap: options.hasAny
+                        ? () => Navigator.of(context).pop(options)
+                        : null,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _optionRow({
+    required String label,
+    required bool value,
+    required VoidCallback onTap,
+  }) {
+    final c = context.colors;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 9),
+        child: Row(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 140),
+              width: 26,
+              height: 26,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: value ? AppTheme.brand : Colors.transparent,
+                borderRadius: BorderRadius.circular(5),
+                border: Border.all(
+                  color: value ? AppTheme.brand : c.textTertiary,
+                  width: 2,
+                ),
+              ),
+              child: value
+                  ? const AppIcon(
+                      HeroAppIcons.check,
+                      size: 17,
+                      color: Colors.white,
+                    )
+                  : null,
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 17,
+                  height: 1.25,
+                  color: c.textPrimary,
+                  decoration: TextDecoration.none,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _dialogButton({
+    required String label,
+    required Color color,
+    required VoidCallback? onTap,
+  }) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+            color: color,
+            decoration: TextDecoration.none,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class ChatView extends StatefulWidget {
   const ChatView({
     super.key,
@@ -1518,16 +1734,71 @@ class _ChatViewState extends State<ChatView> {
           );
         }
       case MessageAction.delete:
-        final confirmed = await confirmDialog(
-          context,
-          title: AppStringKeys.chatDeleteMessagesQuestion,
-          message: AppStringKeys.chatDeleteSingleMessageQuestion,
-          confirmText: AppStringKeys.chatDelete,
-          destructive: true,
-        );
-        if (!mounted || !confirmed) return;
-        _vm.deleteMessage(message.id);
+        await _performDeleteAction(message);
     }
+  }
+
+  Future<void> _performDeleteAction(ChatMessage message) async {
+    final options = await _confirmMessageDeleteOptions(message);
+    if (!mounted || options == null) return;
+    try {
+      if (options.reportSpam) {
+        await _vm.reportMessage(message);
+      }
+      if (options.blockSender) {
+        await _vm.blockSender(message);
+      }
+      if (options.deleteAllFromSender) {
+        await _vm.deleteMessagesFromSender(message);
+      } else if (options.deleteMessage) {
+        _vm.deleteMessage(message.id);
+      }
+      if (!mounted) return;
+      showToast(context, AppStringKeys.chatDeleteActionsDone);
+    } catch (e) {
+      if (!mounted) return;
+      showToast(
+        context,
+        AppStrings.t(AppStringKeys.chatDeleteActionsFailed, {'value1': e}),
+      );
+    }
+  }
+
+  Future<_MessageDeleteOptions?> _confirmMessageDeleteOptions(
+    ChatMessage message,
+  ) {
+    final senderName = _deleteSenderName(message);
+    return showGeneralDialog<_MessageDeleteOptions>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: AppStrings.t(AppStringKeys.countryPickerCancel),
+      barrierColor: Colors.black.withValues(alpha: 0.42),
+      transitionDuration: const Duration(milliseconds: 180),
+      pageBuilder: (dialogContext, _, _) => _MessageDeleteOptionsDialog(
+        canActOnSender: !message.isOutgoing && message.senderId != null,
+        senderName: senderName,
+      ),
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return FadeTransition(
+          opacity: curved,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.98, end: 1).animate(curved),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
+  String _deleteSenderName(ChatMessage message) {
+    final name = (message.senderName ?? message.senderTitle ?? '').trim();
+    if (name.isNotEmpty) return name;
+    return AppStrings.t(AppStringKeys.topicChatUsers);
   }
 
   Future<void> _showTextSelection(ChatMessage message) async {

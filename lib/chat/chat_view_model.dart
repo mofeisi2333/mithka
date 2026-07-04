@@ -1092,6 +1092,24 @@ class ChatViewModel extends ChangeNotifier {
     _removeMessages(ids);
   }
 
+  Future<void> deleteMessagesFromSender(ChatMessage message) async {
+    final senderId = message.senderId;
+    final sender = _messageSenderFor(message);
+    if (senderId == null || sender == null) {
+      throw TdError({'message': 'Missing message sender'});
+    }
+    await _client.query({
+      '@type': 'deleteChatMessagesBySender',
+      'chat_id': chatId,
+      'sender_id': sender,
+    });
+    final ids = _allMessages
+        .where((candidate) => candidate.senderId == senderId)
+        .map((candidate) => candidate.id)
+        .toList();
+    _removeMessages(ids);
+  }
+
   Future<void> reportMessage(ChatMessage message) async {
     await _reportTelegramContent(message);
     unawaited(
@@ -1102,7 +1120,7 @@ class ChatViewModel extends ChangeNotifier {
     );
   }
 
-  Future<void> blockAndReportSender(ChatMessage message) async {
+  Future<void> blockSender(ChatMessage message) async {
     final senderId = message.senderId;
     final sender = _messageSenderFor(message);
     if (senderId == null || sender == null) {
@@ -1121,6 +1139,10 @@ class ChatViewModel extends ChangeNotifier {
       _applyKeywordFilter();
       rethrow;
     }
+  }
+
+  Future<void> blockAndReportSender(ChatMessage message) async {
+    await blockSender(message);
     unawaited(_reportTelegramContent(message).catchError((_) {}));
     unawaited(
       _notifyDeveloperContentReport(

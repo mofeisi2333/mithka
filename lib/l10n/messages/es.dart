@@ -197,7 +197,13 @@ const esMessages = <String, String>{
   'chatCannotSendMessages': "No puedes enviar mensajes en este chat",
   'chatContactCallsOnly': "Solo se permiten llamadas con contactos",
   'chatDelete': "Eliminar",
+  'chatDeleteActionsDone': "Listo",
+  'chatDeleteActionsFailed': "No se pudo aplicar la acción: {value1}",
   'chatDeleteMessagesQuestion': "¿Eliminar mensajes?",
+  'chatDeleteOptionBlockSender': "Bloquear remitente",
+  'chatDeleteOptionDeleteAllFromSender': "Eliminar todo de {value1}",
+  'chatDeleteOptionDeleteMessage': "Eliminar este mensaje",
+  'chatDeleteOptionReportSpam': "Reportar spam",
   'chatDeleteSelectedMessagesConfirmation':
       "¿Seguro que quieres eliminar los {value1} mensajes seleccionados?",
   'chatDeleteSingleMessageQuestion':

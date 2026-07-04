@@ -205,7 +205,13 @@ const frMessages = <String, String>{
       "Vous ne pouvez pas envoyer de messages dans cette discussion",
   'chatContactCallsOnly': "Appels disponibles uniquement avec les contacts",
   'chatDelete': "Supprimer",
+  'chatDeleteActionsDone': "Terminé",
+  'chatDeleteActionsFailed': "Impossible d’appliquer l’action : {value1}",
   'chatDeleteMessagesQuestion': "Supprimer les messages ?",
+  'chatDeleteOptionBlockSender': "Bloquer l’expéditeur",
+  'chatDeleteOptionDeleteAllFromSender': "Tout supprimer de {value1}",
+  'chatDeleteOptionDeleteMessage': "Supprimer ce message",
+  'chatDeleteOptionReportSpam': "Signaler comme spam",
   'chatDeleteSelectedMessagesConfirmation':
       "Supprimer les {value1} messages sélectionnés ?",
   'chatDeleteSingleMessageQuestion': "Supprimer ce message ?",

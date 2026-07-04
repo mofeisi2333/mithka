@@ -197,7 +197,13 @@ const enMessages = <String, String>{
   'chatCannotSendMessages': "You can’t send messages in this chat",
   'chatContactCallsOnly': "Calls are only supported with contacts",
   'chatDelete': "Delete",
+  'chatDeleteActionsDone': "Done",
+  'chatDeleteActionsFailed': "Could not apply action: {value1}",
   'chatDeleteMessagesQuestion': "Delete messages?",
+  'chatDeleteOptionBlockSender': "Block sender",
+  'chatDeleteOptionDeleteAllFromSender': "Delete all from {value1}",
+  'chatDeleteOptionDeleteMessage': "Delete this message",
+  'chatDeleteOptionReportSpam': "Report spam",
   'chatDeleteSelectedMessagesConfirmation':
       "Delete the selected {value1} messages?",
   'chatDeleteSingleMessageQuestion': "Delete this message?",

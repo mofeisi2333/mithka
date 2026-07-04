@@ -82,10 +82,6 @@ class MessageActionMenu extends StatelessWidget {
     }
     result.add(MessageAction.reply);
     result.add(MessageAction.forward);
-    if (!message.isOutgoing && message.senderId != null) {
-      result.add(MessageAction.report);
-      result.add(MessageAction.block);
-    }
     if (message.video != null && source == MessageActionSource.video) {
       result.add(MessageAction.playMuted);
     }
