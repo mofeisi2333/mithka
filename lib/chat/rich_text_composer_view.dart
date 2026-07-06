@@ -377,35 +377,52 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
           _toolbar(c),
           if (widget.allowMedia) _mediaStrip(c),
           Expanded(
-            child: Column(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    autofocus: true,
-                    maxLines: null,
-                    expands: true,
-                    textAlignVertical: TextAlignVertical.top,
-                    contextMenuBuilder: (context, editableTextState) {
-                      return AdaptiveTextSelectionToolbar.editableText(
-                        editableTextState: editableTextState,
-                      );
-                    },
-                    style: TextStyle(
-                      fontSize: 16,
-                      height: 1.4,
-                      color: c.textPrimary,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+                return SingleChildScrollView(
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.manual,
+                  padding: EdgeInsets.only(bottom: 18 + keyboardInset),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: constraints.maxHeight,
                     ),
-                    decoration: InputDecoration(
-                      contentPadding: const EdgeInsets.all(16),
-                      border: InputBorder.none,
-                      hintText: widget.hintText.l10n(context),
-                      hintStyle: TextStyle(color: c.textTertiary),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        SizedBox(
+                          height: _editorHeight(constraints.maxHeight),
+                          child: TextField(
+                            controller: _controller,
+                            autofocus: true,
+                            maxLines: null,
+                            expands: true,
+                            textAlignVertical: TextAlignVertical.top,
+                            contextMenuBuilder: (context, editableTextState) {
+                              return AdaptiveTextSelectionToolbar.editableText(
+                                editableTextState: editableTextState,
+                              );
+                            },
+                            style: TextStyle(
+                              fontSize: 16,
+                              height: 1.4,
+                              color: c.textPrimary,
+                            ),
+                            decoration: InputDecoration(
+                              contentPadding: const EdgeInsets.all(16),
+                              border: InputBorder.none,
+                              hintText: widget.hintText.l10n(context),
+                              hintStyle: TextStyle(color: c.textTertiary),
+                            ),
+                          ),
+                        ),
+                        if (_tables.isNotEmpty) _inlineTables(c),
+                      ],
                     ),
                   ),
-                ),
-                if (_tables.isNotEmpty) _tableStrip(c),
-              ],
+                );
+              },
             ),
           ),
         ],
@@ -430,19 +447,27 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
     );
   }
 
-  Widget _tableStrip(AppColors c) {
-    final height = MediaQuery.sizeOf(context).height * 0.34;
-    return Container(
-      constraints: BoxConstraints(maxHeight: height.clamp(220, 320)),
+  double _editorHeight(double availableHeight) {
+    if (_tables.isEmpty) return availableHeight;
+    return (availableHeight * 0.52).clamp(180.0, 360.0);
+  }
+
+  Widget _inlineTables(AppColors c) {
+    return DecoratedBox(
       decoration: BoxDecoration(
-        color: c.searchFill.withValues(alpha: 0.42),
+        color: c.searchFill.withValues(alpha: 0.24),
         border: Border(top: BorderSide(color: c.divider)),
       ),
-      child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
-        itemCount: _tables.length,
-        separatorBuilder: (_, _) => const SizedBox(height: 10),
-        itemBuilder: (context, index) => _tableEditor(c, index),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+        child: Column(
+          children: [
+            for (var index = 0; index < _tables.length; index++) ...[
+              if (index > 0) const SizedBox(height: 10),
+              _tableEditor(c, index),
+            ],
+          ],
+        ),
       ),
     );
   }
