@@ -13,6 +13,7 @@ import 'package:provider/provider.dart';
 
 import '../chat/chat_members_view.dart';
 import '../chat/chat_picker_view.dart';
+import '../chat/chat_view.dart';
 import '../chat/custom_emoji.dart';
 import '../chat/rich_text_composer_view.dart';
 import '../chat/rich_text_format.dart';
@@ -40,6 +41,7 @@ class TopicChatView extends StatefulWidget {
     this.showBackButton = true,
     this.headerHeight = 48,
     this.headerColor,
+    this.chatRouteBelow = false,
   });
 
   final ChatSummary chat;
@@ -48,6 +50,7 @@ class TopicChatView extends StatefulWidget {
   final bool showBackButton;
   final double headerHeight;
   final Color? headerColor;
+  final bool chatRouteBelow;
 
   @override
   State<TopicChatView> createState() => _TopicChatViewState();
@@ -515,6 +518,22 @@ class _TopicChatViewState extends State<TopicChatView> {
     );
   }
 
+  void _openChatView() {
+    if (widget.chatRouteBelow) {
+      Navigator.of(context).pop();
+      return;
+    }
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => ChatView(
+          chatId: widget.chat.id,
+          title: widget.chat.title,
+          seedMessage: widget.chat.lastChatMessage,
+        ),
+      ),
+    );
+  }
+
   void _openComments(_TopicPost post, _SenderInfo? sender) {
     showModalBottomSheet(
       context: context,
@@ -811,6 +830,19 @@ class _TopicChatViewState extends State<TopicChatView> {
               padding: const EdgeInsets.all(4),
               child: AppIcon(
                 HeroAppIcons.magnifyingGlass,
+                size: 25,
+                color: c.textPrimary,
+              ),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _openChatView,
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: AppIcon(
+                HeroAppIcons.message,
                 size: 25,
                 color: c.textPrimary,
               ),

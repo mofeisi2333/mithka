@@ -2679,8 +2679,11 @@ class _ChatViewState extends State<ChatView> {
   void _openTopicMode([int? threadId]) {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) =>
-            TopicChatView(chat: _topicChatSummary(), initialThreadId: threadId),
+        builder: (_) => TopicChatView(
+          chat: _topicChatSummary(),
+          initialThreadId: threadId,
+          chatRouteBelow: true,
+        ),
       ),
     );
   }
