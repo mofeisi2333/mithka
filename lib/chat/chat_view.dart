@@ -4173,7 +4173,7 @@ class _MessageTextSelectionSheetState
         borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
         clipBehavior: Clip.antiAlias,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 10, 18, 18),
+          padding: const EdgeInsets.fromLTRB(36, 22, 36, 34),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -4185,7 +4185,7 @@ class _MessageTextSelectionSheetState
                   borderRadius: BorderRadius.circular(999),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 24),
               ConstrainedBox(
                 constraints: BoxConstraints(
                   maxHeight: MediaQuery.sizeOf(context).height * 0.62,
@@ -4204,7 +4204,7 @@ class _MessageTextSelectionSheetState
                         isCollapsed: true,
                       ),
                       style: TextStyle(
-                        fontSize: 16,
+                        fontSize: 32,
                         height: 1.35,
                         color: c.textPrimary,
                       ),
