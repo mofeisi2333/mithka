@@ -3678,7 +3678,7 @@ class _ChatViewState extends State<ChatView> {
     final showActionMenu = !_reactionExpanded;
 
     final reactionH = _reactionExpanded ? 268.0 : 48.0;
-    final menuH = showActionMenu ? 84.0 : 0.0;
+    final menuH = showActionMenu ? MessageActionMenu.preferredHeight : 0.0;
     const gap = 8.0;
     final menuGap = showActionMenu ? gap : 0.0;
 

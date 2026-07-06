@@ -62,6 +62,7 @@ class MessageActionMenu extends StatelessWidget {
 
   static const _surface = Color(0xFF2C2C2E);
   static const _destructive = Color(0xFFFF6961);
+  static const preferredHeight = 152.0;
 
   bool get _isEditableTextMessage =>
       message.contentType == 'messageText' && message.text.isNotEmpty;
@@ -105,64 +106,120 @@ class MessageActionMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final actions = _actions(context.watch<TranslationController>().enabled);
-    // A single content-width row — never pad out to a second row when there
-    // are only a handful of actions. Wraps to a second line only past 5.
-    // Single horizontal row (scrolls if it ever overflows) — never a 5+1 wrap.
-    return Container(
-      constraints: BoxConstraints(
-        maxWidth: MediaQuery.of(context).size.width - 24,
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
-      decoration: BoxDecoration(
-        color: _surface,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.3),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final action in actions)
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => onSelect(action),
-                child: SizedBox(
-                  width: 52,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        action.glyph.data,
-                        size: 22,
-                        color: action.isDestructive
-                            ? _destructive
-                            : Colors.white,
-                      ),
-                      const SizedBox(height: 7),
-                      Text(
-                        telegramText(action.label),
-                        maxLines: 1,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: action.isDestructive
-                              ? _destructive
-                              : Colors.white,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+    final firstRowCount = actions.length <= 5
+        ? actions.length
+        : actions.length <= 10
+        ? 5
+        : (actions.length + 1) ~/ 2;
+    final firstRow = actions.take(firstRowCount).toList();
+    final secondRow = actions.skip(firstRowCount).toList();
+    final columnCount = secondRow.isEmpty
+        ? firstRow.length
+        : firstRow.length > secondRow.length
+        ? firstRow.length
+        : secondRow.length;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxWidth = MediaQuery.of(context).size.width - 24;
+        final availableWidth = constraints.hasBoundedWidth
+            ? constraints.maxWidth.clamp(0.0, maxWidth)
+            : maxWidth;
+        final itemWidth = columnCount == 0
+            ? 58.0
+            : ((availableWidth - 16) / columnCount).clamp(48.0, 72.0);
+        final menuWidth = (itemWidth * columnCount + 16).clamp(0.0, maxWidth);
+        return Container(
+          width: menuWidth,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 13),
+          decoration: BoxDecoration(
+            color: _surface,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.3),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
               ),
-          ],
-        ),
-      ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _ActionRow(
+                actions: firstRow,
+                itemWidth: itemWidth,
+                onSelect: onSelect,
+              ),
+              if (secondRow.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Container(
+                  height: 1,
+                  color: Colors.white.withValues(alpha: 0.08),
+                ),
+                const SizedBox(height: 12),
+                _ActionRow(
+                  actions: secondRow,
+                  itemWidth: itemWidth,
+                  onSelect: onSelect,
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ActionRow extends StatelessWidget {
+  const _ActionRow({
+    required this.actions,
+    required this.itemWidth,
+    required this.onSelect,
+  });
+
+  final List<MessageAction> actions;
+  final double itemWidth;
+  final ValueChanged<MessageAction> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final action in actions)
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => onSelect(action),
+            child: SizedBox(
+              width: itemWidth,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AppIcon(
+                    action.glyph,
+                    size: 22,
+                    color: action.isDestructive
+                        ? MessageActionMenu._destructive
+                        : Colors.white,
+                  ),
+                  const SizedBox(height: 7),
+                  Text(
+                    telegramText(action.label),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: action.isDestructive
+                          ? MessageActionMenu._destructive
+                          : Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
