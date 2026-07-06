@@ -84,8 +84,8 @@ class _ForumTopicBrowserViewState extends State<ForumTopicBrowserView> {
         'query': '',
         'offset_date': 0,
         'offset_message_id': 0,
-        'offset_message_thread_id': 0,
-        'limit': 120,
+        'offset_forum_topic_id': 0,
+        'limit': 100,
       });
       final rawTopics =
           response.objects('topics') ?? const <Map<String, dynamic>>[];
@@ -94,8 +94,7 @@ class _ForumTopicBrowserViewState extends State<ForumTopicBrowserView> {
         final info = topic.obj('info') ?? topic;
         final last = topic.obj('last_message');
         final message = last == null ? null : TDParse.message(last);
-        final id =
-            info.int64('message_thread_id') ?? topic.int64('message_thread_id');
+        final id = _topicId(topic, info);
         if (id == null || id == 0) continue;
         topics.add(
           _ForumTopicEntry(
@@ -111,10 +110,13 @@ class _ForumTopicBrowserViewState extends State<ForumTopicBrowserView> {
                 0,
             iconCustomEmojiId: _topicCustomEmojiId(topic, info),
             iconColor: _topicIconColor(topic, info),
+            order: topic.int64('order') ?? 0,
           ),
         );
       }
       topics.sort((a, b) {
+        final order = b.order.compareTo(a.order);
+        if (order != 0) return order;
         final bd = b.lastMessage?.date ?? 0;
         final ad = a.lastMessage?.date ?? 0;
         return bd.compareTo(ad);
@@ -136,6 +138,13 @@ class _ForumTopicBrowserViewState extends State<ForumTopicBrowserView> {
         info.integer('unread_mention_count') ??
         0;
     return count < 0 ? 0 : count;
+  }
+
+  int? _topicId(Map<String, dynamic> topic, Map<String, dynamic> info) {
+    return info.integer('forum_topic_id') ??
+        topic.integer('forum_topic_id') ??
+        info.int64('message_thread_id') ??
+        topic.int64('message_thread_id');
   }
 
   int _topicCustomEmojiId(
@@ -255,6 +264,7 @@ class _ForumTopicEntry {
     this.isMuted = false,
     this.iconCustomEmojiId = 0,
     this.iconColor,
+    this.order = 0,
   });
 
   final int id;
@@ -264,6 +274,7 @@ class _ForumTopicEntry {
   final bool isMuted;
   final int iconCustomEmojiId;
   final Color? iconColor;
+  final int order;
 }
 
 class _ForumChatRailItem extends StatelessWidget {

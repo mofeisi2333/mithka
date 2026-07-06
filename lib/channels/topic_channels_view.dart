@@ -121,7 +121,7 @@ class _TopicChannelsViewState extends State<TopicChannelsView> {
         'query': '',
         'offset_date': 0,
         'offset_message_id': 0,
-        'offset_message_thread_id': 0,
+        'offset_forum_topic_id': 0,
         'limit': 40,
       });
       final topics =
@@ -132,10 +132,7 @@ class _TopicChannelsViewState extends State<TopicChannelsView> {
         final info = topic.obj('info') ?? topic;
         final last = topic.obj('last_message');
         final parsedLast = last == null ? null : TDParse.message(last);
-        final threadId =
-            info.int64('message_thread_id') ??
-            topic.int64('message_thread_id') ??
-            parsedLast?.id;
+        final threadId = _topicId(topic, info) ?? parsedLast?.id;
         final messages = await _recentRootPostsForTopic(
           chat.id,
           threadId,
@@ -169,6 +166,13 @@ class _TopicChannelsViewState extends State<TopicChannelsView> {
     }
   }
 
+  int? _topicId(Map<String, dynamic> topic, Map<String, dynamic> info) {
+    return info.integer('forum_topic_id') ??
+        topic.integer('forum_topic_id') ??
+        info.int64('message_thread_id') ??
+        topic.int64('message_thread_id');
+  }
+
   Future<bool> _isJoinedChat(ChatSummary chat) async {
     final cached = _joinedChatCache[chat.id];
     if (cached != null) return cached;
@@ -190,14 +194,7 @@ class _TopicChannelsViewState extends State<TopicChannelsView> {
       return fallback == null || fallback.isService ? const [] : [fallback];
     }
     try {
-      final response = await TdClient.shared.query({
-        '@type': 'getMessageThreadHistory',
-        'chat_id': chatId,
-        'message_id': threadId,
-        'from_message_id': 0,
-        'offset': 0,
-        'limit': 30,
-      });
+      final response = await _queryForumTopicHistory(chatId, threadId, 30);
       final messages =
           (response.objects('messages') ?? const <Map<String, dynamic>>[])
               .map(TDParse.message)
@@ -211,6 +208,32 @@ class _TopicChannelsViewState extends State<TopicChannelsView> {
       // Fall through to the topic's last message as a best-effort preview.
     }
     return fallback == null || fallback.isService ? const [] : [fallback];
+  }
+
+  Future<Map<String, dynamic>> _queryForumTopicHistory(
+    int chatId,
+    int forumTopicId,
+    int limit,
+  ) async {
+    try {
+      return await TdClient.shared.query({
+        '@type': 'getForumTopicHistory',
+        'chat_id': chatId,
+        'forum_topic_id': forumTopicId,
+        'from_message_id': 0,
+        'offset': 0,
+        'limit': limit,
+      });
+    } catch (_) {
+      return TdClient.shared.query({
+        '@type': 'getMessageThreadHistory',
+        'chat_id': chatId,
+        'message_id': forumTopicId,
+        'from_message_id': 0,
+        'offset': 0,
+        'limit': limit,
+      });
+    }
   }
 
   void _toggleNonMutedOnly() {

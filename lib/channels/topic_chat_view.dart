@@ -149,7 +149,7 @@ class _TopicChatViewState extends State<TopicChatView> {
         'query': '',
         'offset_date': 0,
         'offset_message_id': 0,
-        'offset_message_thread_id': 0,
+        'offset_forum_topic_id': 0,
         'limit': 80,
       });
       final rawTopics =
@@ -159,18 +159,17 @@ class _TopicChatViewState extends State<TopicChatView> {
         final info = topic.obj('info') ?? topic;
         final last = topic.obj('last_message');
         final message = last == null ? null : TDParse.message(last);
-        if (message == null || message.isService) continue;
+        if (message?.isService == true) continue;
+        final id = _topicId(topic, info) ?? message?.id;
+        if (id == null || id == 0) continue;
         next.add(
           _ForumTopic(
-            id:
-                info.int64('message_thread_id') ??
-                topic.int64('message_thread_id') ??
-                message.id,
+            id: id,
             name:
                 info.str('name') ??
                 topic.str('name') ??
                 AppStringKeys.topicChatTopicTitle,
-            lastMessage: message,
+            lastMessage: message ?? _fallbackTopicMessage(id, info, topic),
             isPinned: topic.boolean('is_pinned') ?? false,
             isMuted:
                 (topic.obj('notification_settings')?.integer('mute_for') ?? 0) >
@@ -210,14 +209,10 @@ class _TopicChatViewState extends State<TopicChatView> {
     }
     _loadingThreads.add(topic.id);
     try {
-      final response = await TdClient.shared.query({
-        '@type': 'getMessageThreadHistory',
-        'chat_id': widget.chat.id,
-        'message_id': topic.id,
-        'from_message_id': 0,
-        'offset': 0,
-        'limit': _selectedThreadId == null ? 6 : 40,
-      });
+      final response = await _queryForumTopicHistory(
+        topic.id,
+        _selectedThreadId == null ? 6 : 40,
+      );
       final messages =
           (response.objects('messages') ?? const <Map<String, dynamic>>[])
               .map(TDParse.message)
@@ -236,6 +231,31 @@ class _TopicChatViewState extends State<TopicChatView> {
     } finally {
       _loadingThreads.remove(topic.id);
       if (mounted) setState(() {});
+    }
+  }
+
+  Future<Map<String, dynamic>> _queryForumTopicHistory(
+    int forumTopicId,
+    int limit,
+  ) async {
+    try {
+      return await TdClient.shared.query({
+        '@type': 'getForumTopicHistory',
+        'chat_id': widget.chat.id,
+        'forum_topic_id': forumTopicId,
+        'from_message_id': 0,
+        'offset': 0,
+        'limit': limit,
+      });
+    } catch (_) {
+      return TdClient.shared.query({
+        '@type': 'getMessageThreadHistory',
+        'chat_id': widget.chat.id,
+        'message_id': forumTopicId,
+        'from_message_id': 0,
+        'offset': 0,
+        'limit': limit,
+      });
     }
   }
 
@@ -259,6 +279,32 @@ class _TopicChatViewState extends State<TopicChatView> {
         info.integer('unread_mention_count') ??
         0;
     return count < 0 ? 0 : count;
+  }
+
+  int? _topicId(Map<String, dynamic> topic, Map<String, dynamic> info) {
+    return info.integer('forum_topic_id') ??
+        topic.integer('forum_topic_id') ??
+        info.int64('message_thread_id') ??
+        topic.int64('message_thread_id');
+  }
+
+  ChatMessage _fallbackTopicMessage(
+    int id,
+    Map<String, dynamic> info,
+    Map<String, dynamic> topic,
+  ) {
+    final created =
+        info.integer('creation_date') ?? topic.integer('creation_date') ?? 0;
+    return ChatMessage(
+      id: id,
+      text:
+          info.str('name') ??
+          topic.str('name') ??
+          AppStrings.t(AppStringKeys.topicChatTopicTitle),
+      date: created,
+      isOutgoing: false,
+      chatId: widget.chat.id,
+    );
   }
 
   int _topicCustomEmojiId(
@@ -332,7 +378,7 @@ class _TopicChatViewState extends State<TopicChatView> {
     if (formatted.text.trim().isEmpty) return;
     final threadId = _selectedThreadId;
     try {
-      final request = {
+      final request = <String, dynamic>{
         '@type': 'sendMessage',
         'chat_id': widget.chat.id,
         'input_message_content': {
@@ -340,8 +386,8 @@ class _TopicChatViewState extends State<TopicChatView> {
           'text': formatted.toTdJson(),
         },
       };
-      if (threadId != null) request['message_thread_id'] = threadId;
-      await TdClient.shared.query(request);
+      if (threadId != null) _attachForumTopic(request, threadId);
+      await _sendForumMessage(request);
       _input.clear();
       _topicMessages.clear();
       await _loadTopics();
@@ -369,7 +415,7 @@ class _TopicChatViewState extends State<TopicChatView> {
       final file = result.media[i];
       final caption = i == 0 ? result.formattedText.toTdJson() : null;
       final isVideo = _isVideoPath(file.path);
-      final request = {
+      final request = <String, dynamic>{
         '@type': 'sendMessage',
         'chat_id': widget.chat.id,
         'input_message_content': {
@@ -385,8 +431,8 @@ class _TopicChatViewState extends State<TopicChatView> {
             'caption': caption,
         },
       };
-      if (threadId != null) request['message_thread_id'] = threadId;
-      await TdClient.shared.query(request);
+      if (threadId != null) _attachForumTopic(request, threadId);
+      await _sendForumMessage(request);
     }
     _input.clear();
     _topicMessages.clear();
@@ -399,6 +445,35 @@ class _TopicChatViewState extends State<TopicChatView> {
         lower.endsWith('.mov') ||
         lower.endsWith('.m4v') ||
         lower.endsWith('.webm');
+  }
+
+  void _attachForumTopic(Map<String, dynamic> request, int forumTopicId) {
+    request['topic_id'] = {
+      '@type': 'messageTopicForum',
+      'forum_topic_id': forumTopicId,
+    };
+    request['message_thread_id'] = forumTopicId;
+  }
+
+  Future<void> _sendForumMessage(Map<String, dynamic> request) async {
+    try {
+      await TdClient.shared.query(request);
+      return;
+    } catch (_) {
+      if (!request.containsKey('topic_id') ||
+          !request.containsKey('message_thread_id')) {
+        rethrow;
+      }
+    }
+    try {
+      await TdClient.shared.query(
+        Map<String, dynamic>.from(request)..remove('message_thread_id'),
+      );
+      return;
+    } catch (_) {}
+    await TdClient.shared.query(
+      Map<String, dynamic>.from(request)..remove('topic_id'),
+    );
   }
 
   void _openSearch() {
@@ -1315,6 +1390,10 @@ class _TopicCommentsSheetState extends State<_TopicCommentsSheet> {
     final request = {
       '@type': 'sendMessage',
       'chat_id': widget.chatId,
+      'topic_id': {
+        '@type': 'messageTopicForum',
+        'forum_topic_id': widget.post.topic.id,
+      },
       'message_thread_id': widget.post.topic.id,
       'reply_to': {
         '@type': 'inputMessageReplyToMessage',
@@ -1326,12 +1405,17 @@ class _TopicCommentsSheetState extends State<_TopicCommentsSheet> {
     try {
       await TdClient.shared.query(request);
     } catch (_) {
-      final fallback = Map<String, dynamic>.from(request)
+      final newOnly = Map<String, dynamic>.from(request)
         ..remove('message_thread_id');
       try {
-        await TdClient.shared.query(fallback);
-      } catch (e) {
-        error = e;
+        await TdClient.shared.query(newOnly);
+      } catch (_) {
+        final oldOnly = Map<String, dynamic>.from(request)..remove('topic_id');
+        try {
+          await TdClient.shared.query(oldOnly);
+        } catch (e) {
+          error = e;
+        }
       }
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -1978,6 +2062,7 @@ class _TopicChannelSettingsViewState extends State<_TopicChannelSettingsView> {
       await TdClient.shared.query({
         '@type': 'toggleForumTopicIsPinned',
         'chat_id': widget.chat.id,
+        'forum_topic_id': topic.id,
         'message_thread_id': topic.id,
         'is_pinned': value,
       });
@@ -2000,6 +2085,7 @@ class _TopicChannelSettingsViewState extends State<_TopicChannelSettingsView> {
       await TdClient.shared.query({
         '@type': 'setForumTopicNotificationSettings',
         'chat_id': widget.chat.id,
+        'forum_topic_id': topic.id,
         'message_thread_id': topic.id,
         'notification_settings': {
           '@type': 'chatNotificationSettings',
@@ -2041,6 +2127,7 @@ class _TopicChannelSettingsViewState extends State<_TopicChannelSettingsView> {
         '@type': 'deleteForumTopic',
         'chat_id': widget.chat.id,
         'forum_topic_id': topic.id,
+        'message_thread_id': topic.id,
       });
       await widget.onTopicChanged();
       if (mounted) Navigator.of(context).pop();

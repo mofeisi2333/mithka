@@ -1346,15 +1346,14 @@ class ChatViewModel extends ChangeNotifier {
         'query': '',
         'offset_date': 0,
         'offset_message_id': 0,
-        'offset_message_thread_id': 0,
+        'offset_forum_topic_id': 0,
         'limit': 80,
       });
       final raw = response.objects('topics') ?? const <Map<String, dynamic>>[];
       final topics = <ForumTopicOption>[];
       for (final topic in raw) {
         final info = topic.obj('info') ?? topic;
-        final id =
-            info.int64('message_thread_id') ?? topic.int64('message_thread_id');
+        final id = _forumTopicId(topic, info);
         if (id == null || id == 0) continue;
         final name =
             info.str('name') ??
@@ -1385,6 +1384,13 @@ class ChatViewModel extends ChangeNotifier {
       forumTopicsLoading = false;
       notifyListeners();
     }
+  }
+
+  int? _forumTopicId(Map<String, dynamic> topic, Map<String, dynamic> info) {
+    return info.integer('forum_topic_id') ??
+        topic.integer('forum_topic_id') ??
+        info.int64('message_thread_id') ??
+        topic.int64('message_thread_id');
   }
 
   int _autoDeleteSeconds(Map<String, dynamic> chat) {
