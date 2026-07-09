@@ -128,8 +128,18 @@ class TelegramLanguageController extends ChangeNotifier {
     if (_initialized) return;
     _initialized = true;
     _prefs = prefs;
+    AppStrings.telegramStringResolver = resolveMappedText;
     final stored = prefs.getString(_selectedPackKey)?.trim();
-    _selectedPackId = stored == null || stored.isEmpty ? null : stored;
+    if (_legacyPackMigrations.containsKey(stored)) {
+      _selectedPackId = _legacyPackMigrations[stored];
+      if (_selectedPackId == null) {
+        await prefs.remove(_selectedPackKey);
+      } else {
+        await prefs.setString(_selectedPackKey, _selectedPackId!);
+      }
+    } else {
+      _selectedPackId = stored == null || stored.isEmpty ? null : stored;
+    }
     _languageUpdates ??= TdClient.shared.subscribe().listen(_handleTdUpdate);
     await refresh();
   }
@@ -198,14 +208,17 @@ class TelegramLanguageController extends ChangeNotifier {
     String appFallbackKey, {
     Map<String, Object?> placeholders = const {},
   }) {
-    final localOverride = _localPackOverrides[_activePackId]?[appFallbackKey];
-    if (localOverride != null && localOverride.trim().isNotEmpty) {
-      return _interpolate(localOverride, placeholders);
-    }
+    return resolveMappedText(appFallbackKey, placeholders) ??
+        AppStrings.tLocal(appFallbackKey, placeholders);
+  }
+
+  String? resolveMappedText(
+    String appFallbackKey,
+    Map<String, Object?> placeholders,
+  ) {
     final telegramKey = _telegramKeyForAppKey[appFallbackKey];
     final template = telegramKey == null ? null : _strings[telegramKey];
-    final fallback = AppStrings.t(appFallbackKey, placeholders);
-    if (template == null || template.trim().isEmpty) return fallback;
+    if (template == null || template.trim().isEmpty) return null;
     return _interpolate(template, placeholders);
   }
 
@@ -256,7 +269,7 @@ class TelegramLanguageController extends ChangeNotifier {
   }
 
   Future<void> _loadAvailablePacks() async {
-    _packs = _localPacks;
+    _packs = _knownRemotePacks;
     final response = await _query({
       '@type': 'getLocalizationTargetInfo',
       'only_local': false,
@@ -268,7 +281,7 @@ class TelegramLanguageController extends ChangeNotifier {
             .toList() ??
         <TelegramLanguagePackOption>[];
     if (packs.isEmpty) {
-      _packs = _localPacks;
+      _packs = _knownRemotePacks;
       return;
     }
     packs.sort((a, b) {
@@ -276,11 +289,14 @@ class TelegramLanguageController extends ChangeNotifier {
       if (official != 0) return official;
       return a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase());
     });
-    _packs = [..._localPacks, ...packs];
+    final knownIds = _knownRemotePacks.map((pack) => pack.id).toSet();
+    _packs = [
+      ..._knownRemotePacks,
+      ...packs.where((pack) => !knownIds.contains(pack.id)),
+    ];
   }
 
   Future<void> _applyPack(String packId) async {
-    if (_localPackOverrides.containsKey(packId)) return;
     await _query({
       '@type': 'setOption',
       'name': _packOption,
@@ -289,21 +305,6 @@ class TelegramLanguageController extends ChangeNotifier {
   }
 
   Future<void> _loadStringsForPack(String packId) async {
-    final localPack = _localPacks
-        .where((pack) => pack.id == packId)
-        .firstOrNull;
-    if (localPack != null) {
-      final baseId = localPack.baseLanguagePackId.trim();
-      final baseStrings = baseId.isEmpty
-          ? const <String, String>{}
-          : await _fetchPackStrings(
-              baseId,
-            ).catchError((_) => const <String, String>{});
-      _strings
-        ..clear()
-        ..addAll(baseStrings);
-      return;
-    }
     final merged = <String, String>{};
     final pack = _packs.where((pack) => pack.id == packId).firstOrNull;
     final baseId = pack?.baseLanguagePackId.trim();
@@ -467,23 +468,12 @@ extension _FirstOrNull<T> on Iterable<T> {
   }
 }
 
-const _localPacks = <TelegramLanguagePackOption>[
+const _knownRemotePacks = <TelegramLanguagePackOption>[
   TelegramLanguagePackOption(
-    id: 'mithka-zh-hans-glossary',
+    id: 'zhhanscn-qq',
     baseLanguagePackId: 'zh-hans',
-    name: 'Mithka Glossary',
-    nativeName: '简体中文（Mithka 术语）',
-    pluralCode: 'zh',
-    isOfficial: false,
-    isRtl: false,
-    isBeta: false,
-    isInstalled: true,
-  ),
-  TelegramLanguagePackOption(
-    id: 'mithka-zh-hant-glossary',
-    baseLanguagePackId: 'zh-hant',
-    name: 'Mithka Glossary',
-    nativeName: '繁體中文（Mithka 術語）',
+    name: 'Familiar Chinese Glossary',
+    nativeName: '简体中文（熟悉术语）',
     pluralCode: 'zh',
     isOfficial: false,
     isRtl: false,
@@ -492,62 +482,142 @@ const _localPacks = <TelegramLanguagePackOption>[
   ),
 ];
 
-const _localPackOverrides = <String, Map<String, String>>{
-  'mithka-zh-hans-glossary': {
-    AppStringKeys.messageActionSetTodo: '群待办',
-    AppStringKeys.messageActionUnsetTodo: '撤回群待办',
-    AppStringKeys.chatTodoSetSuccess: '已设为群待办',
-    AppStringKeys.chatTodoUnsetSuccess: '已撤回群待办',
-    AppStringKeys.chatInfoPinnedHighlights: '群待办',
-    AppStringKeys.pinnedMessagesEmpty: '暂无群待办',
-    AppStringKeys.topicChatPinnedPrefix: '群待办 | ',
-  },
-  'mithka-zh-hant-glossary': {
-    AppStringKeys.messageActionSetTodo: '群組待辦',
-    AppStringKeys.messageActionUnsetTodo: '撤回群組待辦',
-    AppStringKeys.chatTodoSetSuccess: '已設為群組待辦',
-    AppStringKeys.chatTodoUnsetSuccess: '已撤回群組待辦',
-    AppStringKeys.chatInfoPinnedHighlights: '群組待辦',
-    AppStringKeys.pinnedMessagesEmpty: '暫無群組待辦',
-    AppStringKeys.topicChatPinnedPrefix: '群組待辦 | ',
-  },
+const _legacyPackMigrations = <String?, String?>{
+  'mithka-zh-hans-glossary': 'zhhanscn-qq',
+  'mithka-zh-hant-glossary': null,
 };
 
 const _telegramKeyForAppKey = <String, String>{
+  AppStringKeys.accentColorPickerSave: 'Save',
+  AppStringKeys.addMembersDone: 'Done',
   AppStringKeys.channelsFileAttachment: 'AttachDocument',
+  AppStringKeys.chatDelete: 'Delete',
+  AppStringKeys.chatDeleteOptionBlockSender: 'DeleteBanUser',
+  AppStringKeys.chatDeleteOptionDeleteAllFromSender: 'DeleteAllFrom',
+  AppStringKeys.chatDeleteOptionReportSpam: 'DeleteReportSpam',
+  AppStringKeys.chatInfoClear: 'ClearHistory',
+  AppStringKeys.chatInfoClearHistory: 'ClearHistory',
+  AppStringKeys.chatInfoGroupFiles: 'SharedFilesTab',
   AppStringKeys.chatInfoGroupMembers: 'Members',
+  AppStringKeys.chatInfoGroupVideos: 'AttachVideo',
+  AppStringKeys.chatInfoLeaveGroup: 'LeaveMegaMenu',
+  AppStringKeys.chatInfoPin: 'PinToTop',
+  AppStringKeys.chatInfoPinChat: 'PinToTop',
+  AppStringKeys.chatInfoPinLimitReachedError: 'PinFolderLimitReached',
+  AppStringKeys.chatInfoPinnedHighlights: 'PinnedMessages',
+  AppStringKeys.chatInfoRemove: 'Delete',
+  AppStringKeys.chatInfoSearchHistory: 'Search',
   AppStringKeys.chatJoinGroup: 'JoinGroup',
+  AppStringKeys.chatListCreateChannel: 'ChannelAlertCreate2',
+  AppStringKeys.chatListCreateGroup: 'NewGroup',
+  AppStringKeys.chatListMarkUnread: 'MarkAsUnread',
+  AppStringKeys.chatListNoChats: 'NoChats',
+  AppStringKeys.chatListUnpin: 'UnpinFromTop',
+  AppStringKeys.chatMessageInputPlaceholder: 'SendMessage',
+  AppStringKeys.chatOnline: 'Online',
+  AppStringKeys.chatOffline: 'Offline',
+  AppStringKeys.chatPickerChooseChat: 'SelectChat',
   AppStringKeys.chatRequestToJoin: 'RequestToJoin',
   AppStringKeys.chatSearchMessageResultLabel: 'Message',
+  AppStringKeys.chatSearchMessagePlaceholder: 'SearchMessages',
+  AppStringKeys.chatSearchHistoryTitle: 'Search',
   AppStringKeys.chatSearchNoMessagesFound: 'NoResult',
+  AppStringKeys.chatTodoSetSuccess: 'MessagePinnedHint',
+  AppStringKeys.chatTodoUnsetSuccess: 'MessageUnpinnedHint',
   AppStringKeys.chatVideoPlaceholder: 'AttachVideo',
   AppStringKeys.composerAnimatedEmojiPreview: 'AttachGif',
   AppStringKeys.composerAudio: 'AttachMusic',
+  AppStringKeys.composerCamera: 'Camera',
   AppStringKeys.composerImagePreview: 'AttachPhoto',
   AppStringKeys.composerLocationPreview: 'AttachLocation',
+  AppStringKeys.composerPoll: 'Poll',
+  AppStringKeys.composerSend: 'SendMessage',
+  AppStringKeys.composerVideoCall: 'VideoCall',
+  AppStringKeys.composerVoiceCall: 'Call',
   AppStringKeys.composerVoicePreview: 'AttachAudio',
+  AppStringKeys.countryPickerCancel: 'Cancel',
+  AppStringKeys.editProfileTapToSet: 'Add',
+  AppStringKeys.messageActionBlock: 'ReportSpamUser',
   AppStringKeys.messageActionCopy: 'Copy',
   AppStringKeys.messageActionEdit: 'Edit',
+  AppStringKeys.messageActionFavorite: 'AddToFavorites',
   AppStringKeys.messageActionForward: 'Forward',
   AppStringKeys.messageActionMultiSelect: 'Select',
   AppStringKeys.messageActionQuote: 'QuoteMessage',
+  AppStringKeys.messageActionReplies: 'RepliesTitle',
+  AppStringKeys.messageActionReport: 'ReportChat',
   AppStringKeys.messageActionSelectText: 'SelectText',
+  AppStringKeys.messageActionSetTodo: 'PinMessage',
   AppStringKeys.messageActionSticker: 'AttachSticker',
   AppStringKeys.messageActionTranslate: 'TranslateMessage',
+  AppStringKeys.messageActionUnsetTodo: 'UnpinMessage',
   AppStringKeys.messageBubbleForwardedFrom: 'ForwardedFrom',
+  AppStringKeys.musicPlayerAdd: 'Add',
+  AppStringKeys.musicPlayerClear: 'ClearHistory',
+  AppStringKeys.musicPlayerDownload: 'Download',
+  AppStringKeys.musicPlayerModeRepeatOne: 'RepeatSong',
+  AppStringKeys.musicPlayerModeSequence: 'RepeatList',
+  AppStringKeys.musicPlayerModeShuffle: 'ShuffleList',
+  AppStringKeys.musicPlayerNextTrack: 'Next',
+  AppStringKeys.musicPlayerPause: 'Pause',
+  AppStringKeys.musicPlayerPlay: 'Play',
+  AppStringKeys.musicPlayerRemoveFromPlaylist: 'Delete',
   AppStringKeys.pinnedMessagesEmpty: 'NoPinnedMessages',
   AppStringKeys.pinnedMessagesSentBy: 'SentBy',
+  AppStringKeys.privacyBlockedUsers: 'BlockedUsers',
+  AppStringKeys.privacyCurrentDevice: 'CurrentSession',
+  AppStringKeys.privacyEnabled: 'Enabled',
+  AppStringKeys.privacyDisabled: 'Disabled',
+  AppStringKeys.privacyLastSeen: 'LastSeen',
+  AppStringKeys.privacyLoggedInDevices: 'Devices',
+  AppStringKeys.privacyOtherDevices: 'OtherSessions',
+  AppStringKeys.privacyProfilePhoto: 'PrivacyProfilePhoto',
+  AppStringKeys.privacyTwoStepVerification: 'TwoStepVerification',
+  AppStringKeys.privacyUnblock: 'Unblock',
+  AppStringKeys.privacyVisibilityContacts: 'LastSeenContacts',
+  AppStringKeys.privacyVisibilityEveryone: 'LastSeenEverybody',
+  AppStringKeys.privacyVisibilityNobody: 'LastSeenNobody',
+  AppStringKeys.profileAddAccount: 'AddAccount',
+  AppStringKeys.profileDetailAddFriend: 'AddContactChat',
+  AppStringKeys.profileDetailBio: 'UserBio',
+  AppStringKeys.profileDetailMediaFiles: 'SharedMedia',
+  AppStringKeys.profileDetailMusic: 'SharedMusicTab',
+  AppStringKeys.profileDetailSendMessage: 'SendMessage',
+  AppStringKeys.profileLogOutAccount: 'LogOut',
+  AppStringKeys.profileSettings: 'Settings',
   AppStringKeys.sharedMediaEmpty: 'NoMedia',
   AppStringKeys.sharedMediaFilterAll: 'AllMedia',
   AppStringKeys.sharedMediaFilterDownloaded: 'Downloaded',
   AppStringKeys.sharedMediaFilterNotDownloaded: 'NotDownloaded',
-  AppStringKeys.sharedMediaLinks: 'SharedLinksTab2',
+  AppStringKeys.sharedMediaLinks: 'SharedLinksTab',
   AppStringKeys.sharedMediaNoMatches: 'NoResult',
-  AppStringKeys.sharedMediaPhotosAndVideos: 'SharedMediaTab2',
-  AppStringKeys.sharedMediaVideos: 'SharedMediaTab2',
+  AppStringKeys.sharedMediaPhotosAndVideos: 'SharedMediaTab',
+  AppStringKeys.sharedMediaVideos: 'AttachVideo',
   AppStringKeys.sharedMediaVoice: 'AttachAudio',
   AppStringKeys.sharedMediaVoiceMessages: 'VoiceMessages',
+  AppStringKeys.stickerViewerView: 'ViewPackPreview',
+  AppStringKeys.tabChannels: 'Channel',
+  AppStringKeys.tabContacts: 'Contacts',
+  AppStringKeys.tabMessages: 'SearchAllChatsShort',
   AppStringKeys.topicPostContentFile: 'AttachDocument',
+  AppStringKeys.topicChatAllFilter: 'All',
+  AppStringKeys.topicChatAllTopics: 'Topics',
+  AppStringKeys.topicChatChannelMembers: 'ChannelMembers',
+  AppStringKeys.topicChatChannelMessages: 'ChannelMessages',
+  AppStringKeys.topicChatChannelSettings: 'ChannelSettings',
+  AppStringKeys.topicChatCommentCount: 'CommentsNoNumber',
+  AppStringKeys.topicChatExpand: 'PollExpand',
+  AppStringKeys.topicChatInvite: 'AddMember',
+  AppStringKeys.topicChatLeave: 'LeaveMegaMenu',
+  AppStringKeys.topicChatLeaveChannel: 'LeaveChannel',
+  AppStringKeys.topicChatLoading: 'Loading',
+  AppStringKeys.topicChatPinToggle: 'PinMessage',
+  AppStringKeys.topicChatPublish: 'SendMessage',
+  AppStringKeys.topicChatReplyCount: 'RepliesTitle',
+  AppStringKeys.topicChatSearch: 'Search',
+  AppStringKeys.topicChatShare: 'ShareFile',
+  AppStringKeys.topicChatTopicTitle: 'Topics',
+  AppStringKeys.topicChatUsers: 'Members',
   AppStringKeys.tdMessageAutoDeleteTimerChanged: 'AutoDeleteTimerSet',
   AppStringKeys.tdMessageAutoDeleteTimerDisabled: 'AutoDeleteTimerDisabled',
   AppStringKeys.tdMessageChecklist: 'AttachChecklist',

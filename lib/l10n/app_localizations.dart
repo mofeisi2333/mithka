@@ -108,7 +108,7 @@ class AppLocalizations {
   String get _key => localeKeyFor(locale);
 
   String t(String key, [Map<String, Object?> placeholders = const {}]) =>
-      AppStrings.tForLocale(_key, key, placeholders);
+      AppStrings.tForLocaleWithTelegram(_key, key, placeholders);
 
   String format(String key, String value) =>
       t(key, {'value1': value, 'value': value});
@@ -1447,14 +1447,29 @@ abstract final class AppStringKeys {
   static const vipBadgeLabel = 'vipBadgeLabel';
 }
 
+typedef TelegramStringResolver =
+    String? Function(String key, Map<String, Object?> placeholders);
+
 abstract final class AppStrings {
   // t() runs for every localized string render; re-parsing the Intl tag each
   // call is measurable in list scrolling, so the resolved locale key is cached
   // until the tag changes.
   static String? _cachedTag;
   static String _cachedLocaleKey = 'en';
+  static TelegramStringResolver? telegramStringResolver;
 
   static String t(String key, [Map<String, Object?> placeholders = const {}]) {
+    return tForLocaleWithTelegram(_currentLocaleKey, key, placeholders);
+  }
+
+  static String tLocal(
+    String key, [
+    Map<String, Object?> placeholders = const {},
+  ]) {
+    return tForLocale(_currentLocaleKey, key, placeholders);
+  }
+
+  static String get _currentLocaleKey {
     final tag = Intl.getCurrentLocale();
     if (tag != _cachedTag) {
       final locale =
@@ -1465,7 +1480,17 @@ abstract final class AppStrings {
       );
       _cachedTag = tag;
     }
-    return tForLocale(_cachedLocaleKey, key, placeholders);
+    return _cachedLocaleKey;
+  }
+
+  static String tForLocaleWithTelegram(
+    String localeKey,
+    String key, [
+    Map<String, Object?> placeholders = const {},
+  ]) {
+    final telegram = telegramStringResolver?.call(key, placeholders);
+    if (telegram != null && telegram.trim().isNotEmpty) return telegram;
+    return tForLocale(localeKey, key, placeholders);
   }
 
   static String tForLocale(
