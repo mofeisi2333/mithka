@@ -34,6 +34,7 @@ jobs:
     outputs:
       app_version: ${{ steps.version.outputs.app_version }}
       version_code: ${{ steps.version.outputs.version_code }}
+      play_version_code: ${{ steps.version.outputs.play_version_code }}
       build_stamp: ${{ steps.version.outputs.build_stamp }}
       release_tag: ${{ steps.version.outputs.release_tag }}
       release_name: ${{ steps.version.outputs.release_name }}
@@ -56,6 +57,11 @@ jobs:
             ''|*[!0-9]*) echo "Invalid Android version code: $version_code" >&2; exit 1 ;;
           esac
           build_stamp="$(date -u '+%y%m%d%H')"
+          play_version_code="$(date -u '+%s')"
+          if [ "$play_version_code" -gt 2100000000 ]; then
+            echo "Generated Google Play version code exceeds Android's limit" >&2
+            exit 1
+          fi
           short_sha="${GITHUB_SHA::7}"
           branch_name="${GITHUB_REF_NAME:-${GITHUB_REF#refs/heads/}}"
           case "$branch_name" in
@@ -80,6 +86,7 @@ jobs:
           esac
           echo "app_version=$app_version" >> "$GITHUB_OUTPUT"
           echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+          echo "play_version_code=$play_version_code" >> "$GITHUB_OUTPUT"
           echo "build_stamp=$build_stamp" >> "$GITHUB_OUTPUT"
           echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
           echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
@@ -90,6 +97,7 @@ jobs:
           echo "Release tag: $release_tag"
           echo "Release channel: $release_channel"
           echo "Android version code: $version_code"
+          echo "Google Play version code: $play_version_code"
           echo "GMT build stamp: $build_stamp"
 
   build:
@@ -407,7 +415,7 @@ jobs:
           flutter build appbundle --release \
             --target-platform android-arm,android-arm64,android-x64 \
             --build-name="${{ needs.prepare.outputs.app_version }}" \
-            --build-number="${{ needs.prepare.outputs.version_code }}" \
+            --build-number="${{ needs.prepare.outputs.play_version_code }}" \
             --dart-define="GIT_COMMIT=${{ needs.prepare.outputs.short_sha }}" \
             --dart-define="CI_BUILD_STAMP=${{ needs.prepare.outputs.build_stamp }}" \
             --dart-define="GOOGLE_PLAY_BUILD=true" \
