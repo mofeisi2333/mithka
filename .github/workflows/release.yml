@@ -380,6 +380,7 @@ jobs:
             --build-number="${{ needs.prepare.outputs.version_code }}" \
             --dart-define="GIT_COMMIT=${{ needs.prepare.outputs.short_sha }}" \
             --dart-define="CI_BUILD_STAMP=${{ needs.prepare.outputs.build_stamp }}" \
+            --dart-define="GOOGLE_PLAY_BUILD=true" \
             --dart-define="SENTRY_DSN=$SENTRY_DSN"
           jarsigner -verify build/app/outputs/bundle/release/app-release.aab
 

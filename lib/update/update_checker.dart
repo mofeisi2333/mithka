@@ -21,15 +21,27 @@ import '../components/confirm_dialog.dart';
 class UpdateChecker {
   UpdateChecker._();
 
+  static const _isGooglePlayBuild = bool.fromEnvironment('GOOGLE_PLAY_BUILD');
   static const _channel = MethodChannel('mithka/app_info');
   static const _owner = 'iebb';
   static const _repo = 'mithka';
   static bool _checkedThisLaunch = false;
 
+  /// Google Play builds update through the store and must not offer APKs from
+  /// GitHub Releases. The optional argument keeps the distribution rule easy
+  /// to verify without changing compile-time defines in the test process.
+  static bool automaticChecksEnabled({
+    bool isGooglePlayBuild = _isGooglePlayBuild,
+  }) => !isGooglePlayBuild;
+
   /// Checks once per launch (Android only) and prompts if a newer same-ABI APK
   /// exists. Safe to call from any screen's first frame; no-op otherwise.
   static Future<void> maybePrompt(BuildContext context) async {
-    if (!Platform.isAndroid || _checkedThisLaunch) return;
+    if (!automaticChecksEnabled() ||
+        !Platform.isAndroid ||
+        _checkedThisLaunch) {
+      return;
+    }
     _checkedThisLaunch = true;
     try {
       final info = await _channel.invokeMethod<Map<dynamic, dynamic>>('info');
