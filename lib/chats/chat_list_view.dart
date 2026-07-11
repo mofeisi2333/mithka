@@ -607,7 +607,7 @@ class _ChatListViewState extends State<ChatListView> {
               ),
               const SizedBox(width: AppSpacing.md),
             ],
-            if (useFilterMenu)
+            if (useFilterMenu && _model.filters.isNotEmpty)
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: () => setState(() {
