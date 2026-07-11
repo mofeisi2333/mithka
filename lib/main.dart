@@ -452,22 +452,32 @@ class _NoRadiusPageTransitionsBuilder extends PageTransitionsBuilder {
     Widget child,
   ) {
     if (route.fullscreenDialog) {
+      final curved = CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeOutCubic,
+      );
       final offset = Tween<Offset>(
         begin: const Offset(0, 0.08),
         end: Offset.zero,
-      ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic));
+      ).animate(curved);
       return FadeTransition(
-        opacity: animation,
+        opacity: curved,
         child: SlideTransition(position: offset, child: child),
       );
     }
 
+    final curved = CurvedAnimation(
+      parent: animation,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeOutCubic,
+    );
     final offset = Tween<Offset>(
       begin: const Offset(0.08, 0),
       end: Offset.zero,
-    ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic));
+    ).animate(curved);
     return FadeTransition(
-      opacity: animation,
+      opacity: curved,
       child: SlideTransition(position: offset, child: child),
     );
   }
