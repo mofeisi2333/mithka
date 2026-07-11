@@ -42,6 +42,7 @@ import 'settings/auto_download_media_controller.dart';
 import 'settings/developer_mode_controller.dart';
 import 'settings/keyword_blocker.dart';
 import 'settings/translation_controller.dart';
+import 'tdlib/td_client.dart';
 import 'theme/app_theme.dart';
 import 'theme/theme_controller.dart';
 
@@ -211,7 +212,7 @@ class MithkaApp extends StatefulWidget {
   State<MithkaApp> createState() => _MithkaAppState();
 }
 
-class _MithkaAppState extends State<MithkaApp> {
+class _MithkaAppState extends State<MithkaApp> with WidgetsBindingObserver {
   late final AuthManager _auth = AuthManager();
   late final ThemeController _theme = ThemeController(widget.prefs);
   late final TranslationController _translation = TranslationController(
@@ -234,6 +235,7 @@ class _MithkaAppState extends State<MithkaApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _theme.loadSelectedEmojiFontIfAvailable();
     _autoDownload.initialize(widget.prefs);
     _auth.start();
@@ -242,6 +244,19 @@ class _MithkaAppState extends State<MithkaApp> {
     unawaited(_accounts.recoverPendingAddOnStartup(_auth));
     NotificationController.shared.start();
     PushDeviceRegistrar.shared.start();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      TdClient.shared.restartReceiveIsolate();
+    }
   }
 
   ThemeData _themeData(Brightness brightness, ThemeController theme) {

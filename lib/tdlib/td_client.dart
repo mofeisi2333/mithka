@@ -83,6 +83,11 @@ class TdClient {
   bool _isRunning = false;
   Timer? _debugReceiveTimer;
 
+  // Receive isolate management — stored as fields so we can restart on resume.
+  ReceivePort? _receivePort;
+  StreamSubscription<dynamic>? _receiveSub;
+  bool _receiveIsolateDead = false;
+
   // Request/response correlation, keyed by the "@extra" we attach.
   final Map<String, Completer<Map<String, dynamic>>> _pending = {};
   final Map<int, Completer<void>> _clientClosedWaiters = {};
@@ -162,23 +167,41 @@ class TdClient {
     if (kDebugMode) {
       _startDebugReceivePump();
     } else {
-      // Spawn the dedicated receive isolate.
-      final fromIsolate = ReceivePort();
-      await Isolate.spawn(
-        _receiveEntry,
-        fromIsolate.sendPort,
-        debugName: 'TDLibReceive',
-      );
-      fromIsolate.listen((message) {
-        // The isolate ships already-decoded maps so JSON parsing stays off
-        // the UI thread; the String branch is a safety net.
-        if (message is Map<String, dynamic>) {
-          _route(message);
-        } else if (message is String) {
-          _routeRaw(message);
-        }
-      });
+      _spawnReceiveIsolate();
     }
+  }
+
+  void _spawnReceiveIsolate() {
+    _receivePort?.close();
+    _receiveSub?.cancel();
+
+    final port = ReceivePort();
+    _receivePort = port;
+    _receiveIsolateDead = false;
+
+    Isolate.spawn(
+      _receiveEntry,
+      port.sendPort,
+      debugName: 'TDLibReceive',
+    );
+    _receiveSub = port.listen((message) {
+      if (message is Map<String, dynamic>) {
+        _route(message);
+      } else if (message is String) {
+        _routeRaw(message);
+      }
+    });
+  }
+
+  /// Restarts the receive isolate if it died (e.g. after app background→foreground
+  /// on Android where the FFI state became stale). Safe to call when healthy.
+  void restartReceiveIsolate() {
+    if (!_isRunning) return;
+    if (kDebugMode) return;
+    if (!_receiveIsolateDead) return;
+
+    debugPrint('🔑 [Mithka] restarting receive isolate after resume');
+    _spawnReceiveIsolate();
   }
 
   // MARK: - Account management
@@ -880,6 +903,16 @@ class TdClient {
 
     // Only surface the active account's updates to the UI.
     if (clientId == _activeClientId) _updates.add(object);
+
+    // Internal: receive isolate reported a fatal error (e.g. td_receive threw
+    // after Android background→foreground). Mark it dead so a later resume
+    // restarts it.
+    if (object.type == '_tdReceiveFatal') {
+      _receiveIsolateDead = true;
+      debugPrint(
+        '🔑 [Mithka] receive isolate died: ${object['error'] ?? 'unknown'}',
+      );
+    }
   }
 
   void _routeRaw(String message) {
@@ -1134,10 +1167,28 @@ class TdFreshSessionResult {
 /// tdjson library and pumps every incoming event back to the main isolate.
 /// Events are decoded here so the main isolate never pays for JSON parsing
 /// during TDLib bursts (login sync, file progress, …).
+///
+/// On Android, the OS may freeze the process when the app goes to background.
+/// After thaw, the native FFI state can be stale and td_receive may throw or
+/// crash. We catch the error, notify the main isolate, and exit gracefully —
+/// the main isolate will restart us on the next foreground transition.
 void _receiveEntry(SendPort toMain) {
-  final bindings = TdBindings.open();
+  TdBindings bindings;
+  try {
+    bindings = TdBindings.open();
+  } catch (e) {
+    toMain.send({'@type': '_tdReceiveFatal', 'error': e.toString()});
+    return;
+  }
+
   while (true) {
-    final event = bindings.receive(1.0);
+    String? event;
+    try {
+      event = bindings.receive(1.0);
+    } catch (e) {
+      toMain.send({'@type': '_tdReceiveFatal', 'error': e.toString()});
+      return;
+    }
     if (event == null) continue;
     try {
       final decoded = jsonDecode(event);
