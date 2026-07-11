@@ -1958,7 +1958,6 @@ class ChatViewModel extends ChangeNotifier {
   }
 
   Future<void> _loadInitialLatestHistory() async {
-    final seeded = _allMessages.isNotEmpty;
     final localLoaded = await _fetchHistory(
       0,
       0,
@@ -1967,10 +1966,6 @@ class ChatViewModel extends ChangeNotifier {
       restorePosition: false,
     );
     if (!localLoaded) {
-      if (seeded || _allMessages.isNotEmpty) {
-        unawaited(_fetchHistory(0, 0, 40, restorePosition: false));
-        return;
-      }
       await _fetchHistory(0, 0, 40);
     } else {
       unawaited(_fetchHistory(0, 0, 40, restorePosition: false));
