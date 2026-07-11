@@ -19,6 +19,7 @@ import 'package:video_player/video_player.dart';
 import '../components/app_icons.dart';
 import '../components/photo_avatar.dart';
 import '../components/toast.dart';
+import '../platform/screen_wakelock.dart';
 import '../platform/system_picture_in_picture.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
@@ -375,6 +376,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   bool _systemPiPPrepared = false;
   String? _systemPiPId;
   int _lastSystemPiPSyncMs = -1;
+  bool _wakelockActive = false;
 
   static const _speeds = <double>[0.5, 0.75, 1, 1.25, 1.5, 2];
   static const _resumePrefix = 'mithka.video.resume.';
@@ -497,6 +499,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     }
     c.addListener(_onTick);
     setState(() => _controller = c);
+    _updateWakelock();
     unawaited(_refreshSystemPictureInPictureSupport());
     _scheduleHide();
     return true;
@@ -506,7 +509,21 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   void _onTick() {
     _storePlaybackPositionIfNeeded();
     _syncSystemPictureInPictureIfNeeded();
+    _updateWakelock();
     if (mounted) setState(() {});
+  }
+
+  /// Keep the screen awake while the video is actively playing; release the
+  /// wakelock when paused or finished so the system idle timer resumes.
+  void _updateWakelock() {
+    final c = _controller;
+    if (c == null || !c.value.isInitialized) return;
+    final shouldKeepAwake = c.value.isPlaying;
+    if (shouldKeepAwake == _wakelockActive) return;
+    _wakelockActive = shouldKeepAwake;
+    unawaited(
+      shouldKeepAwake ? ScreenWakelock.enable() : ScreenWakelock.disable(),
+    );
   }
 
   void _syncSystemPictureInPictureIfNeeded() {
@@ -793,6 +810,10 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   }
 
   void _close() {
+    if (_wakelockActive) {
+      _wakelockActive = false;
+      unawaited(ScreenWakelock.disable());
+    }
     unawaited(_storePlaybackPosition(force: true));
     final onClose = widget.onClose;
     if (onClose != null) {
@@ -804,6 +825,10 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
 
   @override
   void dispose() {
+    if (_wakelockActive) {
+      _wakelockActive = false;
+      unawaited(ScreenWakelock.disable());
+    }
     _hideTimer?.cancel();
     _progressSub?.cancel();
     unawaited(_storePlaybackPosition(force: true));
