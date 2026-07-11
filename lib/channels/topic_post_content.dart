@@ -13,6 +13,7 @@ import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
+import '../profile/profile_detail_view.dart';
 
 class TopicPostContent extends StatelessWidget {
   const TopicPostContent({
@@ -46,6 +47,14 @@ class TopicPostContent extends StatelessWidget {
           maxLines: maxTextLines,
           overflow: textOverflow,
           style: textStyle,
+          onMentionTap: (userId, name) {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) =>
+                    ProfileDetailView(userId: userId, name: name),
+              ),
+            );
+          },
         ),
       );
     }
@@ -181,6 +190,14 @@ class _TopicFileCard extends StatelessWidget {
                 text: caption,
                 entities: captionEntities,
                 style: captionStyle,
+                onMentionTap: (userId, name) {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          ProfileDetailView(userId: userId, name: name),
+                    ),
+                  );
+                },
               ),
             ],
           ],

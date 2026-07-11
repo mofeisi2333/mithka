@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_math_fork/flutter_math.dart';
 
-import '../profile/profile_detail_view.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import 'custom_emoji.dart';
@@ -20,6 +19,7 @@ class TelegramRichText extends StatefulWidget {
     this.overflow = TextOverflow.clip,
     this.onBotCommandTap,
     this.onHashtagTap,
+    this.onMentionTap,
     this.quoteBackgroundColor,
   });
 
@@ -31,6 +31,7 @@ class TelegramRichText extends StatefulWidget {
   final TextOverflow overflow;
   final ValueChanged<String>? onBotCommandTap;
   final ValueChanged<String>? onHashtagTap;
+  final void Function(int userId, String name)? onMentionTap;
   final Color? quoteBackgroundColor;
 
   @override
@@ -273,17 +274,14 @@ class _TelegramRichTextState extends State<TelegramRichText> {
 
     final mentionUserId = _mentionUserId(active);
     if (mentionUserId != null) {
-      final recognizer = TapGestureRecognizer()
-        ..onTap = () {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) =>
-                  ProfileDetailView(userId: mentionUserId, name: segment),
-            ),
-          );
-        };
-      _recognizers.add(recognizer);
-      return [TextSpan(text: segment, style: style, recognizer: recognizer)];
+      final onTap = widget.onMentionTap;
+      if (onTap != null) {
+        final recognizer = TapGestureRecognizer()
+          ..onTap = () => onTap(mentionUserId, segment);
+        _recognizers.add(recognizer);
+        return [TextSpan(text: segment, style: style, recognizer: recognizer)];
+      }
+      return [TextSpan(text: segment, style: style)];
     }
 
     final target = _entityTapTarget(segment, active);

@@ -36,6 +36,7 @@ import '../tdlib/chat_membership.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
+import '../profile/profile_detail_view.dart';
 import '../theme/app_theme.dart';
 import '../theme/date_text.dart';
 import 'story_viewer_view.dart';
@@ -2745,6 +2746,14 @@ class _DetailCommentTile extends StatelessWidget {
                           height: 1.28,
                           color: c.textPrimary,
                         ),
+                        onMentionTap: (userId, name) {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  ProfileDetailView(userId: userId, name: name),
+                            ),
+                          );
+                        },
                       ),
                     ],
                   ),
@@ -3416,6 +3425,14 @@ class ChannelPostRow extends StatelessWidget {
                   height: 1.35,
                   color: c.textPrimary,
                 ),
+                onMentionTap: (userId, name) {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          ProfileDetailView(userId: userId, name: name),
+                    ),
+                  );
+                },
               ),
             ],
             if (_hasReplyQuote) ...[
@@ -3617,6 +3634,14 @@ class _InlineComments extends StatelessWidget {
                       height: 1.25,
                       color: c.textPrimary,
                     ),
+                    onMentionTap: (userId, name) {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              ProfileDetailView(userId: userId, name: name),
+                        ),
+                      );
+                    },
                   ),
                 ],
               ),
