@@ -19,6 +19,7 @@ import '../settings/keyword_blocker.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
+import 'package:mithka/notifications/scope_notification_settings.dart';
 import 'forward_options.dart';
 import 'gif_item.dart';
 import 'sticker_item.dart';
@@ -1448,7 +1449,7 @@ class ChatViewModel extends ChangeNotifier {
     unreadCount = chat.integer('unread_count') ?? 0;
     isMarkedUnread = chat.boolean('is_marked_as_unread') ?? false;
     final notificationSettings = chat.obj('notification_settings');
-    isMuted = (notificationSettings?.integer('mute_for') ?? 0) > 0;
+    isMuted = ScopeNotificationSettings.shared.isMuted(chat);
     if (hasLegacyHiddenNotificationPreview(notificationSettings)) {
       unawaited(_repairLegacyNotificationPreview(notificationSettings!));
     }
