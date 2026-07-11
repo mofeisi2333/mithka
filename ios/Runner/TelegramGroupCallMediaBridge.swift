@@ -177,11 +177,11 @@ final class TelegramGroupCallMediaBridge: NSObject {
           completion([])
           return EmptyMediaDescriptionTask()
         }
-        mediaDescriptionsLock.lock()
+        self.mediaDescriptionsLock.lock()
         let descriptions = ssrcs.compactMap {
-          mediaDescriptionsBySsrc[$0.uint32Value]
+          self.mediaDescriptionsBySsrc[$0.uint32Value]
         }
-        mediaDescriptionsLock.unlock()
+        self.mediaDescriptionsLock.unlock()
         completion(descriptions)
         return EmptyMediaDescriptionTask()
       },
