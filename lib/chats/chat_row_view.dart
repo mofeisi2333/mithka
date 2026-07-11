@@ -13,6 +13,7 @@ import '../chat/custom_emoji.dart';
 import '../components/app_icons.dart';
 import '../components/photo_avatar.dart';
 import '../components/ui_components.dart';
+import '../l10n/app_localizations.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import '../theme/date_text.dart';
@@ -46,13 +47,15 @@ class ChatRowView extends StatelessWidget {
     final c = context.colors;
     final theme = context.watch<ThemeController>();
     final rowHeight = theme.rowHeight;
-    final premiumNameColor = theme.showPremiumNameColors && chat.peerIsPremium
+    final asFavorites = chat.isSavedMessages && theme.displayOwnChatAsFavorites;
+    final premiumNameColor = theme.showPremiumNameColors && chat.peerIsPremium && !asFavorites
         ? _accentColor(chat.peerAccentColorId)
         : c.textPrimary;
     final showPremiumStatus =
         theme.showPremiumEmojiStatus &&
         chat.peerIsPremium &&
-        chat.peerEmojiStatusId != 0;
+        chat.peerEmojiStatusId != 0 &&
+        !asFavorites;
     return Container(
       height: rowHeight,
       color: selected
@@ -72,12 +75,14 @@ class ChatRowView extends StatelessWidget {
                   children: [
                     Flexible(
                       child: Text(
-                        chat.title,
+                        asFavorites
+                            ? AppStringKeys.savedMessages.l10n(context)
+                            : chat.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: AppTextSize.body,
-                          fontWeight: chat.peerIsPremium
+                          fontWeight: chat.peerIsPremium && !asFavorites
                               ? FontWeight.w600
                               : FontWeight.w500,
                           color: premiumNameColor,
@@ -122,18 +127,33 @@ class ChatRowView extends StatelessWidget {
     final theme = context.watch<ThemeController>();
     final circleGroups = theme.circularGroupAvatars;
     final avatarSize = theme.avatarSize;
+    final asFavorites = chat.isSavedMessages && theme.displayOwnChatAsFavorites;
     return SizedBox(
       width: avatarSize,
       height: avatarSize,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          PhotoAvatar(
-            title: chat.title,
-            photo: chat.photo,
-            size: avatarSize,
-            square: chat.usesSquareAvatar && !circleGroups,
-          ),
+          asFavorites
+              ? Container(
+                  width: avatarSize,
+                  height: avatarSize,
+                  decoration: BoxDecoration(
+                    color: context.colors.linkBlue,
+                    borderRadius: BorderRadius.circular(avatarSize / 2),
+                  ),
+                  child: AppIcon(
+                    HeroAppIcons.thumbtack,
+                    size: avatarSize * 0.5,
+                    color: const Color(0xFFFFFFFF),
+                  ),
+                )
+              : PhotoAvatar(
+                  title: chat.title,
+                  photo: chat.photo,
+                  size: avatarSize,
+                  square: chat.usesSquareAvatar && !circleGroups,
+                ),
           if (chat.unreadCount > 0)
             Positioned(
               right: 0,
