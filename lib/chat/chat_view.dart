@@ -531,7 +531,6 @@ class _ChatViewState extends State<ChatView> {
       return;
     }
     _loadingOlderFromScroll = true;
-    final oldPixels = _scroll.position.pixels;
     final oldMax = _scroll.position.maxScrollExtent;
     try {
       final loaded = await _vm.loadOlder();
@@ -540,14 +539,11 @@ class _ChatViewState extends State<ChatView> {
       if (!mounted || !_scroll.hasClients || _scrollTargetId != null) return;
       final delta = _scroll.position.maxScrollExtent - oldMax;
       if (delta > 1) {
-        final target = (oldPixels + delta).clamp(
-          _scroll.position.minScrollExtent,
-          _scroll.position.maxScrollExtent,
-        );
-        _scroll.jumpTo(target);
+        _scroll.position.correctBy(delta);
       }
     } finally {
       _loadingOlderFromScroll = false;
+      if (mounted) setState(() {});
     }
   }
 
@@ -749,7 +745,9 @@ class _ChatViewState extends State<ChatView> {
         if (mounted) setState(() => _bannerDismissed = true);
       });
     }
-    setState(() {});
+    if (!_loadingOlderFromScroll) {
+      setState(() {});
+    }
   }
 
   int _firstUnreadIndex() => _vm.messages.indexWhere(
