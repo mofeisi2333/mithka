@@ -151,6 +151,46 @@ void main() {
       expect(tester.takeException(), isNull);
       semantics.dispose();
     });
+
+    testWidgets('keeps the editable text state while selection changes', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          localizationsDelegates: [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: RichTextComposerView(
+            initialText: 'select this text',
+            allowMedia: false,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final field = find.byType(TextField).first;
+      final editable = find.descendant(
+        of: field,
+        matching: find.byType(EditableText),
+      );
+      final editableBefore = tester.state<EditableTextState>(editable);
+      final controller = tester.widget<TextField>(field).controller!;
+
+      controller.selection = const TextSelection(
+        baseOffset: 0,
+        extentOffset: 6,
+      );
+      await tester.pump();
+
+      expect(tester.state<EditableTextState>(editable), same(editableBefore));
+      expect(
+        controller.selection,
+        const TextSelection(baseOffset: 0, extentOffset: 6),
+      );
+    });
   });
 
   group('ChatInputBar', () {
