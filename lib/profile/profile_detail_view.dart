@@ -22,6 +22,7 @@ import '../chat/chat_search_view.dart';
 import '../chat/chat_view.dart';
 import '../chat/custom_emoji.dart';
 import '../chat/full_image_viewer.dart';
+import '../chat/telegram_rich_text.dart';
 import '../chat/voice_audio.dart';
 import '../components/app_icons.dart';
 import '../components/photo_avatar.dart';
@@ -52,6 +53,7 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
   String? _username;
   String _phone = '';
   String _bio = '';
+  List<MessageTextEntity> _bioEntities = const [];
   TdFileRef? _photo;
   bool _isOnline = false;
   bool _isPremium = false;
@@ -128,6 +130,7 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
       if (mounted) {
         setState(() {
           _bio = full.obj('bio')?.str('text') ?? '';
+          _bioEntities = TDParse.textEntities(full.obj('bio'));
           _birthday = _formatBirthday(full.obj('birthdate'));
           _location =
               full.obj('business_info')?.obj('location')?.str('address') ?? '';
@@ -584,11 +587,20 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
             Row(
               children: [
                 Expanded(
-                  child: Text(
-                    _bio,
+                  child: TelegramRichText(
+                    text: _bio,
+                    entities: _bioEntities,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 15, color: c.textPrimary),
+                    onMentionTap: (userId, name) {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              ProfileDetailView(userId: userId, name: name),
+                        ),
+                      );
+                    },
                   ),
                 ),
                 const SizedBox(width: 8),
