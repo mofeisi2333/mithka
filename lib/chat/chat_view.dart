@@ -531,6 +531,7 @@ class _ChatViewState extends State<ChatView> {
       return;
     }
     _loadingOlderFromScroll = true;
+    final oldPixels = _scroll.position.pixels;
     final oldMax = _scroll.position.maxScrollExtent;
     try {
       final loaded = await _vm.loadOlder();
@@ -539,7 +540,11 @@ class _ChatViewState extends State<ChatView> {
       if (!mounted || !_scroll.hasClients || _scrollTargetId != null) return;
       final delta = _scroll.position.maxScrollExtent - oldMax;
       if (delta > 1) {
-        _scroll.position.correctBy(delta);
+        final target = (oldPixels + delta).clamp(
+          _scroll.position.minScrollExtent,
+          _scroll.position.maxScrollExtent,
+        );
+        _scroll.jumpTo(target);
       }
     } finally {
       _loadingOlderFromScroll = false;
