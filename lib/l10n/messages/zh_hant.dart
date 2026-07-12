@@ -114,6 +114,7 @@ const zhHantMessages = <String, String>{
   'appearanceInUseSize': "使用中",
   'appearanceManage': "管理",
   'appearanceMergeConsecutiveImages': "合併顯示連續圖片",
+  'appearanceHideBlockedUserMessages': "隱藏已封鎖使用者的訊息",
   'appearanceMode': "模式",
   'appearanceMonospaceFont': "等寬字型",
   'appearanceNoCleanableFonts': "沒有可清理項目",

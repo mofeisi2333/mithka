@@ -257,6 +257,8 @@ abstract final class AppStringKeys {
   static const appearanceManage = 'appearanceManage';
   static const appearanceMergeConsecutiveImages =
       'appearanceMergeConsecutiveImages';
+  static const appearanceHideBlockedUserMessages =
+      'appearanceHideBlockedUserMessages';
   static const appearanceMode = 'appearanceMode';
   static const appearanceMonospaceFont = 'appearanceMonospaceFont';
   static const appearanceNoCleanableFonts = 'appearanceNoCleanableFonts';

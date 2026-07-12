@@ -113,6 +113,7 @@ const zhHansMessages = <String, String>{
   'appearanceInUseSize': "正在使用",
   'appearanceManage': "管理",
   'appearanceMergeConsecutiveImages': "连续图片合并显示",
+  'appearanceHideBlockedUserMessages': "隐藏已拉黑用户的消息",
   'appearanceMode': "模式",
   'appearanceMonospaceFont': "等宽字体",
   'appearanceNoCleanableFonts': "无可清理",

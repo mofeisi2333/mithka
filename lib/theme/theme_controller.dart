@@ -849,6 +849,8 @@ class ThemeController extends ChangeNotifier {
         _prefs.getBool(_messageMetaIndicatorsKey) ?? false;
     _openChatsAtLatest = _prefs.getBool(_openChatsAtLatestKey) ?? false;
     _groupImageMessages = _prefs.getBool(_groupImageMessagesKey) ?? true;
+    _hideBlockedUserMessages =
+        _prefs.getBool(_hideBlockedUserMessagesKey) ?? false;
     _showChannelsTab = _prefs.getBool(_showChannelsTabKey) ?? false;
     _showMomentsTab = _prefs.getBool(_showMomentsTabKey) ?? true;
     _archivedChatsDisplayMode = ArchivedChatsDisplayMode.values.firstWhere(
@@ -898,6 +900,7 @@ class ThemeController extends ChangeNotifier {
   static const _messageMetaIndicatorsKey = 'showMessageMetaIndicators';
   static const _openChatsAtLatestKey = 'openChatsAtLatest';
   static const _groupImageMessagesKey = 'groupImageMessages';
+  static const _hideBlockedUserMessagesKey = 'hideBlockedUserMessages';
   static const _showChannelsTabKey = 'showChannelsTab';
   static const _showMomentsTabKey = 'showMomentsTab';
   static const _archivedChatsDisplayModeKey = 'archivedChatsDisplayMode';
@@ -937,6 +940,7 @@ class ThemeController extends ChangeNotifier {
   bool _showMessageMetaIndicators = false;
   bool _openChatsAtLatest = false;
   bool _groupImageMessages = true;
+  bool _hideBlockedUserMessages = false;
   bool _showChannelsTab = false;
   bool _showMomentsTab = true;
   late ArchivedChatsDisplayMode _archivedChatsDisplayMode;
@@ -998,6 +1002,7 @@ class ThemeController extends ChangeNotifier {
   bool get showMessageMetaIndicators => _showMessageMetaIndicators;
   bool get openChatsAtLatest => _openChatsAtLatest;
   bool get groupImageMessages => _groupImageMessages;
+  bool get hideBlockedUserMessages => _hideBlockedUserMessages;
   bool get showChannelsTab => _showChannelsTab;
   bool get showMomentsTab => _showMomentsTab;
   ArchivedChatsDisplayMode get archivedChatsDisplayMode =>
@@ -1393,6 +1398,12 @@ class ThemeController extends ChangeNotifier {
   set groupImageMessages(bool value) {
     _groupImageMessages = value;
     _prefs.setBool(_groupImageMessagesKey, value);
+    notifyListeners();
+  }
+
+  set hideBlockedUserMessages(bool value) {
+    _hideBlockedUserMessages = value;
+    _prefs.setBool(_hideBlockedUserMessagesKey, value);
     notifyListeners();
   }
 

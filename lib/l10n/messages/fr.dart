@@ -122,6 +122,8 @@ const frMessages = <String, String>{
   'appearanceInUseSize': "En cours d’utilisation",
   'appearanceManage': "Gérer",
   'appearanceMergeConsecutiveImages': "Fusionner les images consécutives",
+  'appearanceHideBlockedUserMessages':
+      "Masquer les messages des utilisateurs bloqués",
   'appearanceMode': "Mode",
   'appearanceMonospaceFont': "Police monospace",
   'appearanceNoCleanableFonts': "Rien à nettoyer",

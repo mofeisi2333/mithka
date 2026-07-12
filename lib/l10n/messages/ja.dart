@@ -116,6 +116,7 @@ const jaMessages = <String, String>{
   'appearanceInUseSize': "使用中",
   'appearanceManage': "管理",
   'appearanceMergeConsecutiveImages': "連続した画像をまとめて表示",
+  'appearanceHideBlockedUserMessages': "ブロックしたユーザーのメッセージを非表示",
   'appearanceMode': "モード",
   'appearanceMonospaceFont': "等幅フォント",
   'appearanceNoCleanableFonts': "クリーンアップ可能な項目なし",

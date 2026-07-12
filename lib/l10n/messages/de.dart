@@ -121,6 +121,7 @@ const deMessages = <String, String>{
   'appearanceManage': "Verwalten",
   'appearanceMergeConsecutiveImages':
       "Aufeinanderfolgende Bilder zusammen anzeigen",
+  'appearanceHideBlockedUserMessages': "Nachrichten blockierter Nutzer ausblenden",
   'appearanceMode': "Modus",
   'appearanceMonospaceFont': "Monospace-Schrift",
   'appearanceNoCleanableFonts': "Nichts zu bereinigen",

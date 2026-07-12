@@ -119,6 +119,7 @@ const enMessages = <String, String>{
   'appearanceInUseSize': "In Use",
   'appearanceManage': "Manage",
   'appearanceMergeConsecutiveImages': "Merge Consecutive Images",
+  'appearanceHideBlockedUserMessages': "Hide Blocked Users' Messages",
   'appearanceMode': "Mode",
   'appearanceMonospaceFont': "Monospace Font",
   'appearanceNoCleanableFonts': "Nothing to clean",

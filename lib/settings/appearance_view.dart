@@ -26,6 +26,7 @@ import '../theme/emoji_font_catalog.dart';
 import '../theme/system_font_catalog.dart';
 import '../theme/theme_controller.dart';
 import 'app_icon_controller.dart';
+import 'blocked_user_service.dart';
 
 class AppearanceView extends StatelessWidget {
   const AppearanceView({super.key});
@@ -334,6 +335,18 @@ class DisplaySettingsView extends StatelessWidget {
                     ),
                     theme.showChatPremiumEmojiStatus,
                     (v) => theme.showChatPremiumEmojiStatus = v,
+                  ),
+                  _toggleRow(
+                    context,
+                    HeroAppIcons.eyeSlash.data,
+                    AppStrings.t(
+                      AppStringKeys.appearanceHideBlockedUserMessages,
+                    ),
+                    theme.hideBlockedUserMessages,
+                    (v) {
+                      theme.hideBlockedUserMessages = v;
+                      if (v) BlockedUserService.shared.loadBlockedUsers();
+                    },
                   ),
                 ]),
                 const SizedBox(height: AppSpacing.xl),

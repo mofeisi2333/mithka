@@ -374,6 +374,7 @@ class ChatMessage {
     this.hasCommentThread = false,
     this.commentCount = 0,
     this.lastCommentMessageId,
+    this.blockedByUser = false,
   });
 
   final int id;
@@ -445,6 +446,9 @@ class ChatMessage {
   int
   commentCount; // channel discussion replies/comments, when TDLib exposes it
   int? lastCommentMessageId;
+  /// When true, this message is from a Telegram-blocked user and the
+  /// "hide blocked user messages" feature is on.
+  bool blockedByUser;
   List<MessageReaction> reactions = const [];
   String? forwardOrigin; // name of the original author when forwarded
   int? forwardFromUserId; // origin user, resolved lazily to forwardOrigin

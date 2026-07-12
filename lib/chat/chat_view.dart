@@ -29,6 +29,7 @@ import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../l10n/telegram_language_controller.dart';
 import '../profile/profile_detail_view.dart';
+import '../settings/blocked_user_service.dart';
 import '../settings/developer_mode_controller.dart';
 import '../settings/keyword_blocker.dart';
 import '../settings/topic_group_display_mode.dart';
@@ -414,6 +415,9 @@ class _ChatViewState extends State<ChatView> {
     _vm.addListener(_onModel);
     _scrollTargetId = widget.initialMessageId;
     _vm.onAppear();
+    // Sync blocked-user-hiding toggle from theme.
+    final theme = context.read<ThemeController>();
+    BlockedUserService.shared.enabled = theme.hideBlockedUserMessages;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _retainTabBarSuppression();
     });
@@ -1381,6 +1385,22 @@ class _ChatViewState extends State<ChatView> {
           ),
           Expanded(child: Divider(color: c.divider, height: 1)),
         ],
+      ),
+    );
+  }
+
+  Widget _blockedMessagePlaceholder(BuildContext context) {
+    final c = context.colors;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Text(
+          '\u00B7 \u00B7 \u00B7',
+          style: TextStyle(
+            fontSize: 16,
+            color: c.textSecondary.withValues(alpha: 0.5),
+          ),
+        ),
       ),
     );
   }
@@ -2391,6 +2411,9 @@ class _ChatViewState extends State<ChatView> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    // Keep blocked-user hiding toggle in sync with theme.
+    BlockedUserService.shared.enabled =
+        context.watch<ThemeController>().hideBlockedUserMessages;
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     _syncKeyboardInset(keyboardInset);
     // Not a member, joinable, and nothing to preview → a custom join screen
@@ -3686,6 +3709,8 @@ class _ChatViewState extends State<ChatView> {
                 TimeSeparator(unix: message.date),
               if (message.isService)
                 SystemBanner(text: message.text)
+              else if (message.blockedByUser)
+                _blockedMessagePlaceholder(context)
               else if (entry.isImageGroup)
                 _selectionEntry(entry, _imageGroupBubble(entry.messages))
               else

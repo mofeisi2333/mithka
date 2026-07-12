@@ -116,6 +116,7 @@ const koMessages = <String, String>{
   'appearanceInUseSize': "사용 중",
   'appearanceManage': "관리",
   'appearanceMergeConsecutiveImages': "연속 이미지를 합쳐서 표시",
+  'appearanceHideBlockedUserMessages': "차단한 사용자의 메시지 숨기기",
   'appearanceMode': "모드",
   'appearanceMonospaceFont': "고정폭 글꼴",
   'appearanceNoCleanableFonts': "정리할 항목 없음",

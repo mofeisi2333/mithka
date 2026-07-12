@@ -120,6 +120,8 @@ const esMessages = <String, String>{
   'appearanceInUseSize': "En uso",
   'appearanceManage': "Gestionar",
   'appearanceMergeConsecutiveImages': "Combinar imágenes consecutivas",
+  'appearanceHideBlockedUserMessages':
+      "Ocultar mensajes de usuarios bloqueados",
   'appearanceMode': "Modo",
   'appearanceMonospaceFont': "Fuente monoespaciada",
   'appearanceNoCleanableFonts': "Nada para limpiar",
