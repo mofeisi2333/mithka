@@ -45,6 +45,7 @@ import 'chat_info_view.dart';
 import 'chat_input_bar.dart';
 import 'chat_picker_view.dart';
 import 'chat_search_view.dart';
+import 'chat_unread_progress.dart';
 import 'chat_view_model.dart';
 import 'custom_emoji.dart';
 import 'emoji_store.dart';
@@ -351,6 +352,10 @@ class _ChatViewState extends State<ChatView> {
   final _pinnedKey = GlobalKey(); // the pinned message's row, for scroll-to
   final _targetKey = GlobalKey(); // arbitrary linked/anchored message row
   final _unreadKey = GlobalKey(); // the "以下为新消息" divider, for entry scroll
+  final _transcriptViewportKey = GlobalKey();
+  final Map<int, GlobalKey> _entryVisibilityKeys = <int, GlobalKey>{};
+  Map<int, _TranscriptEntry> _trackedTranscriptEntries = const {};
+  bool _unreadProgressUpdateScheduled = false;
   ChatMessage? _actionTarget;
   Rect? _actionRect; // global bounds of the long-pressed bubble
   MessageActionSource _actionSource = MessageActionSource.normal;
@@ -363,7 +368,10 @@ class _ChatViewState extends State<ChatView> {
   Timer? _bannerTimer; // auto-hides the banner a few seconds after it appears
   int? _scrollTargetId;
   int? _lastNewestMessageId;
-  int _liveNewMessageCount = 0;
+  final ChatUnreadProgress _unreadProgress = ChatUnreadProgress();
+  int get _liveNewMessageCount => _unreadProgress.liveCount;
+  int get _remainingUnreadCount =>
+      _unreadProgress.remaining(initialUnreadCount: _vm.unreadCount);
   double _keyboardInset = 0;
   bool _shortTranscriptFillScheduled = false;
   bool _isFillingShortTranscript = false;
@@ -469,6 +477,7 @@ class _ChatViewState extends State<ChatView> {
       _bottomSettleGeneration++;
     }
     _saveSessionScrollSnapshot();
+    _scheduleUnreadProgressUpdate();
     if (_selectionAnchorId != null && scrollingUp != _selectionScrollingUp) {
       setState(() => _selectionScrollingUp = scrollingUp);
     }
@@ -487,7 +496,7 @@ class _ChatViewState extends State<ChatView> {
         (_liveNewMessageCount > 0 ||
             (!_openAtLatest && !_bannerDismissed && _vm.unreadCount > 0))) {
       setState(() {
-        _liveNewMessageCount = 0;
+        _unreadProgress.clearLiveMessages();
         _bannerDismissed = true;
       });
     }
@@ -514,6 +523,49 @@ class _ChatViewState extends State<ChatView> {
     );
   }
 
+  void _scheduleUnreadProgressUpdate() {
+    if (_unreadProgressUpdateScheduled || !mounted) return;
+    _unreadProgressUpdateScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _unreadProgressUpdateScheduled = false;
+      if (mounted) _updateUnreadProgressFromViewport();
+    });
+  }
+
+  void _updateUnreadProgressFromViewport() {
+    final viewportContext = _transcriptViewportKey.currentContext;
+    final viewportRenderObject = viewportContext?.findRenderObject();
+    if (viewportRenderObject is! RenderBox || !viewportRenderObject.attached) {
+      return;
+    }
+    final viewportOrigin = viewportRenderObject.localToGlobal(Offset.zero);
+    final viewportRect = viewportOrigin & viewportRenderObject.size;
+    var changed = false;
+
+    for (final entry in _trackedTranscriptEntries.entries) {
+      final itemContext = _entryVisibilityKeys[entry.key]?.currentContext;
+      final itemRenderObject = itemContext?.findRenderObject();
+      if (itemRenderObject is! RenderBox || !itemRenderObject.attached) {
+        continue;
+      }
+      final itemOrigin = itemRenderObject.localToGlobal(Offset.zero);
+      final itemRect = itemOrigin & itemRenderObject.size;
+      if (!itemRect.overlaps(viewportRect)) continue;
+
+      for (final message in entry.value.messages) {
+        if (message.isOutgoing || message.isService) continue;
+        changed =
+            _unreadProgress.markVisible(
+              messageId: message.id,
+              initialUnread: message.id > _vm.lastReadInboxId,
+            ) ||
+            changed;
+      }
+    }
+
+    if (changed && mounted) setState(() {});
+  }
+
   bool _isNearBottom([double threshold = 160]) {
     if (!_scroll.hasClients) return true;
     final pos = _scroll.position;
@@ -532,7 +584,7 @@ class _ChatViewState extends State<ChatView> {
       changed = true;
     }
     if (_liveNewMessageCount > 0) {
-      _liveNewMessageCount = 0;
+      _unreadProgress.clearLiveMessages();
       changed = true;
     }
     if (!_bannerDismissed) {
@@ -634,7 +686,7 @@ class _ChatViewState extends State<ChatView> {
       _scrollTargetId = null;
       if (_liveNewMessageCount > 0) {
         setState(() {
-          _liveNewMessageCount = 0;
+          _unreadProgress.clearLiveMessages();
           _bannerDismissed = _vm.unreadCount <= 0;
         });
       }
@@ -648,7 +700,7 @@ class _ChatViewState extends State<ChatView> {
       final ok = await _vm.loadLatestHistory();
       if (!mounted || !ok) return;
       setState(() {
-        _liveNewMessageCount = 0;
+        _unreadProgress.clearLiveMessages();
         _bannerDismissed = _vm.unreadCount <= 0;
       });
       _scheduleScrollToBottom(force: true);
@@ -668,7 +720,7 @@ class _ChatViewState extends State<ChatView> {
   void _onComposerMessageSent() {
     _autoScrollPolicy.returnToBottom();
     _scrollTargetId = null;
-    _liveNewMessageCount = 0;
+    _unreadProgress.clearLiveMessages();
     _bannerDismissed = true;
     if (_vm.anchoredHistory) {
       unawaited(_returnToLatest());
@@ -681,7 +733,7 @@ class _ChatViewState extends State<ChatView> {
   /// sits); fall back to the bottom if none is loaded.
   void _jumpToFirstUnread() {
     setState(() {
-      _liveNewMessageCount = 0;
+      _unreadProgress.clearLiveMessages();
       _bannerDismissed = true;
     });
     final i = _vm.messages.indexWhere(
@@ -726,7 +778,7 @@ class _ChatViewState extends State<ChatView> {
             wasNearBottom: wasNearBottom,
           );
       if (shouldAutoScroll) {
-        _liveNewMessageCount = 0;
+        _unreadProgress.clearLiveMessages();
         _scheduleScrollToBottom(
           animated: newest.isOutgoing,
           keyboardSettle: newest.isOutgoing,
@@ -738,7 +790,7 @@ class _ChatViewState extends State<ChatView> {
           !newest.isOutgoing &&
           !newest.isService &&
           (_autoScrollPolicy.preservesViewport || !wasNearBottom)) {
-        _liveNewMessageCount++;
+        _unreadProgress.addLiveMessage(newest.id);
         _bannerDismissed = false;
         _bannerTimer?.cancel();
         _bannerTimer = null;
@@ -2767,7 +2819,7 @@ class _ChatViewState extends State<ChatView> {
   }
 
   bool get _shouldShowNewMessagesBanner {
-    if ((_vm.unreadCount + _liveNewMessageCount) <= 0 || _bannerDismissed) {
+    if (_remainingUnreadCount <= 0 || _bannerDismissed) {
       return false;
     }
     if (_isAtLoadedBottom()) return false;
@@ -2810,7 +2862,7 @@ class _ChatViewState extends State<ChatView> {
   /// boundary; in unread-boundary mode it points down to the newest message.
   Widget _newMessagesBanner({required bool pointsDown}) {
     final c = context.colors;
-    final count = _vm.unreadCount + _liveNewMessageCount;
+    final count = _remainingUnreadCount;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: pointsDown ? _returnToLatest : _jumpToFirstUnread,
@@ -3715,9 +3767,11 @@ class _ChatViewState extends State<ChatView> {
     final groupImages = context.watch<ThemeController>().groupImageMessages;
     final entries = _transcriptEntries(groupImages);
     final messages = _transcriptCacheMessages ?? _vm.messages;
+    _scheduleUnreadProgressUpdate();
     return Container(
       color: context.colors.chatBackground,
       child: ListView.builder(
+        key: _transcriptViewportKey,
         controller: _scroll,
         physics: const ClampingScrollPhysics(
           parent: AlwaysScrollableScrollPhysics(),
@@ -3797,7 +3851,13 @@ class _ChatViewState extends State<ChatView> {
           );
           return KeyedSubtree(
             key: entry.key,
-            child: RepaintBoundary(child: content),
+            child: KeyedSubtree(
+              key: _entryVisibilityKeys.putIfAbsent(
+                entry.first.id,
+                GlobalKey.new,
+              ),
+              child: RepaintBoundary(child: content),
+            ),
           );
         },
       ),
@@ -3832,6 +3892,11 @@ class _ChatViewState extends State<ChatView> {
     _transcriptCacheLastReadInboxId = _vm.lastReadInboxId;
     _transcriptIndexByKey = {
       for (var i = 0; i < entries.length; i++) entries[i].key: i,
+    };
+    final entryIds = entries.map((entry) => entry.first.id).toSet();
+    _entryVisibilityKeys.removeWhere((id, _) => !entryIds.contains(id));
+    _trackedTranscriptEntries = {
+      for (final entry in entries) entry.first.id: entry,
     };
     return entries;
   }
