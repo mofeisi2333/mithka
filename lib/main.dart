@@ -39,6 +39,7 @@ import 'notifications/notification_controller.dart';
 import 'notifications/push_device_registrar.dart';
 import 'settings/app_icon_controller.dart';
 import 'settings/auto_download_media_controller.dart';
+import 'settings/blocked_user_service.dart';
 import 'settings/developer_mode_controller.dart';
 import 'settings/keyword_blocker.dart';
 import 'settings/translation_controller.dart';
@@ -94,6 +95,8 @@ Future<void> _bootstrapAndRunApp() async {
   final prefs = await SharedPreferences.getInstance();
   KeywordBlocker.shared.initialize(prefs);
   MusicPlayerController.shared.initialize(prefs);
+  // Preload Telegram blocked-user list so chat filters have data right away.
+  unawaited(BlockedUserService.shared.loadBlockedUsers());
   // Firebase + analytics + Sentry tags are several platform-channel round
   // trips that nothing in the widget tree depends on — initialize them in
   // parallel with the first frame instead of blocking it.
