@@ -283,14 +283,14 @@ class _MessageBubbleState extends State<MessageBubble>
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
+                      if (widget.showRepeat) _repeatBadge(),
+                      if (widget.showRepeat) const SizedBox(width: 6),
                       Flexible(
                         child: Align(
                           alignment: Alignment.centerRight,
                           child: content,
                         ),
                       ),
-                      if (widget.showRepeat) const SizedBox(width: 6),
-                      if (widget.showRepeat) _repeatBadge(),
                     ],
                   ),
                 ),
