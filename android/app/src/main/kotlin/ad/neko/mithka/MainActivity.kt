@@ -3,10 +3,13 @@ package ad.neko.mithka
 import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
+import android.content.ClipDescription
 import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
+import android.view.DragEvent
 import android.view.WindowManager
+import android.webkit.MimeTypeMap
 import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.nl.translate.Translation
@@ -24,6 +27,8 @@ import org.xmlpull.v1.XmlPullParserFactory
 
 class MainActivity : FlutterActivity() {
     private var callMedia: CallMediaPlugin? = null
+    private var mediaDropChannel: MethodChannel? = null
+    private var acceptingImageDrop = false
     private val translators = mutableMapOf<String, Translator>()
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -164,6 +169,90 @@ class MainActivity : FlutterActivity() {
                     result.error("clipboard_unavailable", e.message, null)
                 }
             }
+        mediaDropChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "mithka/media_drop",
+        )
+        window.decorView.setOnDragListener { _, event -> handleMediaDragEvent(event) }
+    }
+
+    private fun handleMediaDragEvent(event: DragEvent): Boolean {
+        when (event.action) {
+            DragEvent.ACTION_DRAG_STARTED -> {
+                acceptingImageDrop =
+                    event.clipDescription?.hasMimeType("image/*") == true ||
+                    event.clipDescription?.hasMimeType(ClipDescription.MIMETYPE_TEXT_URILIST) == true
+                if (acceptingImageDrop) {
+                    mediaDropChannel?.invokeMethod("dragEntered", null)
+                    return true
+                }
+            }
+            DragEvent.ACTION_DRAG_ENTERED -> {
+                if (acceptingImageDrop) {
+                    mediaDropChannel?.invokeMethod("dragEntered", null)
+                    return true
+                }
+            }
+            DragEvent.ACTION_DRAG_LOCATION -> if (acceptingImageDrop) return true
+            DragEvent.ACTION_DRAG_EXITED -> {
+                if (acceptingImageDrop) {
+                    mediaDropChannel?.invokeMethod("dragExited", null)
+                    return true
+                }
+            }
+            DragEvent.ACTION_DROP -> {
+                if (!acceptingImageDrop) return false
+                val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    requestDragAndDropPermissions(event)
+                } else {
+                    null
+                }
+                val uris = buildList {
+                    val clip = event.clipData
+                    for (index in 0 until minOf(clip.itemCount, 10)) {
+                        clip.getItemAt(index).uri?.let(::add)
+                    }
+                }
+                Thread {
+                    val paths = uris.mapNotNull { uri ->
+                        val mimeType = contentResolver.getType(uri) ?: return@mapNotNull null
+                        if (!mimeType.startsWith("image/")) return@mapNotNull null
+                        try {
+                            val extension = MimeTypeMap.getSingleton()
+                                .getExtensionFromMimeType(mimeType)
+                                ?.takeIf { it.matches(Regex("^[A-Za-z0-9]{2,5}$")) }
+                                ?: "png"
+                            val destination = File(
+                                cacheDir,
+                                "mithka-drop-${System.nanoTime()}.$extension",
+                            )
+                            contentResolver.openInputStream(uri).use { input ->
+                                if (input == null) return@mapNotNull null
+                                destination.outputStream().use(input::copyTo)
+                            }
+                            destination.absolutePath
+                        } catch (error: Exception) {
+                            Log.w("Mithka", "Unable to read dropped image", error)
+                            null
+                        }
+                    }
+                    runOnUiThread {
+                        permissions?.release()
+                        mediaDropChannel?.invokeMethod("dropImages", paths)
+                    }
+                }.start()
+                acceptingImageDrop = false
+                return true
+            }
+            DragEvent.ACTION_DRAG_ENDED -> {
+                if (acceptingImageDrop) {
+                    mediaDropChannel?.invokeMethod("dragExited", null)
+                    acceptingImageDrop = false
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     private fun launcherAliases(): Map<String, String> = mapOf(

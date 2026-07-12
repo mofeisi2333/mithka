@@ -71,11 +71,16 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
       ),
     );
     if (!mounted || result == null) return;
-    setState(() {
-      _attachments[_selectedIndex] = attachment.copyWith(
+    final updated = await resolveAttachmentDimensions(
+      attachment.copyWith(
         path: result.path,
         clearPreviewBytes: true,
-      );
+        clearDimensions: true,
+      ),
+    );
+    if (!mounted) return;
+    setState(() {
+      _attachments[_selectedIndex] = updated;
       if (result.caption.trim().isNotEmpty) {
         _captionController.text = result.caption;
       }

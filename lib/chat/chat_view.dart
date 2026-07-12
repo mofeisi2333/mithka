@@ -43,6 +43,7 @@ import '../theme/theme_controller.dart';
 import 'chat_auto_scroll_policy.dart';
 import 'chat_info_view.dart';
 import 'chat_input_bar.dart';
+import 'chat_media_drop_region.dart';
 import 'chat_picker_view.dart';
 import 'chat_search_view.dart';
 import 'chat_unread_progress.dart';
@@ -54,6 +55,7 @@ import 'full_image_viewer.dart';
 import 'link_handler.dart';
 import 'media_album_layout.dart';
 import 'media_library_saver.dart';
+import 'media_send_preview_view.dart';
 import 'message_action_menu.dart';
 import 'message_bubble.dart';
 import 'message_replies_sheet.dart';
@@ -2524,30 +2526,51 @@ class _ChatViewState extends State<ChatView> {
       resizeToAvoidBottomInset: true,
       body: ColoredBox(
         color: c.chatBackground,
-        child: Listener(
-          behavior: HitTestBehavior.translucent,
-          onPointerDown: _onBackSwipePointerDown,
-          onPointerMove: _onBackSwipePointerMove,
-          onPointerUp: _onBackSwipePointerEnd,
-          onPointerCancel: _onBackSwipePointerEnd,
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: Column(
-                  children: [
-                    _isSelecting ? _selectionHeader() : _header(),
-                    Expanded(child: _transcriptLayer()),
-                    _isSelecting ? _selectionActionBar() : _composerArea(),
-                  ],
+        child: ChatMediaDropRegion(
+          enabled: _vm.canSendMessages && !_isSelecting,
+          onImagesDropped: _previewAndSendDroppedImages,
+          child: Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: _onBackSwipePointerDown,
+            onPointerMove: _onBackSwipePointerMove,
+            onPointerUp: _onBackSwipePointerEnd,
+            onPointerCancel: _onBackSwipePointerEnd,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: Column(
+                    children: [
+                      _isSelecting ? _selectionHeader() : _header(),
+                      Expanded(child: _transcriptLayer()),
+                      _isSelecting ? _selectionActionBar() : _composerArea(),
+                    ],
+                  ),
                 ),
-              ),
-              if (_actionTarget != null && !_isSelecting) _actionMenuOverlay(),
-              if (_vm.isTelegramTosRestricted) _restrictedChatOverlay(),
-            ],
+                if (_actionTarget != null && !_isSelecting)
+                  _actionMenuOverlay(),
+                if (_vm.isTelegramTosRestricted) _restrictedChatOverlay(),
+              ],
+            ),
           ),
         ),
       ),
     );
+  }
+
+  Future<void> _previewAndSendDroppedImages(
+    List<OutgoingAttachment> attachments,
+  ) async {
+    if (!_vm.canSendMessages || attachments.isEmpty || !mounted) return;
+    final preview = await Navigator.of(context).push<MediaSendPreviewResult>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => MediaSendPreviewView(attachments: attachments),
+      ),
+    );
+    if (!mounted || preview == null || preview.attachments.isEmpty) return;
+    final resolved = await resolveAttachmentListDimensions(preview.attachments);
+    await _vm.sendAttachments(resolved, caption: preview.caption);
+    if (mounted) _onComposerMessageSent();
   }
 
   Widget _restrictedChatOverlay() {

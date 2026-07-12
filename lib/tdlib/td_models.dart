@@ -504,6 +504,10 @@ class ChatMessage {
   /// replaces it with the server-confirmed message and new file identifiers.
   void inheritLocalMediaFrom(ChatMessage previous) {
     image = image?.inheritLocalPathFrom(previous.image) ?? previous.image;
+    if ((imageWidth ?? 0) <= 0 || (imageHeight ?? 0) <= 0) {
+      imageWidth = previous.imageWidth;
+      imageHeight = previous.imageHeight;
+    }
     video = video?.inheritLocalPathFrom(previous.video) ?? previous.video;
     animatedSticker =
         animatedSticker?.inheritLocalPathFrom(previous.animatedSticker) ??

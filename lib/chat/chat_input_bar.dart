@@ -1022,22 +1022,13 @@ class _ChatInputBarState extends State<ChatInputBar> {
               path: file.path,
               kind: kind,
               previewBytes: asset.thumbnailBytes,
+              width: asset.width,
+              height: asset.height,
             );
           })
           .toList(growable: false);
       if (attachments.isEmpty) return;
-      final preview = await Navigator.of(context).push<MediaSendPreviewResult>(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) => MediaSendPreviewView(attachments: attachments),
-        ),
-      );
-      if (!mounted || preview == null || preview.attachments.isEmpty) return;
-      await widget.vm.sendAttachments(
-        preview.attachments,
-        caption: preview.caption,
-      );
-      widget.onMessageSent();
+      await _previewAndSendAttachments(attachments);
     } catch (error, stackTrace) {
       debugPrint('Failed to send selected media: $error\n$stackTrace');
       _pickFailed(AppStrings.t(AppStringKeys.composerImage));
@@ -1051,7 +1042,13 @@ class _ChatInputBarState extends State<ChatInputBar> {
       if (shot == null) return;
       final edited = await _editImage(shot.path);
       if (edited != null) {
-        widget.vm.sendPhoto(edited.path, caption: edited.caption);
+        final attachment = await resolveAttachmentDimensions(
+          OutgoingAttachment(
+            path: edited.path,
+            kind: OutgoingAttachmentKind.photo,
+          ),
+        );
+        await widget.vm.sendAttachments([attachment], caption: edited.caption);
         widget.onMessageSent();
       }
     } catch (_) {
@@ -1147,14 +1144,37 @@ class _ChatInputBarState extends State<ChatInputBar> {
         }
         return;
       }
-      if (_isGifPath(path)) {
-        widget.vm.sendAnimation(path, caption: caption);
-      } else {
-        widget.vm.sendPhoto(path, caption: caption);
-      }
+      final attachment = await resolveAttachmentDimensions(
+        OutgoingAttachment(
+          path: path,
+          kind: _isGifPath(path)
+              ? OutgoingAttachmentKind.animation
+              : OutgoingAttachmentKind.photo,
+        ),
+      );
+      await widget.vm.sendAttachments([attachment], caption: caption);
       widget.onMessageSent();
       return;
     }
+  }
+
+  Future<void> _previewAndSendAttachments(
+    List<OutgoingAttachment> attachments,
+  ) async {
+    final resolved = await resolveAttachmentListDimensions(attachments);
+    if (!mounted) return;
+    final preview = await Navigator.of(context).push<MediaSendPreviewResult>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => MediaSendPreviewView(attachments: resolved),
+      ),
+    );
+    if (!mounted || preview == null || preview.attachments.isEmpty) return;
+    final finalAttachments = await resolveAttachmentListDimensions(
+      preview.attachments,
+    );
+    await widget.vm.sendAttachments(finalAttachments, caption: preview.caption);
+    widget.onMessageSent();
   }
 
   Future<_ClipboardImageAction?> _showClipboardImagePreview(

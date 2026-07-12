@@ -11,10 +11,17 @@ import '../theme/app_theme.dart';
 enum AppAssetPickerType { image, video, imageAndVideo }
 
 class AppPickedAsset {
-  const AppPickedAsset({required this.file, this.thumbnailBytes});
+  const AppPickedAsset({
+    required this.file,
+    this.thumbnailBytes,
+    this.width,
+    this.height,
+  });
 
   final XFile file;
   final Uint8List? thumbnailBytes;
+  final int? width;
+  final int? height;
 }
 
 class AppAssetPickerSelection {
@@ -211,6 +218,8 @@ abstract final class AppAssetPicker {
         mimeType: shouldCompressPhoto ? 'image/jpeg' : mimeType,
       ),
       thumbnailBytes: thumbnailBytes,
+      width: asset.width > 0 ? asset.width : null,
+      height: asset.height > 0 ? asset.height : null,
     );
   }
 

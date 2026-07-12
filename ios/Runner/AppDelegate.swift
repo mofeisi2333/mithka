@@ -18,6 +18,7 @@ import UIKit
   private var systemPictureInPictureBridge: SystemPictureInPictureBridge?
   private var liveCommunicationBridge: AnyObject?
   private var groupCallMediaBridge: TelegramGroupCallMediaBridge?
+  private var mediaDropBridge: MediaDropBridge?
 
   override func application(
     _ application: UIApplication,
@@ -120,6 +121,9 @@ import UIKit
       }
       result(nil)
     }
+    mediaDropBridge = MediaDropBridge(
+      messenger: engineBridge.applicationRegistrar.messenger()
+    )
 
     let fontsChannel = FlutterMethodChannel(
       name: "mithka/fonts",

@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 enum OutgoingAttachmentKind { photo, video, animation, document, audio }
 
@@ -11,6 +13,8 @@ class OutgoingAttachment {
     this.caption = '',
     this.captionEntities = const [],
     this.previewBytes,
+    this.width,
+    this.height,
   });
 
   final String path;
@@ -18,6 +22,8 @@ class OutgoingAttachment {
   final String caption;
   final List<Map<String, dynamic>> captionEntities;
   final Uint8List? previewBytes;
+  final int? width;
+  final int? height;
 
   AttachmentAlbumKind get albumKind => switch (kind) {
     OutgoingAttachmentKind.photo ||
@@ -34,6 +40,9 @@ class OutgoingAttachment {
     List<Map<String, dynamic>>? captionEntities,
     Uint8List? previewBytes,
     bool clearPreviewBytes = false,
+    int? width,
+    int? height,
+    bool clearDimensions = false,
   }) {
     return OutgoingAttachment(
       path: path ?? this.path,
@@ -43,9 +52,41 @@ class OutgoingAttachment {
       previewBytes: clearPreviewBytes
           ? null
           : previewBytes ?? this.previewBytes,
+      width: clearDimensions ? null : width ?? this.width,
+      height: clearDimensions ? null : height ?? this.height,
     );
   }
 }
+
+Future<OutgoingAttachment> resolveAttachmentDimensions(
+  OutgoingAttachment attachment,
+) async {
+  if (attachment.kind != OutgoingAttachmentKind.photo &&
+      attachment.kind != OutgoingAttachmentKind.animation) {
+    return attachment;
+  }
+  if ((attachment.width ?? 0) > 0 && (attachment.height ?? 0) > 0) {
+    return attachment;
+  }
+  try {
+    final data = await File(attachment.path).readAsBytes();
+    final codec = await ui.instantiateImageCodec(data);
+    final frame = await codec.getNextFrame();
+    final result = attachment.copyWith(
+      width: frame.image.width,
+      height: frame.image.height,
+    );
+    frame.image.dispose();
+    codec.dispose();
+    return result;
+  } catch (_) {
+    return attachment;
+  }
+}
+
+Future<List<OutgoingAttachment>> resolveAttachmentListDimensions(
+  Iterable<OutgoingAttachment> attachments,
+) => Future.wait(attachments.map(resolveAttachmentDimensions));
 
 class OutgoingAttachmentBatch {
   const OutgoingAttachmentBatch(this.attachments);
@@ -111,7 +152,15 @@ Map<String, dynamic> attachmentInputMessageContent(
   return switch (attachment.kind) {
     OutgoingAttachmentKind.photo => {
       '@type': 'inputMessagePhoto',
-      'photo': {'@type': 'inputPhoto', 'photo': localFile},
+      'photo': {
+        '@type': 'inputPhoto',
+        'photo': localFile,
+        'added_sticker_file_ids': <int>[],
+        'width': attachment.width ?? 0,
+        'height': attachment.height ?? 0,
+      },
+      if ((attachment.width ?? 0) > 0) 'width': attachment.width,
+      if ((attachment.height ?? 0) > 0) 'height': attachment.height,
       'caption': ?formattedCaption,
     },
     OutgoingAttachmentKind.video => {
@@ -127,8 +176,8 @@ Map<String, dynamic> attachmentInputMessageContent(
       '@type': 'inputMessageAnimation',
       'animation': localFile,
       'duration': 0,
-      'width': 0,
-      'height': 0,
+      'width': attachment.width ?? 0,
+      'height': attachment.height ?? 0,
       'caption': ?formattedCaption,
     },
     OutgoingAttachmentKind.document => {

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as image_lib;
 import 'package:mithka/chat/outgoing_attachment.dart';
 import 'package:mithka/tdlib/td_image_loader.dart';
 import 'package:mithka/tdlib/td_models.dart';
@@ -9,7 +10,15 @@ OutgoingAttachment attachment(
   String path,
   OutgoingAttachmentKind kind, {
   String caption = '',
-}) => OutgoingAttachment(path: path, kind: kind, caption: caption);
+  int? width,
+  int? height,
+}) => OutgoingAttachment(
+  path: path,
+  kind: kind,
+  caption: caption,
+  width: width,
+  height: height,
+);
 
 void main() {
   test('groups compatible attachments without reordering', () {
@@ -121,6 +130,40 @@ void main() {
     expect((album[2] as Map)['caption'], isNull);
   });
 
+  test('includes image dimensions in the outgoing photo payload', () {
+    final content = attachmentInputMessageContent(
+      attachment(
+        'wide.jpg',
+        OutgoingAttachmentKind.photo,
+        width: 1600,
+        height: 900,
+      ),
+    );
+
+    expect(content['width'], 1600);
+    expect(content['height'], 900);
+    expect((content['photo'] as Map)['width'], 1600);
+    expect((content['photo'] as Map)['height'], 900);
+  });
+
+  test('reads the encoded photo dimensions before sending', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'mithka-dimensions-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final file = File('${directory.path}/wide.png');
+    await file.writeAsBytes(
+      image_lib.encodePng(image_lib.Image(width: 4, height: 2)),
+    );
+
+    final resolved = await resolveAttachmentDimensions(
+      attachment(file.path, OutgoingAttachmentKind.photo),
+    );
+
+    expect(resolved.width, 4);
+    expect(resolved.height, 2);
+  });
+
   test('parses the local source path from an outgoing TDLib file', () {
     final message = TDParse.message({
       '@type': 'message',
@@ -164,6 +207,8 @@ void main() {
       date: 1,
       contentType: 'messageVideo',
       image: TdFileRef(id: 1, localPath: '/tmp/thumb.jpg'),
+      imageWidth: 1600,
+      imageHeight: 900,
       video: TdFileRef(id: 2, localPath: '/tmp/video.mp4'),
       document: MessageDocument(
         fileName: 'file.pdf',
@@ -192,6 +237,8 @@ void main() {
 
     expect(sent.image?.id, 11);
     expect(sent.image?.localPath, '/tmp/thumb.jpg');
+    expect(sent.imageWidth, 1600);
+    expect(sent.imageHeight, 900);
     expect(sent.video?.id, 12);
     expect(sent.video?.localPath, '/tmp/video.mp4');
     expect(sent.document?.file?.id, 13);
