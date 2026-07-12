@@ -539,6 +539,7 @@ const esMessages = <String, String>{
   'generalAutoDownloadWifi': "Wi-Fi",
   'generalOpenChatAtLatestMessage': "Abrir chats en el mensaje más reciente",
   'generalSendMessageWithEnter': "Enviar mensajes con Enter",
+  'generalRepeatPreserveSender': "Conservar remitente al usar +1",
   'generalStorage': "Almacenamiento",
   'generalTitle': "General",
   'groupManagementAdminApprovalRequired':
@@ -722,6 +723,7 @@ const esMessages = <String, String>{
   'messageActionEdit': "Editar",
   'messageActionFavorite': "Guardar en favoritos",
   'messageActionForward': "Reenviar",
+  'messageActionRepeat': "Repetir",
   'messageActionMultiSelect': "Selección múltiple",
   'messageActionPlayMuted': "Reproducir sin sonido",
   'messageActionQuote': "Citar",

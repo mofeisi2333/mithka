@@ -856,6 +856,7 @@ abstract final class AppStringKeys {
   static const generalOpenChatAtLatestMessage =
       'generalOpenChatAtLatestMessage';
   static const generalSendMessageWithEnter = 'generalSendMessageWithEnter';
+  static const generalRepeatPreserveSender = 'generalRepeatPreserveSender';
   static const generalStorage = 'generalStorage';
   static const generalTitle = 'generalTitle';
   static const groupManagementAdminApprovalRequired =
@@ -1067,6 +1068,7 @@ abstract final class AppStringKeys {
   static const messageActionEdit = 'messageActionEdit';
   static const messageActionFavorite = 'messageActionFavorite';
   static const messageActionForward = 'messageActionForward';
+  static const messageActionRepeat = 'messageActionRepeat';
   static const messageActionMultiSelect = 'messageActionMultiSelect';
   static const messageActionPlayMuted = 'messageActionPlayMuted';
   static const messageActionQuote = 'messageActionQuote';

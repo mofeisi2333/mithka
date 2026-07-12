@@ -40,6 +40,7 @@ import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import '../theme/date_text.dart';
 import '../theme/theme_controller.dart';
+import 'chat_auto_scroll_policy.dart';
 import 'chat_info_view.dart';
 import 'chat_input_bar.dart';
 import 'chat_picker_view.dart';
@@ -387,6 +388,7 @@ class _ChatViewState extends State<ChatView> {
   static const _initialUnreadAlignment = 0.12;
   static OverlayEntry? _globalPictureInPictureVideo;
   static final Map<int, _ChatScrollSnapshot> _sessionScrollSnapshots = {};
+  late final ChatAutoScrollPolicy _autoScrollPolicy;
 
   double _messageMediaMaxWidth([double? chatWidth]) {
     final width = chatWidth ?? MediaQuery.sizeOf(context).width;
@@ -400,6 +402,12 @@ class _ChatViewState extends State<ChatView> {
     _sessionScrollSnapshot = widget.initialMessageId == null
         ? _sessionScrollSnapshots[widget.chatId]
         : null;
+    final sessionScrollSnapshot = _sessionScrollSnapshot;
+    _autoScrollPolicy = ChatAutoScrollPolicy(
+      preserveViewport:
+          sessionScrollSnapshot != null &&
+          !sessionScrollSnapshot.wasAtLoadedBottom,
+    );
     _scroll = ScrollController(
       initialScrollOffset: _shouldRestoreSessionScroll
           ? _sessionScrollSnapshot!.pixels
@@ -452,6 +460,14 @@ class _ChatViewState extends State<ChatView> {
     final pos = _scroll.position;
     final scrollingUp = pos.pixels < _lastScrollPixels;
     _lastScrollPixels = pos.pixels;
+    final wasPreservingViewport = _autoScrollPolicy.preservesViewport;
+    _autoScrollPolicy.noteUserScroll(
+      towardOlderMessages: pos.userScrollDirection == ScrollDirection.forward,
+      isAtBottom: _isAtLoadedBottom(1),
+    );
+    if (!wasPreservingViewport && _autoScrollPolicy.preservesViewport) {
+      _bottomSettleGeneration++;
+    }
     _saveSessionScrollSnapshot();
     if (_selectionAnchorId != null && scrollingUp != _selectionScrollingUp) {
       setState(() => _selectionScrollingUp = scrollingUp);
@@ -466,6 +482,7 @@ class _ChatViewState extends State<ChatView> {
       unawaited(_returnToLatest());
     }
     final nearBottom = _isNearBottom(80);
+    if (_isAtLoadedBottom(1)) _autoScrollPolicy.returnToBottom();
     if (nearBottom &&
         (_liveNewMessageCount > 0 ||
             (!_openAtLatest && !_bannerDismissed && _vm.unreadCount > 0))) {
@@ -562,7 +579,9 @@ class _ChatViewState extends State<ChatView> {
     final wasNearBottom = _isNearBottom(260);
     final opening = inset > _keyboardInset;
     _keyboardInset = inset;
-    if ((wasNearBottom || opening) && _scrollTargetId == null) {
+    if ((wasNearBottom || opening) &&
+        !_autoScrollPolicy.preservesViewport &&
+        _scrollTargetId == null) {
       _scheduleScrollToBottom(keyboardSettle: true, force: opening);
     }
   }
@@ -588,6 +607,7 @@ class _ChatViewState extends State<ChatView> {
     bool force = false,
   }) {
     if (!_scroll.hasClients) return;
+    _autoScrollPolicy.returnToBottom();
     final target = _scroll.position.maxScrollExtent;
     if (!animated || (target - _scroll.position.pixels).abs() < 48) {
       _scroll.jumpTo(target);
@@ -609,6 +629,7 @@ class _ChatViewState extends State<ChatView> {
 
   Future<void> _returnToLatest() async {
     if (_loadingLatestFromAnchor) return;
+    _autoScrollPolicy.returnToBottom();
     if (!_vm.anchoredHistory) {
       _scrollTargetId = null;
       if (_liveNewMessageCount > 0) {
@@ -645,6 +666,7 @@ class _ChatViewState extends State<ChatView> {
   }
 
   void _onComposerMessageSent() {
+    _autoScrollPolicy.returnToBottom();
     _scrollTargetId = null;
     _liveNewMessageCount = 0;
     _bannerDismissed = true;
@@ -699,7 +721,10 @@ class _ChatViewState extends State<ChatView> {
           _scrollTargetId == null &&
           !_vm.anchoredHistory &&
           appendedNewest &&
-          (newest.isOutgoing || (wasNearBottom && !_isUserScrolling));
+          !_isUserScrolling &&
+          _autoScrollPolicy.shouldFollowAppendedMessage(
+            wasNearBottom: wasNearBottom,
+          );
       if (shouldAutoScroll) {
         _liveNewMessageCount = 0;
         _scheduleScrollToBottom(
@@ -712,7 +737,7 @@ class _ChatViewState extends State<ChatView> {
           appendedNewest &&
           !newest.isOutgoing &&
           !newest.isService &&
-          !wasNearBottom) {
+          (_autoScrollPolicy.preservesViewport || !wasNearBottom)) {
         _liveNewMessageCount++;
         _bannerDismissed = false;
         _bannerTimer?.cancel();
@@ -1040,6 +1065,7 @@ class _ChatViewState extends State<ChatView> {
 
   void _scrollToBottom({bool settle = false, bool forceSettle = false}) {
     if (!_scroll.hasClients) return;
+    _autoScrollPolicy.returnToBottom();
     _scroll.jumpTo(_scroll.position.maxScrollExtent);
     _markReadAtBottomIfNeeded();
     _clearBottomIndicatorsIfNeeded();
@@ -1849,6 +1875,22 @@ class _ChatViewState extends State<ChatView> {
         await _openMessageComments(message);
       case MessageAction.forward:
         unawaited(_forwardMessage(message));
+      case MessageAction.repeat:
+        try {
+          final preserveSender = context
+              .read<ThemeController>()
+              .preserveSenderWhenRepeating;
+          await _vm.forward(
+            message.id,
+            _vm.chatId,
+            options: ForwardOptions(removeSender: !preserveSender),
+          );
+          if (!mounted) return;
+          _scrollToBottom(settle: true, forceSettle: true);
+        } catch (e) {
+          if (!mounted) return;
+          _showForwardFailure(e);
+        }
       case MessageAction.report:
         final confirmed = await confirmDialog(
           context,
@@ -2412,8 +2454,9 @@ class _ChatViewState extends State<ChatView> {
   Widget build(BuildContext context) {
     final c = context.colors;
     // Keep blocked-user hiding toggle in sync with theme.
-    BlockedUserService.shared.enabled =
-        context.watch<ThemeController>().hideBlockedUserMessages;
+    BlockedUserService.shared.enabled = context
+        .watch<ThemeController>()
+        .hideBlockedUserMessages;
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     _syncKeyboardInset(keyboardInset);
     // Not a member, joinable, and nothing to preview → a custom join screen
@@ -4270,10 +4313,7 @@ class _ChatViewState extends State<ChatView> {
               left: 10,
               right: 10,
               child: _reactionExpanded
-                  ? Align(
-                      alignment: align,
-                      child: _expandedReactionPicker(),
-                    )
+                  ? Align(alignment: align, child: _expandedReactionPicker())
                   : SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       reverse: align == Alignment.centerRight,

@@ -27,6 +27,7 @@ enum MessageAction {
   reply(HeroAppIcons.quoteLeft, AppStringKeys.messageActionQuote),
   replies(HeroAppIcons.comments, AppStringKeys.messageActionReplies),
   forward(HeroAppIcons.share, AppStringKeys.messageActionForward),
+  repeat(HeroAppIcons.circlePlus, AppStringKeys.messageActionRepeat),
   report(HeroAppIcons.triangleExclamation, AppStringKeys.messageActionReport),
   block(HeroAppIcons.ban, AppStringKeys.messageActionBlock),
   playMuted(HeroAppIcons.volumeXmark, AppStringKeys.messageActionPlayMuted),
@@ -69,13 +70,34 @@ class MessageActionMenu extends StatelessWidget {
   static const _destructive = Color(0xFFFF6961);
   static const _horizontalPadding = 8.0;
   static const _actionWidth = 68.0;
+  static const _visibleActionSlots = 3.5;
   static const preferredHeight = 152.0;
+
+  @visibleForTesting
+  static ({int first, int second}) rowCountsForActionCount(int count) {
+    if (count <= 5) return (first: math.max(count, 0), second: 0);
+    final first = (count + 1) ~/ 2;
+    return (first: first, second: count - first);
+  }
+
+  @visibleForTesting
+  static double viewportWidthForColumnCount(
+    int columnCount, {
+    required double availableWidth,
+  }) {
+    final columns = math.max(columnCount, 1);
+    final contentWidth = (columns * _actionWidth) + (_horizontalPadding * 2);
+    final visibleWidth =
+        (math.min(columns, _visibleActionSlots) * _actionWidth) +
+        (_horizontalPadding * 2);
+    return math.min(contentWidth, math.min(visibleWidth, availableWidth));
+  }
 
   bool get _isEditableTextMessage =>
       message.text.isNotEmpty &&
       (message.contentType == 'messageText' ||
-       message.contentType == 'messagePhoto' ||
-       message.contentType == 'messageVideo');
+          message.contentType == 'messagePhoto' ||
+          message.contentType == 'messageVideo');
 
   bool get _hasCopyableText => message.text.trim().isNotEmpty;
 
@@ -96,6 +118,7 @@ class MessageActionMenu extends StatelessWidget {
       result.add(MessageAction.replies);
     }
     result.add(MessageAction.forward);
+    result.add(MessageAction.repeat);
     if (message.video != null && source == MessageActionSource.video) {
       result.add(MessageAction.playMuted);
     }
@@ -125,11 +148,8 @@ class MessageActionMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final actions = _actions(context.watch<TranslationController>().enabled);
-    final firstRowCount = actions.length <= 5
-        ? actions.length
-        : actions.length <= 10
-        ? 5
-        : (actions.length + 1) ~/ 2;
+    final rowCounts = rowCountsForActionCount(actions.length);
+    final firstRowCount = rowCounts.first;
     final firstRow = actions.take(firstRowCount).toList();
     final secondRow = actions.skip(firstRowCount).toList();
     final columnCount = secondRow.isEmpty
@@ -139,15 +159,19 @@ class MessageActionMenu extends StatelessWidget {
         : secondRow.length;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final maxWidth = (MediaQuery.of(context).size.width - 24) * 0.8;
+        final maxWidth = MediaQuery.of(context).size.width - 24;
         final availableWidth = constraints.hasBoundedWidth
             ? constraints.maxWidth.clamp(0.0, maxWidth)
             : maxWidth;
         final contentWidth =
             (math.max(columnCount, 1) * _actionWidth) +
             (_horizontalPadding * 2);
-        final menuWidth = contentWidth.clamp(0.0, availableWidth);
+        final menuWidth = viewportWidthForColumnCount(
+          columnCount,
+          availableWidth: availableWidth,
+        );
         return Container(
+          key: const ValueKey('message-action-menu-surface'),
           width: menuWidth,
           padding: const EdgeInsets.symmetric(vertical: 13),
           clipBehavior: Clip.antiAlias,
@@ -216,13 +240,28 @@ class _ActionRow extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  AppIcon(
-                    action.glyph,
-                    size: 22,
-                    color: action.isDestructive
-                        ? MessageActionMenu._destructive
-                        : Colors.white,
-                  ),
+                  if (action == MessageAction.repeat)
+                    const SizedBox(
+                      height: 22,
+                      child: Center(
+                        child: Text(
+                          '+1',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                    AppIcon(
+                      action.glyph,
+                      size: 22,
+                      color: action.isDestructive
+                          ? MessageActionMenu._destructive
+                          : Colors.white,
+                    ),
                   const SizedBox(height: 7),
                   Text(
                     telegramText(action.label),

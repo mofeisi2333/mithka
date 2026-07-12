@@ -296,6 +296,14 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
             theme.openChatsAtLatest,
             (v) => theme.openChatsAtLatest = v,
           ),
+          const InsetDivider(leadingInset: 56),
+          _toggleRow(
+            HeroAppIcons.arrowsRotate.data,
+            const Color(0xFF16B0A0),
+            AppStrings.t(AppStringKeys.generalRepeatPreserveSender),
+            theme.preserveSenderWhenRepeating,
+            (v) => theme.preserveSenderWhenRepeating = v,
+          ),
         ]),
       ],
     );

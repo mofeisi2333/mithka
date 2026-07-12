@@ -549,6 +549,7 @@ const frMessages = <String, String>{
   'generalAutoDownloadWifi': "Wi-Fi",
   'generalOpenChatAtLatestMessage': "Ouvrir les discussions au dernier message",
   'generalSendMessageWithEnter': "Envoyer avec Entrée",
+  'generalRepeatPreserveSender': "Conserver l’expéditeur avec +1",
   'generalStorage': "Stockage",
   'generalTitle': "Général",
   'groupManagementAdminApprovalRequired':
@@ -730,6 +731,7 @@ const frMessages = <String, String>{
   'messageActionEdit': "Modifier",
   'messageActionFavorite': "Ajouter aux favoris",
   'messageActionForward': "Transférer",
+  'messageActionRepeat': "Répéter",
   'messageActionMultiSelect': "Sélection multiple",
   'messageActionPlayMuted': "Lire sans son",
   'messageActionQuote': "Citer",

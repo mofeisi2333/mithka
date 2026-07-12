@@ -868,6 +868,8 @@ class ThemeController extends ChangeNotifier {
     _showMessageMetaIndicators =
         _prefs.getBool(_messageMetaIndicatorsKey) ?? false;
     _openChatsAtLatest = _prefs.getBool(_openChatsAtLatestKey) ?? false;
+    _preserveSenderWhenRepeating =
+        _prefs.getBool(_preserveSenderWhenRepeatingKey) ?? true;
     _groupImageMessages = _prefs.getBool(_groupImageMessagesKey) ?? true;
     _hideBlockedUserMessages =
         _prefs.getBool(_hideBlockedUserMessagesKey) ?? false;
@@ -926,6 +928,7 @@ class ThemeController extends ChangeNotifier {
   static const _chatPremiumEmojiStatusKey = 'showChatPremiumEmojiStatus';
   static const _messageMetaIndicatorsKey = 'showMessageMetaIndicators';
   static const _openChatsAtLatestKey = 'openChatsAtLatest';
+  static const _preserveSenderWhenRepeatingKey = 'preserveSenderWhenRepeating';
   static const _groupImageMessagesKey = 'groupImageMessages';
   static const _hideBlockedUserMessagesKey = 'hideBlockedUserMessages';
   static const _showChannelsTabKey = 'showChannelsTab';
@@ -966,6 +969,7 @@ class ThemeController extends ChangeNotifier {
   bool _showChatPremiumEmojiStatus = true;
   bool _showMessageMetaIndicators = false;
   bool _openChatsAtLatest = false;
+  bool _preserveSenderWhenRepeating = true;
   bool _groupImageMessages = true;
   bool _hideBlockedUserMessages = false;
   bool _showChannelsTab = false;
@@ -1031,6 +1035,7 @@ class ThemeController extends ChangeNotifier {
   bool get showChatPremiumEmojiStatus => _showChatPremiumEmojiStatus;
   bool get showMessageMetaIndicators => _showMessageMetaIndicators;
   bool get openChatsAtLatest => _openChatsAtLatest;
+  bool get preserveSenderWhenRepeating => _preserveSenderWhenRepeating;
   bool get groupImageMessages => _groupImageMessages;
   bool get hideBlockedUserMessages => _hideBlockedUserMessages;
   bool get showChannelsTab => _showChannelsTab;
@@ -1419,6 +1424,13 @@ class ThemeController extends ChangeNotifier {
   set openChatsAtLatest(bool value) {
     _openChatsAtLatest = value;
     _prefs.setBool(_openChatsAtLatestKey, value);
+    notifyListeners();
+  }
+
+  set preserveSenderWhenRepeating(bool value) {
+    if (_preserveSenderWhenRepeating == value) return;
+    _preserveSenderWhenRepeating = value;
+    _prefs.setBool(_preserveSenderWhenRepeatingKey, value);
     notifyListeners();
   }
 
