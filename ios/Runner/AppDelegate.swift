@@ -189,6 +189,23 @@ import UIKit
       }
     }
 
+    let wakelockChannel = FlutterMethodChannel(
+      name: "mithka/screen_wakelock",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    wakelockChannel.setMethodCallHandler { call, result in
+      switch call.method {
+      case "enable":
+        UIApplication.shared.isIdleTimerDisabled = true
+        result(nil)
+      case "disable":
+        UIApplication.shared.isIdleTimerDisabled = false
+        result(nil)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+
     let accountBackupChannel = FlutterMethodChannel(
       name: "mithka/account_backup",
       binaryMessenger: engineBridge.applicationRegistrar.messenger()
