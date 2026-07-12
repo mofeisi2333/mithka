@@ -43,6 +43,14 @@ class DateText {
     return _timeLabel(date);
   }
 
+  /// Full message timestamp shown on demand or in bubble metadata.
+  static String messageDetailLabel(int unix) {
+    if (unix <= 0) return '';
+    final date = DateTime.fromMillisecondsSinceEpoch(unix * 1000);
+    return '${_two(date.month)}-${_two(date.day)} '
+        '${_two(date.hour)}:${_two(date.minute)}:${_two(date.second)}';
+  }
+
   /// Reply quote timestamp.
   static String quoteLabel(int unix) {
     if (unix <= 0) return '';

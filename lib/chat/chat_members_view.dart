@@ -15,11 +15,15 @@ import '../components/photo_avatar.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../l10n/telegram_language_controller.dart';
+import '../settings/edit_field_view.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
+import 'chat_administrator_edit_view.dart';
+
+enum ChatMembersMode { members, administrators }
 
 class GroupMember {
   GroupMember({
@@ -30,6 +34,7 @@ class GroupMember {
     this.title,
     this.status = '',
     this.isOnline = false,
+    this.rawStatus,
   });
   final int id;
   final String name;
@@ -38,12 +43,34 @@ class GroupMember {
   final String? title;
   final String status;
   final bool isOnline;
+  final Map<String, dynamic>? rawStatus;
+
+  GroupMember copyWith({
+    String? title,
+    MemberRole? role,
+    Map<String, dynamic>? rawStatus,
+  }) => GroupMember(
+    id: id,
+    name: name,
+    photo: photo,
+    role: role ?? this.role,
+    title: title ?? this.title,
+    status: status,
+    isOnline: isOnline,
+    rawStatus: rawStatus ?? this.rawStatus,
+  );
 }
 
 class ChatMembersView extends StatefulWidget {
-  const ChatMembersView({super.key, required this.chatId, required this.title});
+  const ChatMembersView({
+    super.key,
+    required this.chatId,
+    required this.title,
+    this.mode = ChatMembersMode.members,
+  });
   final int chatId;
   final String title;
+  final ChatMembersMode mode;
 
   @override
   State<ChatMembersView> createState() => _ChatMembersViewState();
@@ -53,6 +80,9 @@ class _ChatMembersViewState extends State<ChatMembersView> {
   List<GroupMember> _members = [];
   int _total = 0;
   bool _loading = true;
+  bool _canRemove = false;
+  bool _canPromote = false;
+  int? _openRowId;
 
   @override
   void initState() {
@@ -67,6 +97,7 @@ class _ChatMembersViewState extends State<ChatMembersView> {
         'chat_id': widget.chatId,
       });
       final type = chat.obj('type');
+      await _loadSelfPermissions();
       List<Map<String, dynamic>> raw = [];
       if (type?.type == 'chatTypeBasicGroup') {
         final gid = type?.int64('basic_group_id');
@@ -76,6 +107,9 @@ class _ChatMembersViewState extends State<ChatMembersView> {
             'basic_group_id': gid,
           });
           raw = full.objects('members') ?? const <Map<String, dynamic>>[];
+          if (widget.mode == ChatMembersMode.administrators) {
+            raw = raw.where(_isAdministratorEntry).toList();
+          }
           _total = raw.length;
         }
       } else if (type?.type == 'chatTypeSupergroup') {
@@ -94,17 +128,51 @@ class _ChatMembersViewState extends State<ChatMembersView> {
           final res = await TdClient.shared.query({
             '@type': 'getSupergroupMembers',
             'supergroup_id': sgid,
-            'filter': {'@type': 'supergroupMembersFilterRecent'},
+            'filter': {
+              '@type': widget.mode == ChatMembersMode.administrators
+                  ? 'supergroupMembersFilterAdministrators'
+                  : 'supergroupMembersFilterRecent',
+            },
             'offset': 0,
             'limit': 200,
           });
           raw = res.objects('members') ?? const <Map<String, dynamic>>[];
-          _total = fullCount ?? res.integer('member_count') ?? raw.length;
+          _total = widget.mode == ChatMembersMode.administrators
+              ? raw.length
+              : fullCount ?? res.integer('member_count') ?? raw.length;
         }
       }
       await _resolve(raw);
     } catch (_) {}
     if (mounted) setState(() => _loading = false);
+  }
+
+  bool _isAdministratorEntry(Map<String, dynamic> entry) {
+    final type = entry.obj('status')?.type;
+    return type == 'chatMemberStatusCreator' ||
+        type == 'chatMemberStatusAdministrator';
+  }
+
+  Future<void> _loadSelfPermissions() async {
+    try {
+      final me = await TdClient.shared.query({'@type': 'getMe'});
+      final uid = me.int64('id');
+      if (uid == null) return;
+      final member = await TdClient.shared.query({
+        '@type': 'getChatMember',
+        'chat_id': widget.chatId,
+        'member_id': {'@type': 'messageSenderUser', 'user_id': uid},
+      });
+      final status = member.obj('status');
+      if (status?.type == 'chatMemberStatusCreator') {
+        _canRemove = true;
+        _canPromote = true;
+      } else if (status?.type == 'chatMemberStatusAdministrator') {
+        final rights = status?.obj('rights');
+        _canRemove = rights?.boolean('can_restrict_members') ?? false;
+        _canPromote = rights?.boolean('can_promote_members') ?? false;
+      }
+    } catch (_) {}
   }
 
   Future<void> _resolve(List<Map<String, dynamic>> raw) async {
@@ -132,6 +200,7 @@ class _ChatMembersViewState extends State<ChatMembersView> {
             title: title,
             status: TDParse.userStatus(user),
             isOnline: TDParse.isUserOnline(user),
+            rawStatus: status,
           ),
         );
       } catch (_) {}
@@ -156,7 +225,7 @@ class _ChatMembersViewState extends State<ChatMembersView> {
   }
 
   Future<void> _confirmRemove(GroupMember m) async {
-    if (m.role == MemberRole.owner) return; // can't remove the creator
+    if (!_canRemove || m.role == MemberRole.owner) return;
     final ok = await confirmDialog(
       context,
       title: AppStrings.t(AppStringKeys.chatMembersRemoveMemberTitle),
@@ -189,6 +258,87 @@ class _ChatMembersViewState extends State<ChatMembersView> {
     }
   }
 
+  Future<void> _openAdministratorEditor(GroupMember member) async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => ChatAdministratorEditView(
+          chatId: widget.chatId,
+          userId: member.id,
+          name: member.name,
+          status: member.rawStatus,
+          canEdit: _canPromote && member.role != MemberRole.owner,
+        ),
+      ),
+    );
+    if (changed == true && mounted) await _reload();
+  }
+
+  Future<void> _reload() async {
+    setState(() {
+      _loading = true;
+      _members = [];
+      _openRowId = null;
+    });
+    await _load();
+  }
+
+  Future<void> _editTitle(GroupMember member) async {
+    if (!_canPromote) return;
+    if (member.role != MemberRole.admin) {
+      showToast(context, AppStringKeys.chatMembersPromoteFirst);
+      return;
+    }
+    final value = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => EditFieldView(
+          title: AppStringKeys.chatMembersSetTitle,
+          initial: member.title ?? '',
+          maxLength: 16,
+        ),
+      ),
+    );
+    if (!mounted || value == null) return;
+    try {
+      await TdClient.shared.query({
+        '@type': 'setChatMemberCustomTitle',
+        'chat_id': widget.chatId,
+        'user_id': member.id,
+        'custom_title': value.trim(),
+      });
+      setState(() {
+        final index = _members.indexWhere((item) => item.id == member.id);
+        if (index >= 0) _members[index] = member.copyWith(title: value.trim());
+      });
+    } catch (_) {
+      if (mounted) showToast(context, AppStringKeys.chatMembersUpdateFailed);
+    }
+  }
+
+  Future<void> _confirmDemote(GroupMember member) async {
+    if (!_canPromote || member.role != MemberRole.admin) return;
+    final ok = await confirmDialog(
+      context,
+      title: AppStrings.t(AppStringKeys.chatMembersDemote),
+      message: AppStrings.t(AppStringKeys.chatMembersDemoteConfirmation, {
+        'value1': member.name,
+      }),
+      confirmText: AppStrings.t(AppStringKeys.chatMembersDemote),
+      destructive: true,
+    );
+    if (!ok) return;
+    try {
+      await TdClient.shared.query({
+        '@type': 'setChatMemberStatus',
+        'chat_id': widget.chatId,
+        'member_id': {'@type': 'messageSenderUser', 'user_id': member.id},
+        'status': {'@type': 'chatMemberStatusMember'},
+      });
+      if (mounted) await _reload();
+    } catch (_) {
+      if (mounted) showToast(context, AppStringKeys.chatMembersUpdateFailed);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
@@ -197,7 +347,9 @@ class _ChatMembersViewState extends State<ChatMembersView> {
       body: Column(
         children: [
           NavHeader(
-            title: _total > 0
+            title: widget.mode == ChatMembersMode.administrators
+                ? AppStrings.t(AppStringKeys.chatMembersAdministratorsTitle)
+                : _total > 0
                 ? AppStrings.t(AppStringKeys.chatMembersTitleWithCount, {
                     'value1': _total,
                   })
@@ -212,12 +364,49 @@ class _ChatMembersViewState extends State<ChatMembersView> {
                     itemCount: _members.length,
                     itemBuilder: (context, i) {
                       final m = _members[i];
+                      final leadingActions = <_MemberSwipeAction>[
+                        if (_canPromote && m.role == MemberRole.member)
+                          _MemberSwipeAction(
+                            title: AppStringKeys.chatMembersPromote,
+                            color: AppTheme.brand,
+                            onTap: () => _openAdministratorEditor(m),
+                          ),
+                        if (_canPromote && m.role != MemberRole.owner)
+                          _MemberSwipeAction(
+                            title: AppStringKeys.chatMembersSetTitle,
+                            color: const Color(0xFF16A085),
+                            onTap: () => _editTitle(m),
+                          ),
+                      ];
+                      final trailingActions = <_MemberSwipeAction>[
+                        if (widget.mode == ChatMembersMode.administrators &&
+                            _canPromote &&
+                            m.role == MemberRole.admin)
+                          _MemberSwipeAction(
+                            title: AppStringKeys.chatMembersDemote,
+                            color: AppTheme.tagRed,
+                            onTap: () => _confirmDemote(m),
+                          )
+                        else if (_canRemove && m.role != MemberRole.owner)
+                          _MemberSwipeAction(
+                            title: AppStringKeys.chatInfoRemove,
+                            color: AppTheme.tagRed,
+                            onTap: () => _confirmRemove(m),
+                          ),
+                      ];
                       return Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onLongPress: () => _confirmRemove(m),
+                          _MemberSwipeRow(
+                            rowId: m.id,
+                            openRowId: _openRowId,
+                            onOpenChanged: (id) =>
+                                setState(() => _openRowId = id),
+                            leadingActions: leadingActions,
+                            trailingActions: trailingActions,
+                            onTap: widget.mode == ChatMembersMode.administrators
+                                ? () => _openAdministratorEditor(m)
+                                : null,
                             child: _memberRow(m),
                           ),
                           const InsetDivider(leadingInset: 70),
@@ -313,4 +502,144 @@ class _ChatMembersViewState extends State<ChatMembersView> {
         return null;
     }
   }
+}
+
+class _MemberSwipeAction {
+  const _MemberSwipeAction({
+    required this.title,
+    required this.color,
+    required this.onTap,
+  });
+
+  final String title;
+  final Color color;
+  final VoidCallback onTap;
+}
+
+class _MemberSwipeRow extends StatefulWidget {
+  const _MemberSwipeRow({
+    required this.rowId,
+    required this.openRowId,
+    required this.onOpenChanged,
+    required this.leadingActions,
+    required this.trailingActions,
+    required this.child,
+    this.onTap,
+  });
+
+  final int rowId;
+  final int? openRowId;
+  final ValueChanged<int?> onOpenChanged;
+  final List<_MemberSwipeAction> leadingActions;
+  final List<_MemberSwipeAction> trailingActions;
+  final Widget child;
+  final VoidCallback? onTap;
+
+  @override
+  State<_MemberSwipeRow> createState() => _MemberSwipeRowState();
+}
+
+class _MemberSwipeRowState extends State<_MemberSwipeRow> {
+  static const _actionWidth = 76.0;
+  double _offset = 0;
+
+  double get _leadingWidth => widget.leadingActions.length * _actionWidth;
+  double get _trailingWidth => widget.trailingActions.length * _actionWidth;
+
+  @override
+  void didUpdateWidget(covariant _MemberSwipeRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.openRowId != widget.rowId && _offset != 0) _offset = 0;
+  }
+
+  void _close() {
+    setState(() => _offset = 0);
+    widget.onOpenChanged(null);
+  }
+
+  Widget _actions(List<_MemberSwipeAction> actions) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      for (final action in actions)
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            _close();
+            action.onTap();
+          },
+          child: Container(
+            width: _actionWidth,
+            color: action.color,
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: Text(
+              AppStrings.t(action.title),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              style: const TextStyle(fontSize: 13, color: Colors.white),
+            ),
+          ),
+        ),
+    ],
+  );
+
+  @override
+  Widget build(BuildContext context) => ClipRect(
+    child: Stack(
+      children: [
+        if (widget.leadingActions.isNotEmpty)
+          Positioned.fill(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: _actions(widget.leadingActions),
+            ),
+          ),
+        if (widget.trailingActions.isNotEmpty)
+          Positioned.fill(
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: _actions(widget.trailingActions),
+            ),
+          ),
+        Transform.translate(
+          offset: Offset(_offset, 0),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _offset == 0 ? widget.onTap : _close,
+            onHorizontalDragUpdate: (details) {
+              final next = _offset + details.delta.dx;
+              setState(() {
+                if (next > 0 && _leadingWidth > 0) {
+                  _offset = next.clamp(0, _leadingWidth + 20);
+                } else if (next < 0 && _trailingWidth > 0) {
+                  _offset = next.clamp(-_trailingWidth - 20, 0);
+                }
+              });
+            },
+            onHorizontalDragEnd: (details) {
+              final velocity = details.primaryVelocity ?? 0;
+              setState(() {
+                if (_offset > 0 &&
+                    (_offset > _leadingWidth * 0.35 || velocity > 450)) {
+                  _offset = _leadingWidth;
+                  widget.onOpenChanged(widget.rowId);
+                } else if (_offset < 0 &&
+                    (-_offset > _trailingWidth * 0.35 || velocity < -450)) {
+                  _offset = -_trailingWidth;
+                  widget.onOpenChanged(widget.rowId);
+                } else {
+                  _offset = 0;
+                  widget.onOpenChanged(null);
+                }
+              });
+            },
+            child: ColoredBox(
+              color: context.colors.background,
+              child: widget.child,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 }

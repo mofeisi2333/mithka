@@ -339,6 +339,13 @@ class DisplaySettingsView extends StatelessWidget {
                   ),
                   _toggleRow(
                     context,
+                    HeroAppIcons.clock.data,
+                    AppStrings.t(AppStringKeys.appearanceAlwaysShowMessageTime),
+                    theme.alwaysShowMessageTime,
+                    (v) => theme.alwaysShowMessageTime = v,
+                  ),
+                  _toggleRow(
+                    context,
                     HeroAppIcons.eyeSlash.data,
                     AppStrings.t(
                       AppStringKeys.appearanceHideBlockedUserMessages,

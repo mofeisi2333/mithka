@@ -59,7 +59,7 @@ class _GroupManagementLogViewState extends State<GroupManagementLogView> {
       });
       final events = res.objects('events') ?? const <Map<String, dynamic>>[];
       for (final event in events) {
-        final userId = event.int64('user_id');
+        final userId = chatEventActorUserId(event);
         if (userId != null) await _resolveUser(userId);
       }
       if (!mounted) return;
@@ -199,7 +199,7 @@ class _GroupManagementLogViewState extends State<GroupManagementLogView> {
 
   Widget _eventRow(Map<String, dynamic> event) {
     final c = context.colors;
-    final userId = event.int64('user_id');
+    final userId = chatEventActorUserId(event);
     final user = userId == null ? null : _users[userId];
     final action = event.obj('action');
     return Container(
@@ -215,7 +215,7 @@ class _GroupManagementLogViewState extends State<GroupManagementLogView> {
           PhotoAvatar(
             title:
                 user?.name ??
-                AppStrings.t(AppStringKeys.groupManagementLogAdmin),
+                AppStrings.t(AppStringKeys.groupManagementLogUnknownActor),
             photo: user?.photo,
             size: 38,
           ),
@@ -229,7 +229,9 @@ class _GroupManagementLogViewState extends State<GroupManagementLogView> {
                     Expanded(
                       child: Text(
                         user?.name ??
-                            AppStrings.t(AppStringKeys.groupManagementLogAdmin),
+                            AppStrings.t(
+                              AppStringKeys.groupManagementLogUnknownActor,
+                            ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -326,6 +328,12 @@ class _GroupManagementLogViewState extends State<GroupManagementLogView> {
         return AppStrings.t(AppStringKeys.groupManagementLogGenericAdminAction);
     }
   }
+}
+
+int? chatEventActorUserId(Map<String, dynamic> event) {
+  final sender = event.obj('member_id');
+  if (sender?.type == 'messageSenderUser') return sender?.int64('user_id');
+  return event.int64('user_id');
 }
 
 class _UserSummary {

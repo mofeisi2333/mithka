@@ -129,6 +129,7 @@ class _MessageBubbleState extends State<MessageBubble>
   bool _stickerReady = false;
   bool _videoStickerReady = false;
   bool _musicPressed = false;
+  bool _showTappedTimestamp = false;
   double _swipeX = 0;
   double? _layoutWidth;
   final Set<String> _expandedQuotes = {};
@@ -248,13 +249,35 @@ class _MessageBubbleState extends State<MessageBubble>
         message.senderIsPremium &&
         message.senderEmojiStatusId != 0;
     final senderTitle = message.senderTitle?.trim();
+    final alwaysShowTime = theme.alwaysShowMessageTime;
     final body = GestureDetector(
       key: _bubbleKey,
+      behavior: HitTestBehavior.opaque,
+      onTap: alwaysShowTime
+          ? null
+          : () => setState(() => _showTappedTimestamp = !_showTappedTimestamp),
       onLongPress: _handleLongPress,
       onHorizontalDragStart: (_) => _swipeController.stop(),
       onHorizontalDragUpdate: _onDragUpdate,
       onHorizontalDragEnd: _onDragEnd,
-      child: _contentBody(outgoing),
+      child: Column(
+        key: ValueKey('messageTapTarget-${message.id}'),
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: outgoing
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
+        children: [
+          _contentBody(outgoing),
+          if (_showTappedTimestamp && !alwaysShowTime) ...[
+            const SizedBox(height: 3),
+            Text(
+              DateText.messageDetailLabel(message.date),
+              key: const ValueKey('messageTappedTimestamp'),
+              style: TextStyle(fontSize: 10, color: c.textTertiary),
+            ),
+          ],
+        ],
+      ),
     );
     final content = ConstrainedBox(
       constraints: BoxConstraints(maxWidth: _bubbleMaxWidth()),
@@ -542,7 +565,10 @@ class _MessageBubbleState extends State<MessageBubble>
   }
 
   Widget _withFloatingMeta(Widget child, bool outgoing) {
-    final show = message.isEdited || outgoing;
+    final show =
+        message.isEdited ||
+        outgoing ||
+        context.watch<ThemeController>().alwaysShowMessageTime;
     if (!show) return child;
     return Stack(
       clipBehavior: Clip.none,
@@ -571,6 +597,15 @@ class _MessageBubbleState extends State<MessageBubble>
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (context.watch<ThemeController>().alwaysShowMessageTime)
+                Text(
+                  DateText.messageDetailLabel(message.date),
+                  key: const ValueKey('messageInlineTimestamp'),
+                  style: TextStyle(fontSize: 9, height: 1, color: faint),
+                ),
+              if (context.watch<ThemeController>().alwaysShowMessageTime &&
+                  (message.isEdited || outgoing))
+                const SizedBox(width: 4),
               if (message.isEdited)
                 AppIcon(HeroAppIcons.pen, size: 13, color: faint),
               if (message.isEdited && outgoing) const SizedBox(width: 3),
@@ -792,9 +827,13 @@ class _MessageBubbleState extends State<MessageBubble>
     final textFontSize = emojiOnly ? 34.0 : 16.0;
     return Container(
       constraints: BoxConstraints(maxWidth: _bubbleMaxWidth()),
-      padding: emojiOnly
-          ? const EdgeInsets.symmetric(horizontal: 10, vertical: 7)
-          : const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      padding: context.watch<ThemeController>().alwaysShowMessageTime
+          ? (emojiOnly
+                ? const EdgeInsets.fromLTRB(10, 7, 10, 18)
+                : const EdgeInsets.fromLTRB(12, 9, 12, 20))
+          : (emojiOnly
+                ? const EdgeInsets.symmetric(horizontal: 10, vertical: 7)
+                : const EdgeInsets.symmetric(horizontal: 12, vertical: 9)),
       decoration: BoxDecoration(
         color: outgoing ? AppTheme.bubbleOutgoing : c.bubbleIncoming,
         borderRadius: BorderRadius.circular(6),
@@ -1697,7 +1736,7 @@ class _MessageBubbleState extends State<MessageBubble>
     unicode: true,
   );
 
-  /// Trailing inline meta after the text: edited pencil + delivery dots.
+  /// Trailing inline meta after the text: time + edited pencil + delivery dots.
   InlineSpan _metaSpan(bool outgoing) {
     final faint = outgoing
         ? Colors.white.withValues(alpha: 0.65)

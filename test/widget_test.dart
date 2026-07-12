@@ -13,6 +13,7 @@ import 'package:mithka/chat/chat_input_bar.dart';
 import 'package:mithka/chat/chat_view_model.dart';
 import 'package:mithka/chat/emoji_catalog.dart';
 import 'package:mithka/chat/emoji_text_controller.dart';
+import 'package:mithka/chat/group_management_log_view.dart';
 import 'package:mithka/chat/media_album_layout.dart';
 import 'package:mithka/chat/message_bubble.dart';
 import 'package:mithka/chat/rich_text_composer_view.dart';
@@ -33,6 +34,11 @@ void main() {
     test('bubbleLabel pads to HH:mm', () {
       final unix = DateTime(2024, 6, 4, 9, 5).millisecondsSinceEpoch ~/ 1000;
       expect(DateText.bubbleLabel(unix), '09:05');
+    });
+
+    test('messageDetailLabel uses MM-dd HH:mm:ss', () {
+      final unix = DateTime(2024, 6, 4, 9, 5, 7).millisecondsSinceEpoch ~/ 1000;
+      expect(DateText.messageDetailLabel(unix), '06-04 09:05:07');
     });
 
     test('empty for non-positive unix', () {
@@ -421,9 +427,72 @@ void main() {
         findsOneWidget,
       );
     });
+
+    testWidgets('shows detail time on tap unless always-on is enabled', (
+      tester,
+    ) async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final theme = ThemeController(prefs);
+      final message = ChatMessage(
+        id: 2,
+        isOutgoing: false,
+        text: 'timestamp',
+        date: DateTime(2024, 6, 4, 9, 5, 7).millisecondsSinceEpoch ~/ 1000,
+      );
+
+      Future<void> pump() => tester.pumpWidget(
+        ChangeNotifierProvider<ThemeController>.value(
+          value: theme,
+          child: MaterialApp(
+            home: Scaffold(
+              body: MessageBubble(
+                message: message,
+                peerTitle: 'Test',
+                isGroup: false,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await pump();
+      expect(
+        find.byKey(const ValueKey('messageTappedTimestamp')),
+        findsNothing,
+      );
+      await tester.tap(find.byKey(const ValueKey('messageTapTarget-2')));
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('messageTappedTimestamp')),
+        findsOneWidget,
+      );
+
+      theme.alwaysShowMessageTime = true;
+      addTearDown(theme.dispose);
+      await pump();
+      expect(
+        find.byKey(const ValueKey('messageInlineTimestamp')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('messageTappedTimestamp')),
+        findsNothing,
+      );
+    });
   });
 
   group('JSON helpers', () {
+    test('management log resolves modern and legacy actor ids', () {
+      expect(
+        chatEventActorUserId({
+          'member_id': {'@type': 'messageSenderUser', 'user_id': '42'},
+        }),
+        42,
+      );
+      expect(chatEventActorUserId({'user_id': 17}), 17);
+    });
+
     test('parses TDLib int64-as-string', () {
       final obj = <String, dynamic>{'order': '123456789012345', 'n': 7};
       expect(obj.int64('order'), 123456789012345);

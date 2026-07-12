@@ -140,6 +140,7 @@ const frMessages = <String, String>{
   'appearanceShowChatListSearch': "Afficher la recherche dans la liste",
   'appearanceShowEditAndReadMarks':
       "Afficher les marques de modification et de lecture",
+  'appearanceAlwaysShowMessageTime': "Toujours afficher l’heure du message",
   'appearanceShowGroupMemberTitles':
       "Afficher les titres des membres du groupe",
   'appearanceShowPremiumNameColor': "Afficher la couleur du nom Premium",
@@ -326,6 +327,22 @@ const frMessages = <String, String>{
   'chatMembersRemoveMemberConfirmation': "Retirer {value1} du groupe ?",
   'chatMembersRemoveMemberTitle': "Retirer le membre",
   'chatMembersTitleWithCount': "Membres du groupe ({value1})",
+  'chatMembersAdministratorsTitle': "Administrateurs",
+  'chatMembersPromote': "Nommer admin",
+  'chatMembersDemote': "Retirer l’admin",
+  'chatMembersDemoteConfirmation':
+      "Retirer les droits d’administrateur de {value1} ?",
+  'chatMembersSetTitle': "Définir le titre",
+  'chatMembersPromoteFirst': "Nommez d’abord ce membre administrateur.",
+  'chatMembersAdminSave': "Enregistrer",
+  'chatMembersAdminPermissions': "Droits d’administrateur",
+  'chatMembersUpdateFailed': "Impossible de modifier ce membre.",
+  'chatAdminManageChat': "Gérer le groupe",
+  'chatAdminDeleteMessages': "Supprimer les messages",
+  'chatAdminRestrictMembers': "Restreindre les membres",
+  'chatAdminManageVideoChats': "Gérer les discussions vidéo",
+  'chatAdminPromoteMembers': "Ajouter des administrateurs",
+  'chatAdminAnonymous': "Rester anonyme",
   'chatMenu': "Menu",
   'chatMessageInputPlaceholder': "Envoyer un message…",
   'chatMessageRequired': "Le message ne peut pas être vide",
@@ -593,6 +610,7 @@ const frMessages = <String, String>{
   'groupManagementLogLeftGroup': "A quitté le groupe",
   'groupManagementLogNoPermission':
       "Vous n’avez pas l’autorisation de consulter le journal de gestion du groupe",
+  'groupManagementLogUnknownActor': "Utilisateur inconnu",
   'groupManagementLogPinnedMessage': "A épinglé un message",
   'groupManagementLogRevokedInviteLink': "A révoqué un lien d’invitation",
   'groupManagementLogStartedVideoChat': "A créé un chat vidéo",

@@ -276,6 +276,8 @@ abstract final class AppStringKeys {
       'appearanceChatListFolderSwipeSwitching';
   static const appearanceShowEditAndReadMarks =
       'appearanceShowEditAndReadMarks';
+  static const appearanceAlwaysShowMessageTime =
+      'appearanceAlwaysShowMessageTime';
   static const appearanceShowGroupMemberTitles =
       'appearanceShowGroupMemberTitles';
   static const appearanceShowPremiumNameColor =
@@ -469,6 +471,22 @@ abstract final class AppStringKeys {
       'chatMembersRemoveMemberConfirmation';
   static const chatMembersRemoveMemberTitle = 'chatMembersRemoveMemberTitle';
   static const chatMembersTitleWithCount = 'chatMembersTitleWithCount';
+  static const chatMembersAdministratorsTitle =
+      'chatMembersAdministratorsTitle';
+  static const chatMembersPromote = 'chatMembersPromote';
+  static const chatMembersDemote = 'chatMembersDemote';
+  static const chatMembersDemoteConfirmation = 'chatMembersDemoteConfirmation';
+  static const chatMembersSetTitle = 'chatMembersSetTitle';
+  static const chatMembersPromoteFirst = 'chatMembersPromoteFirst';
+  static const chatMembersAdminSave = 'chatMembersAdminSave';
+  static const chatMembersAdminPermissions = 'chatMembersAdminPermissions';
+  static const chatMembersUpdateFailed = 'chatMembersUpdateFailed';
+  static const chatAdminManageChat = 'chatAdminManageChat';
+  static const chatAdminDeleteMessages = 'chatAdminDeleteMessages';
+  static const chatAdminRestrictMembers = 'chatAdminRestrictMembers';
+  static const chatAdminManageVideoChats = 'chatAdminManageVideoChats';
+  static const chatAdminPromoteMembers = 'chatAdminPromoteMembers';
+  static const chatAdminAnonymous = 'chatAdminAnonymous';
   static const chatMenu = 'chatMenu';
   static const chatMessageInputPlaceholder = 'chatMessageInputPlaceholder';
   static const chatMessageRequired = 'chatMessageRequired';
@@ -917,6 +935,8 @@ abstract final class AppStringKeys {
   static const groupManagementLogLeftGroup = 'groupManagementLogLeftGroup';
   static const groupManagementLogNoPermission =
       'groupManagementLogNoPermission';
+  static const groupManagementLogUnknownActor =
+      'groupManagementLogUnknownActor';
   static const groupManagementLogPinnedMessage =
       'groupManagementLogPinnedMessage';
   static const groupManagementLogRevokedInviteLink =

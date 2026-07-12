@@ -270,7 +270,7 @@ class _GroupManagementViewState extends State<GroupManagementView> {
                                 : AppStrings.t(
                                     AppStringKeys.groupManagementReadOnly,
                                   ),
-                            onTap: _openMembers,
+                            onTap: _openAdministrators,
                           ),
                           _divider(),
                           _navRow(
@@ -536,6 +536,18 @@ class _GroupManagementViewState extends State<GroupManagementView> {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ChatMembersView(chatId: widget.chatId, title: _title),
+      ),
+    );
+  }
+
+  void _openAdministrators() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ChatMembersView(
+          chatId: widget.chatId,
+          title: _title,
+          mode: ChatMembersMode.administrators,
+        ),
       ),
     );
   }
