@@ -2518,8 +2518,6 @@ class _ChatViewState extends State<ChatView> {
     switch (action) {
       case MessageAction.copy:
         unawaited(Clipboard.setData(ClipboardData(text: message.text)));
-      case MessageAction.selectText:
-        await _showTextSelection(message);
       case MessageAction.edit:
         unawaited(_editMessage(message));
       case MessageAction.translate:
@@ -4725,6 +4723,9 @@ class _ChatViewState extends State<ChatView> {
                       onLongPress: _isSelecting
                           ? null
                           : _showActionMenuForMessage,
+                      onDoubleTap: _isSelecting
+                          ? null
+                          : (m) => unawaited(_showTextSelection(m)),
                       onReply: (m) => _vm.setReply(m),
                       onAvatarTap: _openSenderProfile,
                       onAvatarLongPress: (m) {

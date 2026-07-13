@@ -407,6 +407,7 @@ class ChatMessage {
     this.callDiscardReason,
     this.callDuration = 0,
     this.contentType,
+    this.restrictionReason,
     this.senderId,
     this.senderPhoto,
     this.image,
@@ -472,6 +473,10 @@ class ChatMessage {
   /// Kept so we can distinguish kinds the lossy media fields can't (e.g. a
   /// photo vs a video-thumb, or plain text vs an audio/poll placeholder).
   String? contentType;
+
+  /// TDLib's message-level restriction reason. When present, the original
+  /// content must be replaced by this server-provided explanation.
+  String? restrictionReason;
   int? senderId;
   TdFileRef? senderPhoto;
   TdFileRef? image; // photo / sticker / video-thumb / gif
@@ -543,6 +548,9 @@ class ChatMessage {
   /// of which also set [image].
   bool get isPhoto => contentType == 'messagePhoto';
 
+  bool get isContentRestricted =>
+      restrictionReason != null && restrictionReason!.trim().isNotEmpty;
+
   /// Visual media that Telegram may place in the same media album.
   ///
   /// Stickers, GIFs and video stickers also have thumbnails in [image], but
@@ -560,7 +568,7 @@ class ChatMessage {
   /// Whether the "+1" (复读) quick-repeat may apply to this kind at all: only
   /// plain text and photos. Audio, voice, location, stickers, polls, files,
   /// videos, contacts and call logs are excluded.
-  bool get canRepeat => isPlainText || isPhoto;
+  bool get canRepeat => !isContentRestricted && (isPlainText || isPhoto);
 
   /// Keeps the source files used by an outgoing pending message after TDLib
   /// replaces it with the server-confirmed message and new file identifiers.
@@ -877,18 +885,22 @@ abstract final class TDParse {
     final outgoing = message.boolean('is_outgoing') ?? false;
     final date = message.integer('date') ?? 0;
     final content = message.obj('content');
-    final service = isServiceContent(content?.type);
-    final isCall = content?.type == 'messageCall';
+    final restrictionReason = restrictionReasonFor(message);
+    final isContentRestricted = restrictionReason != null;
+    final service = !isContentRestricted && isServiceContent(content?.type);
+    final isCall = !isContentRestricted && content?.type == 'messageCall';
     final callIsVideo = isCall && (content?.boolean('is_video') ?? false);
     final callDuration = isCall ? (content?.integer('duration') ?? 0) : 0;
     final callDiscardReason = isCall
         ? content?.obj('discard_reason')?.type
         : null;
-    final text = service
-        ? serviceText(content)
-        : (content != null
-              ? messageText(content)
-              : telegramText(AppStringKeys.chatSearchMessageResultLabel));
+    final text =
+        restrictionReason ??
+        (service
+            ? serviceText(content)
+            : (content != null
+                  ? messageText(content)
+                  : telegramText(AppStringKeys.chatSearchMessageResultLabel)));
 
     int? senderId;
     final sender = message.obj('sender_id');
@@ -899,7 +911,9 @@ abstract final class TDParse {
         senderId = sender?.int64('chat_id');
     }
 
-    final media = mediaAttachment(content);
+    final media = isContentRestricted
+        ? const MediaAttachment()
+        : mediaAttachment(content);
 
     // 转发: forward_info.origin identifies the original author.
     final origin = message.obj('forward_info')?.obj('origin');
@@ -924,21 +938,26 @@ abstract final class TDParse {
         ? replyTo?.int64('message_id')
         : null;
 
-    final parsedEntities = messageTextEntities(content);
+    final parsedEntities = isContentRestricted
+        ? const <MessageTextEntity>[]
+        : messageTextEntities(content);
     final markdown = !service && parsedEntities.isEmpty
         ? _markdownText(text)
         : null;
     final replyInfo = message.obj('interaction_info')?.obj('reply_info');
     var displayText = markdown?.text ?? text;
     var displayEntities = markdown?.entities ?? parsedEntities;
-    final richBlocks = <RichMessageBlock>[...richMessageBlocks(content)];
-    if (content?.type == 'messageRichMessage' &&
+    final richBlocks = isContentRestricted
+        ? <RichMessageBlock>[]
+        : <RichMessageBlock>[...richMessageBlocks(content)];
+    if (!isContentRestricted &&
+        content?.type == 'messageRichMessage' &&
         richBlocks.isNotEmpty &&
         displayText ==
             telegramText(AppStringKeys.chatSearchMessageResultLabel)) {
       displayText = '';
     }
-    if (content?.type != 'messageRichMessage') {
+    if (!isContentRestricted && content?.type != 'messageRichMessage') {
       final extracted = _extractMarkdownTables(displayText, displayEntities);
       displayText = extracted.text;
       displayEntities = extracted.entities;
@@ -956,7 +975,8 @@ abstract final class TDParse {
         callIsVideo: callIsVideo,
         callDiscardReason: callDiscardReason,
         callDuration: callDuration,
-        contentType: content?.type,
+        contentType: isContentRestricted ? 'messageText' : content?.type,
+        restrictionReason: restrictionReason,
         senderId: senderId,
         senderIsChat: sender?.type == 'messageSenderChat',
         senderTitle:
@@ -972,40 +992,57 @@ abstract final class TDParse {
         videoSticker: media.videoSticker,
         video: media.video,
         videoDuration: media.videoDuration,
-        diceEmoji: content?.type == 'messageDice'
+        diceEmoji: !isContentRestricted && content?.type == 'messageDice'
             ? content?.str('emoji')
             : null,
-        diceValue: content?.type == 'messageDice'
+        diceValue: !isContentRestricted && content?.type == 'messageDice'
             ? content?.integer('value')
             : null,
         stickerFileId: media.stickerFileId,
         stickerSetId: media.stickerSetId,
         isAnimatedEmoji: media.isAnimatedEmoji,
-        location: locationAttachment(content),
-        voice: voiceAttachment(content),
-        replyToMessageId: replyToMessageId,
-        serviceUserIds: serviceUserIds(content, senderId),
-        customEmoji: customEmojiEntitiesFrom(parsedEntities),
+        location: isContentRestricted ? null : locationAttachment(content),
+        voice: isContentRestricted ? null : voiceAttachment(content),
+        replyToMessageId: isContentRestricted ? null : replyToMessageId,
+        serviceUserIds: isContentRestricted
+            ? const []
+            : serviceUserIds(content, senderId),
+        customEmoji: isContentRestricted
+            ? const []
+            : customEmojiEntitiesFrom(parsedEntities),
         textEntities: displayEntities,
-        linkPreview: linkPreview(content?.obj('link_preview')),
-        buttonRows: messageButtonRows(message.obj('reply_markup')),
+        linkPreview: isContentRestricted
+            ? null
+            : linkPreview(content?.obj('link_preview')),
+        buttonRows: isContentRestricted
+            ? const []
+            : messageButtonRows(message.obj('reply_markup')),
         richBlocks: richBlocks,
         richMessageIsFull:
+            isContentRestricted ||
             content?.type != 'messageRichMessage' ||
             (content?.obj('message')?.boolean('is_full') ?? false),
         isEdited: (message.integer('edit_date') ?? 0) > 0,
-        hasCommentThread: replyInfo != null,
-        commentCount:
-            replyInfo?.integer('reply_count') ??
-            replyInfo?.integer('comment_count') ??
-            0,
-        lastCommentMessageId: replyInfo?.int64('last_message_id'),
+        hasCommentThread: !isContentRestricted && replyInfo != null,
+        commentCount: isContentRestricted
+            ? 0
+            : (replyInfo?.integer('reply_count') ??
+                  replyInfo?.integer('comment_count') ??
+                  0),
+        lastCommentMessageId: isContentRestricted
+            ? null
+            : replyInfo?.int64('last_message_id'),
       )
       ..reactions = reactionsFrom(message)
-      ..forwardOrigin = fwdName
-      ..forwardFromUserId = fwdUserId
-      ..forwardFromChatId = fwdChatId;
+      ..forwardOrigin = isContentRestricted ? null : fwdName
+      ..forwardFromUserId = isContentRestricted ? null : fwdUserId
+      ..forwardFromChatId = isContentRestricted ? null : fwdChatId;
   }
+
+  /// Returns the server-provided reason that makes a chat or message
+  /// unavailable on this client platform.
+  static String? restrictionReasonFor(Map<String, dynamic>? object) =>
+      _cleanString(object?.obj('restriction_info')?.str('restriction_reason'));
 
   static String? _cleanString(String? value) {
     final text = value?.trim();

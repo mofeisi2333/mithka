@@ -799,6 +799,60 @@ abstract final class AppStringKeys {
   static const countryZA = 'countryZA';
   static const countryZM = 'countryZM';
   static const countryZW = 'countryZW';
+  static const businessSettingsAlwaysOpen = 'businessSettingsAlwaysOpen';
+  static const businessSettingsChatLink = 'businessSettingsChatLink';
+  static const businessSettingsChatLinks = 'businessSettingsChatLinks';
+  static const businessSettingsChatLinksEmpty =
+      'businessSettingsChatLinksEmpty';
+  static const businessSettingsChatLinksSubtitle =
+      'businessSettingsChatLinksSubtitle';
+  static const businessSettingsDeleteLink = 'businessSettingsDeleteLink';
+  static const businessSettingsEmojiStatus = 'businessSettingsEmojiStatus';
+  static const businessSettingsEmojiStatusSet =
+      'businessSettingsEmojiStatusSet';
+  static const businessSettingsEntry = 'businessSettingsEntry';
+  static const businessSettingsHoursSet = 'businessSettingsHoursSet';
+  static const businessSettingsLinkDraft = 'businessSettingsLinkDraft';
+  static const businessSettingsLinkDraftHint = 'businessSettingsLinkDraftHint';
+  static const businessSettingsLinkTitle = 'businessSettingsLinkTitle';
+  static const businessSettingsLinkTitleHint = 'businessSettingsLinkTitleHint';
+  static const businessSettingsLocation = 'businessSettingsLocation';
+  static const businessSettingsLocationAddressHint =
+      'businessSettingsLocationAddressHint';
+  static const businessSettingsLocationAddressRequired =
+      'businessSettingsLocationAddressRequired';
+  static const businessSettingsMonday = 'businessSettingsMonday';
+  static const businessSettingsNotSet = 'businessSettingsNotSet';
+  static const businessSettingsOpeningHours = 'businessSettingsOpeningHours';
+  static const businessSettingsProfile = 'businessSettingsProfile';
+  static const businessSettingsRemoveHours = 'businessSettingsRemoveHours';
+  static const businessSettingsRemoveLocation =
+      'businessSettingsRemoveLocation';
+  static const businessSettingsRemoveStartPage =
+      'businessSettingsRemoveStartPage';
+  static const businessSettingsSaveFailed = 'businessSettingsSaveFailed';
+  static const businessSettingsSetOnMap = 'businessSettingsSetOnMap';
+  static const businessSettingsStartPage = 'businessSettingsStartPage';
+  static const businessSettingsStartPageMessage =
+      'businessSettingsStartPageMessage';
+  static const businessSettingsStartPageMessageHint =
+      'businessSettingsStartPageMessageHint';
+  static const businessSettingsStartPageRequired =
+      'businessSettingsStartPageRequired';
+  static const businessSettingsStartPageTitle =
+      'businessSettingsStartPageTitle';
+  static const businessSettingsStartPageTitleHint =
+      'businessSettingsStartPageTitleHint';
+  static const businessSettingsSummary = 'businessSettingsSummary';
+  static const businessSettingsSunday = 'businessSettingsSunday';
+  static const businessSettingsThursday = 'businessSettingsThursday';
+  static const businessSettingsTimeZone = 'businessSettingsTimeZone';
+  static const businessSettingsTitle = 'businessSettingsTitle';
+  static const businessSettingsTools = 'businessSettingsTools';
+  static const businessSettingsTuesday = 'businessSettingsTuesday';
+  static const businessSettingsWednesday = 'businessSettingsWednesday';
+  static const businessSettingsFriday = 'businessSettingsFriday';
+  static const businessSettingsSaturday = 'businessSettingsSaturday';
   static const createGroupFailed = 'createGroupFailed';
   static const createGroupOptionalLabel = 'createGroupOptionalLabel';
   static const createGroupStartGroupChat = 'createGroupStartGroupChat';
@@ -820,6 +874,7 @@ abstract final class AppStringKeys {
   static const editProfileClearBirthday = 'editProfileClearBirthday';
   static const editProfileDefault = 'editProfileDefault';
   static const editProfileInvalidAvatarFile = 'editProfileInvalidAvatarFile';
+  static const editProfileLastName = 'editProfileLastName';
   static const editProfileNameColor = 'editProfileNameColor';
   static const editProfileNameColorDescription =
       'editProfileNameColorDescription';
@@ -1275,15 +1330,20 @@ abstract final class AppStringKeys {
   static const profileDetailAddFriend = 'profileDetailAddFriend';
   static const profileDetailAddFriendDone = 'profileDetailAddFriendDone';
   static const profileDetailAddFriendFailed = 'profileDetailAddFriendFailed';
+  static const profileDetailArchivedPosts = 'profileDetailArchivedPosts';
   static const profileDetailAudioVideoCall = 'profileDetailAudioVideoCall';
   static const profileDetailBio = 'profileDetailBio';
   static const profileDetailBirthday = 'profileDetailBirthday';
+  static const profileDetailBusinessHours = 'profileDetailBusinessHours';
   static const profileDetailCardLinkCopied = 'profileDetailCardLinkCopied';
+  static const profileDetailCopyLink = 'profileDetailCopyLink';
   static const profileDetailFeaturedPhotos = 'profileDetailFeaturedPhotos';
+  static const profileDetailGifts = 'profileDetailGifts';
   static const profileDetailLocation = 'profileDetailLocation';
   static const profileDetailMediaFiles = 'profileDetailMediaFiles';
   static const profileDetailMonthDayDate = 'profileDetailMonthDayDate';
   static const profileDetailMusic = 'profileDetailMusic';
+  static const profileDetailPosts = 'profileDetailPosts';
   static const profileDetailSendMessage = 'profileDetailSendMessage';
   static const profileDetailYearMonthDate = 'profileDetailYearMonthDate';
   static const profileNightMode = 'profileNightMode';

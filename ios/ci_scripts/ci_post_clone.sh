@@ -149,18 +149,18 @@ GIT_COMMIT="$(git rev-parse --short HEAD)"
 echo "▸ git commit: $GIT_COMMIT"
 
 # Xcode Cloud runs xcodebuild after this script and can otherwise keep using
-# stale FLUTTER_BUILD_NAME values from the checked-in project. Keep the archive
-# version sourced from pubspec.yaml by default, matching the Android/GitHub
-# release flow; release branches may pin an approved App Store version with
-# IOS_APP_BUILD_NAME_OVERRIDE.
-IOS_APP_BUILD_NAME_OVERRIDE="0.4.0"
+# stale Flutter values from the checked-in project. Keep both archive version
+# fields sourced directly from pubspec.yaml, matching local iOS and Android
+# builds without a release-specific override.
 RAW_VERSION="$(awk '/^version:/ { print $2; exit }' pubspec.yaml)"
 test -n "$RAW_VERSION"
-APP_BUILD_NAME="${IOS_APP_BUILD_NAME_OVERRIDE:-${RAW_VERSION%%+*}}"
-APP_BUILD_NUMBER="$(date -u '+%y%m%d%H')"
+APP_BUILD_NAME="${RAW_VERSION%%+*}"
+APP_BUILD_NUMBER="${RAW_VERSION#*+}"
+if [ "$APP_BUILD_NUMBER" = "$RAW_VERSION" ] || [ -z "$APP_BUILD_NUMBER" ]; then
+  APP_BUILD_NUMBER=1
+fi
 XCODE_BUILD_NAME="$APP_BUILD_NAME"
 echo "▸ app version: $APP_BUILD_NAME+$APP_BUILD_NUMBER"
-echo "▸ Xcode Cloud App Store version override: $XCODE_BUILD_NAME+$APP_BUILD_NUMBER"
 python3 - <<PY
 from pathlib import Path
 path = Path("ios/Runner.xcodeproj/project.pbxproj")

@@ -21,7 +21,6 @@ import 'emoji_store.dart';
 
 enum MessageAction {
   copy(HeroAppIcons.file, AppStringKeys.messageActionCopy),
-  selectText(HeroAppIcons.font, AppStringKeys.messageActionSelectText),
   edit(HeroAppIcons.pen, AppStringKeys.messageActionEdit),
   translate(HeroAppIcons.language, AppStringKeys.messageActionTranslate),
   reply(HeroAppIcons.quoteLeft, AppStringKeys.messageActionQuote),
@@ -199,7 +198,6 @@ class MessageActionMenu extends StatelessWidget {
     final result = <MessageAction>[];
     if (_hasCopyableText) {
       result.add(MessageAction.copy);
-      result.add(MessageAction.selectText);
       if (message.isOutgoing && _isEditableMessage) {
         result.add(MessageAction.edit);
       }

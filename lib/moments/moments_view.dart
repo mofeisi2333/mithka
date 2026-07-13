@@ -9,6 +9,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -1617,11 +1618,29 @@ class _MomentsComposerHeader extends StatelessWidget {
       color: c.background,
       child: Column(
         children: [
-          Container(
+          SizedBox(
             height: 166,
-            color: backgroundColor,
             child: Stack(
               children: [
+                Positioned.fill(
+                  child: mePhoto == null
+                      ? ColoredBox(color: backgroundColor)
+                      : Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            ImageFiltered(
+                              imageFilter: ui.ImageFilter.blur(
+                                sigmaX: 28,
+                                sigmaY: 28,
+                              ),
+                              child: TDImage(photo: mePhoto, cornerRadius: 0),
+                            ),
+                            ColoredBox(
+                              color: Colors.black.withValues(alpha: 0.18),
+                            ),
+                          ],
+                        ),
+                ),
                 Positioned(
                   left: 18,
                   right: 18,
@@ -1640,10 +1659,11 @@ class _MomentsComposerHeader extends StatelessWidget {
                             children: [
                               Text(
                                 meName,
-                                maxLines: 1,
+                                maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
                                   fontSize: 25,
+                                  height: 1.08,
                                   fontWeight: FontWeight.w600,
                                   color: c.textPrimary,
                                 ),

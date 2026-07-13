@@ -143,6 +143,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   Timer? _recTimer;
   String? _recPath;
   late bool _hasText = vm.draft.trim().isNotEmpty;
+  bool _replyKeyboardVisible = false;
   Timer? _mentionSearchTimer;
   MentionQuery? _mentionQuery;
   List<MentionCandidate> _mentionCandidates = const [];
@@ -185,6 +186,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
     final hasText = _controller.text.trim().isNotEmpty;
     if (hasText != _hasText) {
       _hasText = hasText;
+      if (hasText) _replyKeyboardVisible = false;
       if (mounted) setState(() {});
     }
     _updateMentionSuggestions();
@@ -609,7 +611,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
             if (vm.replyTo != null) _replyBanner(vm.replyTo!),
             if (_mentionCandidates.isNotEmpty) _mentionMenu(),
             _inputRow(replyKeyboard),
-            if (replyKeyboard != null)
+            if (replyKeyboard != null && _replyKeyboardVisible && !_hasText)
               _replyKeyboardPanel(replyKeyboard)
             else
               _iconStrip(),
@@ -840,7 +842,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   _botMenuRow(
                     icon: HeroAppIcons.tableCells,
                     title: menu!.actionTitle,
-                    subtitle: menu.isLegacyMenuUrl ? '' : menu.url,
+                    subtitle: '',
                     onTap: () {
                       Navigator.of(context).pop();
                       unawaited(_openBotMenuWebApp(menu));
@@ -850,7 +852,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                 ],
                 for (var i = 0; i < commands.length; i++) ...[
                   _botMenuRow(
-                    icon: HeroAppIcons.ban,
+                    icon: HeroAppIcons.code,
                     title: '/${commands[i].command}',
                     subtitle: commands[i].description,
                     onTap: () {
@@ -1047,17 +1049,30 @@ class _ChatInputBarState extends State<ChatInputBar> {
     showToast(context, AppStringKeys.chatButtonUnsupported);
   }
 
+  void _toggleReplyKeyboard() {
+    setState(() {
+      _replyKeyboardVisible = !_replyKeyboardVisible;
+      if (_replyKeyboardVisible) _panel = _Panel.none;
+    });
+    if (_replyKeyboardVisible) _focus.unfocus();
+  }
+
   Widget _inputRow(_ReplyKeyboard? replyKeyboard) {
     final c = context.colors;
     final hasText = _hasText;
     final sender = vm.selectedMessageSender;
+    final botMenu = vm.botMenu;
+    final menuWebApp = botMenu?.isWebApp == true ? botMenu : null;
     final webAppButton = _webAppButton(replyKeyboard);
     return Padding(
       padding: const EdgeInsets.only(left: 12, right: 12, top: 8, bottom: 6),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          if (webAppButton != null && replyKeyboard != null) ...[
+          if (menuWebApp != null) ...[
+            _botMenuMiniAppAction(menuWebApp),
+            const SizedBox(width: 8),
+          ] else if (webAppButton != null && replyKeyboard != null) ...[
             _replyKeyboardMiniAppAction(replyKeyboard, webAppButton),
             const SizedBox(width: 8),
           ] else if (vm.peerIsBot &&
@@ -1218,6 +1233,30 @@ class _ChatInputBarState extends State<ChatInputBar> {
                       ),
                     ),
                   ),
+                  if (!hasText && replyKeyboard != null)
+                    Semantics(
+                      button: true,
+                      label: _replyKeyboardVisible
+                          ? 'Hide bot keyboard'
+                          : 'Show bot keyboard',
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _toggleReplyKeyboard,
+                        child: SizedBox(
+                          width: 32,
+                          height: 24,
+                          child: Center(
+                            child: AppIcon(
+                              _replyKeyboardVisible
+                                  ? HeroAppIcons.chevronDown
+                                  : HeroAppIcons.tableCells,
+                              size: _replyKeyboardVisible ? 22 : 23,
+                              color: c.textSecondary,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -1268,6 +1307,51 @@ class _ChatInputBarState extends State<ChatInputBar> {
     );
   }
 
+  Widget _botMenuMiniAppAction(BotMenuInfo menu) {
+    final c = context.colors;
+    return Semantics(
+      button: true,
+      label: menu.actionTitle,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => unawaited(_openBotMenuWebApp(menu)),
+        onLongPress: () => _showBotMenu(forceMenu: true),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 156),
+          child: Container(
+            height: 38,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: AppTheme.brand,
+              borderRadius: BorderRadius.circular(19),
+              border: Border.all(
+                color: c.inputBarBackground.withValues(alpha: 0.72),
+                width: 2,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    menu.actionTitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _replyKeyboardMiniAppAction(
     _ReplyKeyboard keyboard,
     MessageButton button,
@@ -1296,12 +1380,6 @@ class _ChatInputBarState extends State<ChatInputBar> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const AppIcon(
-                  HeroAppIcons.square,
-                  size: 18,
-                  color: Colors.white,
-                ),
-                const SizedBox(width: 7),
                 Flexible(
                   child: Text(
                     button.text,

@@ -17,6 +17,7 @@ import 'package:mithka/chat/group_management_log_view.dart';
 import 'package:mithka/chat/media_album_layout.dart';
 import 'package:mithka/chat/message_bubble.dart';
 import 'package:mithka/chat/rich_text_composer_view.dart';
+import 'package:mithka/components/app_icons.dart';
 import 'package:mithka/components/ui_components.dart';
 import 'package:mithka/l10n/app_locale_controller.dart';
 import 'package:mithka/l10n/app_localizations.dart';
@@ -377,6 +378,129 @@ void main() {
       );
       expect(preview.onTap, isNotNull);
     });
+
+    testWidgets(
+      'uses a bot menu Mini App action and toggles the reply keyboard',
+      (tester) async {
+        final vm =
+            ChatViewModel(chatId: 1, title: 'Test bot', markReadOnOpen: false)
+              ..peerIsBot = true
+              ..botMenu = const BotMenuInfo(
+                type: 'botMenuButton',
+                text: '小程序购买',
+                url: 'menu://https://example.com/webapp',
+              )
+              ..botCommands = const [
+                BotCommandOption(
+                  command: 'start',
+                  description: 'Start the bot',
+                ),
+              ]
+              ..messages = [
+                ChatMessage(
+                  id: 1,
+                  isOutgoing: false,
+                  text: '',
+                  date: 1,
+                  buttonRows: [
+                    [
+                      const MessageButton(
+                        text: '购买套餐',
+                        type: 'keyboardButtonTypeText',
+                        isReplyKeyboard: true,
+                      ),
+                    ],
+                  ],
+                ),
+              ];
+        addTearDown(vm.dispose);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            localizationsDelegates: const [
+              GlobalMaterialLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(
+              body: Align(
+                alignment: Alignment.bottomCenter,
+                child: ChatInputBar(
+                  vm: vm,
+                  onStartCall: (_) {},
+                  onMessageSent: () {},
+                ),
+              ),
+            ),
+          ),
+        );
+
+        expect(find.text('小程序购买'), findsOneWidget);
+        expect(find.bySemanticsLabel('Show bot keyboard'), findsOneWidget);
+        expect(find.text('购买套餐'), findsNothing);
+
+        await tester.tap(find.bySemanticsLabel('Show bot keyboard'));
+        await tester.pumpAndSettle();
+        expect(find.bySemanticsLabel('Hide bot keyboard'), findsOneWidget);
+        expect(find.text('购买套餐'), findsOneWidget);
+
+        await tester.longPress(find.text('小程序购买'));
+        await tester.pumpAndSettle();
+        expect(find.text('/start'), findsOneWidget);
+        expect(find.byIcon(HeroAppIcons.code.data), findsOneWidget);
+      },
+    );
+
+    testWidgets('only shows the bot keyboard toggle for an empty draft', (
+      tester,
+    ) async {
+      final vm =
+          ChatViewModel(chatId: 1, title: 'Test bot', markReadOnOpen: false)
+            ..draft = 'already typing'
+            ..messages = [
+              ChatMessage(
+                id: 1,
+                isOutgoing: false,
+                text: '',
+                date: 1,
+                buttonRows: const [
+                  [
+                    MessageButton(
+                      text: '购买套餐',
+                      type: 'keyboardButtonTypeText',
+                      isReplyKeyboard: true,
+                    ),
+                  ],
+                ],
+              ),
+            ];
+      addTearDown(vm.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: const [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.bottomCenter,
+              child: ChatInputBar(
+                vm: vm,
+                onStartCall: (_) {},
+                onMessageSent: () {},
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.bySemanticsLabel('Show bot keyboard'), findsNothing);
+      expect(find.bySemanticsLabel('Hide bot keyboard'), findsNothing);
+    });
   });
 
   group('MessageBubble delivery status', () {
@@ -530,6 +654,55 @@ void main() {
       );
     });
 
+    testWidgets('keeps an outgoing photo repeat badge beside its bubble', (
+      tester,
+    ) async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final theme = ThemeController(prefs);
+      addTearDown(theme.dispose);
+      final message = ChatMessage(
+        id: 6,
+        isOutgoing: true,
+        text: '',
+        date: 1,
+        contentType: 'messagePhoto',
+        image: TdFileRef(id: 987, miniThumb: Uint8List(0)),
+        imageWidth: 600,
+        imageHeight: 400,
+      );
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider<ThemeController>.value(
+          value: theme,
+          child: MaterialApp(
+            home: SizedBox(
+              width: 420,
+              child: Scaffold(
+                body: MessageBubble(
+                  message: message,
+                  peerTitle: 'Test',
+                  isGroup: false,
+                  showRepeat: true,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final badge = tester.getRect(
+        find.byKey(const ValueKey('messageRepeatBadge')),
+      );
+      final bubble = tester.getRect(
+        find.byKey(const ValueKey('messageTapTarget-6')),
+      );
+      expect((bubble.left - badge.right).abs(), lessThanOrEqualTo(7));
+
+      // Expire the media lookup timeout scheduled by the image placeholder.
+      await tester.pump(const Duration(minutes: 3, seconds: 1));
+    });
+
     testWidgets('shows detail time on tap unless always-on is enabled', (
       tester,
     ) async {
@@ -581,6 +754,44 @@ void main() {
         find.byKey(const ValueKey('messageTappedTimestamp')),
         findsNothing,
       );
+    });
+
+    testWidgets('opens text selection through a double tap', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final theme = ThemeController(prefs);
+      addTearDown(theme.dispose);
+      final message = ChatMessage(
+        id: 3,
+        isOutgoing: false,
+        text: 'selectable',
+        date: 1,
+      );
+      ChatMessage? selected;
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider<ThemeController>.value(
+          value: theme,
+          child: MaterialApp(
+            home: Scaffold(
+              body: MessageBubble(
+                message: message,
+                peerTitle: 'Test',
+                isGroup: false,
+                onDoubleTap: (value) => selected = value,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final target = find.byKey(const ValueKey('messageTapTarget-3'));
+      await tester.tap(target);
+      await tester.pump(const Duration(milliseconds: 40));
+      await tester.tap(target);
+      await tester.pump();
+
+      expect(selected, same(message));
     });
   });
 
@@ -1071,6 +1282,28 @@ void main() {
     );
   });
 
+  group('BotMenuInfo', () {
+    test('uses the bot menu text even when TDLib uses a menu URL', () {
+      const menu = BotMenuInfo(
+        type: 'botMenuButton',
+        text: '小程序购买',
+        url: 'menu://https://example.com/webapp',
+      );
+
+      expect(menu.isLegacyMenuUrl, isTrue);
+      expect(menu.actionTitle, '小程序购买');
+    });
+
+    test('falls back to Open when a bot menu has no text', () {
+      const menu = BotMenuInfo(
+        type: 'botMenuButton',
+        url: 'menu://https://webappinternal.telegram.org/botfather',
+      );
+
+      expect(menu.actionTitle, 'Open');
+    });
+  });
+
   group('TDParse.messageText', () {
     test('photo with no caption uses localized placeholder', () {
       final content = <String, dynamic>{'@type': 'messagePhoto'};
@@ -1086,6 +1319,43 @@ void main() {
         'text': {'@type': 'formattedText', 'text': 'hello'},
       };
       expect(TDParse.messageText(content), 'hello');
+    });
+
+    test('redacts only a message carrying restriction info', () {
+      const notice =
+          "This message can't be displayed because it violated Telegram's Terms of Service.";
+      final restricted = TDParse.message({
+        'id': 11,
+        'date': 1,
+        'content': {
+          '@type': 'messagePhoto',
+          'caption': {'@type': 'formattedText', 'text': 'Original photo'},
+        },
+        'restriction_info': {
+          '@type': 'restrictionInfo',
+          'restriction_reason': notice,
+        },
+      });
+      final ordinary = TDParse.message({
+        'id': 12,
+        'date': 2,
+        'content': {
+          '@type': 'messageText',
+          'text': {'@type': 'formattedText', 'text': notice},
+        },
+      });
+
+      expect(restricted, isNotNull);
+      expect(restricted!.text, notice);
+      expect(restricted.isContentRestricted, isTrue);
+      expect(restricted.isPhoto, isFalse);
+      expect(restricted.image, isNull);
+      expect(restricted.buttonRows, isEmpty);
+      expect(restricted.canRepeat, isFalse);
+
+      expect(ordinary, isNotNull);
+      expect(ordinary!.text, notice);
+      expect(ordinary.isContentRestricted, isFalse);
     });
 
     test('dice keeps emoji preview and parsed value', () {

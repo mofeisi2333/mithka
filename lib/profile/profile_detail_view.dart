@@ -13,6 +13,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
@@ -25,10 +26,14 @@ import '../chat/full_image_viewer.dart';
 import '../chat/telegram_rich_text.dart';
 import '../chat/voice_audio.dart';
 import '../components/app_icons.dart';
+import '../components/confirm_dialog.dart';
 import '../components/photo_avatar.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../components/vip_badge.dart';
+import '../moments/story_viewer_view.dart';
+import '../settings/blocked_user_service.dart';
+import '../settings/edit_profile_view.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
@@ -64,6 +69,10 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
   List<TdFileRef> _photos = []; // 精选照片 — profile-photo history
   String _birthday = '';
   String _location = '';
+  String _businessHours = '';
+  int _giftCount = 0;
+  List<int> _postStoryIds = const [];
+  List<int> _archivedStoryIds = const [];
   String _musicTitle = '';
   ChatMessage? _musicMessage;
   final VoicePlayer _musicPlayer = VoicePlayer();
@@ -71,6 +80,7 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
   bool _hideIdentity = false;
   bool _isMe = false;
   bool _isContact = true;
+  bool _isBlocked = false;
   String _firstName = '';
   String _lastName = '';
   String _rawPhone = '';
@@ -129,12 +139,17 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
         'user_id': widget.userId,
       });
       if (mounted) {
+        final business = full.obj('business_info');
         setState(() {
           _bio = full.obj('bio')?.str('text') ?? '';
           _bioEntities = TDParse.textEntities(full.obj('bio'));
           _birthday = _formatBirthday(full.obj('birthdate'));
-          _location =
-              full.obj('business_info')?.obj('location')?.str('address') ?? '';
+          _location = business?.obj('location')?.str('address') ?? '';
+          _businessHours = _formatBusinessHours(
+            business?.obj('local_opening_hours') ??
+                business?.obj('opening_hours'),
+          );
+          _giftCount = full.integer('gift_count') ?? 0;
           _musicTitle = _isMe
               ? _defaultOwnMusicTitle
               : _extractMusicTitle(full, _bio);
@@ -169,11 +184,10 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
         'user_id': widget.userId,
         'force': false,
       });
-      if (mounted) {
-        setState(() {
-          _chatId = chat.int64('id');
-        });
-      }
+      final chatId = chat.int64('id');
+      if (!mounted || chatId == null) return;
+      setState(() => _chatId = chatId);
+      unawaited(_loadStoryCollections(chatId));
     } catch (_) {}
   }
 
@@ -250,6 +264,22 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
     );
   }
 
+  void _changeAvatar() {
+    if (!_isMe) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const EditProfileView(openAvatarPicker: true),
+      ),
+    );
+  }
+
+  Future<void> _openEditProfile() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const EditProfileView()));
+    if (mounted) await _load();
+  }
+
   void _openSearch() {
     final cid = _chatId;
     if (cid == null) return;
@@ -260,12 +290,90 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
     );
   }
 
-  void _shareCard() {
+  void _copyProfileLink() {
     final link = (_username?.isNotEmpty ?? false)
         ? 'https://t.me/$_username'
         : 'tg://user?id=${widget.userId}';
     Clipboard.setData(ClipboardData(text: link));
     showToast(context, AppStrings.t(AppStringKeys.profileDetailCardLinkCopied));
+  }
+
+  Future<void> _showProfileContextMenu() async {
+    final action = await showModalBottomSheet<_ProfileContextAction>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _ProfileContextMenu(showBlock: !_isMe && !_isBlocked),
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case _ProfileContextAction.copyLink:
+        _copyProfileLink();
+      case _ProfileContextAction.blockUser:
+        await _blockUser();
+    }
+  }
+
+  Future<void> _blockUser() async {
+    final confirmed = await confirmDialog(
+      context,
+      title: AppStringKeys.chatBlockUserConfirm,
+      confirmText: AppStringKeys.chatBlockUserConfirm,
+      destructive: true,
+    );
+    if (!mounted || !confirmed) return;
+    try {
+      await BlockedUserService.shared.blockUser(widget.userId);
+      if (mounted) setState(() => _isBlocked = true);
+    } catch (e) {
+      if (!mounted) return;
+      showToast(
+        context,
+        AppStrings.t(AppStringKeys.chatBlockUserFailed, {'value1': e}),
+      );
+    }
+  }
+
+  Future<void> _loadStoryCollections(int chatId) async {
+    final results = await Future.wait([
+      _loadStoryIds('getChatPostedToChatPageStories', chatId),
+      _loadStoryIds('getChatArchivedStories', chatId),
+    ]);
+    if (!mounted || _chatId != chatId) return;
+    setState(() {
+      _postStoryIds = results[0];
+      _archivedStoryIds = results[1];
+    });
+  }
+
+  Future<List<int>> _loadStoryIds(String type, int chatId) async {
+    try {
+      final response = await TdClient.shared.query({
+        '@type': type,
+        'chat_id': chatId,
+        'from_story_id': 0,
+        'limit': 20,
+      });
+      return (response.objects('stories') ?? const <Map<String, dynamic>>[])
+          .map((story) => story.int64('id') ?? story.integer('id'))
+          .whereType<int>()
+          .where((id) => id > 0)
+          .toList(growable: false);
+    } catch (_) {
+      // Stories are privacy-scoped. Archived posts are shown only when TDLib
+      // returns posts the active account is allowed to see.
+      return const [];
+    }
+  }
+
+  void _openStories(List<int> storyIds) {
+    final chatId = _chatId;
+    if (chatId == null || storyIds.isEmpty) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => StoryViewerView(chatId: chatId, storyIds: storyIds),
+      ),
+    );
   }
 
   Future<void> _openMusicSearch() async {
@@ -311,6 +419,10 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                   Container(height: 12, color: c.groupedBackground),
                   _photosCard(),
                 ],
+                if (_hasProfileCollections) ...[
+                  Container(height: 12, color: c.groupedBackground),
+                  _profileCollectionsCard(),
+                ],
                 Container(height: 12, color: c.groupedBackground),
                 _profileToolsCard(),
                 if (_infoRows.isNotEmpty) ...[
@@ -333,7 +445,14 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
       (AppStrings.t(AppStringKeys.profileDetailBirthday), _birthday),
     if (_location.isNotEmpty)
       (AppStrings.t(AppStringKeys.profileDetailLocation), _location),
+    if (_businessHours.isNotEmpty)
+      (AppStrings.t(AppStringKeys.profileDetailBusinessHours), _businessHours),
   ];
+
+  bool get _hasProfileCollections =>
+      _giftCount > 0 ||
+      _postStoryIds.isNotEmpty ||
+      _archivedStoryIds.isNotEmpty;
 
   static const _defaultOwnMusicTitle = 'SEKAI NO OWARI - The Peak';
 
@@ -353,6 +472,47 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
             'value2': md,
           })
         : md;
+  }
+
+  String _formatBusinessHours(Map<String, dynamic>? openingHours) {
+    final intervals =
+        openingHours?.objects('opening_hours') ??
+        const <Map<String, dynamic>>[];
+    if (intervals.isEmpty) return '';
+    const minutesPerDay = 24 * 60;
+    const minutesPerWeek = 7 * minutesPerDay;
+    if (intervals.length == 1 &&
+        intervals.first.integer('start_minute') == 0 &&
+        intervals.first.integer('end_minute') == minutesPerWeek) {
+      return '24/7';
+    }
+    final perDay = List.generate(7, (_) => <String>[]);
+    for (final interval in intervals) {
+      final start = interval.integer('start_minute');
+      final end = interval.integer('end_minute');
+      if (start == null || end == null || start < 0 || end <= start) continue;
+      final day = math.min(6, math.max(0, start ~/ minutesPerDay));
+      final startTime = _formatBusinessTime(start % minutesPerDay);
+      final endTime = _formatBusinessTime(end % minutesPerDay);
+      perDay[day].add('$startTime-$endTime');
+    }
+    final locale = Localizations.localeOf(context).toString();
+    final weekday = DateFormat.E(locale);
+    final monday = DateTime.utc(2024);
+    final lines = <String>[];
+    for (var day = 0; day < perDay.length; day++) {
+      if (perDay[day].isEmpty) continue;
+      final label = weekday.format(monday.add(Duration(days: day)));
+      lines.add('$label ${perDay[day].join(', ')}');
+    }
+    return lines.join('\n');
+  }
+
+  String _formatBusinessTime(int minutes) {
+    final normalized = minutes % (24 * 60);
+    final hour = normalized ~/ 60;
+    final minute = normalized % 60;
+    return '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}';
   }
 
   String _extractMusicTitle(Map<String, dynamic> full, String bio) {
@@ -441,12 +601,35 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
               ),
             ),
           ),
+        if (_isMe)
+          Positioned(
+            top: top + 4,
+            right: 18,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _openEditProfile,
+              child: Container(
+                width: 42,
+                height: 42,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.22),
+                  shape: BoxShape.circle,
+                ),
+                child: const AppIcon(
+                  HeroAppIcons.pen,
+                  size: 19,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
         Positioned(
           top: top + 4,
-          right: 18,
+          right: _isMe ? 70 : 18,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: _shareCard,
+            onTap: _showProfileContextMenu,
             child: Container(
               width: 42,
               height: 42,
@@ -489,22 +672,26 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Container(
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: c.card, width: 4),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.08),
-                      blurRadius: 16,
-                      offset: const Offset(0, 5),
-                    ),
-                  ],
-                ),
-                child: PhotoAvatar(
-                  title: _name.isEmpty ? '?' : _name,
-                  photo: _photo,
-                  size: 80,
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _isMe ? _changeAvatar : null,
+                child: Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: c.card, width: 4),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.08),
+                        blurRadius: 16,
+                        offset: const Offset(0, 5),
+                      ),
+                    ],
+                  ),
+                  child: PhotoAvatar(
+                    title: _name.isEmpty ? '?' : _name,
+                    photo: _photo,
+                    size: 80,
+                  ),
                 ),
               ),
               const SizedBox(width: 16),
@@ -679,6 +866,50 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _profileCollectionsCard() {
+    final rows = <Widget>[];
+    void addRow(Widget row) {
+      if (rows.isNotEmpty) rows.add(const InsetDivider(leadingInset: 56));
+      rows.add(row);
+    }
+
+    if (_giftCount > 0) {
+      addRow(
+        _profileRow(
+          HeroAppIcons.star.data,
+          AppStrings.t(AppStringKeys.profileDetailGifts),
+          trailing: _giftCount.toString(),
+          onTap: null,
+          showChevron: false,
+        ),
+      );
+    }
+    if (_postStoryIds.isNotEmpty) {
+      addRow(
+        _profileRow(
+          HeroAppIcons.towerBroadcast.data,
+          AppStrings.t(AppStringKeys.profileDetailPosts),
+          trailing: _postStoryIds.length.toString(),
+          onTap: () => _openStories(_postStoryIds),
+        ),
+      );
+    }
+    if (_archivedStoryIds.isNotEmpty) {
+      addRow(
+        _profileRow(
+          HeroAppIcons.inbox.data,
+          AppStrings.t(AppStringKeys.profileDetailArchivedPosts),
+          trailing: _archivedStoryIds.length.toString(),
+          onTap: () => _openStories(_archivedStoryIds),
+        ),
+      );
+    }
+    return Container(
+      color: context.colors.card,
+      child: Column(children: rows),
     );
   }
 
@@ -876,7 +1107,7 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 16,
-                    fontWeight: FontWeight.w500,
+                    fontWeight: context.appFontWeight(AppTextWeight.medium),
                     color: c.textPrimary,
                   ),
                 ),
@@ -1095,6 +1326,99 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
             if (i < rows.length - 1) const InsetDivider(leadingInset: 16),
           ],
         ],
+      ),
+    );
+  }
+}
+
+enum _ProfileContextAction { copyLink, blockUser }
+
+class _ProfileContextMenu extends StatelessWidget {
+  const _ProfileContextMenu({required this.showBlock});
+
+  final bool showBlock;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return SafeArea(
+      top: false,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        decoration: BoxDecoration(
+          color: c.card,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.16),
+              blurRadius: 18,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _item(
+              context,
+              key: const ValueKey('profile-context-copy-link'),
+              icon: HeroAppIcons.link,
+              label: AppStrings.t(AppStringKeys.profileDetailCopyLink),
+              onTap: () =>
+                  Navigator.of(context).pop(_ProfileContextAction.copyLink),
+            ),
+            if (showBlock) ...[
+              const InsetDivider(leadingInset: 56),
+              _item(
+                context,
+                key: const ValueKey('profile-context-block-user'),
+                icon: HeroAppIcons.shieldHalved,
+                label: AppStrings.t(AppStringKeys.chatBlockUserConfirm),
+                destructive: true,
+                onTap: () =>
+                    Navigator.of(context).pop(_ProfileContextAction.blockUser),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _item(
+    BuildContext context, {
+    required Key key,
+    required AppIconData icon,
+    required String label,
+    required VoidCallback onTap,
+    bool destructive = false,
+  }) {
+    final c = context.colors;
+    final color = destructive ? const Color(0xFFFF4D4F) : c.textPrimary;
+    return GestureDetector(
+      key: key,
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: SizedBox(
+        height: 56,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            children: [
+              AppIcon(icon, size: 21, color: color),
+              const SizedBox(width: 16),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: context.appFontWeight(AppTextWeight.medium),
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

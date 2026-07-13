@@ -28,10 +28,13 @@ import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import 'accent_color_picker_view.dart';
 import 'animated_avatar_crop_view.dart';
+import 'business_settings_view.dart';
 import 'edit_field_view.dart';
 
 class EditProfileView extends StatefulWidget {
-  const EditProfileView({super.key});
+  const EditProfileView({super.key, this.openAvatarPicker = false});
+
+  final bool openAvatarPicker;
 
   @override
   State<EditProfileView> createState() => _EditProfileViewState();
@@ -40,6 +43,8 @@ class EditProfileView extends StatefulWidget {
 enum _AvatarKind { static, animated }
 
 class _EditProfileViewState extends State<EditProfileView> {
+  static const _fieldLabelWidth = 112.0;
+
   final TdClient _client = TdClient.shared;
   String _firstName = '';
   String _lastName = '';
@@ -51,6 +56,7 @@ class _EditProfileViewState extends State<EditProfileView> {
   int? _bDay, _bMonth, _bYear;
   TdFileRef? _photo;
   bool _loading = true;
+  bool _openedAvatarPicker = false;
 
   @override
   void initState() {
@@ -84,10 +90,15 @@ class _EditProfileViewState extends State<EditProfileView> {
         }
       }
     } catch (_) {}
-    if (mounted) setState(() => _loading = false);
+    if (!mounted) return;
+    setState(() => _loading = false);
+    if (widget.openAvatarPicker && !_openedAvatarPicker) {
+      _openedAvatarPicker = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _changeAvatar();
+      });
+    }
   }
-
-  String get _displayName => '$_firstName $_lastName'.trim();
 
   Future<String?> _edit(
     String title,
@@ -113,16 +124,10 @@ class _EditProfileViewState extends State<EditProfileView> {
     );
   }
 
-  Future<void> _editName() async {
-    final result = await _edit(
-      AppStrings.t(AppStringKeys.editProfileChangeName),
-      _displayName,
-      hint: AppStrings.t(AppStringKeys.loginFirstName),
-    );
-    if (result == null || result.isEmpty) return;
-    final parts = result.split(RegExp(r'\s+'));
-    final first = parts.first;
-    final last = parts.skip(1).join(' ');
+  Future<void> _setName(String firstName, String lastName) async {
+    final first = firstName.trim();
+    final last = lastName.trim();
+    if (first.isEmpty) return;
     try {
       await _client.query({
         '@type': 'setName',
@@ -136,6 +141,26 @@ class _EditProfileViewState extends State<EditProfileView> {
     } catch (_) {
       _toast(AppStrings.t(AppStringKeys.editProfileSaveFailed));
     }
+  }
+
+  Future<void> _editFirstName() async {
+    final result = await _edit(
+      AppStrings.t(AppStringKeys.editProfileChangeName),
+      _firstName,
+      hint: AppStrings.t(AppStringKeys.loginFirstName),
+    );
+    if (result == null || result.trim().isEmpty) return;
+    await _setName(result, _lastName);
+  }
+
+  Future<void> _editLastName() async {
+    final result = await _edit(
+      AppStrings.t(AppStringKeys.loginLastNameOptional),
+      _lastName,
+      hint: AppStrings.t(AppStringKeys.loginLastNameOptional),
+    );
+    if (result == null) return;
+    await _setName(_firstName, result);
   }
 
   Future<void> _editUsername() async {
@@ -542,7 +567,7 @@ class _EditProfileViewState extends State<EditProfileView> {
                           children: [
                             Center(
                               child: PhotoAvatar(
-                                title: _displayName,
+                                title: '$_firstName $_lastName'.trim(),
                                 photo: _photo,
                                 size: 88,
                               ),
@@ -565,10 +590,18 @@ class _EditProfileViewState extends State<EditProfileView> {
                       const SizedBox(height: 18),
                       _field(
                         AppStrings.t(AppStringKeys.loginFirstName),
-                        _displayName.isEmpty
+                        _firstName.isEmpty
                             ? AppStrings.t(AppStringKeys.editProfileTapToSet)
-                            : _displayName,
-                        _editName,
+                            : _firstName,
+                        _editFirstName,
+                      ),
+                      _field(
+                        AppStrings.t(AppStringKeys.editProfileLastName),
+                        _lastName.isEmpty
+                            ? AppStrings.t(AppStringKeys.editProfileTapToSet)
+                            : _lastName,
+                        _editLastName,
+                        faded: _lastName.isEmpty,
                       ),
                       _field(
                         AppStrings.t(AppStringKeys.editProfileUsername),
@@ -600,6 +633,18 @@ class _EditProfileViewState extends State<EditProfileView> {
                             : _bio,
                         _editBio,
                         faded: _bio.isEmpty,
+                      ),
+                      _field(
+                        AppStrings.t(AppStringKeys.businessSettingsEntry),
+                        AppStrings.t(AppStringKeys.businessSettingsSummary),
+                        () async {
+                          await Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const BusinessSettingsView(),
+                            ),
+                          );
+                        },
+                        faded: true,
                       ),
                       _colorField(
                         AppStrings.t(AppStringKeys.editProfileNameColor),
@@ -639,7 +684,7 @@ class _EditProfileViewState extends State<EditProfileView> {
         child: Row(
           children: [
             SizedBox(
-              width: 64,
+              width: _fieldLabelWidth,
               child: Text(
                 label,
                 style: TextStyle(fontSize: 15, color: c.textSecondary),
@@ -678,7 +723,7 @@ class _EditProfileViewState extends State<EditProfileView> {
       child: Row(
         children: [
           SizedBox(
-            width: 64,
+            width: _fieldLabelWidth,
             child: Text(
               label,
               style: TextStyle(fontSize: 15, color: c.textSecondary),
@@ -717,7 +762,7 @@ class _EditProfileViewState extends State<EditProfileView> {
         child: Row(
           children: [
             SizedBox(
-              width: 64,
+              width: _fieldLabelWidth,
               child: Text(
                 label,
                 style: TextStyle(fontSize: 15, color: c.textSecondary),

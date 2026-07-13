@@ -290,16 +290,20 @@ class _ProfileViewState extends State<ProfileView> {
             const SizedBox(height: 8),
             Row(
               children: [
-                Container(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 2),
-                  ),
-                  child: PhotoAvatar(
-                    title:
-                        user?.name ?? AppStrings.t(AppStringKeys.chatMeLabel),
-                    photo: user?.photo,
-                    size: 64,
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _openMyProfile,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                    ),
+                    child: PhotoAvatar(
+                      title:
+                          user?.name ?? AppStrings.t(AppStringKeys.chatMeLabel),
+                      photo: user?.photo,
+                      size: 64,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 14),

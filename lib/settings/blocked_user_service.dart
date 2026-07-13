@@ -34,6 +34,7 @@ class BlockedUserService extends ChangeNotifier {
       while (true) {
         final result = await TdClient.shared.query({
           '@type': 'getBlockedMessageSenders',
+          'block_list': {'@type': 'blockListMain'},
           'offset': offset,
           'limit': limit,
         });
@@ -43,8 +44,11 @@ class BlockedUserService extends ChangeNotifier {
 
         for (final sender in senders) {
           if (sender is Map<String, dynamic>) {
-            final senderData = sender['sender'] as Map<String, dynamic>?;
-            if (senderData != null && senderData['@type'] == 'messageSenderUser') {
+            // TDLib returns messageSender directly; accept the legacy wrapper
+            // too so the cache remains compatible with stored test fixtures.
+            final senderData =
+                sender['sender'] as Map<String, dynamic>? ?? sender;
+            if (senderData['@type'] == 'messageSenderUser') {
               final userId = senderData['user_id'];
               if (userId is int) {
                 _blockedUserIds.add(userId);
@@ -60,6 +64,18 @@ class BlockedUserService extends ChangeNotifier {
       // Graceful: on error just leave the existing cache or empty set.
     }
 
+    _loaded = true;
+    notifyListeners();
+  }
+
+  Future<void> blockUser(int userId) async {
+    if (userId <= 0 || _blockedUserIds.contains(userId)) return;
+    await TdClient.shared.query({
+      '@type': 'setMessageSenderBlockList',
+      'sender_id': {'@type': 'messageSenderUser', 'user_id': userId},
+      'block_list': {'@type': 'blockListMain'},
+    });
+    _blockedUserIds.add(userId);
     _loaded = true;
     notifyListeners();
   }

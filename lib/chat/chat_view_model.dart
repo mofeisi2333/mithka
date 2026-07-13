@@ -131,8 +131,7 @@ class BotMenuInfo {
   bool get isWebApp => type == 'botMenuButton' && url.isNotEmpty;
   bool get isLegacyMenuUrl => url.startsWith('menu://');
   String get webAppUrl => isLegacyMenuUrl ? '' : url;
-  String get actionTitle =>
-      isLegacyMenuUrl || text.trim().isEmpty ? 'Open' : text.trim();
+  String get actionTitle => text.trim().isEmpty ? 'Open' : text.trim();
   bool get opensCommands =>
       type == 'botMenuButtonCommands' || type == 'botMenuButtonDefault';
 }
@@ -1809,10 +1808,21 @@ class ChatViewModel extends ChangeNotifier {
               '@type': 'getUser',
               'user_id': uid,
             });
+            final restrictionReason = TDParse.restrictionReasonFor(user);
+            if (restrictionReason != null) {
+              _setTelegramTosRestricted(restrictionReason);
+              notifyListeners();
+              return;
+            }
             peerIsBot = _isBotUser(user);
             peerOnline = TDParse.isUserOnline(user);
             peerStatusText = TDParse.userStatus(user);
-          } catch (_) {}
+          } catch (error) {
+            if (_markTelegramTosRestricted(error)) {
+              notifyListeners();
+              return;
+            }
+          }
           unawaited(_loadPrivatePaidMessageInfo(uid));
           if (peerIsBot) await _loadBotInfo(uid);
         }
@@ -1837,12 +1847,23 @@ class ChatViewModel extends ChangeNotifier {
               '@type': 'getSupergroup',
               'supergroup_id': sgid,
             });
+            final restrictionReason = TDParse.restrictionReasonFor(sg);
+            if (restrictionReason != null) {
+              _setTelegramTosRestricted(restrictionReason);
+              notifyListeners();
+              return;
+            }
             isChannel = sg.boolean('is_channel') ?? false;
             isForum = isForum || (sg.boolean('is_forum') ?? false);
             joinByRequest = sg.boolean('join_by_request') ?? false;
             _setPaidMessageStarCount(_paidMessageStars(sg), notify: false);
             _applyGroupStatus(sg.obj('status'));
-          } catch (_) {}
+          } catch (error) {
+            if (_markTelegramTosRestricted(error)) {
+              notifyListeners();
+              return;
+            }
+          }
           unawaited(_loadSupergroupFullInfo(sgid));
         }
     }
@@ -1860,7 +1881,6 @@ class ChatViewModel extends ChangeNotifier {
     final lastRaw = chat.obj('last_message');
     final lastMessage = lastRaw == null ? null : TDParse.message(lastRaw);
     if (lastMessage == null) return;
-    if (_markTelegramTosRestrictedText(lastMessage.text)) return;
     _merge([lastMessage]);
     _resolveRichMessagesIfNeeded([lastMessage]);
     _resolveRepliesIfNeeded([lastMessage]);
@@ -2304,11 +2324,9 @@ class ChatViewModel extends ChangeNotifier {
       });
       final target = TDParse.message(targetRaw);
       if (target != null) batch.add(target);
-    } catch (error) {
-      if (_markTelegramTosRestricted(error)) {
-        notifyListeners();
-        return false;
-      }
+    } catch (_) {
+      // A missing or restricted target message doesn't imply the containing
+      // chat is restricted. Load its surrounding history when available.
     }
 
     try {
@@ -2329,19 +2347,18 @@ class ChatViewModel extends ChangeNotifier {
       if (_markTelegramTosRestricted(error)) notifyListeners();
     }
 
-    final visibleBatch = _withoutRestrictedNoticeMessages(batch);
-    if (visibleBatch.isEmpty) return false;
+    if (batch.isEmpty) return false;
     _allMessages = [];
     messages = [];
     _hasOlderHistory = true;
     anchoredHistory = true;
     if (scrollToTarget) _pendingScrollToId = messageId;
-    _merge(visibleBatch);
-    _resolveRichMessagesIfNeeded(visibleBatch);
-    _resolveSendersIfNeeded(visibleBatch);
-    _resolveRepliesIfNeeded(visibleBatch);
-    _resolveForwardsIfNeeded(visibleBatch);
-    _resolveServiceUsersIfNeeded(visibleBatch);
+    _merge(batch);
+    _resolveRichMessagesIfNeeded(batch);
+    _resolveSendersIfNeeded(batch);
+    _resolveRepliesIfNeeded(batch);
+    _resolveForwardsIfNeeded(batch);
+    _resolveServiceUsersIfNeeded(batch);
     return messages.any((m) => m.id == messageId);
   }
 
@@ -2414,18 +2431,13 @@ class ChatViewModel extends ChangeNotifier {
         .map(TDParse.message)
         .whereType<ChatMessage>()
         .toList();
-    final visibleMessages = _withoutRestrictedNoticeMessages(parsed);
-    if (parsed.isNotEmpty && visibleMessages.isEmpty) {
-      notifyListeners();
-      return false;
-    }
-    if (visibleMessages.isEmpty) {
+    if (parsed.isEmpty) {
       if (isOlder || fromMessageId != 0) _hasOlderHistory = false;
       return false;
     }
 
-    _merge(visibleMessages);
-    _resolveRichMessagesIfNeeded(visibleMessages);
+    _merge(parsed);
+    _resolveRichMessagesIfNeeded(parsed);
     if (isOlder &&
         restorePosition &&
         anchor != null &&
@@ -2433,10 +2445,10 @@ class ChatViewModel extends ChangeNotifier {
         _allMessages.first.id != allAnchor) {
       _restoreTopId = anchor;
     }
-    _resolveSendersIfNeeded(visibleMessages);
-    _resolveRepliesIfNeeded(visibleMessages);
-    _resolveForwardsIfNeeded(visibleMessages);
-    _resolveServiceUsersIfNeeded(visibleMessages);
+    _resolveSendersIfNeeded(parsed);
+    _resolveRepliesIfNeeded(parsed);
+    _resolveForwardsIfNeeded(parsed);
+    _resolveServiceUsersIfNeeded(parsed);
     return true;
   }
 
@@ -2448,12 +2460,6 @@ class ChatViewModel extends ChangeNotifier {
         normalized.contains('chat_restricted') ||
         normalized.contains('channel_restricted');
     if (!restricted) return false;
-    _setTelegramTosRestricted(text);
-    return true;
-  }
-
-  bool _markTelegramTosRestrictedText(String text) {
-    if (!_isTelegramTosRestrictedText(text)) return false;
     _setTelegramTosRestricted(text);
     return true;
   }
@@ -2472,31 +2478,9 @@ class ChatViewModel extends ChangeNotifier {
   String _normalizedRestrictionText(String text) =>
       text.toLowerCase().replaceAll('’', "'");
 
-  List<ChatMessage> _withoutRestrictedNoticeMessages(List<ChatMessage> source) {
-    var restrictedNotice = '';
-    final visible = <ChatMessage>[];
-    for (final message in source) {
-      if (_isTelegramTosRestrictedText(message.text)) {
-        restrictedNotice = message.text;
-        continue;
-      }
-      visible.add(message);
-    }
-    if (restrictedNotice.isNotEmpty) {
-      _setTelegramTosRestricted(restrictedNotice);
-    }
-    return visible;
-  }
-
   void _setTelegramTosRestricted(String text) {
     isTelegramTosRestricted = true;
     telegramTosRestrictionText = text;
-    messages = messages
-        .where((message) => !_isTelegramTosRestrictedText(message.text))
-        .toList();
-    _allMessages = _allMessages
-        .where((message) => !_isTelegramTosRestrictedText(message.text))
-        .toList();
     anchoredHistory = false;
     canSendMessages = false;
     canJoin = false;

@@ -61,6 +61,7 @@ class MessageBubble extends StatefulWidget {
     this.showRepeat = false,
     this.onRepeat,
     this.onLongPress,
+    this.onDoubleTap,
     this.onReply,
     this.onAvatarTap,
     this.onAvatarLongPress,
@@ -93,6 +94,7 @@ class MessageBubble extends StatefulWidget {
     MessageActionSource source,
   )?
   onLongPress;
+  final ValueChanged<ChatMessage>? onDoubleTap;
   final ValueChanged<ChatMessage>? onReply;
   final ValueChanged<ChatMessage>? onAvatarTap;
   final ValueChanged<ChatMessage>? onAvatarLongPress;
@@ -131,6 +133,8 @@ class _MessageBubbleState extends State<MessageBubble>
   bool _videoStickerReady = false;
   bool _musicPressed = false;
   bool _showTappedTimestamp = false;
+  DateTime? _lastTapAt;
+  bool _skipNextTap = false;
   double _swipeX = 0;
   double? _layoutWidth;
   final Set<String> _expandedQuotes = {};
@@ -139,12 +143,37 @@ class _MessageBubbleState extends State<MessageBubble>
   void _handleLongPress([
     MessageActionSource source = MessageActionSource.normal,
   ]) {
+    _lastTapAt = null;
     final box = _bubbleKey.currentContext?.findRenderObject() as RenderBox?;
     Rect? bounds;
     if (box != null && box.hasSize) {
       bounds = box.localToGlobal(Offset.zero) & box.size;
     }
     widget.onLongPress?.call(message, bounds, source);
+  }
+
+  void _handleTapDown(TapDownDetails details) {
+    if (widget.onDoubleTap == null) return;
+    final now = DateTime.now();
+    final previous = _lastTapAt;
+    _lastTapAt = now;
+    if (previous == null ||
+        now.difference(previous) > const Duration(milliseconds: 280)) {
+      return;
+    }
+    _lastTapAt = null;
+    _skipNextTap = true;
+    widget.onDoubleTap?.call(message);
+  }
+
+  void _handleTap(bool alwaysShowTime) {
+    if (_skipNextTap) {
+      _skipNextTap = false;
+      return;
+    }
+    if (!alwaysShowTime) {
+      setState(() => _showTappedTimestamp = !_showTappedTimestamp);
+    }
   }
 
   ChatMessage get message => widget.message;
@@ -262,9 +291,8 @@ class _MessageBubbleState extends State<MessageBubble>
     final body = GestureDetector(
       key: _bubbleKey,
       behavior: HitTestBehavior.opaque,
-      onTap: alwaysShowTime
-          ? null
-          : () => setState(() => _showTappedTimestamp = !_showTappedTimestamp),
+      onTapDown: _handleTapDown,
+      onTap: () => _handleTap(alwaysShowTime),
       onLongPress: _handleLongPress,
       onHorizontalDragStart: (_) => _swipeController.stop(),
       onHorizontalDragUpdate: _onDragUpdate,
@@ -304,6 +332,7 @@ class _MessageBubbleState extends State<MessageBubble>
               ],
             ),
     );
+    final ownPhotoRepeat = outgoing && message.isPhoto && widget.showRepeat;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
@@ -312,19 +341,31 @@ class _MessageBubbleState extends State<MessageBubble>
         children: outgoing
             ? [
                 Expanded(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      if (widget.showRepeat) _repeatBadge(),
-                      if (widget.showRepeat) const SizedBox(width: 6),
-                      Flexible(
-                        child: Align(
+                  child: ownPhotoRepeat
+                      ? Align(
                           alignment: Alignment.centerRight,
-                          child: content,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _repeatBadge(),
+                              const SizedBox(width: 6),
+                              Flexible(child: content),
+                            ],
+                          ),
+                        )
+                      : Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            if (widget.showRepeat) _repeatBadge(),
+                            if (widget.showRepeat) const SizedBox(width: 6),
+                            Flexible(
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                child: content,
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                    ],
-                  ),
                 ),
                 const SizedBox(width: 8),
                 GestureDetector(
@@ -469,6 +510,7 @@ class _MessageBubbleState extends State<MessageBubble>
   }
 
   Widget _repeatBadge() => GestureDetector(
+    key: const ValueKey('messageRepeatBadge'),
     onTap: widget.onRepeat,
     child: Container(
       width: 28,
@@ -493,6 +535,10 @@ class _MessageBubbleState extends State<MessageBubble>
 
   Widget _contentBody(bool outgoing) {
     late final Widget body;
+    if (message.isContentRestricted) {
+      body = _textBubble(message.text, outgoing);
+      return _withButtonRows(_withFloatingMeta(body, outgoing), outgoing);
+    }
     if (message.isCall) {
       body = _callBubble(outgoing);
       return _withButtonRows(_withFloatingMeta(body, outgoing), outgoing);
@@ -634,6 +680,7 @@ class _MessageBubbleState extends State<MessageBubble>
   );
 
   Widget _withButtonRows(Widget body, bool outgoing) {
+    if (message.isContentRestricted) return body;
     final showComments =
         widget.showCommentAttachment && message.commentCount > 0;
     if (message.buttonRows.isEmpty && !showComments) return body;
