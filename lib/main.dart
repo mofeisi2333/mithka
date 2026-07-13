@@ -36,12 +36,14 @@ import 'l10n/app_localizations.dart';
 import 'l10n/telegram_language_controller.dart';
 import 'notifications/notification_controller.dart';
 import 'notifications/push_device_registrar.dart';
+import 'platform/firebase_configuration.dart';
 import 'settings/app_icon_controller.dart';
 import 'settings/auto_download_media_controller.dart';
 import 'settings/blocked_user_service.dart';
 import 'settings/country_message_filter.dart';
 import 'settings/developer_mode_controller.dart';
 import 'settings/keyword_blocker.dart';
+import 'settings/safety_notice_controller.dart';
 import 'settings/translation_controller.dart';
 import 'tdlib/td_client.dart';
 import 'theme/app_theme.dart';
@@ -125,15 +127,20 @@ bool _shouldUseFvp() {
 
 Future<void> _initTelemetry() async {
   try {
-    await Firebase.initializeApp();
+    final hasFirebaseConfiguration = await FirebaseConfiguration.isAvailable;
     final appVersion = await AppVersion.load();
-    await FirebaseAnalytics.instance.setAnalyticsCollectionEnabled(true);
-    await FirebaseAnalytics.instance.setDefaultEventParameters(
-      appVersion.analyticsParameters,
-    );
-    await FirebaseAnalytics.instance.logAppOpen(
-      parameters: appVersion.analyticsParameters,
-    );
+    if (hasFirebaseConfiguration) {
+      await Firebase.initializeApp();
+      await FirebaseAnalytics.instance.setAnalyticsCollectionEnabled(true);
+      await FirebaseAnalytics.instance.setDefaultEventParameters(
+        appVersion.analyticsParameters,
+      );
+      await FirebaseAnalytics.instance.logAppOpen(
+        parameters: appVersion.analyticsParameters,
+      );
+    } else {
+      debugPrint('Firebase configuration not found; analytics disabled');
+    }
     if (_sentryDsn.isNotEmpty) {
       await Sentry.configureScope((scope) async {
         await scope.setTag('app.version', appVersion.version);
@@ -227,6 +234,9 @@ class _MithkaAppState extends State<MithkaApp> with WidgetsBindingObserver {
   late final DeveloperModeController _developer = DeveloperModeController(
     widget.prefs,
   );
+  late final SafetyNoticeController _safetyNotice = SafetyNoticeController(
+    widget.prefs,
+  );
 
   @override
   void initState() {
@@ -312,6 +322,7 @@ class _MithkaAppState extends State<MithkaApp> with WidgetsBindingObserver {
         ChangeNotifierProvider.value(value: _appIcons),
         ChangeNotifierProvider.value(value: _autoDownload),
         ChangeNotifierProvider.value(value: _developer),
+        ChangeNotifierProvider.value(value: _safetyNotice),
         ChangeNotifierProvider<dc.DrawerController>.value(value: _drawer),
       ],
       child: Consumer3<ThemeController, AccountStore, AppLocaleController>(

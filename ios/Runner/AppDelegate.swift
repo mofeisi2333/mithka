@@ -250,6 +250,26 @@ import UIKit
       }
     }
 
+    let firebaseConfigurationChannel = FlutterMethodChannel(
+      name: "mithka/firebase_configuration",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    firebaseConfigurationChannel.setMethodCallHandler { call, result in
+      guard call.method == "isAvailable" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      let options = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist")
+        .flatMap(NSDictionary.init(contentsOfFile:))
+      let appID = options?["GOOGLE_APP_ID"] as? String
+      let bundleID = options?["BUNDLE_ID"] as? String
+      let validAppID = appID?.range(
+        of: #"^1:[0-9]+:ios:[0-9a-fA-F]+$"#,
+        options: .regularExpression
+      ) != nil
+      result(validAppID && bundleID == Bundle.main.bundleIdentifier)
+    }
+
     let playerBrightnessChannel = FlutterMethodChannel(
       name: "mithka/player_brightness",
       binaryMessenger: engineBridge.applicationRegistrar.messenger()

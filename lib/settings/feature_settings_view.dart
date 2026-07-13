@@ -11,6 +11,7 @@ import '../components/ui_components.dart';
 import '../l10n/app_localizations.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
+import 'safety_notice_controller.dart';
 
 class FeatureSettingsView extends StatelessWidget {
   const FeatureSettingsView({super.key});
@@ -19,6 +20,7 @@ class FeatureSettingsView extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     final theme = context.watch<ThemeController>();
+    final safetyNotice = context.watch<SafetyNoticeController>();
     return Scaffold(
       backgroundColor: c.groupedBackground,
       body: Column(
@@ -52,6 +54,22 @@ class FeatureSettingsView extends StatelessWidget {
                       title: AppStrings.t(AppStringKeys.tabMoments),
                       value: theme.showMomentsTab,
                       onChanged: (value) => theme.showMomentsTab = value,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.section),
+                _sectionHeader(
+                  context,
+                  AppStrings.t(AppStringKeys.featureSafety),
+                ),
+                SettingsCard(
+                  children: [
+                    SettingsSwitchRow(
+                      title: AppStrings.t(
+                        AppStringKeys.featureDisableSafetyNotice,
+                      ),
+                      value: safetyNotice.disabled,
+                      onChanged: (value) => safetyNotice.disabled = value,
                     ),
                   ],
                 ),

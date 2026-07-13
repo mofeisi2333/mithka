@@ -518,6 +518,8 @@ const zhHansMessages = <String, String>{
   'developerModeTitle': "开发者模式",
   'developerModeUnlocked': "已开启开发者模式",
   'featureBottomTabs': "底部标签",
+  'featureDisableSafetyNotice': "停用安全提示弹窗",
+  'featureSafety': "安全",
   'featureTitle': "功能",
   'fileDetailDownloadProgress': "文件下载中…({value1}/{value2})",
   'fileDetailNoAppCanOpenFile': "没有可打开此文件的应用",

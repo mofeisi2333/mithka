@@ -558,6 +558,8 @@ const esMessages = <String, String>{
   'developerModeTitle': "Modo de desarrollador",
   'developerModeUnlocked': "Modo de desarrollador activado",
   'featureBottomTabs': "Pestañas inferiores",
+  'featureDisableSafetyNotice': "Desactivar aviso de seguridad",
+  'featureSafety': "Seguridad",
   'featureTitle': "Funciones",
   'fileDetailDownloadProgress': "Descargando archivo… ({value1}/{value2})",
   'fileDetailNoAppCanOpenFile': "No hay ninguna app para abrir este archivo",

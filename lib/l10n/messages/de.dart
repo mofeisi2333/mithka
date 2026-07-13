@@ -568,6 +568,8 @@ const deMessages = <String, String>{
   'developerModeTitle': "Entwicklermodus",
   'developerModeUnlocked': "Entwicklermodus aktiviert",
   'featureBottomTabs': "Untere Tabs",
+  'featureDisableSafetyNotice': "Sicherheitshinweis deaktivieren",
+  'featureSafety': "Sicherheit",
   'featureTitle': "Funktionen",
   'fileDetailDownloadProgress':
       "Datei wird heruntergeladen… ({value1}/{value2})",

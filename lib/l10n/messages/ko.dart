@@ -526,6 +526,8 @@ const koMessages = <String, String>{
   'developerModeTitle': "개발자 모드",
   'developerModeUnlocked': "개발자 모드가 열렸습니다",
   'featureBottomTabs': "하단 탭",
+  'featureDisableSafetyNotice': "안전 안내 팝업 사용 안 함",
+  'featureSafety': "안전",
   'featureTitle': "기능",
   'fileDetailDownloadProgress': "파일 다운로드 중…({value1}/{value2})",
   'fileDetailNoAppCanOpenFile': "이 파일을 열 수 있는 앱이 없습니다",

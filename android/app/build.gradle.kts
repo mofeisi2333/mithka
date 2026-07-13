@@ -5,7 +5,21 @@ plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
-    id("com.google.gms.google-services")
+    id("com.google.gms.google-services") apply false
+}
+
+// Firebase is optional for local contributors. Apply Google Services only for
+// a real config; missing or placeholder files must not make debug builds fail.
+val googleServicesFile = file("google-services.json")
+val hasFirebaseConfig = googleServicesFile.isFile && Regex(
+    "\\\"mobilesdk_app_id\\\"\\s*:\\s*\\\"1:[0-9]+:android:[0-9a-fA-F]+\\\"",
+).containsMatchIn(googleServicesFile.readText()) && Regex(
+    "\\\"package_name\\\"\\s*:\\s*\\\"ad\\.neko\\.mithka\\\"",
+).containsMatchIn(googleServicesFile.readText())
+if (hasFirebaseConfig) {
+    apply(plugin = "com.google.gms.google-services")
+} else {
+    logger.lifecycle("Firebase config not found; building without Firebase Analytics")
 }
 
 // Release signing (Nekoko LLC). Credentials live in android/key.properties

@@ -34,6 +34,7 @@ import '../profile/profile_detail_view.dart';
 import '../settings/blocked_user_service.dart';
 import '../settings/developer_mode_controller.dart';
 import '../settings/keyword_blocker.dart';
+import '../settings/safety_notice_controller.dart';
 import '../settings/topic_group_display_mode.dart';
 import '../settings/translation_api.dart';
 import '../settings/translation_controller.dart';
@@ -3337,6 +3338,7 @@ class _ChatViewState extends State<ChatView> {
     BlockedUserService.shared.enabled = context
         .watch<ThemeController>()
         .hideBlockedUserMessages;
+    final hideSafetyNotice = context.watch<SafetyNoticeController>().disabled;
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     _syncKeyboardInset(keyboardInset);
     // Not a member, joinable, and nothing to preview → a custom join screen
@@ -3374,7 +3376,8 @@ class _ChatViewState extends State<ChatView> {
                   ),
                   if (_actionTarget != null && !_isSelecting)
                     _actionMenuOverlay(),
-                  if (_vm.isTelegramTosRestricted) _restrictedChatOverlay(),
+                  if (_vm.isTelegramTosRestricted && !hideSafetyNotice)
+                    _restrictedChatOverlay(),
                 ],
               ),
             ),

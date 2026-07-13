@@ -928,6 +928,8 @@ abstract final class AppStringKeys {
   static const developerModeTitle = 'developerModeTitle';
   static const developerModeUnlocked = 'developerModeUnlocked';
   static const featureBottomTabs = 'featureBottomTabs';
+  static const featureDisableSafetyNotice = 'featureDisableSafetyNotice';
+  static const featureSafety = 'featureSafety';
   static const featureTitle = 'featureTitle';
   static const fileDetailDownloadProgress = 'fileDetailDownloadProgress';
   static const fileDetailNoAppCanOpenFile = 'fileDetailNoAppCanOpenFile';

@@ -527,6 +527,8 @@ const jaMessages = <String, String>{
   'developerModeTitle': "開発者モード",
   'developerModeUnlocked': "開発者モードを有効にしました",
   'featureBottomTabs': "下部タブ",
+  'featureDisableSafetyNotice': "安全通知のポップアップを無効にする",
+  'featureSafety': "安全",
   'featureTitle': "機能",
   'fileDetailDownloadProgress': "ファイルをダウンロード中…（{value1}/{value2}）",
   'fileDetailNoAppCanOpenFile': "このファイルを開けるアプリがありません",

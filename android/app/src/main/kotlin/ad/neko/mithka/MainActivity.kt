@@ -62,6 +62,19 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "mithka/firebase_configuration",
+        ).setMethodCallHandler { call, result ->
+            if (call.method != "isAvailable") {
+                result.notImplemented()
+                return@setMethodCallHandler
+            }
+            val appIdResource = resources.getIdentifier("google_app_id", "string", packageName)
+            val appId = if (appIdResource == 0) "" else getString(appIdResource)
+            result.success(appId.isNotBlank())
+        }
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "mithka/app_icon")
             .setMethodCallHandler { call, result ->
                 when (call.method) {

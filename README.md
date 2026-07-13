@@ -88,6 +88,12 @@ flutter pub get
 flutter run            # on a connected device / simulator
 ```
 
+Firebase Analytics is optional for local builds. If
+`android/app/google-services.json` or `ios/Runner/GoogleService-Info.plist` is
+missing (or is only an empty placeholder), the app builds and runs with
+analytics disabled. Maintainers and release CI provide the real, git-ignored
+configuration files automatically.
+
 ### Release signing (Android)
 
 Release builds are signed with the project's upload key when

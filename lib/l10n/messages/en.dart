@@ -593,6 +593,8 @@ const enMessages = <String, String>{
   'developerModeTitle': "Developer Mode",
   'developerModeUnlocked': "Developer Mode unlocked",
   'featureBottomTabs': "Bottom tabs",
+  'featureDisableSafetyNotice': "Disable safety notice popup",
+  'featureSafety': "Safety",
   'featureTitle': "Features",
   'fileDetailDownloadProgress': "Downloading file… ({value1}/{value2})",
   'fileDetailNoAppCanOpenFile': "No app can open this file",

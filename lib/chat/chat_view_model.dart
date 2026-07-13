@@ -1768,7 +1768,13 @@ class ChatViewModel extends ChangeNotifier {
     try {
       chat = await _client.query({'@type': 'getChat', 'chat_id': chatId});
     } catch (error) {
-      if (_markTelegramTosRestricted(error)) notifyListeners();
+      if (_markTelegramTosRestricted(error)) {
+        canSendMessages = false;
+        sendDisabledReason = AppStrings.t(
+          AppStringKeys.chatRestrictedTelegramTosMessage,
+        );
+        notifyListeners();
+      }
       return;
     }
     peerTitle = chat.str('title') ?? peerTitle;
@@ -1791,16 +1797,11 @@ class ChatViewModel extends ChangeNotifier {
     isGroup = kind == ChatKind.group || kind == ChatKind.channel;
     isSecretChat = kind == ChatKind.secret;
     _primeLastMessage(chat);
-    if (isTelegramTosRestricted) {
-      notifyListeners();
-      return;
-    }
-
     // Chat-wide default send permission + permissive membership defaults
     // (refined per type below).
     _chatCanSend =
         chat.obj('permissions')?.boolean('can_send_basic_messages') ?? true;
-    canSendMessages = true;
+    canSendMessages = _chatCanSend;
     isMember = true;
     canJoin = false;
     joinByRequest = false;
@@ -1823,8 +1824,6 @@ class ChatViewModel extends ChangeNotifier {
             final restrictionReason = TDParse.restrictionReasonFor(user);
             if (restrictionReason != null) {
               _setTelegramTosRestricted(restrictionReason);
-              notifyListeners();
-              return;
             }
             peerIsBot = _isBotUser(user);
             peerOnline = TDParse.isUserOnline(user);
@@ -1832,7 +1831,6 @@ class ChatViewModel extends ChangeNotifier {
           } catch (error) {
             if (_markTelegramTosRestricted(error)) {
               notifyListeners();
-              return;
             }
           }
           if (type?.type == 'chatTypePrivate') {
@@ -1864,8 +1862,6 @@ class ChatViewModel extends ChangeNotifier {
             final restrictionReason = TDParse.restrictionReasonFor(sg);
             if (restrictionReason != null) {
               _setTelegramTosRestricted(restrictionReason);
-              notifyListeners();
-              return;
             }
             isChannel = sg.boolean('is_channel') ?? false;
             isForum = isForum || (sg.boolean('is_forum') ?? false);
@@ -1875,7 +1871,6 @@ class ChatViewModel extends ChangeNotifier {
           } catch (error) {
             if (_markTelegramTosRestricted(error)) {
               notifyListeners();
-              return;
             }
           }
           unawaited(_loadSupergroupFullInfo(sgid));
@@ -1889,6 +1884,13 @@ class ChatViewModel extends ChangeNotifier {
     }
     if (isChannel || peerIsBot) {
       unawaited(_retrieveSponsoredMessages());
+    }
+    if (!canSendMessages &&
+        sendDisabledReason.isEmpty &&
+        isTelegramTosRestricted) {
+      sendDisabledReason = AppStrings.t(
+        AppStringKeys.chatRestrictedTelegramTosMessage,
+      );
     }
     notifyListeners();
     unawaited(_loadPinnedMessage());
@@ -2516,13 +2518,6 @@ class ChatViewModel extends ChangeNotifier {
   void _setTelegramTosRestricted(String text) {
     isTelegramTosRestricted = true;
     telegramTosRestrictionText = text;
-    anchoredHistory = false;
-    canSendMessages = false;
-    canJoin = false;
-    isMember = true;
-    sendDisabledReason = AppStrings.t(
-      AppStringKeys.chatRestrictedTelegramTosMessage,
-    );
   }
 
   Future<void> leaveChat() async {

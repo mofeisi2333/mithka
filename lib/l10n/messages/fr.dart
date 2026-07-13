@@ -566,6 +566,8 @@ const frMessages = <String, String>{
   'developerModeTitle': "Mode développeur",
   'developerModeUnlocked': "Mode développeur activé",
   'featureBottomTabs': "Onglets inférieurs",
+  'featureDisableSafetyNotice': "Désactiver l’avertissement de sécurité",
+  'featureSafety': "Sécurité",
   'featureTitle': "Fonctionnalités",
   'fileDetailDownloadProgress':
       "Téléchargement du fichier… ({value1}/{value2})",

@@ -518,6 +518,8 @@ const zhHantMessages = <String, String>{
   'developerModeTitle': "開發者模式",
   'developerModeUnlocked': "已開啟開發者模式",
   'featureBottomTabs': "底部標籤",
+  'featureDisableSafetyNotice': "停用安全提示彈窗",
+  'featureSafety': "安全",
   'featureTitle': "功能",
   'fileDetailDownloadProgress': "檔案下載中…({value1}/{value2})",
   'fileDetailNoAppCanOpenFile': "沒有可開啟此檔案的應用程式",
