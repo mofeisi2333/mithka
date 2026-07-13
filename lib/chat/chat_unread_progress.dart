@@ -10,6 +10,14 @@ class ChatUnreadProgress {
 
   bool addLiveMessage(int messageId) => _liveMessageIds.add(messageId);
 
+  bool addLiveMessages(Iterable<int> messageIds) {
+    var changed = false;
+    for (final messageId in messageIds) {
+      changed = _liveMessageIds.add(messageId) || changed;
+    }
+    return changed;
+  }
+
   bool markVisible({required int messageId, required bool initialUnread}) {
     if (_liveMessageIds.remove(messageId)) return true;
     return initialUnread && _seenInitialMessageIds.add(messageId);

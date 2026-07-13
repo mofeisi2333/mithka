@@ -754,12 +754,13 @@ class ChatViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  void sendBotStart() {
-    if (!peerIsBot) return;
+  bool sendBotStart() {
+    if (!peerIsBot) return false;
     _clearDraft();
     botStartSent = true;
     _sendText('/start');
     notifyListeners();
+    return true;
   }
 
   void _sendText(String text) {
@@ -1345,9 +1346,9 @@ class ChatViewModel extends ChangeNotifier {
     );
   }
 
-  void sendKeyboardButtonText(String text) {
+  bool sendKeyboardButtonText(String text) {
     final trimmed = text.trim();
-    if (trimmed.isEmpty) return;
+    if (trimmed.isEmpty) return false;
     _client.send(
       _withPaidMessageOptions({
         '@type': 'sendMessage',
@@ -1358,12 +1359,14 @@ class ChatViewModel extends ChangeNotifier {
         },
       }),
     );
+    return true;
   }
 
-  void sendCommand(String command) {
+  bool sendCommand(String command) {
     final trimmed = command.trim();
-    if (!trimmed.startsWith('/')) return;
+    if (!trimmed.startsWith('/')) return false;
     _sendText(trimmed);
+    return true;
   }
 
   Future<Map<String, dynamic>> answerCallbackButton(

@@ -722,6 +722,8 @@ class _ChatViewState extends State<ChatView> {
   int get _liveNewMessageCount => _unreadProgress.liveCount;
   int get _remainingUnreadCount => _showEntryUnreadBanner
       ? _entryUnreadCount
+      : _liveNewMessageCount > 0
+      ? _liveNewMessageCount
       : _unreadProgress.remaining(initialUnreadCount: _vm.unreadCount);
   int _entryUnreadCount = 0;
   bool _showEntryUnreadBanner = false;
@@ -1215,6 +1217,21 @@ class _ChatViewState extends State<ChatView> {
     _scheduleScrollToBottom(keyboardSettle: true, force: true);
   }
 
+  void _sendCommand(String command) {
+    if (!_vm.sendCommand(command)) return;
+    _onComposerMessageSent();
+  }
+
+  void _sendKeyboardButtonText(String text) {
+    if (!_vm.sendKeyboardButtonText(text)) return;
+    _onComposerMessageSent();
+  }
+
+  void _sendBotStart() {
+    if (!_vm.sendBotStart()) return;
+    _onComposerMessageSent();
+  }
+
   /// Jump to the first unread incoming message (where the "以下为新消息" divider
   /// sits); fall back to the bottom if none is loaded.
   void _jumpToFirstUnread() {
@@ -1251,6 +1268,17 @@ class _ChatViewState extends State<ChatView> {
           (newest.isOutgoing ||
               previousNewestId == null ||
               newest.id > previousNewestId);
+      final appendedIncomingIds = previousNewestId == null
+          ? const <int>[]
+          : _vm.messages
+                .where(
+                  (message) =>
+                      message.id > previousNewestId &&
+                      !message.isOutgoing &&
+                      !message.isService,
+                )
+                .map((message) => message.id)
+                .toList(growable: false);
       final restore = _vm.consumeRestoreTop();
       _lastCount = _vm.messages.length;
       _lastNewestMessageId = newest?.id ?? _lastNewestMessageId;
@@ -1274,10 +1302,12 @@ class _ChatViewState extends State<ChatView> {
       } else if (_didInitialScroll &&
           restore == null &&
           appendedNewest &&
-          !newest.isOutgoing &&
-          !newest.isService &&
-          (_autoScrollPolicy.preservesViewport || !wasNearBottom)) {
-        _unreadProgress.addLiveMessage(newest.id);
+          appendedIncomingIds.isNotEmpty &&
+          (_isUserScrolling ||
+              _autoScrollPolicy.preservesViewport ||
+              !wasNearBottom ||
+              !_isAtLoadedBottom(1))) {
+        _unreadProgress.addLiveMessages(appendedIncomingIds);
         _bannerDismissed = false;
         _bannerTimer?.cancel();
         _bannerTimer = null;
@@ -2451,7 +2481,7 @@ class _ChatViewState extends State<ChatView> {
       return;
     }
     if (button.isReplyKeyboard && button.type == 'keyboardButtonTypeText') {
-      _vm.sendKeyboardButtonText(button.text);
+      _sendKeyboardButtonText(button.text);
       return;
     }
     if (button.switchInlineQuery != null) {
@@ -3529,7 +3559,7 @@ class _ChatViewState extends State<ChatView> {
           ),
         if (transcriptReady && _isSelecting) _selectToHereButton(),
         if (transcriptReady && _shouldShowNewMessagesBanner)
-          _openAtLatest
+          _showEntryUnreadBanner
               ? Positioned(
                   top: showPinnedTodo ? 72 : 8,
                   right: 12,
@@ -3544,7 +3574,9 @@ class _ChatViewState extends State<ChatView> {
           Positioned(
             top:
                 (showPinnedTodo ? 72.0 : 8.0) +
-                (_shouldShowNewMessagesBanner && _openAtLatest ? 42.0 : 0.0),
+                (_shouldShowNewMessagesBanner && _showEntryUnreadBanner
+                    ? 42.0
+                    : 0.0),
             right: 12,
             child: _unreadMentionIndicator(),
           ),
@@ -3634,6 +3666,7 @@ class _ChatViewState extends State<ChatView> {
       return false;
     }
     if (_showEntryUnreadBanner) return true;
+    if (_liveNewMessageCount > 0) return !_isAtLoadedBottom();
     if (_isAtLoadedBottom()) return false;
     return _openAtLatest || !_isNearBottom(80);
   }
@@ -3797,7 +3830,7 @@ class _ChatViewState extends State<ChatView> {
       ),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: _vm.sendBotStart,
+        onTap: _sendBotStart,
         child: Container(
           height: 46,
           alignment: Alignment.center,
@@ -4688,7 +4721,7 @@ class _ChatViewState extends State<ChatView> {
                       onOpenSticker: _openSticker,
                       onPlayVideo: _playVideo,
                       onButtonTap: _pressMessageButton,
-                      onBotCommandTap: _vm.sendCommand,
+                      onBotCommandTap: _sendCommand,
                       onHashtagTap: _openHashtagSearch,
                       isRead: _vm.isRead(message),
                       onToggleReaction: (r) => _vm.toggleReaction(message, r),

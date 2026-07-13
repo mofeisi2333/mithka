@@ -28,4 +28,15 @@ void main() {
     expect(progress.markVisible(messageId: 20, initialUnread: true), isTrue);
     expect(progress.remaining(initialUnreadCount: 3), 3);
   });
+
+  test('batched live arrivals increase the indicator once per message', () {
+    final progress = ChatUnreadProgress();
+
+    expect(progress.addLiveMessages([21, 22, 23]), isTrue);
+    expect(progress.liveCount, 3);
+    expect(progress.remaining(initialUnreadCount: 0), 3);
+
+    expect(progress.addLiveMessages([22, 23]), isFalse);
+    expect(progress.liveCount, 3);
+  });
 }
