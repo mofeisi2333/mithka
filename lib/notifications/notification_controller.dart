@@ -178,6 +178,26 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
   }
 
   Future<void> _handle(Map<String, dynamic> update) async {
+    if (update.type == 'updateChatNotificationSettings') {
+      _applyChatNotificationSettingsUpdate(update);
+      return;
+    }
+    if (update.type == 'updateScopeNotificationSettings') {
+      final scope = update.obj('scope')?.type;
+      final settings = update.obj('notification_settings');
+      if (scope != null && settings != null) {
+        ScopeNotificationSettings.shared.update(
+          scope,
+          settings.integer('mute_for') ?? 0,
+        );
+        ScopeNotificationSettings.shared.updateShowPreview(
+          scope,
+          settings.boolean('show_preview') ?? true,
+        );
+        await _dismissBannerIfMuted();
+      }
+      return;
+    }
     if (update.type != 'updateNewMessage') return;
 
     final raw = update.obj('message');
@@ -193,13 +213,8 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
       return;
     }
 
-    final title = chat.str('title') ?? 'Mithka';
     final messageText = _notificationText(content);
     if (KeywordBlocker.shared.matches(messageText)) return;
-    final showPreview = ScopeNotificationSettings.shared.showPreview(chat);
-    final body = showPreview
-        ? messageText
-        : AppStrings.t(AppStringKeys.notificationNewMessage);
     final surface = notificationSurfaceFor(
       lifecycleState: _state,
       inAppBannersEnabled: _inAppBannersEnabled,
@@ -207,7 +222,18 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
     );
     if (surface == NotificationSurface.inApp) {
       if (_isChatVisible(chatId)) return;
-      final sender = showPreview ? await _senderLabel(raw, chat) : null;
+      final sender = ScopeNotificationSettings.shared.showPreview(chat)
+          ? await _senderLabel(raw, chat)
+          : null;
+      final latestChat = await _chat(chatId);
+      if (latestChat == null || _isMuted(latestChat)) return;
+      final showPreview = ScopeNotificationSettings.shared.showPreview(
+        latestChat,
+      );
+      final title = latestChat.str('title') ?? 'Mithka';
+      final body = showPreview
+          ? messageText
+          : AppStrings.t(AppStringKeys.notificationNewMessage);
       _presentInAppBanner(
         InAppNotificationBannerData(
           target: NotificationTarget(
@@ -216,9 +242,11 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
             title: title,
           ),
           title: title,
-          body: sender == null || sender.isEmpty ? body : '$sender: $body',
-          photo: TDParse.smallPhoto(chat.obj('photo')),
-          squarePhoto: switch (TDParse.chatKind(chat)) {
+          body: !showPreview || sender == null || sender.isEmpty
+              ? body
+              : '$sender: $body',
+          photo: TDParse.smallPhoto(latestChat.obj('photo')),
+          squarePhoto: switch (TDParse.chatKind(latestChat)) {
             ChatKind.group || ChatKind.channel => true,
             _ => false,
           },
@@ -227,6 +255,15 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
       return;
     }
     if (surface != NotificationSurface.system) return;
+    final latestChat = await _chat(chatId);
+    if (latestChat == null || _isMuted(latestChat)) return;
+    final title = latestChat.str('title') ?? 'Mithka';
+    final showPreview = ScopeNotificationSettings.shared.showPreview(
+      latestChat,
+    );
+    final body = showPreview
+        ? messageText
+        : AppStrings.t(AppStringKeys.notificationNewMessage);
     final payload = jsonEncode({
       'chat_id': chatId,
       'message_id': messageId,
@@ -269,6 +306,37 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
     return text.contains('not authorized') ||
         text.contains('UNErrorDomain') ||
         text.contains('Error 2003');
+  }
+
+  void _applyChatNotificationSettingsUpdate(Map<String, dynamic> update) {
+    final chatId = update.int64('chat_id');
+    final settings = update.obj('notification_settings');
+    if (chatId == null || settings == null) return;
+    final useDefault = settings.boolean('use_default_mute_for') ?? false;
+    if (!useDefault) {
+      if ((settings.integer('mute_for') ?? 0) > 0 &&
+          _inAppBanner?.target.chatId == chatId) {
+        dismissInAppBanner();
+      }
+      return;
+    }
+    unawaited(_dismissBannerIfMuted(chatId: chatId));
+  }
+
+  Future<void> _dismissBannerIfMuted({int? chatId}) async {
+    final targetChatId = _inAppBanner?.target.chatId;
+    if (targetChatId == null || chatId != null && targetChatId != chatId) {
+      return;
+    }
+    final chat = await _chat(targetChatId);
+    if (chat != null && _isMuted(chat)) dismissInAppBanner();
+  }
+
+  @visibleForTesting
+  void applyChatNotificationSettingsUpdateForTesting(
+    Map<String, dynamic> update,
+  ) {
+    _applyChatNotificationSettingsUpdate(update);
   }
 
   Future<Map<String, dynamic>?> _chat(int chatId) async {

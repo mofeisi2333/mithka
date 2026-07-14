@@ -88,6 +88,59 @@ void main() {
     expect(settings.showPreview(overridden), isTrue);
   });
 
+  test('chat and inherited scope mute settings suppress notifications', () {
+    final settings = ScopeNotificationSettings.shared;
+    const groupScope = 'notificationSettingsScopeGroupChats';
+    settings.update(groupScope, 2147483647);
+    addTearDown(() => settings.update(groupScope, 0));
+
+    final inherited = <String, dynamic>{
+      '@type': 'chat',
+      'type': {'@type': 'chatTypeBasicGroup', 'basic_group_id': 7},
+      'notification_settings': {
+        '@type': 'chatNotificationSettings',
+        'use_default_mute_for': true,
+      },
+    };
+    final chatMuted = <String, dynamic>{
+      ...inherited,
+      'notification_settings': {
+        '@type': 'chatNotificationSettings',
+        'use_default_mute_for': false,
+        'mute_for': 2147483647,
+      },
+    };
+
+    expect(settings.isMuted(inherited), isTrue);
+    expect(settings.isMuted(chatMuted), isTrue);
+  });
+
+  test('muting a chat dismisses its visible in-app banner', () {
+    final controller = NotificationController.shared;
+    addTearDown(controller.dismissInAppBanner);
+    controller.presentInAppBannerForTesting(
+      const InAppNotificationBannerData(
+        target: NotificationTarget(chatId: 42, messageId: 9001),
+        title: 'Muted chat',
+        body: 'Message',
+        photo: null,
+        squarePhoto: true,
+      ),
+    );
+
+    controller.applyChatNotificationSettingsUpdateForTesting({
+      '@type': 'updateChatNotificationSettings',
+      'chat_id': 42,
+      'notification_settings': {
+        '@type': 'chatNotificationSettings',
+        'use_default_mute_for': false,
+        'mute_for': 2147483647,
+      },
+    });
+
+    expect(controller.inAppBanner, isNull);
+  });
+
   testWidgets('banner opens the exact message and supports swipe dismissal', (
     tester,
   ) async {
