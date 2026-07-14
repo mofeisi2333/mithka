@@ -358,6 +358,73 @@ void main() {
       expect(labels, contains('Insert'));
     });
 
+    testWidgets('table title is editable and table actions stay clickable', (
+      tester,
+    ) async {
+      RichTextComposerResult? result;
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: const [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Builder(
+            builder: (context) => GestureDetector(
+              key: const ValueKey('open-rich-composer'),
+              behavior: HitTestBehavior.opaque,
+              onTap: () async {
+                result = await Navigator.of(context)
+                    .push<RichTextComposerResult>(
+                      PageRouteBuilder<RichTextComposerResult>(
+                        pageBuilder: (_, _, _) => const RichTextComposerView(
+                          initialText: '',
+                          allowMedia: false,
+                        ),
+                      ),
+                    );
+              },
+              child: const SizedBox.expand(),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.byKey(const ValueKey('open-rich-composer')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Table'));
+      await tester.pump();
+
+      final title = find.byKey(const ValueKey('rich-table-title'));
+      expect(title, findsOneWidget);
+      expect(tester.widget<TextField>(title).controller?.text, 'Table 1');
+      await tester.enterText(title, 'Quarterly <Plan>');
+
+      final textFieldCount = find.byType(TextField).evaluate().length;
+      await tester.longPress(find.text('Column 1'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AdaptiveTextSelectionToolbar), findsNothing);
+      final addRow = find.text('Add row above');
+      expect(addRow, findsOneWidget);
+      await tester.ensureVisible(addRow);
+      await tester.tap(addRow);
+      await tester.pump();
+      expect(find.byType(TextField), findsNWidgets(textFieldCount + 3));
+
+      await tester.tap(find.text('Post'));
+      await tester.pumpAndSettle();
+
+      expect(result, isNotNull);
+      expect(result!.text, startsWith('Quarterly <Plan>\n\n|'));
+      final html = result!.segments
+          .where((segment) => segment.isHtml)
+          .map((segment) => segment.html)
+          .join();
+      expect(html, contains('<caption>Quarterly &lt;Plan&gt;</caption>'));
+    });
+
     testWidgets('block handle opens move and delete actions', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(

@@ -127,8 +127,9 @@ class _RichTableCellStyle {
 }
 
 class _RichTableDraft {
-  _RichTableDraft({int rows = 3, int columns = 3})
-    : cells = List.generate(
+  _RichTableDraft({int rows = 3, int columns = 3, String title = ''})
+    : title = TextEditingController(text: title),
+      cells = List.generate(
         rows,
         (row) => List.generate(
           columns,
@@ -147,6 +148,7 @@ class _RichTableDraft {
 
   static const maxColumns = 20;
 
+  final TextEditingController title;
   final List<List<TextEditingController>> cells;
   final List<List<_RichTableCellStyle>> styles;
   bool bordered = true;
@@ -156,6 +158,7 @@ class _RichTableDraft {
   int get columnCount => cells.isEmpty ? 0 : cells.first.length;
 
   void dispose() {
+    title.dispose();
     for (final row in cells) {
       for (final cell in row) {
         cell.dispose();
@@ -230,6 +233,12 @@ class _RichTableDraft {
       return width;
     });
     final buffer = StringBuffer();
+    final tableTitle = title.text.trim();
+    if (tableTitle.isNotEmpty) {
+      buffer
+        ..writeln(tableTitle)
+        ..writeln();
+    }
     buffer.writeln(_markdownRow(rows.first, widths));
     buffer.writeln(_markdownRow(widths.map((w) => '-' * w).toList(), widths));
     for (final row in rows.skip(1)) {
@@ -244,6 +253,13 @@ class _RichTableDraft {
     final buffer = StringBuffer(
       '<table${tableAttributes.isEmpty ? '' : ' ${tableAttributes.join(' ')}'}>',
     );
+    final tableTitle = title.text.trim();
+    if (tableTitle.isNotEmpty) {
+      buffer
+        ..write('<caption>')
+        ..write(escapeRichHtml(tableTitle))
+        ..write('</caption>');
+    }
     for (var rowIndex = 0; rowIndex < cells.length; rowIndex++) {
       buffer.write('<tr>');
       for (
@@ -712,7 +728,16 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
   }
 
   void _insertTable() {
-    _insertStructuredBlock(_RichContentBlock.table(_RichTableDraft()));
+    final tableNumber =
+        _blocks.where((block) => block.table != null).length + 1;
+    _insertStructuredBlock(
+      _RichContentBlock.table(
+        _RichTableDraft(
+          title:
+              '${AppStringKeys.richTextComposerInsertTable.l10n(context)} $tableNumber',
+        ),
+      ),
+    );
   }
 
   void _insertMathBlock() {
@@ -1141,13 +1166,9 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
       }
       return const SizedBox.shrink();
     }
-    final tableNumber = _blocks
-        .take(index + 1)
-        .where((block) => block.table != null)
-        .length;
     return Padding(
       padding: const EdgeInsets.fromLTRB(2, 2, 12, 2),
-      child: _tableEditor(c, table, tableNumber),
+      child: _tableEditor(c, table),
     );
   }
 
@@ -1833,7 +1854,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
     });
   }
 
-  Widget _tableEditor(AppColors c, _RichTableDraft table, int tableNumber) {
+  Widget _tableEditor(AppColors c, _RichTableDraft table) {
     final tableHeight = (table.rowCount * 54.0 + 18).clamp(102.0, 300.0);
     return Container(
       decoration: BoxDecoration(
@@ -1854,11 +1875,21 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    '${AppStringKeys.richTextComposerInsertTable.l10n(context)} $tableNumber',
+                  child: TextField(
+                    key: const ValueKey('rich-table-title'),
+                    controller: table.title,
+                    textInputAction: TextInputAction.done,
+                    onChanged: (_) => setState(() {}),
                     style: AppTextStyle.callout(
                       c.textPrimary,
                       weight: AppTextWeight.semibold,
+                    ),
+                    decoration: InputDecoration(
+                      isCollapsed: true,
+                      border: InputBorder.none,
+                      hintText: AppStringKeys.richTextComposerInsertTable.l10n(
+                        context,
+                      ),
                     ),
                   ),
                 ),
@@ -2061,9 +2092,9 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
               },
             ),
           ]);
-          return AdaptiveTextSelectionToolbar.buttonItems(
-            anchors: editableTextState.contextMenuAnchors,
-            buttonItems: items,
+          return _RichTableContextToolbar(
+            anchor: editableTextState.contextMenuAnchors.primaryAnchor,
+            items: items,
           );
         },
         style: AppTextStyle.callout(
@@ -2760,6 +2791,103 @@ extension on _RichBlockKind {
     _RichBlockKind.thinking => HeroAppIcons.comments,
     _RichBlockKind.document => HeroAppIcons.file,
   };
+}
+
+class _RichTableContextToolbar extends StatelessWidget {
+  const _RichTableContextToolbar({required this.anchor, required this.items});
+
+  final Offset anchor;
+  final List<ContextMenuButtonItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final media = MediaQuery.of(context);
+    final screen = media.size;
+    const height = 46.0;
+    final width = math.min(620.0, screen.width - 24);
+    final left = (anchor.dx - width / 2)
+        .clamp(12.0, math.max(12.0, screen.width - width - 12))
+        .toDouble();
+    final safeTop = media.padding.top + 8;
+    final preferredTop = anchor.dy - height - 14;
+    final belowTop = anchor.dy + 18;
+    final maxTop = math.max(safeTop, screen.height - height - 12);
+    final top = (preferredTop >= safeTop ? preferredTop : belowTop)
+        .clamp(safeTop, maxTop)
+        .toDouble();
+
+    return SizedBox.expand(
+      child: Stack(
+        children: [
+          Positioned(
+            left: left,
+            top: top,
+            width: width,
+            height: height,
+            child: Container(
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                color: c.card,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: c.divider, width: 0.5),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.22),
+                    blurRadius: 16,
+                    offset: const Offset(0, 7),
+                  ),
+                ],
+              ),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    for (var index = 0; index < items.length; index++) ...[
+                      if (index > 0)
+                        Container(width: 0.5, height: 28, color: c.divider),
+                      _RichTableContextButton(item: items[index]),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RichTableContextButton extends StatelessWidget {
+  const _RichTableContextButton({required this.item});
+
+  final ContextMenuButtonItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = item.onPressed != null;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: item.onPressed,
+      child: Container(
+        height: 46,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Text(
+          AdaptiveTextSelectionToolbar.getButtonLabel(context, item),
+          maxLines: 1,
+          style: TextStyle(
+            color: enabled
+                ? context.colors.textPrimary
+                : context.colors.textTertiary,
+            fontSize: 15,
+            decoration: TextDecoration.none,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 enum _RichInlineFormatAction {
