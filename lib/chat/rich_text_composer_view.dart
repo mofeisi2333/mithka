@@ -1979,7 +1979,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
           ConstrainedBox(
             constraints: BoxConstraints(maxHeight: tableHeight),
             child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
               child: Scrollbar(
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
@@ -2166,7 +2166,10 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
         child: TextField(
           key: ValueKey('rich-table-cell-$row-$column'),
           controller: table.cells[row][column],
-          textInputAction: TextInputAction.next,
+          keyboardType: TextInputType.multiline,
+          textInputAction: TextInputAction.newline,
+          minLines: 1,
+          maxLines: null,
           onTap: () => _activateTableCell(table, row, column),
           textAlign: switch (cellStyle.horizontal) {
             _RichCellHorizontalAlignment.left => TextAlign.left,

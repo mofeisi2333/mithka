@@ -527,6 +527,32 @@ void main() {
       final firstCellController =
           tester.widget<TextField>(firstCell).controller!
               as EmojiTextEditingController;
+      expect(
+        tester.widget<TextField>(firstCell).keyboardType,
+        TextInputType.multiline,
+      );
+      expect(
+        tester.widget<TextField>(firstCell).textInputAction,
+        TextInputAction.newline,
+      );
+      expect(tester.widget<TextField>(firstCell).maxLines, isNull);
+      await tester.enterText(firstCell, 'Column 1\nSecond line');
+      await tester.pump();
+      expect(firstCellController.text, 'Column 1\nSecond line');
+      expect(
+        tester
+            .widget<EditableText>(
+              find.descendant(
+                of: firstCell,
+                matching: find.byType(EditableText),
+              ),
+            )
+            .focusNode
+            .hasFocus,
+        isTrue,
+      );
+      await tester.enterText(firstCell, 'Column 1');
+      await tester.pump();
 
       await tester.tap(firstCell);
       await tester.pump();
@@ -608,9 +634,24 @@ void main() {
         isTrue,
       );
 
-      await tester.longPress(firstCell);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Format'));
+      firstCellController.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: firstCellController.text.length,
+      );
+      await tester.pump();
+      final formattedField = tester.widget<TextField>(firstCell);
+      final formattedEditableState = tester.state<EditableTextState>(
+        find.descendant(of: firstCell, matching: find.byType(EditableText)),
+      );
+      final formattedToolbar =
+          formattedField.contextMenuBuilder!(
+                tester.element(firstCell),
+                formattedEditableState,
+              )
+              as AdaptiveTextSelectionToolbar;
+      formattedToolbar.buttonItems!
+          .singleWhere((item) => item.label == 'Format')
+          .onPressed!();
       await tester.pumpAndSettle();
       expect(
         find.descendant(
