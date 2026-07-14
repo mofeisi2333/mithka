@@ -478,27 +478,47 @@ void main() {
       await tester.tap(borderlessToggle);
       await tester.pumpAndSettle();
 
+      final originalTextFieldCount = find.byType(TextField).evaluate().length;
+      final tableControlKeys = [
+        'rich-table-add-row',
+        'rich-table-add-column',
+        'rich-table-toggle-header',
+        'rich-table-align-horizontal',
+        'rich-table-align-vertical',
+      ];
+      for (final key in tableControlKeys) {
+        expect(find.byKey(ValueKey(key)), findsOneWidget);
+      }
+      final controlCenters = tableControlKeys
+          .map((key) => tester.getCenter(find.byKey(ValueKey(key))))
+          .toList();
+      for (final center in controlCenters.skip(1)) {
+        expect(center.dy, moreOrLessEquals(controlCenters.first.dy));
+      }
+      await tester.tap(find.byKey(const ValueKey('rich-table-add-row')));
+      await tester.pump();
+      expect(find.byType(TextField), findsNWidgets(originalTextFieldCount + 3));
+      await tester.tap(find.byKey(const ValueKey('rich-table-add-column')));
+      await tester.pump();
+      expect(find.byType(TextField), findsNWidgets(originalTextFieldCount + 7));
       final textFieldCount = find.byType(TextField).evaluate().length;
+
       final firstCell = find.byKey(const ValueKey('rich-table-cell-0-0'));
       final firstCellController =
           tester.widget<TextField>(firstCell).controller!
               as EmojiTextEditingController;
-      for (final key in [
-        'rich-table-align-left',
-        'rich-table-align-center',
-        'rich-table-align-right',
-        'rich-table-align-top',
-        'rich-table-align-middle',
-        'rich-table-align-bottom',
-      ]) {
-        expect(find.byKey(ValueKey(key)), findsOneWidget);
-      }
 
       await tester.tap(firstCell);
       await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('rich-table-align-center')));
+      await tester.tap(find.byKey(const ValueKey('rich-table-toggle-header')));
       await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('rich-table-align-bottom')));
+      await tester.tap(
+        find.byKey(const ValueKey('rich-table-align-horizontal')),
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('rich-table-align-vertical')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('rich-table-align-vertical')));
       await tester.pump();
       expect(tester.widget<TextField>(firstCell).textAlign, TextAlign.center);
       expect(
@@ -513,9 +533,15 @@ void main() {
       final secondCell = find.byKey(const ValueKey('rich-table-cell-0-1'));
       await tester.tap(secondCell);
       await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('rich-table-align-right')));
+      await tester.tap(
+        find.byKey(const ValueKey('rich-table-align-horizontal')),
+      );
       await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('rich-table-align-middle')));
+      await tester.tap(
+        find.byKey(const ValueKey('rich-table-align-horizontal')),
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('rich-table-align-vertical')));
       await tester.pump();
       expect(tester.widget<TextField>(secondCell).textAlign, TextAlign.right);
       expect(
@@ -543,6 +569,13 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('Format'));
       await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('rich-format-bold')),
+          matching: find.byIcon(HeroAppIcons.check.data),
+        ),
+        findsNothing,
+      );
       await tester.tap(find.text('Bold'));
       await tester.pumpAndSettle();
       final formattedCell = firstCellController.toFormatted();
@@ -554,6 +587,20 @@ void main() {
         ),
         isTrue,
       );
+
+      await tester.longPress(firstCell);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Format'));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('rich-format-bold')),
+          matching: find.byIcon(HeroAppIcons.check.data),
+        ),
+        findsOneWidget,
+      );
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
 
       firstCellController.selection = const TextSelection.collapsed(offset: 0);
       await tester.pump();
@@ -577,12 +624,28 @@ void main() {
       await tester.pump();
       expect(find.text('Borderless'), findsOneWidget);
       expect(find.text('Striped table'), findsNothing);
+      final horizontalAlignmentY = [
+        'Align left',
+        'Align center',
+        'Align right',
+      ].map((label) => tester.getCenter(find.text(label)).dy).toList();
+      final verticalAlignmentY = [
+        'Align top',
+        'Align middle',
+        'Align bottom',
+      ].map((label) => tester.getCenter(find.text(label)).dy).toList();
+      for (final y in horizontalAlignmentY.skip(1)) {
+        expect(y, moreOrLessEquals(horizontalAlignmentY.first));
+      }
+      for (final y in verticalAlignmentY.skip(1)) {
+        expect(y, moreOrLessEquals(verticalAlignmentY.first));
+      }
       final addRow = find.text('Add row above');
       expect(addRow, findsOneWidget);
       await tester.ensureVisible(addRow);
       await tester.tap(addRow);
       await tester.pump();
-      expect(find.byType(TextField), findsNWidgets(textFieldCount + 3));
+      expect(find.byType(TextField), findsNWidgets(textFieldCount + 4));
 
       await tester.tap(find.text('Post'));
       await tester.pumpAndSettle();
@@ -599,7 +662,7 @@ void main() {
       expect(html, contains('<caption>Quarterly &lt;Plan&gt;</caption>'));
       expect(
         html,
-        contains('<th align="center" valign="bottom"><b>Column 1</b></th>'),
+        contains('<td align="center" valign="bottom"><b>Column 1</b></td>'),
       );
       expect(html, contains('<th align="right" valign="middle">Column 2</th>'));
     });
