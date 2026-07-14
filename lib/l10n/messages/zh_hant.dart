@@ -937,6 +937,8 @@ const zhHantMessages = <String, String>{
   'richTextTableAlignMiddle': "垂直置中",
   'richTextTableAlignBottom': "底端對齊",
   'richTextTableBordered': "顯示表格框線",
+  'richTextTableBorderless': "無框線",
+  'richTextTableChange': "修改表格",
   'richTextTableStriped': "交錯色彩表格",
   'richTextComposerAnchorName': "錨點名稱",
   'richTextComposerContentPlaceholder': "輸入富文字內容",

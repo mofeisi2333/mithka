@@ -1034,6 +1034,8 @@ const enMessages = <String, String>{
   'richTextTableAlignMiddle': "Align middle",
   'richTextTableAlignBottom': "Align bottom",
   'richTextTableBordered': "Table borders",
+  'richTextTableBorderless': "Borderless",
+  'richTextTableChange': "Change Table",
   'richTextTableStriped': "Striped table",
   'richTextComposerAnchorName': "Anchor name",
   'richTextComposerContentPlaceholder': "Enter rich text",

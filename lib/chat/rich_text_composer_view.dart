@@ -118,6 +118,25 @@ enum _RichCellHorizontalAlignment { left, center, right }
 
 enum _RichCellVerticalAlignment { top, middle, bottom }
 
+enum _RichTableMenuAction {
+  addRowAbove,
+  addRowBelow,
+  addColumnLeft,
+  addColumnRight,
+  toggleHeader,
+  alignLeft,
+  alignCenter,
+  alignRight,
+  alignTop,
+  alignMiddle,
+  alignBottom,
+  toggleBorderless,
+  toggleStriped,
+  removeRow,
+  removeColumn,
+  removeTable,
+}
+
 class _RichTableCellStyle {
   _RichTableCellStyle({this.isHeader = false});
 
@@ -1973,128 +1992,25 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
           _RichCellVerticalAlignment.bottom => TextAlignVertical.bottom,
         },
         contextMenuBuilder: (context, editableTextState) {
-          final items = [...editableTextState.contextMenuButtonItems];
-          items.addAll([
-            ContextMenuButtonItem(
-              label: AppStringKeys.richTextTableAddRowAbove.l10n(context),
-              onPressed: () {
-                editableTextState.hideToolbar();
-                setState(() => table.insertRow(row));
-              },
-            ),
-            ContextMenuButtonItem(
-              label: AppStringKeys.richTextTableAddRowBelow.l10n(context),
-              onPressed: () {
-                editableTextState.hideToolbar();
-                setState(() => table.insertRow(row + 1));
-              },
-            ),
-            ContextMenuButtonItem(
-              label: AppStringKeys.richTextTableAddColumnLeft.l10n(context),
-              onPressed: table.columnCount >= _RichTableDraft.maxColumns
-                  ? null
-                  : () {
-                      editableTextState.hideToolbar();
-                      setState(() => table.insertColumn(column));
-                    },
-            ),
-            ContextMenuButtonItem(
-              label: AppStringKeys.richTextTableAddColumnRight.l10n(context),
-              onPressed: table.columnCount >= _RichTableDraft.maxColumns
-                  ? null
-                  : () {
-                      editableTextState.hideToolbar();
-                      setState(() => table.insertColumn(column + 1));
-                    },
-            ),
-            ContextMenuButtonItem(
-              label: _checkedMenuLabel(
-                context,
-                AppStringKeys.richTextTableHeader,
-                cellStyle.isHeader,
-              ),
-              onPressed: () {
-                editableTextState.hideToolbar();
-                setState(() => cellStyle.isHeader = !cellStyle.isHeader);
-              },
-            ),
-            for (final alignment in _RichCellHorizontalAlignment.values)
-              ContextMenuButtonItem(
-                label: _checkedMenuLabel(context, switch (alignment) {
-                  _RichCellHorizontalAlignment.left =>
-                    AppStringKeys.richTextTableAlignLeft,
-                  _RichCellHorizontalAlignment.center =>
-                    AppStringKeys.richTextTableAlignCenter,
-                  _RichCellHorizontalAlignment.right =>
-                    AppStringKeys.richTextTableAlignRight,
-                }, cellStyle.horizontal == alignment),
-                onPressed: () {
-                  editableTextState.hideToolbar();
-                  setState(() => cellStyle.horizontal = alignment);
-                },
-              ),
-            for (final alignment in _RichCellVerticalAlignment.values)
-              ContextMenuButtonItem(
-                label: _checkedMenuLabel(context, switch (alignment) {
-                  _RichCellVerticalAlignment.top =>
-                    AppStringKeys.richTextTableAlignTop,
-                  _RichCellVerticalAlignment.middle =>
-                    AppStringKeys.richTextTableAlignMiddle,
-                  _RichCellVerticalAlignment.bottom =>
-                    AppStringKeys.richTextTableAlignBottom,
-                }, cellStyle.vertical == alignment),
-                onPressed: () {
-                  editableTextState.hideToolbar();
-                  setState(() => cellStyle.vertical = alignment);
-                },
-              ),
-            ContextMenuButtonItem(
-              label: _checkedMenuLabel(
-                context,
-                AppStringKeys.richTextTableBordered,
-                table.bordered,
-              ),
-              onPressed: () {
-                editableTextState.hideToolbar();
-                setState(() => table.bordered = !table.bordered);
-              },
-            ),
-            ContextMenuButtonItem(
-              label: _checkedMenuLabel(
-                context,
-                AppStringKeys.richTextTableStriped,
-                table.striped,
-              ),
-              onPressed: () {
-                editableTextState.hideToolbar();
-                setState(() => table.striped = !table.striped);
-              },
-            ),
-            ContextMenuButtonItem(
-              label: AppStringKeys.richTextComposerRemoveRow.l10n(context),
-              onPressed: () {
-                editableTextState.hideToolbar();
-                setState(() => table.removeRowAt(row));
-              },
-            ),
-            ContextMenuButtonItem(
-              label: AppStringKeys.richTextComposerRemoveColumn.l10n(context),
-              onPressed: () {
-                editableTextState.hideToolbar();
-                setState(() => table.removeColumnAt(column));
-              },
-            ),
-            ContextMenuButtonItem(
-              label: AppStringKeys.richTextComposerRemoveTable.l10n(context),
-              onPressed: () {
-                editableTextState.hideToolbar();
-                _removeTable(table);
-              },
-            ),
-          ]);
-          return _RichTableContextToolbar(
+          return _RichTableCellContextMenu(
             anchor: editableTextState.contextMenuAnchors.primaryAnchor,
-            items: items,
+            systemItems: editableTextState.contextMenuButtonItems,
+            isHeader: cellStyle.isHeader,
+            horizontal: cellStyle.horizontal,
+            vertical: cellStyle.vertical,
+            isBorderless: !table.bordered,
+            isStriped: table.striped,
+            canAddColumn: table.columnCount < _RichTableDraft.maxColumns,
+            canRemoveRow: table.rowCount > 1,
+            canRemoveColumn: table.columnCount > 1,
+            onTableAction: (action) => _applyTableMenuAction(
+              action,
+              editableTextState,
+              table,
+              cellStyle,
+              row,
+              column,
+            ),
           );
         },
         style: AppTextStyle.callout(
@@ -2110,8 +2026,56 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
     );
   }
 
-  String _checkedMenuLabel(BuildContext context, String key, bool checked) =>
-      '${checked ? '✓  ' : ''}${key.l10n(context)}';
+  void _applyTableMenuAction(
+    _RichTableMenuAction action,
+    EditableTextState editableTextState,
+    _RichTableDraft table,
+    _RichTableCellStyle cellStyle,
+    int row,
+    int column,
+  ) {
+    editableTextState.hideToolbar();
+    switch (action) {
+      case _RichTableMenuAction.addRowAbove:
+        setState(() => table.insertRow(row));
+      case _RichTableMenuAction.addRowBelow:
+        setState(() => table.insertRow(row + 1));
+      case _RichTableMenuAction.addColumnLeft:
+        setState(() => table.insertColumn(column));
+      case _RichTableMenuAction.addColumnRight:
+        setState(() => table.insertColumn(column + 1));
+      case _RichTableMenuAction.toggleHeader:
+        setState(() => cellStyle.isHeader = !cellStyle.isHeader);
+      case _RichTableMenuAction.alignLeft:
+        setState(
+          () => cellStyle.horizontal = _RichCellHorizontalAlignment.left,
+        );
+      case _RichTableMenuAction.alignCenter:
+        setState(
+          () => cellStyle.horizontal = _RichCellHorizontalAlignment.center,
+        );
+      case _RichTableMenuAction.alignRight:
+        setState(
+          () => cellStyle.horizontal = _RichCellHorizontalAlignment.right,
+        );
+      case _RichTableMenuAction.alignTop:
+        setState(() => cellStyle.vertical = _RichCellVerticalAlignment.top);
+      case _RichTableMenuAction.alignMiddle:
+        setState(() => cellStyle.vertical = _RichCellVerticalAlignment.middle);
+      case _RichTableMenuAction.alignBottom:
+        setState(() => cellStyle.vertical = _RichCellVerticalAlignment.bottom);
+      case _RichTableMenuAction.toggleBorderless:
+        setState(() => table.bordered = !table.bordered);
+      case _RichTableMenuAction.toggleStriped:
+        setState(() => table.striped = !table.striped);
+      case _RichTableMenuAction.removeRow:
+        setState(() => table.removeRowAt(row));
+      case _RichTableMenuAction.removeColumn:
+        setState(() => table.removeColumnAt(column));
+      case _RichTableMenuAction.removeTable:
+        _removeTable(table);
+    }
+  }
 
   Widget _miniIconButton(
     AppColors c, {
@@ -2793,28 +2757,64 @@ extension on _RichBlockKind {
   };
 }
 
-class _RichTableContextToolbar extends StatelessWidget {
-  const _RichTableContextToolbar({required this.anchor, required this.items});
+class _RichTableCellContextMenu extends StatefulWidget {
+  const _RichTableCellContextMenu({
+    required this.anchor,
+    required this.systemItems,
+    required this.isHeader,
+    required this.horizontal,
+    required this.vertical,
+    required this.isBorderless,
+    required this.isStriped,
+    required this.canAddColumn,
+    required this.canRemoveRow,
+    required this.canRemoveColumn,
+    required this.onTableAction,
+  });
 
   final Offset anchor;
-  final List<ContextMenuButtonItem> items;
+  final List<ContextMenuButtonItem> systemItems;
+  final bool isHeader;
+  final _RichCellHorizontalAlignment horizontal;
+  final _RichCellVerticalAlignment vertical;
+  final bool isBorderless;
+  final bool isStriped;
+  final bool canAddColumn;
+  final bool canRemoveRow;
+  final bool canRemoveColumn;
+  final ValueChanged<_RichTableMenuAction> onTableAction;
+
+  @override
+  State<_RichTableCellContextMenu> createState() =>
+      _RichTableCellContextMenuState();
+}
+
+class _RichTableCellContextMenuState extends State<_RichTableCellContextMenu> {
+  bool _showTableActions = false;
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     final media = MediaQuery.of(context);
     final screen = media.size;
-    const height = 46.0;
-    final width = math.min(620.0, screen.width - 24);
-    final left = (anchor.dx - width / 2)
-        .clamp(12.0, math.max(12.0, screen.width - width - 12))
+    final leftWidth = math.min(300.0, screen.width - 24);
+    final twoPaneRightWidth = screen.width - 24 - leftWidth - 8;
+    final wide = twoPaneRightWidth >= 280;
+    final rightWidth = wide
+        ? math.min(390.0, twoPaneRightWidth)
+        : math.min(390.0, screen.width - 24);
+    final totalWidth = _showTableActions && wide
+        ? leftWidth + 8 + rightWidth
+        : (_showTableActions ? rightWidth : leftWidth);
+    final maxHeight = math.min(
+      590.0,
+      screen.height - media.padding.top - media.padding.bottom - 20,
+    );
+    final left = (widget.anchor.dx - totalWidth / 2)
+        .clamp(12.0, math.max(12.0, screen.width - totalWidth - 12))
         .toDouble();
     final safeTop = media.padding.top + 8;
-    final preferredTop = anchor.dy - height - 14;
-    final belowTop = anchor.dy + 18;
-    final maxTop = math.max(safeTop, screen.height - height - 12);
-    final top = (preferredTop >= safeTop ? preferredTop : belowTop)
-        .clamp(safeTop, maxTop)
+    final top = (widget.anchor.dy - 42)
+        .clamp(safeTop, math.max(safeTop, screen.height - maxHeight - 12))
         .toDouble();
 
     return SizedBox.expand(
@@ -2823,68 +2823,354 @@ class _RichTableContextToolbar extends StatelessWidget {
           Positioned(
             left: left,
             top: top,
-            width: width,
-            height: height,
-            child: Container(
-              clipBehavior: Clip.antiAlias,
-              decoration: BoxDecoration(
-                color: c.card,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: c.divider, width: 0.5),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.22),
-                    blurRadius: 16,
-                    offset: const Offset(0, 7),
-                  ),
-                ],
-              ),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    for (var index = 0; index < items.length; index++) ...[
-                      if (index > 0)
-                        Container(width: 0.5, height: 28, color: c.divider),
-                      _RichTableContextButton(item: items[index]),
-                    ],
-                  ],
-                ),
-              ),
+            width: totalWidth,
+            height: maxHeight,
+            child: TextFieldTapRegion(
+              child: _showTableActions && !wide
+                  ? _tableActionsPanel(showBack: true)
+                  : Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(width: leftWidth, child: _systemPanel()),
+                        if (_showTableActions) ...[
+                          const SizedBox(width: 8),
+                          SizedBox(
+                            width: rightWidth,
+                            child: _tableActionsPanel(),
+                          ),
+                        ],
+                      ],
+                    ),
             ),
           ),
         ],
       ),
     );
   }
+
+  Widget _systemPanel() {
+    return _RichContextMenuSurface(
+      child: ListView(
+        padding: EdgeInsets.zero,
+        children: [
+          _RichContextMenuRow(
+            label: AppStringKeys.richTextTableChange.l10n(context),
+            leading: AppIcon(
+              HeroAppIcons.tableCells,
+              size: 20,
+              color: context.colors.textPrimary,
+            ),
+            trailing: AppIcon(
+              HeroAppIcons.chevronRight,
+              size: 18,
+              color: context.colors.textSecondary,
+            ),
+            selected: _showTableActions,
+            onTap: () => setState(() => _showTableActions = true),
+          ),
+          const _RichContextMenuDivider(),
+          for (final item in widget.systemItems)
+            if (AdaptiveTextSelectionToolbar.getButtonLabel(
+              context,
+              item,
+            ).isNotEmpty)
+              _RichContextMenuRow(
+                label: AdaptiveTextSelectionToolbar.getButtonLabel(
+                  context,
+                  item,
+                ),
+                onTap: item.onPressed,
+              ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tableActionsPanel({bool showBack = false}) {
+    return _RichContextMenuSurface(
+      child: ListView(
+        padding: EdgeInsets.zero,
+        children: [
+          if (showBack) ...[
+            _RichContextMenuRow(
+              label: AppStringKeys.richTextTableChange.l10n(context),
+              leading: AppIcon(
+                HeroAppIcons.chevronLeft,
+                size: 18,
+                color: context.colors.textPrimary,
+              ),
+              onTap: () => setState(() => _showTableActions = false),
+            ),
+            const _RichContextMenuDivider(),
+          ],
+          _tableActionRow(
+            _RichTableMenuAction.addRowAbove,
+            AppStringKeys.richTextTableAddRowAbove,
+            const _RichTableInsertIcon(HeroAppIcons.arrowUp),
+          ),
+          _tableActionRow(
+            _RichTableMenuAction.addRowBelow,
+            AppStringKeys.richTextTableAddRowBelow,
+            const _RichTableInsertIcon(HeroAppIcons.arrowDown),
+          ),
+          _tableActionRow(
+            _RichTableMenuAction.addColumnLeft,
+            AppStringKeys.richTextTableAddColumnLeft,
+            const _RichTableInsertIcon(HeroAppIcons.arrowLeft),
+            enabled: widget.canAddColumn,
+          ),
+          _tableActionRow(
+            _RichTableMenuAction.addColumnRight,
+            AppStringKeys.richTextTableAddColumnRight,
+            const _RichTableInsertIcon(HeroAppIcons.arrowRight),
+            enabled: widget.canAddColumn,
+          ),
+          const _RichContextMenuDivider(),
+          _tableActionRow(
+            _RichTableMenuAction.toggleHeader,
+            AppStringKeys.richTextTableHeader,
+            AppIcon(
+              HeroAppIcons.tableCells,
+              size: 21,
+              color: context.colors.textPrimary,
+            ),
+            checked: widget.isHeader,
+          ),
+          const _RichContextMenuDivider(),
+          _tableActionRow(
+            _RichTableMenuAction.alignLeft,
+            AppStringKeys.richTextTableAlignLeft,
+            _menuIcon(HeroAppIcons.alignLeft),
+            checked: widget.horizontal == _RichCellHorizontalAlignment.left,
+          ),
+          _tableActionRow(
+            _RichTableMenuAction.alignCenter,
+            AppStringKeys.richTextTableAlignCenter,
+            _menuIcon(HeroAppIcons.alignCenter),
+            checked: widget.horizontal == _RichCellHorizontalAlignment.center,
+          ),
+          _tableActionRow(
+            _RichTableMenuAction.alignRight,
+            AppStringKeys.richTextTableAlignRight,
+            _menuIcon(HeroAppIcons.alignRight),
+            checked: widget.horizontal == _RichCellHorizontalAlignment.right,
+          ),
+          const _RichContextMenuDivider(),
+          _tableActionRow(
+            _RichTableMenuAction.alignTop,
+            AppStringKeys.richTextTableAlignTop,
+            _menuIcon(HeroAppIcons.alignTop),
+            checked: widget.vertical == _RichCellVerticalAlignment.top,
+          ),
+          _tableActionRow(
+            _RichTableMenuAction.alignMiddle,
+            AppStringKeys.richTextTableAlignMiddle,
+            _menuIcon(HeroAppIcons.arrowsUpDown),
+            checked: widget.vertical == _RichCellVerticalAlignment.middle,
+          ),
+          _tableActionRow(
+            _RichTableMenuAction.alignBottom,
+            AppStringKeys.richTextTableAlignBottom,
+            _menuIcon(HeroAppIcons.alignBottom),
+            checked: widget.vertical == _RichCellVerticalAlignment.bottom,
+          ),
+          const _RichContextMenuDivider(),
+          _tableActionRow(
+            _RichTableMenuAction.toggleBorderless,
+            AppStringKeys.richTextTableBorderless,
+            _menuIcon(HeroAppIcons.tableCells),
+            checked: widget.isBorderless,
+          ),
+          _tableActionRow(
+            _RichTableMenuAction.toggleStriped,
+            AppStringKeys.richTextTableStriped,
+            _menuIcon(HeroAppIcons.bars),
+            checked: widget.isStriped,
+          ),
+          const _RichContextMenuDivider(),
+          _tableActionRow(
+            _RichTableMenuAction.removeRow,
+            AppStringKeys.richTextComposerRemoveRow,
+            _menuIcon(HeroAppIcons.trash),
+            enabled: widget.canRemoveRow,
+            destructive: true,
+          ),
+          _tableActionRow(
+            _RichTableMenuAction.removeColumn,
+            AppStringKeys.richTextComposerRemoveColumn,
+            _menuIcon(HeroAppIcons.trash),
+            enabled: widget.canRemoveColumn,
+            destructive: true,
+          ),
+          _tableActionRow(
+            _RichTableMenuAction.removeTable,
+            AppStringKeys.richTextComposerRemoveTable,
+            _menuIcon(HeroAppIcons.trash),
+            destructive: true,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _menuIcon(AppIconData icon) =>
+      AppIcon(icon, size: 21, color: context.colors.textPrimary);
+
+  Widget _tableActionRow(
+    _RichTableMenuAction action,
+    String labelKey,
+    Widget leading, {
+    bool enabled = true,
+    bool checked = false,
+    bool destructive = false,
+  }) {
+    return _RichContextMenuRow(
+      label: labelKey.l10n(context),
+      leading: leading,
+      trailing: checked
+          ? AppIcon(HeroAppIcons.check, size: 20, color: AppTheme.brand)
+          : null,
+      enabled: enabled,
+      destructive: destructive,
+      onTap: enabled ? () => widget.onTableAction(action) : null,
+    );
+  }
 }
 
-class _RichTableContextButton extends StatelessWidget {
-  const _RichTableContextButton({required this.item});
+class _RichContextMenuSurface extends StatelessWidget {
+  const _RichContextMenuSurface({required this.child});
 
-  final ContextMenuButtonItem item;
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    final enabled = item.onPressed != null;
+    final c = context.colors;
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: c.card,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: c.divider, width: 0.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.24),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+}
+
+class _RichContextMenuRow extends StatelessWidget {
+  const _RichContextMenuRow({
+    required this.label,
+    this.leading,
+    this.trailing,
+    this.onTap,
+    this.enabled = true,
+    this.selected = false,
+    this.destructive = false,
+  });
+
+  final String label;
+  final Widget? leading;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+  final bool enabled;
+  final bool selected;
+  final bool destructive;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final active = enabled && onTap != null;
+    final color = !active
+        ? c.textTertiary
+        : destructive
+        ? const Color(0xFFFF5A52)
+        : c.textPrimary;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: item.onPressed,
+      onTap: active ? onTap : null,
       child: Container(
-        height: 46,
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Text(
-          AdaptiveTextSelectionToolbar.getButtonLabel(context, item),
-          maxLines: 1,
-          style: TextStyle(
-            color: enabled
-                ? context.colors.textPrimary
-                : context.colors.textTertiary,
-            fontSize: 15,
-            decoration: TextDecoration.none,
-          ),
+        height: 48,
+        color: selected ? c.searchFill : Colors.transparent,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        child: Row(
+          children: [
+            if (leading case final leading?) ...[
+              SizedBox(width: 26, child: Center(child: leading)),
+              const SizedBox(width: 12),
+            ],
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 16,
+                  decoration: TextDecoration.none,
+                ),
+              ),
+            ),
+            if (trailing case final trailing?) ...[
+              const SizedBox(width: 10),
+              trailing,
+            ],
+          ],
         ),
+      ),
+    );
+  }
+}
+
+class _RichContextMenuDivider extends StatelessWidget {
+  const _RichContextMenuDivider();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    height: 0.5,
+    margin: const EdgeInsets.symmetric(vertical: 4),
+    color: context.colors.divider,
+  );
+}
+
+class _RichTableInsertIcon extends StatelessWidget {
+  const _RichTableInsertIcon(this.direction);
+
+  final AppIconData direction;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = context.colors.textPrimary;
+    return SizedBox(
+      width: 26,
+      height: 26,
+      child: Stack(
+        children: [
+          Align(
+            alignment: Alignment.topLeft,
+            child: AppIcon(direction, size: 21, color: color),
+          ),
+          Positioned(
+            right: 0,
+            bottom: -1,
+            child: Text(
+              '+',
+              style: TextStyle(
+                color: color,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                height: 1,
+                decoration: TextDecoration.none,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

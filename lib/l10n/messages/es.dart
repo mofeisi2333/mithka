@@ -1016,6 +1016,8 @@ const esMessages = <String, String>{
   'richTextTableAlignMiddle': "Centrar verticalmente",
   'richTextTableAlignBottom': "Alinear abajo",
   'richTextTableBordered': "Bordes de tabla",
+  'richTextTableBorderless': "Sin bordes",
+  'richTextTableChange': "Cambiar tabla",
   'richTextTableStriped': "Tabla con franjas",
   'richTextComposerAnchorName': "Nombre del ancla",
   'richTextComposerContentPlaceholder': "Introduce texto enriquecido",

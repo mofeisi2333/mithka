@@ -949,6 +949,8 @@ const koMessages = <String, String>{
   'richTextTableAlignMiddle': "세로 가운데 맞춤",
   'richTextTableAlignBottom': "아래쪽 맞춤",
   'richTextTableBordered': "표 테두리",
+  'richTextTableBorderless': "테두리 없음",
+  'richTextTableChange': "표 변경",
   'richTextTableStriped': "줄무늬 표",
   'richTextComposerAnchorName': "앵커 이름",
   'richTextComposerContentPlaceholder': "서식 있는 텍스트 입력",

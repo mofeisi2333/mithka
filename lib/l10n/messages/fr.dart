@@ -1026,6 +1026,8 @@ const frMessages = <String, String>{
   'richTextTableAlignMiddle': "Centrer verticalement",
   'richTextTableAlignBottom': "Aligner en bas",
   'richTextTableBordered': "Bordures du tableau",
+  'richTextTableBorderless': "Sans bordure",
+  'richTextTableChange': "Modifier le tableau",
   'richTextTableStriped': "Tableau à bandes",
   'richTextComposerAnchorName': "Nom de l’ancre",
   'richTextComposerContentPlaceholder': "Saisissez du texte enrichi",

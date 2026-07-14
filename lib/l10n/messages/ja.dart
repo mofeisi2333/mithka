@@ -950,6 +950,8 @@ const jaMessages = <String, String>{
   'richTextTableAlignMiddle': "上下中央揃え",
   'richTextTableAlignBottom': "下揃え",
   'richTextTableBordered': "表の罫線",
+  'richTextTableBorderless': "枠線なし",
+  'richTextTableChange': "表を変更",
   'richTextTableStriped': "縞模様の表",
   'richTextComposerAnchorName': "アンカー名",
   'richTextComposerContentPlaceholder': "リッチテキストを入力",

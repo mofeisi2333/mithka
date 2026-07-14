@@ -937,6 +937,8 @@ const zhHansMessages = <String, String>{
   'richTextTableAlignMiddle': "垂直居中",
   'richTextTableAlignBottom': "底部对齐",
   'richTextTableBordered': "显示表格边框",
+  'richTextTableBorderless': "无边框",
+  'richTextTableChange': "修改表格",
   'richTextTableStriped': "斑马纹表格",
   'richTextComposerAnchorName': "锚点名称",
   'richTextComposerContentPlaceholder': "输入富文本内容",

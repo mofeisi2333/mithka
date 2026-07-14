@@ -1416,6 +1416,8 @@ abstract final class AppStringKeys {
   static const richTextTableAlignMiddle = 'richTextTableAlignMiddle';
   static const richTextTableAlignBottom = 'richTextTableAlignBottom';
   static const richTextTableBordered = 'richTextTableBordered';
+  static const richTextTableBorderless = 'richTextTableBorderless';
+  static const richTextTableChange = 'richTextTableChange';
   static const richTextTableStriped = 'richTextTableStriped';
   static const richTextComposerAnchorName = 'richTextComposerAnchorName';
   static const richTextComposerContentPlaceholder =

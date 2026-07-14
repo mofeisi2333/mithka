@@ -25,6 +25,8 @@ class HeroAppIcons {
 
   static const angleDown = AppIconData(HeroiconsOutline.chevronDown);
   static const arrowDown = AppIconData(HeroiconsOutline.arrowDown);
+  static const arrowLeft = AppIconData(HeroiconsOutline.arrowLeft);
+  static const arrowRight = AppIconData(HeroiconsOutline.arrowRight);
   static const arrowUp = AppIconData(HeroiconsOutline.arrowUp);
   static const arrowTopRight = AppIconData(
     HeroiconsOutline.arrowTopRightOnSquare,
@@ -34,6 +36,11 @@ class HeroAppIcons {
   static const at = AppIconData(HeroiconsOutline.atSymbol);
   static const ban = AppIconData(HeroiconsOutline.noSymbol);
   static const bars = AppIconData(HeroiconsOutline.bars3);
+  static const alignLeft = AppIconData(HeroiconsOutline.bars3BottomLeft);
+  static const alignCenter = AppIconData(HeroiconsOutline.bars3CenterLeft);
+  static const alignRight = AppIconData(HeroiconsOutline.bars3BottomRight);
+  static const alignTop = AppIconData(HeroiconsOutline.barsArrowUp);
+  static const alignBottom = AppIconData(HeroiconsOutline.barsArrowDown);
   static const bell = AppIconData(HeroiconsOutline.bell);
   static const bellSlash = AppIconData(HeroiconsOutline.bellSlash);
   static const camera = AppIconData(HeroiconsOutline.camera);

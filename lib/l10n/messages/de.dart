@@ -1026,6 +1026,8 @@ const deMessages = <String, String>{
   'richTextTableAlignMiddle': "Vertikal zentrieren",
   'richTextTableAlignBottom': "Unten ausrichten",
   'richTextTableBordered': "Tabellenrahmen",
+  'richTextTableBorderless': "Rahmenlos",
+  'richTextTableChange': "Tabelle ändern",
   'richTextTableStriped': "Gestreifte Tabelle",
   'richTextComposerAnchorName': "Ankername",
   'richTextComposerContentPlaceholder': "Rich-Text eingeben",

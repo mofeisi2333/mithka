@@ -364,6 +364,7 @@ void main() {
       RichTextComposerResult? result;
       await tester.pumpWidget(
         MaterialApp(
+          locale: const Locale('en'),
           localizationsDelegates: const [
             GlobalMaterialLocalizations.delegate,
             GlobalWidgetsLocalizations.delegate,
@@ -402,10 +403,31 @@ void main() {
       await tester.enterText(title, 'Quarterly <Plan>');
 
       final textFieldCount = find.byType(TextField).evaluate().length;
+      final firstCell = find.widgetWithText(TextField, 'Column 1');
+      final firstCellController = tester
+          .widget<TextField>(firstCell)
+          .controller!;
       await tester.longPress(find.text('Column 1'));
       await tester.pumpAndSettle();
 
       expect(find.byType(AdaptiveTextSelectionToolbar), findsNothing);
+      expect(find.text('Change Table'), findsOneWidget);
+      final selectAll = find.textContaining(
+        RegExp('select all', caseSensitive: false),
+      );
+      expect(selectAll, findsOneWidget);
+      await tester.tap(selectAll);
+      await tester.pump();
+      expect(firstCellController.selection.start, 0);
+      expect(
+        firstCellController.selection.end,
+        firstCellController.text.length,
+      );
+
+      await tester.longPress(find.text('Column 1'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Change Table'));
+      await tester.pump();
       final addRow = find.text('Add row above');
       expect(addRow, findsOneWidget);
       await tester.ensureVisible(addRow);
