@@ -858,6 +858,7 @@ const frMessages = <String, String>{
   'musicPlayerPlaylistLoadFailed': "Impossible de charger les playlists",
   'musicPlayerPlaylistName': "Nom de la playlist",
   'musicPlayerPlaylists': "Playlists",
+  'musicPlayerPlayedChats': "Discussions écoutées",
   'musicPlayerNoPlaylists':
       "Créez une playlist pour enregistrer de la musique dans Telegram.",
   'musicPlayerQueueTitleWithCount': "Liste de lecture ({value1})",

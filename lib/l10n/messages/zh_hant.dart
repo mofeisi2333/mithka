@@ -781,6 +781,7 @@ const zhHantMessages = <String, String>{
   'musicPlayerPlaylistLoadFailed': "無法載入播放清單",
   'musicPlayerPlaylistName': "播放清單名稱",
   'musicPlayerPlaylists': "播放清單",
+  'musicPlayerPlayedChats': "播放過的聊天",
   'musicPlayerNoPlaylists': "建立播放清單，將音樂儲存在 Telegram 中。",
   'musicPlayerQueueTitleWithCount': "目前播放清單 ({value1})",
   'musicPlayerRemovedFromPlaylist': "已從播放清單移除",

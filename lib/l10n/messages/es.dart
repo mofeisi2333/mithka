@@ -848,6 +848,7 @@ const esMessages = <String, String>{
   'musicPlayerPlaylistLoadFailed': "No se pudieron cargar las listas",
   'musicPlayerPlaylistName': "Nombre de la lista",
   'musicPlayerPlaylists': "Listas de reproducción",
+  'musicPlayerPlayedChats': "Chats reproducidos",
   'musicPlayerNoPlaylists': "Crea una lista para guardar música en Telegram.",
   'musicPlayerQueueTitleWithCount': "Cola de reproducción ({value1})",
   'musicPlayerRemovedFromPlaylist': "Eliminado de la lista de reproducción",

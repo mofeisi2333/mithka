@@ -781,6 +781,7 @@ const zhHansMessages = <String, String>{
   'musicPlayerPlaylistLoadFailed': "无法加载歌单",
   'musicPlayerPlaylistName': "歌单名称",
   'musicPlayerPlaylists': "歌单",
+  'musicPlayerPlayedChats': "播放过的聊天",
   'musicPlayerNoPlaylists': "创建歌单，将音乐保存在 Telegram 中。",
   'musicPlayerQueueTitleWithCount': "当前播放列表 ({value1})",
   'musicPlayerRemovedFromPlaylist': "已从播放列表移除",

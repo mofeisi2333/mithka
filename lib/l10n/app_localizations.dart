@@ -1252,6 +1252,7 @@ abstract final class AppStringKeys {
   static const musicPlayerPlaylistLoadFailed = 'musicPlayerPlaylistLoadFailed';
   static const musicPlayerPlaylistName = 'musicPlayerPlaylistName';
   static const musicPlayerPlaylists = 'musicPlayerPlaylists';
+  static const musicPlayerPlayedChats = 'musicPlayerPlayedChats';
   static const musicPlayerNoPlaylists = 'musicPlayerNoPlaylists';
   static const musicPlayerQueueTitleWithCount =
       'musicPlayerQueueTitleWithCount';

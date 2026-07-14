@@ -881,7 +881,10 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
         return AnimatedSize(
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeOutCubic,
-          child: player.isVisible && !player.collapsed
+          child:
+              player.isVisible &&
+                  !player.collapsed &&
+                  !player.hasEmbeddedPlayerHost
               ? GlobalMusicPlayerBar(
                   bottomPadding: safeBottom
                       ? MediaQuery.paddingOf(context).bottom.clamp(0, 12)
@@ -899,7 +902,10 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
       child: child,
       builder: (context, child) {
         final player = MusicPlayerController.shared;
-        if (!reserveForShellPlayer || !player.isVisible || player.collapsed) {
+        if (!reserveForShellPlayer ||
+            !player.isVisible ||
+            player.collapsed ||
+            player.hasEmbeddedPlayerHost) {
           return child!;
         }
         return MediaQuery.removePadding(

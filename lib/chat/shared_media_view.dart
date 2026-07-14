@@ -47,6 +47,8 @@ enum _SharedMediaFileFilter { all, downloaded, notDownloaded }
 
 enum _SharedMediaMenuAction { openOriginal, deleteCache }
 
+enum _MusicHubTab { playlists, music }
+
 class _SharedFileState {
   const _SharedFileState({
     required this.fileId,
@@ -120,6 +122,7 @@ class _SharedMediaViewState extends State<SharedMediaView> {
 
   final TdClient _client = TdClient.shared;
   late int _tab = widget.initialTab;
+  _MusicHubTab _musicHubTab = _MusicHubTab.music;
   final Map<int, List<ChatMessage>> _cache = {};
   final Set<int> _loading = {};
   final Map<int, _SharedFileState> _files = {};
@@ -131,6 +134,7 @@ class _SharedMediaViewState extends State<SharedMediaView> {
   Timer? _searchDebounce;
   String _query = '';
   _SharedMediaFileFilter _fileFilter = _SharedMediaFileFilter.all;
+  bool _musicPlayerHostAttached = false;
 
   @override
   void initState() {
@@ -141,6 +145,14 @@ class _SharedMediaViewState extends State<SharedMediaView> {
       if (file != null) _applyFile(file);
     });
     _load(_tab);
+    if (_isMusicHub) {
+      unawaited(_refreshMusicHubSources());
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        MusicPlayerController.shared.attachEmbeddedPlayerHost(this);
+        _musicPlayerHostAttached = true;
+      });
+    }
   }
 
   @override
@@ -149,7 +161,22 @@ class _SharedMediaViewState extends State<SharedMediaView> {
     _fileSub?.cancel();
     _voice.dispose();
     _search.dispose();
+    if (_musicPlayerHostAttached) {
+      MusicPlayerController.shared.detachEmbeddedPlayerHost(this);
+    }
     super.dispose();
+  }
+
+  bool get _isMusicHub =>
+      widget.chatId == 0 && widget.lockedTab && widget.initialTab == 5;
+
+  Future<void> _refreshMusicHubSources() async {
+    try {
+      await MusicPlayerController.shared.refreshPlaylists(force: true);
+    } catch (error, stackTrace) {
+      debugPrint('Failed to refresh music hub playlists: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
   }
 
   Future<void> _load(int tab) async {
@@ -404,10 +431,307 @@ class _SharedMediaViewState extends State<SharedMediaView> {
       body: Column(
         children: [
           _header(),
-          _toolbar(),
+          if (!_isMusicHub || _musicHubTab == _MusicHubTab.music) _toolbar(),
           if (!widget.lockedTab) _tabStrip(),
-          Expanded(child: _body()),
+          Expanded(
+            child: _isMusicHub && _musicHubTab == _MusicHubTab.playlists
+                ? _musicSourcesBody()
+                : _body(),
+          ),
+          if (_isMusicHub) _musicHubPlayer(),
+          if (_isMusicHub) _musicHubBottomTabs(),
         ],
+      ),
+    );
+  }
+
+  Widget _musicHubPlayer() {
+    return AnimatedBuilder(
+      animation: MusicPlayerController.shared,
+      builder: (context, _) {
+        final player = MusicPlayerController.shared;
+        return AnimatedSize(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          child: player.isVisible && !player.collapsed
+              ? const GlobalMusicPlayerBar()
+              : const SizedBox.shrink(),
+        );
+      },
+    );
+  }
+
+  Widget _musicSourcesBody() {
+    final controller = MusicPlayerController.shared;
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final playlistChatIds = controller.playlists
+            .map((playlist) => playlist.chatId)
+            .toSet();
+        final playedChats = controller.playedMusicChats
+            .where((chat) => !playlistChatIds.contains(chat.chatId))
+            .toList(growable: false);
+        return ListView(
+          padding: const EdgeInsets.only(bottom: 16),
+          children: [
+            _musicSourceSection(
+              AppStrings.t(AppStringKeys.musicPlayerPlaylists),
+              onAdd: () => unawaited(createMusicPlaylist(context)),
+            ),
+            if (controller.playlists.isEmpty)
+              _musicSourcesEmpty(
+                AppStrings.t(AppStringKeys.musicPlayerNoPlaylists),
+                showCreate: playedChats.isEmpty,
+              )
+            else
+              for (final playlist in controller.playlists)
+                _musicSourceRow(
+                  title: playlist.title,
+                  subtitle: AppStrings.t(AppStringKeys.musicPlayerTrackCount, {
+                    'value1': playlist.tracks.length,
+                  }),
+                  icon: HeroAppIcons.music,
+                  onTap: () =>
+                      unawaited(showMusicPlaylistTracks(context, playlist)),
+                ),
+            if (playedChats.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              _musicSourceSection(
+                AppStrings.t(AppStringKeys.musicPlayerPlayedChats),
+              ),
+              for (final source in playedChats)
+                _musicSourceRow(
+                  title: source.title,
+                  subtitle: [
+                    AppStrings.t(AppStringKeys.profileDetailMusic),
+                    DateText.listLabel(source.lastPlayedAt ~/ 1000),
+                  ].where((value) => value.isNotEmpty).join(' · '),
+                  icon: HeroAppIcons.comments,
+                  onTap: () =>
+                      unawaited(showPlayedMusicChatTracks(context, source)),
+                ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _musicSourceSection(String title, {VoidCallback? onAdd}) {
+    final c = context.colors;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 18, 12, 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              title,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: c.textPrimary,
+              ),
+            ),
+          ),
+          if (onAdd != null)
+            Semantics(
+              button: true,
+              label: AppStrings.t(AppStringKeys.musicPlayerCreatePlaylist),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onAdd,
+                child: SizedBox(
+                  width: 40,
+                  height: 36,
+                  child: Center(
+                    child: AppIcon(
+                      HeroAppIcons.plus,
+                      size: 21,
+                      color: c.textSecondary,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _musicSourcesEmpty(String message, {required bool showCreate}) {
+    final c = context.colors;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 26, 24, 30),
+      child: Column(
+        children: [
+          AppIcon(HeroAppIcons.music, size: 34, color: c.textTertiary),
+          const SizedBox(height: 12),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 14, color: c.textSecondary),
+          ),
+          if (showCreate) ...[
+            const SizedBox(height: 18),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => unawaited(createMusicPlaylist(context)),
+              child: Container(
+                height: 42,
+                alignment: Alignment.center,
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                decoration: BoxDecoration(
+                  color: musicPlayerAccent,
+                  borderRadius: BorderRadius.circular(21),
+                ),
+                child: Text(
+                  AppStrings.t(AppStringKeys.musicPlayerCreatePlaylist),
+                  style: const TextStyle(
+                    color: Color(0xFFFFFFFF),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _musicSourceRow({
+    required String title,
+    required String subtitle,
+    required AppIconData icon,
+    required VoidCallback onTap,
+  }) {
+    final c = context.colors;
+    return Semantics(
+      button: true,
+      label: title,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(18, 11, 14, 11),
+          decoration: BoxDecoration(
+            color: c.background,
+            border: Border(bottom: BorderSide(color: c.divider, width: 0.5)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: musicPlayerAccent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: AppIcon(icon, size: 21, color: musicPlayerAccent),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: c.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: c.textTertiary),
+                    ),
+                  ],
+                ),
+              ),
+              AppIcon(
+                HeroAppIcons.chevronRight,
+                size: 17,
+                color: c.textTertiary,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _musicHubBottomTabs() {
+    final c = context.colors;
+    return Container(
+      decoration: BoxDecoration(
+        color: c.navBar,
+        border: Border(top: BorderSide(color: c.divider, width: 0.5)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 54,
+          child: Row(
+            children: [
+              _musicHubTabItem(
+                tab: _MusicHubTab.playlists,
+                icon: HeroAppIcons.listCheck,
+                label: AppStrings.t(AppStringKeys.musicPlayerPlaylists),
+              ),
+              _musicHubTabItem(
+                tab: _MusicHubTab.music,
+                icon: HeroAppIcons.music,
+                label: AppStrings.t(AppStringKeys.profileDetailMusic),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _musicHubTabItem({
+    required _MusicHubTab tab,
+    required AppIconData icon,
+    required String label,
+  }) {
+    final c = context.colors;
+    final selected = _musicHubTab == tab;
+    final color = selected ? musicPlayerAccent : c.textTertiary;
+    return Expanded(
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: label,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => setState(() => _musicHubTab = tab),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              AppIcon(icon, size: 20, color: color),
+              const SizedBox(height: 3),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

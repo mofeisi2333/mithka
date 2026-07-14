@@ -858,6 +858,7 @@ const deMessages = <String, String>{
       "Wiedergabelisten konnten nicht geladen werden",
   'musicPlayerPlaylistName': "Name der Wiedergabeliste",
   'musicPlayerPlaylists': "Wiedergabelisten",
+  'musicPlayerPlayedChats': "Abgespielte Chats",
   'musicPlayerNoPlaylists':
       "Erstelle eine Wiedergabeliste, um Musik in Telegram zu speichern.",
   'musicPlayerQueueTitleWithCount': "Warteschlange ({value1})",

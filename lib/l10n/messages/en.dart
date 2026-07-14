@@ -870,6 +870,7 @@ const enMessages = <String, String>{
   'musicPlayerPlaylistLoadFailed': "Could not load playlists",
   'musicPlayerPlaylistName': "Playlist name",
   'musicPlayerPlaylists': "Playlists",
+  'musicPlayerPlayedChats': "Played chats",
   'musicPlayerNoPlaylists': "Create a playlist to save music in Telegram.",
   'musicPlayerQueueTitleWithCount': "Play queue ({value1})",
   'musicPlayerRemovedFromPlaylist': "Removed from playlist",

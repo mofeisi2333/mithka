@@ -792,6 +792,7 @@ const jaMessages = <String, String>{
   'musicPlayerPlaylistLoadFailed': "プレイリストを読み込めませんでした",
   'musicPlayerPlaylistName': "プレイリスト名",
   'musicPlayerPlaylists': "プレイリスト",
+  'musicPlayerPlayedChats': "再生したチャット",
   'musicPlayerNoPlaylists': "プレイリストを作成して Telegram に音楽を保存できます。",
   'musicPlayerQueueTitleWithCount': "現在のプレイリスト ({value1})",
   'musicPlayerRemovedFromPlaylist': "プレイリストから削除しました",

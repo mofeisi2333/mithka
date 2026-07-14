@@ -790,6 +790,7 @@ const koMessages = <String, String>{
   'musicPlayerPlaylistLoadFailed': "재생 목록을 불러올 수 없습니다",
   'musicPlayerPlaylistName': "재생 목록 이름",
   'musicPlayerPlaylists': "재생 목록",
+  'musicPlayerPlayedChats': "재생한 채팅",
   'musicPlayerNoPlaylists': "재생 목록을 만들어 Telegram에 음악을 저장하세요.",
   'musicPlayerQueueTitleWithCount': "현재 재생 목록 ({value1})",
   'musicPlayerRemovedFromPlaylist': "재생 목록에서 제거됨",

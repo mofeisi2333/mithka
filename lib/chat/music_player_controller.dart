@@ -24,6 +24,7 @@ import '../tdlib/td_image_loader.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import 'chat_view.dart';
+import 'music_history.dart';
 import 'music_playlist_service.dart';
 import 'voice_audio.dart';
 
@@ -43,11 +44,15 @@ class MusicPlayerController extends ChangeNotifier {
 
   final VoicePlayer _player = VoicePlayer();
   final MusicPlaylistService _playlistService = MusicPlaylistService();
+  final Set<Object> _embeddedPlayerHosts = <Object>{};
+  SharedPreferences? _prefs;
   int? _loadedSlot;
+  int? _playedChatsSlot;
 
   ChatMessage? current;
   List<ChatMessage> queue = const [];
   List<MusicPlaylist> playlists = const [];
+  List<PlayedMusicChat> playedMusicChats = const [];
   int? _playbackSourceChatId;
   String _playbackSourceTitle = '';
   bool _playbackSourceIsPlaylist = false;
@@ -74,12 +79,24 @@ class MusicPlayerController extends ChangeNotifier {
 
   int? get playbackSourceChatId => _playbackSourceChatId;
   bool get playbackSourceIsPlaylist => _playbackSourceIsPlaylist;
+  bool get hasEmbeddedPlayerHost => _embeddedPlayerHosts.isNotEmpty;
 
   // Playlist chats are loaded lazily after authorization, when the library is
   // opened. main() calls this before TDLib reaches authorizationStateReady.
-  void initialize(SharedPreferences prefs) {}
+  void initialize(SharedPreferences prefs) {
+    _prefs = prefs;
+    _loadPlayedMusicChats(force: true);
+  }
 
   bool isActive(TdFileRef? file) => _player.isActive(file);
+
+  void attachEmbeddedPlayerHost(Object host) {
+    if (_embeddedPlayerHosts.add(host)) notifyListeners();
+  }
+
+  void detachEmbeddedPlayerHost(Object host) {
+    if (_embeddedPlayerHosts.remove(host)) notifyListeners();
+  }
 
   bool isInPlaylist(ChatMessage message) {
     final fileId = message.music?.file?.id;
@@ -91,6 +108,7 @@ class MusicPlayerController extends ChangeNotifier {
   }
 
   Future<void> refreshPlaylists({bool force = false}) async {
+    _loadPlayedMusicChats();
     final slot = TdClient.shared.activeSlot;
     if (!force && _loadedSlot == slot && playlists.isNotEmpty) return;
     _loadedSlot = slot;
@@ -173,6 +191,7 @@ class MusicPlayerController extends ChangeNotifier {
     int chatId, {
     String? title,
   }) async {
+    _recordPlayedMusicChat(chatId, title ?? message.senderName);
     final sourceRevision = _setPlaybackSource(
       chatId: chatId,
       title: title ?? message.senderName,
@@ -207,6 +226,9 @@ class MusicPlayerController extends ChangeNotifier {
     );
     play(message, visibleQueue: playlist.tracks);
   }
+
+  Future<List<ChatMessage>> loadChatTracks(int chatId) =>
+      _playlistService.loadTracks(chatId);
 
   void play(
     ChatMessage message, {
@@ -341,6 +363,42 @@ class MusicPlayerController extends ChangeNotifier {
     _playbackSourceTitle = title?.trim() ?? '';
     _playbackSourceIsPlaylist = isPlaylist;
     return _playbackSourceRevision;
+  }
+
+  String get _playedChatsPrefsKey =>
+      'mithka.musicPlayedChats.v1.${TdClient.shared.activeSlot}';
+
+  void _loadPlayedMusicChats({bool force = false}) {
+    final prefs = _prefs;
+    final slot = TdClient.shared.activeSlot;
+    if (prefs == null || (!force && _playedChatsSlot == slot)) return;
+    _playedChatsSlot = slot;
+    playedMusicChats = decodePlayedMusicChats(
+      prefs.getStringList(_playedChatsPrefsKey) ?? const [],
+    );
+  }
+
+  void _recordPlayedMusicChat(int chatId, String? title) {
+    final normalizedTitle = title?.trim() ?? '';
+    if (chatId == 0 || normalizedTitle.isEmpty) return;
+    _loadPlayedMusicChats();
+    playedMusicChats = updatePlayedMusicChats(
+      playedMusicChats,
+      PlayedMusicChat(
+        chatId: chatId,
+        title: normalizedTitle,
+        lastPlayedAt: DateTime.now().millisecondsSinceEpoch,
+      ),
+    );
+    final prefs = _prefs;
+    if (prefs != null) {
+      unawaited(
+        prefs.setStringList(
+          _playedChatsPrefsKey,
+          encodePlayedMusicChats(playedMusicChats),
+        ),
+      );
+    }
   }
 
   List<ChatMessage> _dedupeMusic(List<ChatMessage> items) {
@@ -1172,6 +1230,57 @@ Future<void> showMusicPlaylists(
   );
 }
 
+Future<MusicPlaylist?> createMusicPlaylist(BuildContext context) async {
+  final name = await _promptForPlaylistName(context);
+  if (name == null || !context.mounted) return null;
+  try {
+    final playlist = await MusicPlayerController.shared.createPlaylist(name);
+    if (context.mounted) {
+      showToast(context, AppStringKeys.musicPlayerPlaylistCreated);
+    }
+    return playlist;
+  } catch (error, stackTrace) {
+    debugPrint('Failed to create music playlist: $error');
+    debugPrintStack(stackTrace: stackTrace);
+    if (context.mounted) {
+      showToast(context, AppStringKeys.musicPlayerPlaylistCreateFailed);
+    }
+    return null;
+  }
+}
+
+Future<void> showMusicPlaylistTracks(
+  BuildContext context,
+  MusicPlaylist playlist,
+) => _showPlaylistTracks(context, playlist, MusicPlayerController.shared);
+
+Future<void> showPlayedMusicChatTracks(
+  BuildContext context,
+  PlayedMusicChat source,
+) async {
+  final controller = MusicPlayerController.shared;
+  late final List<ChatMessage> tracks;
+  try {
+    tracks = await controller.loadChatTracks(source.chatId);
+  } catch (error, stackTrace) {
+    debugPrint('Failed to load played chat music: $error');
+    debugPrintStack(stackTrace: stackTrace);
+    if (context.mounted) {
+      showToast(context, AppStringKeys.musicPlayerPlaylistLoadFailed);
+    }
+    return;
+  }
+  if (!context.mounted) return;
+  await _showQqMusicSheet<void>(
+    context,
+    builder: (_) => _PlayedChatTracksSheet(
+      source: source,
+      tracks: tracks,
+      controller: controller,
+    ),
+  );
+}
+
 class _MusicPlaylistsSheet extends StatelessWidget {
   const _MusicPlaylistsSheet({
     required this.controller,
@@ -1745,6 +1854,109 @@ class _PlaylistTracksSheet extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _PlayedChatTracksSheet extends StatelessWidget {
+  const _PlayedChatTracksSheet({
+    required this.source,
+    required this.tracks,
+    required this.controller,
+  });
+
+  final PlayedMusicChat source;
+  final List<ChatMessage> tracks;
+  final MusicPlayerController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Container(
+      height: MediaQuery.sizeOf(context).height * 0.68,
+      decoration: BoxDecoration(
+        color: c.background,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            const _SheetGrabber(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 8, 12, 10),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          source.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.w700,
+                            color: c.textPrimary,
+                          ),
+                        ),
+                        Text(
+                          AppStrings.t(AppStringKeys.musicPlayerTrackCount, {
+                            'value1': tracks.length,
+                          }),
+                          style: TextStyle(fontSize: 12, color: c.textTertiary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  _SheetIcon(
+                    icon: HeroAppIcons.play,
+                    tooltip: AppStrings.t(AppStringKeys.musicPlayerPlay),
+                    onTap: tracks.isEmpty
+                        ? null
+                        : () {
+                            Navigator.of(context).pop();
+                            unawaited(
+                              controller.playChat(
+                                tracks.first,
+                                source.chatId,
+                                title: source.title,
+                              ),
+                            );
+                          },
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: tracks.isEmpty
+                  ? Center(
+                      child: Text(
+                        AppStrings.t(AppStringKeys.musicPlayerEmptyPlaylist),
+                        style: TextStyle(color: c.textTertiary),
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      itemCount: tracks.length,
+                      itemBuilder: (context, index) => _QueueRow(
+                        message: tracks[index],
+                        playQueue: tracks,
+                        controller: controller,
+                        onPlay: (message) => unawaited(
+                          controller.playChat(
+                            message,
+                            source.chatId,
+                            title: source.title,
+                          ),
+                        ),
+                      ),
+                    ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
