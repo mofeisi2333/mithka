@@ -3,6 +3,12 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+bool shouldShowSafetyNotice({
+  required bool restricted,
+  required bool disabled,
+  required bool acknowledged,
+}) => restricted && !disabled && !acknowledged;
+
 /// Local preference for the Telegram Terms-of-Service safety notice overlay.
 class SafetyNoticeController extends ChangeNotifier {
   SafetyNoticeController(this._prefs)

@@ -751,6 +751,7 @@ class _ChatViewState extends State<ChatView> {
   bool _openingUnreadMention = false;
   bool _exitStatePrepared = false;
   bool _notificationVisibilityRegistered = false;
+  bool _safetyNoticeAcknowledged = false;
   VelocityTracker? _backSwipeVelocity;
   dc.TabBarVisibility? _tabBarVisibility;
 
@@ -3411,6 +3412,11 @@ class _ChatViewState extends State<ChatView> {
         .watch<ThemeController>()
         .hideBlockedUserMessages;
     final hideSafetyNotice = context.watch<SafetyNoticeController>().disabled;
+    final showSafetyNotice = shouldShowSafetyNotice(
+      restricted: _vm.isTelegramTosRestricted,
+      disabled: hideSafetyNotice,
+      acknowledged: _safetyNoticeAcknowledged,
+    );
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     _syncKeyboardInset(keyboardInset);
     // Not a member, joinable, and nothing to preview → a custom join screen
@@ -3450,8 +3456,7 @@ class _ChatViewState extends State<ChatView> {
                   ),
                   if (_actionTarget != null && !_isSelecting)
                     _actionMenuOverlay(),
-                  if (_vm.isTelegramTosRestricted && !hideSafetyNotice)
-                    _restrictedChatOverlay(),
+                  if (showSafetyNotice) _restrictedChatOverlay(),
                 ],
               ),
             ),
@@ -3594,13 +3599,8 @@ class _ChatViewState extends State<ChatView> {
   }
 
   void _acknowledgeRestrictedChat() {
-    final onBack = widget.onBack;
-    if (onBack != null) {
-      onBack();
-      return;
-    }
-    final navigator = Navigator.of(context);
-    if (navigator.canPop()) navigator.pop();
+    if (_safetyNoticeAcknowledged) return;
+    setState(() => _safetyNoticeAcknowledged = true);
   }
 
   Future<void> _leaveRestrictedChat() async {
