@@ -3308,12 +3308,24 @@ class _ChatViewState extends State<ChatView> {
   }
 
   void _openSenderProfile(ChatMessage m) {
+    if (m.senderIsChat) {
+      final senderChatId = m.senderId;
+      if (senderChatId == null) return;
+      final senderTitle = (m.senderName ?? m.senderTitle ?? _vm.peerTitle)
+          .trim();
+      final title = senderTitle.isEmpty ? _vm.peerTitle : senderTitle;
+      final Widget destination = senderChatId == widget.chatId
+          ? ChatInfoView(chatId: senderChatId, title: title)
+          : ChatView(chatId: senderChatId, title: title);
+      Navigator.of(
+        context,
+      ).push(PageRouteBuilder<void>(pageBuilder: (_, _, _) => destination));
+      return;
+    }
     final uid = m.isOutgoing
         ? _vm.meId
         : (_vm.isGroup ? m.senderId : _vm.peerUserId);
-    if (uid == null || uid <= 0) {
-      return; // channels post as the chat, not a user
-    }
+    if (uid == null || uid <= 0) return;
     _openUserProfile(
       uid,
       m.isOutgoing ? _vm.meName : (m.senderName ?? _vm.peerTitle),
