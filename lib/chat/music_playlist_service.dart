@@ -1,6 +1,7 @@
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
+import 'forward_options.dart';
 
 typedef MusicPlaylistQuery =
     Future<Map<String, dynamic>> Function(Map<String, dynamic> request);
@@ -98,6 +99,12 @@ class MusicPlaylistService {
     if (sourceChatId == null || sourceChatId == 0 || source.id == 0) {
       throw const FormatException('Message has no Telegram source');
     }
+    await assertForwardAllowed(
+      query: _query,
+      fromChatId: sourceChatId,
+      messageIds: [source.id],
+      options: const ForwardOptions(removeSender: true),
+    );
     final sent = await _query({
       '@type': 'forwardMessages',
       'chat_id': playlist.chatId,

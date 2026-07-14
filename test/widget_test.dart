@@ -2111,6 +2111,23 @@ void main() {
   });
 
   group('TDParse.messageText', () {
+    test('protected-content toggles are non-interactive service messages', () {
+      final message = TDParse.message({
+        '@type': 'message',
+        'id': 9,
+        'chat_id': -1001,
+        'date': 1,
+        'content': {
+          '@type': 'messageChatHasProtectedContentToggled',
+          'new_has_protected_content': true,
+        },
+      });
+
+      expect(message, isNotNull);
+      expect(message!.isService, isTrue);
+      expect(message.contentType, 'messageChatHasProtectedContentToggled');
+    });
+
     test('photo with no caption uses localized placeholder', () {
       final content = <String, dynamic>{'@type': 'messagePhoto'};
       expect(

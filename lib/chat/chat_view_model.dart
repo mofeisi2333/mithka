@@ -243,6 +243,7 @@ class ChatViewModel extends ChangeNotifier {
   String sendDisabledReason = ''; // shown in the disabled composer bar
   bool isTelegramTosRestricted = false;
   String telegramTosRestrictionText = '';
+  bool hasProtectedContent = false;
   bool _chatCanSend = true; // chat-wide default can_send_basic_messages
   bool peerIsBot = false;
   bool isSecretChat = false;
@@ -310,6 +311,7 @@ class ChatViewModel extends ChangeNotifier {
 
   bool isRead(ChatMessage m) => m.isOutgoing && m.id <= lastReadOutboxId;
   bool get canChooseMessageSender => availableMessageSenders.length > 1;
+  bool get canForwardContent => !hasProtectedContent;
   bool get canLoadOlder =>
       !_isLoadingOlder && _allMessages.isNotEmpty && _hasOlderHistory;
   bool get requiresPaidMessage => paidMessageStarCount > 0;
@@ -1252,6 +1254,12 @@ class ChatViewModel extends ChangeNotifier {
     int sourceChatId,
     ChatMessage message,
   ) async {
+    await assertForwardAllowed(
+      query: _client.query,
+      fromChatId: sourceChatId,
+      messageIds: [message.id],
+      options: const ForwardOptions(removeSender: true),
+    );
     final music = message.music;
     final fileId = music?.file?.id;
     if (music != null && fileId != null && fileId > 0) {
@@ -1346,6 +1354,7 @@ class ChatViewModel extends ChangeNotifier {
   /// Re-sends the same content (the "+1" quick repeat) — only plain text and
   /// photos; the badge that calls this is gated to those kinds too.
   void repeatMessage(ChatMessage message) {
+    if (hasProtectedContent) return;
     // Photo: send a clean copy (forwardMessages send_copy drops the "转发"
     // header and works regardless of the original file's upload state).
     if (message.isPhoto && message.image != null) {
@@ -1508,6 +1517,7 @@ class ChatViewModel extends ChangeNotifier {
     int targetChatId, {
     ForwardOptions options = const ForwardOptions(),
   }) async {
+    if (hasProtectedContent) throw const ForwardBlockedException();
     await forwardMessagesWithOptions(
       client: _client,
       targetChatId: targetChatId,
@@ -1523,6 +1533,7 @@ class ChatViewModel extends ChangeNotifier {
 
   Future<void> saveToFavoritesMany(List<int> messageIds) async {
     if (messageIds.isEmpty) return;
+    if (hasProtectedContent) throw const ForwardBlockedException();
     final me = await _client.query({'@type': 'getMe'});
     final myId = me.int64('id');
     if (myId == null) throw TdError({'message': 'Missing current user id'});
@@ -1535,15 +1546,12 @@ class ChatViewModel extends ChangeNotifier {
     if (savedChatId == null) {
       throw TdError({'message': 'Missing Saved Messages chat id'});
     }
-    await _client.query({
-      '@type': 'forwardMessages',
-      'chat_id': savedChatId,
-      'from_chat_id': chatId,
-      'message_ids': messageIds,
-      'options': {'@type': 'messageSendOptions'},
-      'send_copy': false,
-      'remove_caption': false,
-    });
+    await forwardMessagesWithOptions(
+      client: _client,
+      targetChatId: savedChatId,
+      fromChatId: chatId,
+      messageIds: messageIds,
+    );
   }
 
   void saveFavoriteSticker(int fileId) {
@@ -1800,6 +1808,8 @@ class ChatViewModel extends ChangeNotifier {
     unreadCount = chat.integer('unread_count') ?? 0;
     unreadMentionCount = chat.integer('unread_mention_count') ?? 0;
     isMarkedUnread = chat.boolean('is_marked_as_unread') ?? false;
+    hasProtectedContent =
+        chat.boolean('has_protected_content') ?? hasProtectedContent;
     final notificationSettings = chat.obj('notification_settings');
     isMuted = ScopeNotificationSettings.shared.isMuted(chat);
     if (hasLegacyHiddenNotificationPreview(notificationSettings)) {
@@ -2800,6 +2810,12 @@ class ChatViewModel extends ChangeNotifier {
       case 'updateNewMessage':
         final raw = update.obj('message');
         if (raw == null || raw.int64('chat_id') != chatId) return;
+        final rawContent = raw.obj('content');
+        if (rawContent?.type == 'messageChatHasProtectedContentToggled') {
+          hasProtectedContent =
+              rawContent?.boolean('new_has_protected_content') ??
+              hasProtectedContent;
+        }
         final message = TDParse.message(raw);
         if (message == null) return;
         final canAppendToTranscript = shouldMergeLiveMessageIntoChatWindow(
@@ -2825,6 +2841,11 @@ class ChatViewModel extends ChangeNotifier {
         final messageId = update.int64('message_id');
         final content = update.obj('new_content');
         if (messageId == null || content == null) return;
+        if (content.type == 'messageChatHasProtectedContentToggled') {
+          hasProtectedContent =
+              content.boolean('new_has_protected_content') ??
+              hasProtectedContent;
+        }
         _replaceText(
           messageId,
           TDParse.messageText(content),
@@ -2888,9 +2909,17 @@ class ChatViewModel extends ChangeNotifier {
         if (chat == null || chat.int64('id') != chatId) return;
         messageAutoDeleteTime = _autoDeleteSeconds(chat);
         _setPaidMessageStarCount(_paidMessageStars(chat), notify: false);
+        hasProtectedContent =
+            chat.boolean('has_protected_content') ?? hasProtectedContent;
         if (chat.containsKey('draft_message')) {
           _applyRemoteDraft(chat.obj('draft_message'), notify: false);
         }
+        notifyListeners();
+
+      case 'updateChatHasProtectedContent':
+        if (update.int64('chat_id') != chatId) return;
+        hasProtectedContent =
+            update.boolean('has_protected_content') ?? hasProtectedContent;
         notifyListeners();
 
       case 'updateChatDraftMessage':

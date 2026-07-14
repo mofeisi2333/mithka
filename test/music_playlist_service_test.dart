@@ -143,7 +143,9 @@ void main() {
     final saved = await service.addTrack(playlist, source);
     await service.removeTrack(playlist, saved);
 
-    final send = requests.first;
+    final send = requests.firstWhere(
+      (request) => request['@type'] == 'forwardMessages',
+    );
     expect(send['chat_id'], 902);
     expect(send['@type'], 'forwardMessages');
     expect(send['from_chat_id'], 10);

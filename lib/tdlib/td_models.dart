@@ -2503,6 +2503,7 @@ abstract final class TDParse {
     'messageContactRegistered',
     'messageChatSetBackground',
     'messageChatSetTheme',
+    'messageChatHasProtectedContentToggled',
     'messageCustomServiceAction',
     'messageChatSetMessageAutoDeleteTime',
     'messageVideoChatStarted',

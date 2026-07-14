@@ -1988,6 +1988,10 @@ class _ChatViewState extends State<ChatView> {
   Future<void> _forwardSelected() async {
     final ids = _orderedSelectedIds();
     if (ids.isEmpty) return;
+    if (!_vm.canForwardContent) {
+      _showForwardFailure(const ForwardBlockedException());
+      return;
+    }
     final result = await Navigator.of(context).push<ChatPickerResult>(
       MaterialPageRoute(
         builder: (_) => const ChatPickerView(
@@ -2017,6 +2021,10 @@ class _ChatViewState extends State<ChatView> {
   Future<void> _saveSelected() async {
     final ids = _orderedSelectedIds();
     if (ids.isEmpty) return;
+    if (!_vm.canForwardContent) {
+      _showForwardFailure(const ForwardBlockedException());
+      return;
+    }
     try {
       await _vm.saveToFavoritesMany(ids);
       if (!mounted) return;
@@ -3373,6 +3381,10 @@ class _ChatViewState extends State<ChatView> {
   }
 
   Future<void> _forwardMessage(ChatMessage message) async {
+    if (!_vm.canForwardContent) {
+      _showForwardFailure(const ForwardBlockedException());
+      return;
+    }
     final result = await Navigator.of(context).push<ChatPickerResult>(
       MaterialPageRoute(
         builder: (_) => const ChatPickerView(
@@ -4544,16 +4556,27 @@ class _ChatViewState extends State<ChatView> {
   Widget _selectionActionBar() {
     final c = context.colors;
     final enabled = _selectedMessageIds.isNotEmpty;
-    final color = enabled ? c.textPrimary : c.textTertiary;
-    Widget button(IconData icon, VoidCallback onTap) => GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: enabled ? onTap : null,
-      child: SizedBox(
-        width: 58,
-        height: 52,
-        child: Icon(icon, size: 26, color: color),
-      ),
-    );
+    Widget button(
+      IconData icon,
+      VoidCallback onTap, {
+      bool actionEnabled = true,
+    }) {
+      final available = enabled && actionEnabled;
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: available ? onTap : null,
+        child: SizedBox(
+          width: 58,
+          height: 52,
+          child: Icon(
+            icon,
+            size: 26,
+            color: available ? c.textPrimary : c.textTertiary,
+          ),
+        ),
+      );
+    }
+
     return Container(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom),
       decoration: BoxDecoration(
@@ -4565,8 +4588,16 @@ class _ChatViewState extends State<ChatView> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            button(HeroAppIcons.share.data, _forwardSelected),
-            button(HeroAppIcons.star.data, _saveSelected),
+            button(
+              HeroAppIcons.share.data,
+              _forwardSelected,
+              actionEnabled: _vm.canForwardContent,
+            ),
+            button(
+              HeroAppIcons.star.data,
+              _saveSelected,
+              actionEnabled: _vm.canForwardContent,
+            ),
             button(HeroAppIcons.trash.data, _deleteSelected),
             button(
               HeroAppIcons.ellipsis.data,
@@ -4877,7 +4908,8 @@ class _ChatViewState extends State<ChatView> {
                       isGroup: _vm.isGroup,
                       meName: _vm.meName,
                       mePhoto: _vm.mePhoto,
-                      showRepeat: _isRepeatTail(messageIndex),
+                      showRepeat:
+                          _vm.canForwardContent && _isRepeatTail(messageIndex),
                       onRepeat: () => _vm.repeatMessage(message),
                       onLongPress: _isSelecting
                           ? null
@@ -5540,6 +5572,7 @@ class _ChatViewState extends State<ChatView> {
                 child: MessageActionMenu(
                   message: _actionTarget!,
                   isPinned: _vm.pinnedMessage?.id == _actionTarget!.id,
+                  allowForwarding: _vm.canForwardContent,
                   source: _actionSource,
                   onSelect: (action) => _perform(action, _actionTarget!),
                 ),

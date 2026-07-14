@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
+import 'forward_options.dart';
 import 'outgoing_attachment.dart';
 import 'rich_message_source.dart';
 
@@ -621,6 +622,19 @@ class RichMessageBotRelay {
   }
 
   Future<void> _forward(TdClient client, Map<String, dynamic> request) async {
+    final fromChatId = request.int64('from_chat_id');
+    final messageIds = request.int64Array('message_ids');
+    if (fromChatId != null && messageIds != null && messageIds.isNotEmpty) {
+      await assertForwardAllowed(
+        query: client.query,
+        fromChatId: fromChatId,
+        messageIds: messageIds,
+        options: ForwardOptions(
+          removeSender: request.boolean('send_copy') ?? false,
+          removeCaption: request.boolean('remove_caption') ?? false,
+        ),
+      );
+    }
     final response = await client.query(request);
     parseRelayForwardResponse(response);
   }

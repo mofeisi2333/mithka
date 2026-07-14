@@ -157,11 +157,13 @@ class MessageActionMenu extends StatelessWidget {
     required this.message,
     required this.isPinned,
     required this.onSelect,
+    this.allowForwarding = true,
     this.source = MessageActionSource.normal,
   });
   final ChatMessage message;
   final bool isPinned;
   final ValueChanged<MessageAction> onSelect;
+  final bool allowForwarding;
   final MessageActionSource source;
 
   static const _surface = Color(0xFF2C2C2E);
@@ -210,12 +212,14 @@ class MessageActionMenu extends StatelessWidget {
     if (message.hasActualReplies) {
       result.add(MessageAction.replies);
     }
-    result.add(MessageAction.forward);
-    result.add(MessageAction.repeat);
+    if (allowForwarding) {
+      result.add(MessageAction.forward);
+      result.add(MessageAction.repeat);
+    }
     if (message.video != null && source == MessageActionSource.video) {
       result.add(MessageAction.playMuted);
     }
-    if (message.music?.file != null) {
+    if (allowForwarding && message.music?.file != null) {
       result.add(MessageAction.addToPlaylist);
     }
     if (message.isPhoto || message.video != null) {
@@ -223,7 +227,7 @@ class MessageActionMenu extends StatelessWidget {
     }
     result.add(MessageAction.multiSelect);
     result.add(isPinned ? MessageAction.unpinTodo : MessageAction.pinTodo);
-    result.add(MessageAction.save);
+    if (allowForwarding) result.add(MessageAction.save);
     // 添加 — add any sticker (tgs / webm / webp) to favorites.
     // Non-premium users can't add custom emoji / emoji sets, so hide 添加 + 表情包
     // on single-emoji messages for them (regular stickers stay addable).
@@ -324,6 +328,7 @@ class _ActionRow extends StatelessWidget {
       children: [
         for (final action in actions)
           GestureDetector(
+            key: ValueKey('message-action-${action.name}'),
             behavior: HitTestBehavior.opaque,
             onTap: () => onSelect(action),
             child: SizedBox(

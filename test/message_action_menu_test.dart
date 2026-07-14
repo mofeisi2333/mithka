@@ -133,4 +133,47 @@ void main() {
 
     expect(find.text('Edit'), findsOneWidget);
   });
+
+  testWidgets('protected chats omit every forwarding-based action', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final translation = TranslationController(prefs);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: translation,
+        child: MaterialApp(
+          home: Scaffold(
+            body: MessageActionMenu(
+              message: ChatMessage(
+                id: 3,
+                isOutgoing: false,
+                text: 'protected track',
+                date: 1,
+                contentType: 'messageAudio',
+                music: MessageMusic(
+                  title: 'Track',
+                  duration: 10,
+                  file: TdFileRef(id: 7),
+                ),
+              ),
+              isPinned: false,
+              allowForwarding: false,
+              onSelect: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byKey(const ValueKey('message-action-forward')), findsNothing);
+    expect(find.byKey(const ValueKey('message-action-repeat')), findsNothing);
+    expect(find.byKey(const ValueKey('message-action-save')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('message-action-addToPlaylist')),
+      findsNothing,
+    );
+  });
 }

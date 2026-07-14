@@ -1,6 +1,9 @@
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 
+typedef ForwardQuery =
+    Future<Map<String, dynamic>> Function(Map<String, dynamic> request);
+
 class ForwardOptions {
   const ForwardOptions({this.removeCaption = false, this.removeSender = false});
 
@@ -39,13 +42,13 @@ Future<void> forwardMessagesWithOptions({
   ForwardOptions options = const ForwardOptions(),
 }) async {
   if (messageIds.isEmpty) return;
-  await _assertForwardAllowed(
-    client: client,
+  await assertForwardAllowed(
+    query: client.query,
     fromChatId: fromChatId,
     messageIds: messageIds,
     options: options,
   );
-  await client.query({
+  final response = await client.query({
     '@type': 'forwardMessages',
     'chat_id': targetChatId,
     'from_chat_id': fromChatId,
@@ -54,17 +57,33 @@ Future<void> forwardMessagesWithOptions({
     'send_copy': options.sendCopy,
     'remove_caption': options.removeCaption,
   });
+  assertForwardResponseComplete(response, messageIds.length);
 }
 
-Future<void> _assertForwardAllowed({
-  required TdClient client,
+Future<void> assertForwardAllowed({
+  required ForwardQuery query,
   required int fromChatId,
   required List<int> messageIds,
   required ForwardOptions options,
 }) async {
+  // Chat protection changes are delivered independently from message
+  // properties. Checking the chat first makes the restriction effective as
+  // soon as updateChatHasProtectedContent is folded into TDLib's local state.
+  try {
+    final chat = await query({'@type': 'getChat', 'chat_id': fromChatId});
+    if (chat.boolean('has_protected_content') == true) {
+      throw const ForwardBlockedException();
+    }
+  } on ForwardBlockedException {
+    rethrow;
+  } catch (_) {
+    // Per-message properties below remain authoritative if an old/local TDLib
+    // state can't return the source chat yet.
+  }
+
   try {
     for (final messageId in messageIds) {
-      final properties = await client.query({
+      final properties = await query({
         '@type': 'getMessageProperties',
         'chat_id': fromChatId,
         'message_id': messageId,
@@ -79,5 +98,17 @@ Future<void> _assertForwardAllowed({
   } catch (_) {
     // Older/local TDLib states can fail to provide properties. Let the actual
     // forward request decide and normalize the server error in the caller.
+  }
+}
+
+void assertForwardResponseComplete(
+  Map<String, dynamic> response,
+  int expectedCount,
+) {
+  final messages = response['messages'];
+  if (response.type != 'messages' || messages is! List) return;
+  if (messages.length != expectedCount ||
+      messages.any((item) => item == null)) {
+    throw const ForwardBlockedException();
   }
 }
