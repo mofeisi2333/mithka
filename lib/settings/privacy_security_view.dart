@@ -37,7 +37,11 @@ class PrivacySecurityView extends StatefulWidget {
 class _PrivacySecurityViewState extends State<PrivacySecurityView> {
   final TdClient _client = TdClient.shared;
   final Map<String, String> _ruleValue = {};
+  final Map<String, int> _ruleRevision = {};
+  StreamSubscription<Map<String, dynamic>>? _updates;
+  StreamSubscription<int>? _activeSlotChanges;
   String _twoStep = '';
+  int _passwordRevision = 0;
 
   static const _privacyRules = <_PrivacyRuleEntry>[
     _PrivacyRuleEntry(
@@ -95,16 +99,69 @@ class _PrivacySecurityViewState extends State<PrivacySecurityView> {
   @override
   void initState() {
     super.initState();
-    _load();
+    _updates = _client.subscribe().listen(_handleUpdate);
+    _activeSlotChanges = _client.subscribeActiveSlotChanges().listen(
+      _handleActiveSlotChanged,
+    );
+    unawaited(_load());
   }
+
+  @override
+  void dispose() {
+    unawaited(_updates?.cancel());
+    unawaited(_activeSlotChanges?.cancel());
+    super.dispose();
+  }
+
+  void _handleUpdate(Map<String, dynamic> update) {
+    final parsed = privacyRulesUpdateFromTdObject(update);
+    if (parsed == null || !mounted) return;
+    if (!_privacyRules.any((entry) => parsed.matchesSetting(entry.setting))) {
+      return;
+    }
+    _bumpRuleRevision(parsed.setting);
+    setState(
+      () => _ruleValue[parsed.setting] = parsed.selection.visibility.labelKey,
+    );
+  }
+
+  void _handleActiveSlotChanged(int _) {
+    if (!mounted) return;
+    for (final entry in _privacyRules) {
+      _bumpRuleRevision(entry.setting);
+    }
+    _passwordRevision += 1;
+    setState(() {
+      _ruleValue.clear();
+      _twoStep = '';
+    });
+    unawaited(_load());
+  }
+
+  int _bumpRuleRevision(String setting) =>
+      _ruleRevision.update(setting, (value) => value + 1, ifAbsent: () => 1);
+
+  bool _isCurrentRuleRevision(String setting, int revision, int clientId) =>
+      mounted &&
+      _client.activeClientId == clientId &&
+      _ruleRevision[setting] == revision;
+
+  bool _isCurrentPasswordRevision(int revision, int clientId) =>
+      mounted &&
+      _client.activeClientId == clientId &&
+      _passwordRevision == revision;
 
   Future<void> _load() async {
     for (final entry in _privacyRules) {
       unawaited(_loadRule(entry.setting));
     }
+    final clientId = _client.activeClientId;
+    final revision = ++_passwordRevision;
     try {
-      final state = await _client.query({'@type': 'getPasswordState'});
-      if (mounted) {
+      final state = await _client.queryTo({
+        '@type': 'getPasswordState',
+      }, clientId);
+      if (_isCurrentPasswordRevision(revision, clientId)) {
         setState(
           () => _twoStep = (state.boolean('has_password') ?? false)
               ? AppStringKeys.privacyEnabled
@@ -115,14 +172,25 @@ class _PrivacySecurityViewState extends State<PrivacySecurityView> {
   }
 
   Future<void> _loadRule(String setting) async {
+    final clientId = _client.activeClientId;
+    final revision = _bumpRuleRevision(setting);
     try {
-      final res = await _client.query({
+      final res = await _client.queryTo({
         '@type': 'getUserPrivacySettingRules',
         'setting': {'@type': setting},
-      });
-      final rules = res.objects('rules') ?? const <Map<String, dynamic>>[];
+      }, clientId);
+      if (res.type != 'userPrivacySettingRules') return;
+      final values = res['rules'];
+      if (values is! List) return;
+      final rules = <Map<String, dynamic>>[];
+      for (final value in values) {
+        if (value is! Map<String, dynamic> || value.type == null) return;
+        rules.add(value);
+      }
       final value = privacyVisibilityFromRules(rules).labelKey;
-      if (mounted) setState(() => _ruleValue[setting] = value);
+      if (_isCurrentRuleRevision(setting, revision, clientId)) {
+        setState(() => _ruleValue[setting] = value);
+      }
     } catch (_) {}
   }
 

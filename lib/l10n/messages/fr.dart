@@ -1010,6 +1010,8 @@ const frMessages = <String, String>{
   'privacyDisabled': "Désactivé",
   'privacyEnabled': "Activé",
   'privacyLastSeen': "Dernière connexion",
+  'privacyLoadFailed':
+      "Impossible de charger les paramètres de confidentialité.",
   'privacyLoggedInDevices': "Appareils connectés",
   'privacyLoginQrAcceptFailed':
       "Impossible d’approuver ce QR code de connexion",
@@ -1050,6 +1052,7 @@ const frMessages = <String, String>{
       "Impossible de mettre à jour la photo publique : {value1}",
   'privacyRemovePublicPhoto': "Supprimer la photo publique",
   'privacyRemovePublicPhotoQuestion': "Supprimer votre photo publique ?",
+  'privacyRetry': "Réessayer",
   'privacyUpdatePublicPhoto': "Mettre à jour la photo publique",
   'privacyWhoCanSeeProfilePhoto': "Qui peut voir ma photo de profil ?",
   'privacyProfilePhoto': "Photo de profil",

@@ -999,6 +999,7 @@ const esMessages = <String, String>{
   'privacyDisabled': "Desactivado",
   'privacyEnabled': "Activado",
   'privacyLastSeen': "Última vez",
+  'privacyLoadFailed': "No se pudo cargar la configuración de privacidad.",
   'privacyLoggedInDevices': "Dispositivos conectados",
   'privacyLoginQrAcceptFailed':
       "No se pudo aprobar este código QR de inicio de sesión",
@@ -1039,6 +1040,7 @@ const esMessages = <String, String>{
       "No se pudo actualizar la foto pública: {value1}",
   'privacyRemovePublicPhoto': "Eliminar foto pública",
   'privacyRemovePublicPhotoQuestion': "¿Eliminar tu foto pública?",
+  'privacyRetry': "Reintentar",
   'privacyUpdatePublicPhoto': "Actualizar foto pública",
   'privacyWhoCanSeeProfilePhoto': "¿Quién puede ver mi foto de perfil?",
   'privacyProfilePhoto': "Foto de perfil",

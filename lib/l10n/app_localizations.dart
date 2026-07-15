@@ -1417,6 +1417,7 @@ abstract final class AppStringKeys {
   static const privacyDisabled = 'privacyDisabled';
   static const privacyEnabled = 'privacyEnabled';
   static const privacyLastSeen = 'privacyLastSeen';
+  static const privacyLoadFailed = 'privacyLoadFailed';
   static const privacyLoggedInDevices = 'privacyLoggedInDevices';
   static const privacyOtherDevices = 'privacyOtherDevices';
   static const privacyExceptionsHint = 'privacyExceptionsHint';
@@ -1439,6 +1440,7 @@ abstract final class AppStringKeys {
   static const privacyRemovePublicPhoto = 'privacyRemovePublicPhoto';
   static const privacyRemovePublicPhotoQuestion =
       'privacyRemovePublicPhotoQuestion';
+  static const privacyRetry = 'privacyRetry';
   static const privacyLoginQrAcceptFailed = 'privacyLoginQrAcceptFailed';
   static const privacyLoginQrAccepted = 'privacyLoginQrAccepted';
   static const privacyLoginQrInvalid = 'privacyLoginQrInvalid';

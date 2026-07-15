@@ -1010,6 +1010,8 @@ const deMessages = <String, String>{
   'privacyDisabled': "Deaktiviert",
   'privacyEnabled': "Aktiviert",
   'privacyLastSeen': "Zuletzt online",
+  'privacyLoadFailed':
+      "Die Datenschutzeinstellungen konnten nicht geladen werden.",
   'privacyLoggedInDevices': "Angemeldete Geräte",
   'privacyLoginQrAcceptFailed':
       "Dieser Login-QR-Code konnte nicht bestätigt werden",
@@ -1050,6 +1052,7 @@ const deMessages = <String, String>{
       "Öffentliches Foto konnte nicht aktualisiert werden: {value1}",
   'privacyRemovePublicPhoto': "Öffentliches Foto entfernen",
   'privacyRemovePublicPhotoQuestion': "Öffentliches Foto entfernen?",
+  'privacyRetry': "Erneut versuchen",
   'privacyUpdatePublicPhoto': "Öffentliches Foto aktualisieren",
   'privacyWhoCanSeeProfilePhoto': "Wer kann mein Profilbild sehen?",
   'privacyProfilePhoto': "Profilbild",
