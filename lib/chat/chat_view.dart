@@ -11,7 +11,6 @@ import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -25,6 +24,7 @@ import '../channels/topic_chat_view.dart';
 import '../components/app_icons.dart';
 import '../components/confirm_dialog.dart';
 import '../components/drawer_controller.dart' as dc;
+import '../components/full_page_back_swipe.dart';
 import '../components/photo_avatar.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
@@ -743,8 +743,6 @@ class _ChatViewState extends State<ChatView> {
   int? _selectionAnchorId;
   bool _selectionScrollingUp = false;
   double _lastScrollPixels = 0;
-  double _backSwipeDx = 0;
-  double _backSwipeDy = 0;
   bool _backSwipePopping = false;
   bool _loadingOlderFromScroll = false;
   bool _maintainSessionScrollAnchor = false;
@@ -755,7 +753,6 @@ class _ChatViewState extends State<ChatView> {
   bool _exitStatePrepared = false;
   bool _notificationVisibilityRegistered = false;
   bool _safetyNoticeAcknowledged = false;
-  VelocityTracker? _backSwipeVelocity;
   dc.TabBarVisibility? _tabBarVisibility;
 
   /// Gap (seconds) between messages that triggers a fresh time separator.
@@ -996,6 +993,14 @@ class _ChatViewState extends State<ChatView> {
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) _prepareExitState();
       },
+      child: child,
+    );
+  }
+
+  Widget _withBackSwipe(Widget child) {
+    return FullPageBackSwipe(
+      enabled: _canBackSwipe,
+      onBack: () => unawaited(_popFromBackSwipe()),
       child: child,
     );
   }
@@ -1858,44 +1863,6 @@ class _ChatViewState extends State<ChatView> {
 
   bool get _canBackSwipe =>
       widget.showBackButton && !_isSelecting && _actionTarget == null;
-
-  void _onBackSwipePointerDown(PointerDownEvent event) {
-    // Back navigation is an edge gesture. Keeping it out of the rest of the
-    // chat lets horizontal controls such as the fixed music player consume
-    // their own swipes without unexpectedly closing the conversation.
-    if (!_canBackSwipe || event.localPosition.dx > 28) {
-      _backSwipeVelocity = null;
-      return;
-    }
-    _backSwipeDx = 0;
-    _backSwipeDy = 0;
-    _backSwipeVelocity = VelocityTracker.withKind(event.kind)
-      ..addPosition(event.timeStamp, event.position);
-  }
-
-  void _onBackSwipePointerMove(PointerMoveEvent event) {
-    final tracker = _backSwipeVelocity;
-    if (tracker == null || !_canBackSwipe) return;
-    _backSwipeDx += event.delta.dx;
-    _backSwipeDy += event.delta.dy;
-    tracker.addPosition(event.timeStamp, event.position);
-  }
-
-  void _onBackSwipePointerEnd(PointerEvent event) {
-    final tracker = _backSwipeVelocity;
-    if (tracker == null) return;
-    final velocity = tracker.getVelocity().pixelsPerSecond.dx;
-    final horizontal = _backSwipeDx.abs() > _backSwipeDy.abs() * 1.65;
-    final shouldPop =
-        _canBackSwipe &&
-        horizontal &&
-        _backSwipeDx > 72 &&
-        (velocity > 520 || _backSwipeDx > 118);
-    _backSwipeVelocity = null;
-    _backSwipeDx = 0;
-    _backSwipeDy = 0;
-    if (shouldPop) unawaited(_popFromBackSwipe());
-  }
 
   Future<void> _popFromBackSwipe() async {
     if (_backSwipePopping || !mounted) return;
@@ -3479,26 +3446,26 @@ class _ChatViewState extends State<ChatView> {
     // (header + centered card) instead of the transcript + composer.
     if (!_vm.isMember && _vm.canJoin && _vm.messages.isEmpty) {
       return _withExitState(
-        Scaffold(backgroundColor: c.groupedBackground, body: _joinScreenBody()),
+        _withBackSwipe(
+          Scaffold(
+            backgroundColor: c.groupedBackground,
+            body: _joinScreenBody(),
+          ),
+        ),
       );
     }
     return _withExitState(
-      Scaffold(
-        backgroundColor: c.inputBarBackground,
-        resizeToAvoidBottomInset: true,
-        body: ChatWallpaperBackground(
-          wallpaper: _effectiveWallpaper(),
-          fallbackColor: c.chatBackground,
-          brightness: Theme.of(context).brightness,
-          child: ChatMediaDropRegion(
-            enabled: _vm.canSendMessages && !_isSelecting,
-            onImagesDropped: _previewAndSendDroppedImages,
-            child: Listener(
-              behavior: HitTestBehavior.translucent,
-              onPointerDown: _onBackSwipePointerDown,
-              onPointerMove: _onBackSwipePointerMove,
-              onPointerUp: _onBackSwipePointerEnd,
-              onPointerCancel: _onBackSwipePointerEnd,
+      _withBackSwipe(
+        Scaffold(
+          backgroundColor: c.inputBarBackground,
+          resizeToAvoidBottomInset: true,
+          body: ChatWallpaperBackground(
+            wallpaper: _effectiveWallpaper(),
+            fallbackColor: c.chatBackground,
+            brightness: Theme.of(context).brightness,
+            child: ChatMediaDropRegion(
+              enabled: _vm.canSendMessages && !_isSelecting,
+              onImagesDropped: _previewAndSendDroppedImages,
               child: Stack(
                 children: [
                   Positioned.fill(
