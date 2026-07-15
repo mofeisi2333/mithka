@@ -35,6 +35,7 @@ import '../profile/profile_detail_view.dart';
 import '../settings/blocked_user_service.dart';
 import '../settings/developer_mode_controller.dart';
 import '../settings/keyword_blocker.dart';
+import '../settings/quick_reaction_settings_view.dart';
 import '../settings/safety_notice_controller.dart';
 import '../settings/topic_group_display_mode.dart';
 import '../settings/translation_api.dart';
@@ -71,6 +72,7 @@ import 'message_bubble.dart';
 import 'message_replies_sheet.dart';
 import 'music_player_controller.dart';
 import 'outgoing_attachment.dart';
+import 'quick_reaction_choice.dart';
 import 'rich_text_composer_view.dart';
 import 'sticker_set_detail_view.dart';
 import 'sticker_viewer.dart';
@@ -5453,52 +5455,6 @@ class _ChatViewState extends State<ChatView> {
   int _cachePx(double logical) =>
       (logical * MediaQuery.devicePixelRatioOf(context)).ceil();
 
-  static const _quickReactions = ['👍', '❤️', '🔥', '🎉', '😁', '😢', '😡'];
-
-  /// The fuller set shown when the quick bar is expanded.
-  static const _allReactions = [
-    '👍',
-    '👎',
-    '❤️',
-    '🔥',
-    '🥰',
-    '👏',
-    '😁',
-    '🤔',
-    '🤯',
-    '😱',
-    '🤬',
-    '😢',
-    '🎉',
-    '🤩',
-    '🤮',
-    '💩',
-    '🙏',
-    '👌',
-    '🕊️',
-    '🤡',
-    '🥱',
-    '🥴',
-    '😍',
-    '🐳',
-    '🌚',
-    '🌭',
-    '💯',
-    '🤣',
-    '⚡',
-    '🍌',
-    '🏆',
-    '💔',
-    '🤨',
-    '😐',
-    '🍓',
-    '🍾',
-    '💋',
-    '🖕',
-    '😈',
-    '😴',
-  ];
-
   void _react(String emoji) {
     final target = _actionTarget;
     setState(() {
@@ -5507,6 +5463,14 @@ class _ChatViewState extends State<ChatView> {
       _reactionExpanded = false;
     });
     if (target != null) _vm.addReaction(target.id, emoji);
+  }
+
+  void _reactQuick(QuickReactionChoice reaction) {
+    if (reaction.isCustom) {
+      _reactCustom(reaction.customEmojiId);
+    } else {
+      _react(reaction.emoji);
+    }
   }
 
   void _reactCustom(int customEmojiId) {
@@ -5576,8 +5540,10 @@ class _ChatViewState extends State<ChatView> {
                   : Align(
                       alignment: align,
                       child: QuickReactionBar(
-                        reactions: _quickReactions,
-                        onReaction: _react,
+                        reactions: context
+                            .watch<ThemeController>()
+                            .quickReactions,
+                        onReaction: _reactQuick,
                         onExpand: () {
                           EmojiStore.shared.loadIfNeeded();
                           setState(() => _reactionExpanded = true);
@@ -5623,7 +5589,7 @@ class _ChatViewState extends State<ChatView> {
       child: Column(
         children: [
           Expanded(child: _reactionContent(packs)),
-          if (packs.isNotEmpty) _reactionTabStrip(packs),
+          _reactionTabStrip(packs),
         ],
       ),
     );
@@ -5666,7 +5632,7 @@ class _ChatViewState extends State<ChatView> {
       crossAxisCount: 7,
       padding: const EdgeInsets.all(10),
       children: [
-        for (final e in _allReactions)
+        for (final e in availableStandardReactions)
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () => _react(e),
@@ -5714,6 +5680,33 @@ class _ChatViewState extends State<ChatView> {
                       color: Colors.white70,
                     ),
             ),
+          GestureDetector(
+            key: const ValueKey('quick-reaction-settings'),
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              setState(() {
+                _actionTarget = null;
+                _actionRect = null;
+                _reactionExpanded = false;
+              });
+              Navigator.of(context).push(
+                PageRouteBuilder<void>(
+                  pageBuilder: (_, _, _) => const QuickReactionSettingsView(),
+                ),
+              );
+            },
+            child: const SizedBox(
+              width: 40,
+              height: 36,
+              child: Center(
+                child: AppIcon(
+                  HeroAppIcons.gear,
+                  size: 21,
+                  color: Colors.white70,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );

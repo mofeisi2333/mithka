@@ -1027,6 +1027,14 @@ const frMessages = <String, String>{
   'privacyLastSeen': "Dernière connexion",
   'privacyLoadFailed':
       "Impossible de charger les paramètres de confidentialité.",
+  'quickReactionsAvailable': "Réactions disponibles",
+  'quickReactionsCount': "{value1} sélectionnées",
+  'quickReactionsHint':
+      "Touchez pour ajouter ou retirer. Maintenez puis faites glisser les réactions sélectionnées pour les réorganiser.",
+  'quickReactionsKeepOne': "Conservez au moins une réaction rapide.",
+  'quickReactionsLimit': "Choisissez jusqu’à 9 réactions rapides.",
+  'quickReactionsSelected': "Sélectionnées",
+  'quickReactionsTitle': "Réactions rapides",
   'privacyLoggedInDevices': "Appareils connectés",
   'privacyLoginQrAcceptFailed':
       "Impossible d’approuver ce QR code de connexion",

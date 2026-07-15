@@ -31,6 +31,7 @@ import '../theme/system_font_catalog.dart';
 import '../theme/theme_controller.dart';
 import 'app_icon_controller.dart';
 import 'blocked_user_service.dart';
+import 'quick_reaction_settings_view.dart';
 
 class AppearanceView extends StatelessWidget {
   const AppearanceView({super.key});
@@ -460,6 +461,20 @@ class DisplaySettingsView extends StatelessWidget {
                     AppStrings.t(AppStringKeys.appearanceAlwaysShowMessageTime),
                     theme.alwaysShowMessageTime,
                     (v) => theme.alwaysShowMessageTime = v,
+                  ),
+                  _navigationRow(
+                    context,
+                    AppStrings.t(AppStringKeys.quickReactionsTitle),
+                    AppStrings.t(AppStringKeys.quickReactionsCount, {
+                      'value1': theme.quickReactions.length,
+                    }),
+                    () => Navigator.of(context).push(
+                      PageRouteBuilder<void>(
+                        pageBuilder: (_, _, _) =>
+                            const QuickReactionSettingsView(),
+                      ),
+                    ),
+                    icon: HeroAppIcons.thumbsUp.data,
                   ),
                   _toggleRow(
                     context,

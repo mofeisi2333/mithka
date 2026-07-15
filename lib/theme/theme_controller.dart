@@ -16,6 +16,7 @@ import 'package:mithka/l10n/app_localizations.dart';
 import 'package:mithka/l10n/preview_texts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../chat/quick_reaction_choice.dart';
 import '../components/app_icons.dart';
 import 'app_theme.dart';
 import 'emoji_font_catalog.dart';
@@ -934,6 +935,15 @@ class ThemeController extends ChangeNotifier {
     _openChatsAtLatest = _prefs.getBool(_openChatsAtLatestKey) ?? false;
     _preserveSenderWhenRepeating =
         _prefs.getBool(_preserveSenderWhenRepeatingKey) ?? true;
+    final storedQuickReactions = _prefs.getStringList(_quickReactionsKey);
+    _quickReactions = storedQuickReactions == null
+        ? [...defaultQuickReactions]
+        : _normalizeQuickReactions(
+            storedQuickReactions
+                .map(QuickReactionChoice.fromStorage)
+                .whereType<QuickReactionChoice>(),
+          );
+    if (_quickReactions.isEmpty) _quickReactions = [...defaultQuickReactions];
     _groupImageMessages = _prefs.getBool(_groupImageMessagesKey) ?? true;
     _hideBlockedUserMessages =
         _prefs.getBool(_hideBlockedUserMessagesKey) ?? false;
@@ -1006,6 +1016,7 @@ class ThemeController extends ChangeNotifier {
   static const _alwaysShowMessageTimeKey = 'alwaysShowMessageTime';
   static const _openChatsAtLatestKey = 'openChatsAtLatest';
   static const _preserveSenderWhenRepeatingKey = 'preserveSenderWhenRepeating';
+  static const _quickReactionsKey = 'quickReactions';
   static const _groupImageMessagesKey = 'groupImageMessages';
   static const _hideBlockedUserMessagesKey = 'hideBlockedUserMessages';
   static const _showChannelsTabKey = 'showChannelsTab';
@@ -1056,6 +1067,7 @@ class ThemeController extends ChangeNotifier {
   bool _alwaysShowMessageTime = false;
   bool _openChatsAtLatest = false;
   bool _preserveSenderWhenRepeating = true;
+  late List<QuickReactionChoice> _quickReactions;
   bool _groupImageMessages = true;
   bool _hideBlockedUserMessages = false;
   bool _showChannelsTab = false;
@@ -1162,6 +1174,8 @@ class ThemeController extends ChangeNotifier {
   bool get alwaysShowMessageTime => _alwaysShowMessageTime;
   bool get openChatsAtLatest => _openChatsAtLatest;
   bool get preserveSenderWhenRepeating => _preserveSenderWhenRepeating;
+  List<QuickReactionChoice> get quickReactions =>
+      List.unmodifiable(_quickReactions);
   bool get groupImageMessages => _groupImageMessages;
   bool get hideBlockedUserMessages => _hideBlockedUserMessages;
   bool get showChannelsTab => _showChannelsTab;
@@ -1698,6 +1712,32 @@ class ThemeController extends ChangeNotifier {
     _preserveSenderWhenRepeating = value;
     _prefs.setBool(_preserveSenderWhenRepeatingKey, value);
     notifyListeners();
+  }
+
+  void setQuickReactions(Iterable<QuickReactionChoice> value) {
+    final normalized = _normalizeQuickReactions(value);
+    if (normalized.isEmpty || listEquals(normalized, _quickReactions)) return;
+    _quickReactions = normalized;
+    _prefs.setStringList(
+      _quickReactionsKey,
+      normalized.map((reaction) => reaction.storageValue).toList(),
+    );
+    notifyListeners();
+  }
+
+  static List<QuickReactionChoice> _normalizeQuickReactions(
+    Iterable<QuickReactionChoice> value,
+  ) {
+    final result = <QuickReactionChoice>[];
+    for (final reaction in value) {
+      if ((!reaction.isCustom && reaction.emoji.isEmpty) ||
+          result.contains(reaction)) {
+        continue;
+      }
+      result.add(reaction);
+      if (result.length == 9) break;
+    }
+    return result;
   }
 
   set groupImageMessages(bool value) {

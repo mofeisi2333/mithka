@@ -1423,6 +1423,13 @@ abstract final class AppStringKeys {
   static const privacyBlockedUsersEmpty = 'privacyBlockedUsersEmpty';
   static const privacyCurrentDevice = 'privacyCurrentDevice';
   static const privacyCalls = 'privacyCalls';
+  static const quickReactionsAvailable = 'quickReactionsAvailable';
+  static const quickReactionsCount = 'quickReactionsCount';
+  static const quickReactionsHint = 'quickReactionsHint';
+  static const quickReactionsKeepOne = 'quickReactionsKeepOne';
+  static const quickReactionsLimit = 'quickReactionsLimit';
+  static const quickReactionsSelected = 'quickReactionsSelected';
+  static const quickReactionsTitle = 'quickReactionsTitle';
   static const privacyDeleteTelegramAccount = 'privacyDeleteTelegramAccount';
   static const privacyDeleteTelegramAccountMessage =
       'privacyDeleteTelegramAccountMessage';

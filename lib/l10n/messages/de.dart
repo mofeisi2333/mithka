@@ -1024,6 +1024,14 @@ const deMessages = <String, String>{
   'privacyDeviceApp': "App",
   'privacyDisabled': "Deaktiviert",
   'privacyEnabled': "Aktiviert",
+  'quickReactionsAvailable': "Verfügbare Reaktionen",
+  'quickReactionsCount': "{value1} ausgewählt",
+  'quickReactionsHint':
+      "Tippe zum Hinzufügen oder Entfernen. Halte ausgewählte Reaktionen gedrückt und ziehe sie, um sie neu anzuordnen.",
+  'quickReactionsKeepOne': "Behalte mindestens eine Schnellreaktion.",
+  'quickReactionsLimit': "Wähle bis zu 9 Schnellreaktionen.",
+  'quickReactionsSelected': "Ausgewählt",
+  'quickReactionsTitle': "Schnellreaktionen",
   'privacyLastSeen': "Zuletzt online",
   'privacyLoadFailed':
       "Die Datenschutzeinstellungen konnten nicht geladen werden.",
