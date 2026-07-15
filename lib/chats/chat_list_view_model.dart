@@ -13,7 +13,6 @@ import 'package:flutter/foundation.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 
 import '../notifications/scope_notification_settings.dart';
-import '../settings/country_message_filter.dart';
 import '../settings/keyword_blocker.dart';
 import '../tdlib/chat_membership.dart';
 import '../tdlib/json_helpers.dart';
@@ -79,7 +78,6 @@ class ChatListViewModel extends ChangeNotifier {
   void onAppear() {
     if (_listening) return;
     _listening = true;
-    CountryMessageFilter.shared.addListener(_scheduleResort);
     _subscribe();
     _loadFilters();
     _loadChats(_initialPageSize);
@@ -101,7 +99,6 @@ class ChatListViewModel extends ChangeNotifier {
   @override
   void dispose() {
     _listening = false;
-    CountryMessageFilter.shared.removeListener(_scheduleResort);
     _sub?.cancel();
     _resortTimer?.cancel();
     super.dispose();
@@ -723,15 +720,8 @@ class ChatListViewModel extends ChangeNotifier {
     final all = _map.values
         .where((c) => _joinedChatCache[c.id] ?? true)
         .toList();
-    final filteredIds = {
-      for (final chat in all)
-        if (_isCountryFiltered(chat)) chat.id,
-    };
-    _filtered = all.where((chat) => filteredIds.contains(chat.id)).toList()
-      ..sort(_compare);
-    final visible = all
-        .where((chat) => !filteredIds.contains(chat.id))
-        .toList(growable: false);
+    _filtered = const [];
+    final visible = all;
     _archived = visible.where((c) => c.archiveOrder > 0).toList()
       ..sort(
         (a, b) => a.archiveOrder != b.archiveOrder
@@ -771,14 +761,6 @@ class ChatListViewModel extends ChangeNotifier {
     if (a.order != b.order) return b.order.compareTo(a.order);
     if (a.date != b.date) return b.date.compareTo(a.date);
     return b.id.compareTo(a.id);
-  }
-
-  bool _isCountryFiltered(ChatSummary chat) {
-    if (chat.isSavedMessages || chat.peerUserId == null) return false;
-    return CountryMessageFilter.shared.matchesUser(
-      isContact: chat.peerIsContact,
-      phoneNumber: chat.peerPhoneNumber,
-    );
   }
 
   // MARK: - Chat-list Premium display metadata (private chats)

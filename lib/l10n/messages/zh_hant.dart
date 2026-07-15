@@ -1429,4 +1429,17 @@ const zhHantMessages = <String, String>{
   'videoPlayerUpNext': "接下來播放",
   'videoPlayerWaitingForFile': "等待影片檔案",
   'vipBadgeLabel': "VIP",
+  'blockingBlocklist': "黑名單",
+  'blockingCountry': "按國家/地區封鎖訊息",
+  'blockingCountryDescription':
+      "僅處理由對方發起的新私訊。符合的對話會移至 _Blocked、標為已讀、永久靜音且不發送通知。",
+  'blockingCountryOff': "關閉",
+  'blockingCountrySearch': "搜尋國家/地區",
+  'blockingCountrySelected': "已選 {value1} 個",
+  'blockingExemptCommonPrivateGroup': "有共同私人群組",
+  'blockingExemptNonDefaultAvatar': "使用了自訂頭像",
+  'blockingExemptPlainText': "不含連結的純文字",
+  'blockingExemptThreeCommonGroups': "有 3 個以上共同群組",
+  'blockingExemptions': "國家/地區封鎖例外",
+  'blockingTitle': "封鎖",
 };

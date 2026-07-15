@@ -1556,4 +1556,17 @@ const deMessages = <String, String>{
   'videoPlayerUpNext': "Als Nächstes",
   'videoPlayerWaitingForFile': "Warten auf Videodatei",
   'vipBadgeLabel': "VIP",
+  'blockingBlocklist': "Blockierliste",
+  'blockingCountry': "Nach Land blockieren",
+  'blockingCountryDescription':
+      "Nur neue, von der anderen Person gestartete Privatchats werden isoliert. Treffer werden nach _Blocked verschoben, gelesen, dauerhaft stummgeschaltet und nie benachrichtigt.",
+  'blockingCountryOff': "Aus",
+  'blockingCountrySearch': "Länder suchen",
+  'blockingCountrySelected': "{value1} ausgewählt",
+  'blockingExemptCommonPrivateGroup': "Gemeinsame private Gruppe",
+  'blockingExemptNonDefaultAvatar': "Eigenes Profilbild",
+  'blockingExemptPlainText': "Nur Text ohne Links",
+  'blockingExemptThreeCommonGroups': "Mindestens 3 gemeinsame Gruppen",
+  'blockingExemptions': "Ausnahmen für Länderblockierung",
+  'blockingTitle': "Blockieren",
 };

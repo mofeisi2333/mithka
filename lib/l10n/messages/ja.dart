@@ -1445,4 +1445,17 @@ const jaMessages = <String, String>{
   'videoPlayerUpNext': "次の動画",
   'videoPlayerWaitingForFile': "動画ファイルを待機中",
   'vipBadgeLabel': "VIP",
+  'blockingBlocklist': "ブロックリスト",
+  'blockingCountry': "国別にメッセージをブロック",
+  'blockingCountryDescription':
+      "相手が開始した新しい個人チャットだけが対象です。一致したチャットは _Blocked に移動し、既読・永久ミュートとなり通知されません。",
+  'blockingCountryOff': "オフ",
+  'blockingCountrySearch': "国を検索",
+  'blockingCountrySelected': "{value1} 件選択",
+  'blockingExemptCommonPrivateGroup': "共通の非公開グループがある",
+  'blockingExemptNonDefaultAvatar': "既定以外のアバター",
+  'blockingExemptPlainText': "リンクのないプレーンテキスト",
+  'blockingExemptThreeCommonGroups': "共通グループが 3 件以上",
+  'blockingExemptions': "国別ブロックの例外",
+  'blockingTitle': "ブロック",
 };

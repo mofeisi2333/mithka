@@ -129,7 +129,6 @@ void main() {
       HeroAppIcons.idBadge,
       HeroAppIcons.palette,
       HeroAppIcons.solidFaceSmile,
-      HeroAppIcons.ban,
       HeroAppIcons.wandMagicSparkles,
       HeroAppIcons.star,
     ]) {

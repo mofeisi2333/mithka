@@ -21,7 +21,6 @@ import 'package:provider/provider.dart';
 import '../components/app_icons.dart';
 import '../components/photo_avatar.dart';
 import '../components/toast.dart';
-import '../components/ui_components.dart';
 import '../l10n/telegram_language_controller.dart';
 import '../profile/profile_detail_view.dart';
 import '../tdlib/json_helpers.dart';
@@ -430,29 +429,24 @@ class _MessageBubbleState extends State<MessageBubble>
                           padding: const EdgeInsets.only(left: 4, bottom: 3),
                           child: Row(
                             children: [
-                              if (showSenderRole) ...[
-                                RoleTag(
-                                  role: message.senderRole!,
-                                  title: showMemberTags ? senderTitle : null,
-                                ),
-                                const SizedBox(width: 4),
-                              ],
                               Flexible(
-                                child: SenderNameReadabilityPlate(
+                                child: SenderIdentityPills(
                                   enabled: theme.showSenderNameReadabilityPlate,
                                   bubbleColor: _incomingBubbleColor,
-                                  child: Text(
-                                    message.senderName!,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: premiumNameColor,
-                                      fontWeight: message.senderIsPremium
-                                          ? FontWeight.w600
-                                          : FontWeight.w400,
-                                    ),
+                                  name: message.senderName!,
+                                  nameStyle: TextStyle(
+                                    fontSize: 12,
+                                    color: premiumNameColor,
+                                    fontWeight: message.senderIsPremium
+                                        ? FontWeight.w600
+                                        : FontWeight.w400,
                                   ),
+                                  role: showSenderRole
+                                      ? message.senderRole
+                                      : null,
+                                  roleTitle: showSenderRole && showMemberTags
+                                      ? senderTitle
+                                      : null,
                                 ),
                               ),
                               if (showPremiumStatus) ...[

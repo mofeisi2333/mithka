@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart' show Theme;
-import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
@@ -7,12 +6,10 @@ import '../chat/chat_wallpaper.dart';
 import '../chat/chat_wallpaper_color_view.dart';
 import '../components/app_confirm_dialog.dart';
 import '../components/app_icons.dart';
-import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../l10n/app_localizations.dart';
 import 'app_theme.dart';
 import 'telegram_cloud_theme.dart';
-import 'telegram_cloud_theme_view.dart';
 import 'theme_controller.dart';
 
 /// Global Telegram .attheme management. This intentionally contains no chat
@@ -37,9 +34,6 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
     Color(0xFFFF2D55),
     Color(0xFF8E8E93),
   ];
-  final _linkController = TextEditingController();
-  final _focusNode = FocusNode();
-  bool _loading = false;
   bool _requestedCommunityThemes = false;
   bool _initializedTargetBrightness = false;
   List<TelegramCloudTheme>? _communityThemes;
@@ -60,47 +54,6 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
     if (_requestedCommunityThemes) return;
     _requestedCommunityThemes = true;
     _synchronizeCommunityThemes(context.read<ThemeController>());
-  }
-
-  @override
-  void dispose() {
-    _linkController.dispose();
-    _focusNode.dispose();
-    super.dispose();
-  }
-
-  Future<void> _loadTheme() async {
-    final link = _linkController.text.trim();
-    if (_loading || link.isEmpty) return;
-    setState(() => _loading = true);
-    try {
-      final theme = await _themeService.load(link);
-      if (!mounted) return;
-      await Navigator.of(context).push(
-        PageRouteBuilder<void>(
-          pageBuilder: (_, _, _) => TelegramCloudThemePreviewView(
-            theme: theme,
-            targetBrightness: _targetBrightness,
-            currentAppBrightness: _appBrightness,
-          ),
-          transitionsBuilder: (_, animation, _, child) =>
-              FadeTransition(opacity: animation, child: child),
-        ),
-      );
-      if (!mounted) return;
-      final local = context.read<ThemeController>().installedCloudThemes;
-      setState(() {
-        _loading = false;
-        _communityThemes = _mergeCommunityThemes(
-          _communityThemes ?? const [],
-          local,
-        );
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _loading = false);
-      showToast(context, AppStringKeys.cloudThemeLoadFailed);
-    }
   }
 
   Future<void> _synchronizeCommunityThemes(ThemeController controller) async {
@@ -187,10 +140,6 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
                 _sectionTitle(AppStringKeys.globalThemeCommunity),
                 const SizedBox(height: 9),
                 _communityThemeStrip(controller, theme),
-                const SizedBox(height: 22),
-                _sectionTitle(AppStringKeys.globalThemeCustomize),
-                const SizedBox(height: 8),
-                _themeLinkControl(),
               ],
             ),
           ),
@@ -679,107 +628,4 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
       brightness: _targetBrightness,
     );
   }
-
-  Widget _themeLinkControl() {
-    final c = _pageColors;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final actionWidth = (constraints.maxWidth * 0.38)
-            .clamp(92.0, 132.0)
-            .toDouble();
-        return Container(
-          key: const ValueKey('global-theme-link-control'),
-          height: 48,
-          padding: const EdgeInsets.fromLTRB(12, 3, 3, 3),
-          decoration: BoxDecoration(
-            color: c.card,
-            border: Border.all(color: c.divider),
-            borderRadius: BorderRadius.circular(13),
-          ),
-          child: Row(
-            children: [
-              AppIcon(HeroAppIcons.link, size: 18, color: c.textTertiary),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Stack(
-                  alignment: Alignment.centerLeft,
-                  children: [
-                    ValueListenableBuilder<TextEditingValue>(
-                      valueListenable: _linkController,
-                      builder: (context, value, _) => value.text.isEmpty
-                          ? IgnorePointer(
-                              child: Text(
-                                'https://t.me/addtheme/',
-                                maxLines: 1,
-                                overflow: TextOverflow.clip,
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  color: c.textTertiary,
-                                ),
-                              ),
-                            )
-                          : const SizedBox.shrink(),
-                    ),
-                    EditableText(
-                      controller: _linkController,
-                      focusNode: _focusNode,
-                      style: TextStyle(fontSize: 15, color: c.textPrimary),
-                      cursorColor: c.linkBlue,
-                      backgroundCursorColor: c.textTertiary,
-                      selectionColor: c.linkBlue.withValues(alpha: 0.25),
-                      textInputAction: TextInputAction.done,
-                      keyboardType: TextInputType.url,
-                      onSubmitted: (_) => _loadTheme(),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 7),
-              GestureDetector(
-                key: const ValueKey('global-theme-save-action'),
-                behavior: HitTestBehavior.opaque,
-                onTap: _loading ? null : _loadTheme,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 120),
-                  width: actionWidth,
-                  height: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: _loading
-                        ? c.linkBlue.withValues(alpha: 0.45)
-                        : c.linkBlue,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      AppStringKeys.globalThemePreview.l10n(context),
-                      maxLines: 1,
-                      style: TextStyle(
-                        color: c.onAccent,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-List<TelegramCloudTheme> _mergeCommunityThemes(
-  Iterable<TelegramCloudTheme> first,
-  Iterable<TelegramCloudTheme> second,
-) {
-  final bySlug = <String, TelegramCloudTheme>{};
-  for (final theme in [...first, ...second]) {
-    if (!theme.slug.startsWith('builtin:')) bySlug[theme.slug] = theme;
-  }
-  return List.unmodifiable(bySlug.values);
 }

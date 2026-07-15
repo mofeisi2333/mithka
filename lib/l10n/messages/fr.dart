@@ -1559,4 +1559,17 @@ const frMessages = <String, String>{
   'videoPlayerUpNext': "À suivre",
   'videoPlayerWaitingForFile': "En attente du fichier vidéo",
   'vipBadgeLabel': "VIP",
+  'blockingBlocklist': "Liste de blocage",
+  'blockingCountry': "Bloquer par pays",
+  'blockingCountryDescription':
+      "Seuls les nouveaux échanges privés initiés par l'autre personne sont isolés. Ils sont déplacés vers _Blocked, lus, mis en sourdine définitivement et ne déclenchent aucune notification.",
+  'blockingCountryOff': "Désactivé",
+  'blockingCountrySearch': "Rechercher un pays",
+  'blockingCountrySelected': "{value1} sélectionnés",
+  'blockingExemptCommonPrivateGroup': "Groupe privé en commun",
+  'blockingExemptNonDefaultAvatar': "Avatar personnalisé",
+  'blockingExemptPlainText': "Texte sans liens",
+  'blockingExemptThreeCommonGroups': "Au moins 3 groupes en commun",
+  'blockingExemptions': "Exceptions du blocage par pays",
+  'blockingTitle': "Blocage",
 };

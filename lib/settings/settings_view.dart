@@ -21,6 +21,7 @@ import '../theme/app_theme.dart';
 import 'about_view.dart';
 import 'advanced_settings_view.dart';
 import 'appearance_view.dart';
+import 'blocking_settings_view.dart';
 import 'developer_mode_controller.dart';
 import 'developer_settings_view.dart';
 import 'edit_profile_view.dart';
@@ -82,6 +83,14 @@ class _SettingsViewState extends State<SettingsView> {
                     AppStrings.t(AppStringKeys.privacySecurityTitle),
                     const Color(0xFF16B05A),
                     () => const PrivacySecurityView(),
+                  ),
+                  const InsetDivider(leadingInset: 56),
+                  _navRow(
+                    context,
+                    HeroAppIcons.ban,
+                    AppStrings.t(AppStringKeys.blockingTitle),
+                    const Color(0xFFDA405B),
+                    () => const BlockingSettingsView(),
                   ),
                 ]),
                 const SizedBox(height: 14),

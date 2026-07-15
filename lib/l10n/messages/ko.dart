@@ -1444,4 +1444,17 @@ const koMessages = <String, String>{
   'videoPlayerUpNext': "다음 동영상",
   'videoPlayerWaitingForFile': "동영상 파일 대기 중",
   'vipBadgeLabel': "VIP",
+  'blockingBlocklist': "차단 목록",
+  'blockingCountry': "국가별 메시지 차단",
+  'blockingCountryDescription':
+      "상대방이 시작한 새 개인 대화에만 적용됩니다. 일치하는 대화는 _Blocked로 이동하고 읽음 처리, 영구 음소거되며 알림이 표시되지 않습니다.",
+  'blockingCountryOff': "끔",
+  'blockingCountrySearch': "국가 검색",
+  'blockingCountrySelected': "{value1}개 선택",
+  'blockingExemptCommonPrivateGroup': "공통 비공개 그룹 있음",
+  'blockingExemptNonDefaultAvatar': "기본이 아닌 아바타",
+  'blockingExemptPlainText': "링크 없는 일반 텍스트",
+  'blockingExemptThreeCommonGroups': "공통 그룹 3개 이상",
+  'blockingExemptions': "국가 차단 예외",
+  'blockingTitle': "차단",
 };

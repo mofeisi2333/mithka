@@ -1,6 +1,8 @@
 import 'package:flutter/widgets.dart';
 
 import '../components/photo_avatar.dart';
+import '../components/ui_components.dart';
+import '../tdlib/td_models.dart';
 
 /// A compact, realistic conversation sample used by appearance pickers.
 ///
@@ -73,36 +75,99 @@ class SenderNameReadabilityPlate extends StatelessWidget {
     required this.bubbleColor,
     required this.child,
     this.padding = const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+    this.connectedToLeading = false,
   });
 
   final bool enabled;
   final Color bubbleColor;
   final Widget child;
   final EdgeInsetsGeometry padding;
+  final bool connectedToLeading;
 
   @override
   Widget build(BuildContext context) {
     if (!enabled) return child;
     return DecoratedBox(
       key: const ValueKey('senderNameReadabilityPlate'),
-      decoration: senderNameReadabilityDecoration(bubbleColor),
+      decoration: senderNameReadabilityDecoration(
+        bubbleColor,
+        connectedToLeading: connectedToLeading,
+      ),
       child: Padding(padding: padding, child: child),
     );
   }
 }
 
-BoxDecoration senderNameReadabilityDecoration(Color bubbleColor) =>
-    BoxDecoration(
-      color: bubbleColor.withValues(alpha: 0.94),
-      borderRadius: BorderRadius.circular(8),
-      boxShadow: const [
-        BoxShadow(
-          color: Color(0x33000000),
-          blurRadius: 5,
-          offset: Offset(0, 2),
+/// Renders a role tag and sender name as touching, color-separated pills when
+/// the readability background is enabled. The shared component keeps live
+/// messages and appearance previews geometrically identical.
+class SenderIdentityPills extends StatelessWidget {
+  const SenderIdentityPills({
+    super.key,
+    required this.enabled,
+    required this.bubbleColor,
+    required this.name,
+    required this.nameStyle,
+    this.role,
+    this.roleTitle,
+  });
+
+  final bool enabled;
+  final Color bubbleColor;
+  final String name;
+  final TextStyle nameStyle;
+  final MemberRole? role;
+  final String? roleTitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final connected = enabled && role != null;
+    return Row(
+      key: connected ? const ValueKey('connectedSenderIdentityPills') : null,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (role != null) ...[
+          RoleTag(
+            role: role!,
+            title: roleTitle,
+            connectedToTrailing: connected,
+            fontSize: connected ? nameStyle.fontSize : null,
+          ),
+          if (!connected) const SizedBox(width: 4),
+        ],
+        Flexible(
+          child: SenderNameReadabilityPlate(
+            enabled: enabled,
+            bubbleColor: bubbleColor,
+            connectedToLeading: connected,
+            child: Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: nameStyle,
+            ),
+          ),
         ),
       ],
     );
+  }
+}
+
+BoxDecoration senderNameReadabilityDecoration(
+  Color bubbleColor, {
+  bool connectedToLeading = false,
+}) => BoxDecoration(
+  color: bubbleColor.withValues(alpha: 0.94),
+  borderRadius: connectedToLeading
+      ? const BorderRadiusDirectional.only(
+          topEnd: Radius.circular(8),
+          bottomEnd: Radius.circular(8),
+        )
+      : BorderRadius.circular(8),
+  boxShadow: const [
+    BoxShadow(color: Color(0x33000000), blurRadius: 5, offset: Offset(0, 2)),
+  ],
+);
 
 class _PreviewMessage extends StatelessWidget {
   const _PreviewMessage({
@@ -131,22 +196,21 @@ class _PreviewMessage extends StatelessWidget {
           : CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        SenderNameReadabilityPlate(
+        SenderIdentityPills(
           enabled: showNamePlate,
           bubbleColor: bubbleColor,
-          child: Text(
-            name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: nameColor,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              shadows: showNamePlate
-                  ? null
-                  : const [Shadow(color: Color(0x66000000), blurRadius: 4)],
-            ),
+          name: name,
+          nameStyle: TextStyle(
+            color: nameColor,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            shadows: showNamePlate
+                ? null
+                : const [Shadow(color: Color(0x66000000), blurRadius: 4)],
           ),
+          role: showNamePlate
+              ? (outgoing ? MemberRole.owner : MemberRole.admin)
+              : null,
         ),
         const SizedBox(height: 3),
         Container(

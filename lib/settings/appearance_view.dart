@@ -30,7 +30,6 @@ import '../theme/global_theme_view.dart';
 import '../theme/system_font_catalog.dart';
 import '../theme/theme_controller.dart';
 import 'app_icon_controller.dart';
-import 'blocked_user_service.dart';
 import 'quick_reaction_settings_view.dart';
 
 class AppearanceView extends StatelessWidget {
@@ -475,18 +474,6 @@ class DisplaySettingsView extends StatelessWidget {
                       ),
                     ),
                     icon: HeroAppIcons.thumbsUp.data,
-                  ),
-                  _toggleRow(
-                    context,
-                    HeroAppIcons.ban.data,
-                    AppStrings.t(
-                      AppStringKeys.appearanceHideBlockedUserMessages,
-                    ),
-                    theme.hideBlockedUserMessages,
-                    (v) {
-                      theme.hideBlockedUserMessages = v;
-                      if (v) BlockedUserService.shared.loadBlockedUsers();
-                    },
                   ),
                 ]),
                 const SizedBox(height: AppSpacing.xl),

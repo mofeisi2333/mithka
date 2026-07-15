@@ -1505,4 +1505,17 @@ const enMessages = <String, String>{
   'videoPlayerUpNext': "Up next",
   'videoPlayerWaitingForFile': "Waiting for video file",
   'vipBadgeLabel': "VIP",
+  'blockingBlocklist': "Blocklist",
+  'blockingCountry': "Block messages by country",
+  'blockingCountryDescription':
+      "Only new private chats started by the other person are quarantined. Matching chats are moved to _Blocked, read, muted, and never notify you.",
+  'blockingCountryOff': "Off",
+  'blockingCountrySearch': "Search countries",
+  'blockingCountrySelected': "{value1} selected",
+  'blockingExemptCommonPrivateGroup': "A private group in common",
+  'blockingExemptNonDefaultAvatar': "Non-default avatar",
+  'blockingExemptPlainText': "Plain text without links",
+  'blockingExemptThreeCommonGroups': "3+ groups in common",
+  'blockingExemptions': "Country blocker exemptions",
+  'blockingTitle': "Blocking",
 };

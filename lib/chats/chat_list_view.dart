@@ -87,6 +87,17 @@ class ChatListSelection {
   bool get isForum => chat?.isForum ?? false;
 }
 
+/// Returns the exact leading offset for a chat-list item.
+///
+/// Chat rows do not include a separator in their layout, so even a fractional
+/// per-row adjustment accumulates into a visible error for targets farther
+/// down the list.
+double chatListItemScrollOffset({
+  required int itemIndex,
+  required double rowHeight,
+  required double maxScrollExtent,
+}) => math.min(itemIndex * rowHeight, maxScrollExtent);
+
 class ChatListView extends StatefulWidget {
   const ChatListView({
     super.key,
@@ -510,10 +521,10 @@ class _ChatListViewState extends State<ChatListView>
       );
       if (archiveIndex <= chatIndex) itemIndex++;
     }
-    final rowH = context.read<ThemeController>().rowHeight + 0.5;
-    return math.min(
-      itemIndex * rowH,
-      _scrollController.position.maxScrollExtent,
+    return chatListItemScrollOffset(
+      itemIndex: itemIndex,
+      rowHeight: context.read<ThemeController>().rowHeight,
+      maxScrollExtent: _scrollController.position.maxScrollExtent,
     );
   }
 

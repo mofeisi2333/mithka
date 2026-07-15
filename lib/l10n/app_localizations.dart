@@ -1917,6 +1917,21 @@ abstract final class AppStringKeys {
   static const videoPlayerUpNext = 'videoPlayerUpNext';
   static const videoPlayerWaitingForFile = 'videoPlayerWaitingForFile';
   static const vipBadgeLabel = 'vipBadgeLabel';
+  static const blockingBlocklist = 'blockingBlocklist';
+  static const blockingCountry = 'blockingCountry';
+  static const blockingCountryDescription = 'blockingCountryDescription';
+  static const blockingCountryOff = 'blockingCountryOff';
+  static const blockingCountrySearch = 'blockingCountrySearch';
+  static const blockingCountrySelected = 'blockingCountrySelected';
+  static const blockingExemptCommonPrivateGroup =
+      'blockingExemptCommonPrivateGroup';
+  static const blockingExemptNonDefaultAvatar =
+      'blockingExemptNonDefaultAvatar';
+  static const blockingExemptPlainText = 'blockingExemptPlainText';
+  static const blockingExemptThreeCommonGroups =
+      'blockingExemptThreeCommonGroups';
+  static const blockingExemptions = 'blockingExemptions';
+  static const blockingTitle = 'blockingTitle';
 }
 
 typedef TelegramStringResolver =

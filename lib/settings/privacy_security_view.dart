@@ -21,8 +21,6 @@ import '../tdlib/td_client.dart';
 import '../theme/app_theme.dart';
 import 'account_backup_view.dart';
 import 'auto_delete_view.dart';
-import 'country_message_filter.dart';
-import 'country_message_filter_view.dart';
 import 'keyword_blocker_view.dart';
 import 'privacy_detail_views.dart';
 import 'privacy_rule_options.dart';
@@ -269,24 +267,10 @@ class _PrivacySecurityViewState extends State<PrivacySecurityView> {
                       () => _open(const AccountBackupView()),
                     ),
                     _Row(
-                      HeroAppIcons.users,
-                      AppStrings.t(AppStringKeys.privacyBlockedUsers),
-                      '',
-                      () => _open(const BlockedUsersView()),
-                    ),
-                    _Row(
                       HeroAppIcons.ban,
                       AppStrings.t(AppStringKeys.keywordBlockerTitle),
                       '',
                       () => _open(const KeywordBlockerView()),
-                    ),
-                    _Row(
-                      HeroAppIcons.globe,
-                      'Block messages by country',
-                      _countryFilterValue,
-                      () => _open(const CountryMessageFilterView()).then((_) {
-                        if (mounted) setState(() {});
-                      }),
                     ),
                     _Row(
                       HeroAppIcons.trash,
@@ -308,11 +292,6 @@ class _PrivacySecurityViewState extends State<PrivacySecurityView> {
         ],
       ),
     );
-  }
-
-  String get _countryFilterValue {
-    final count = CountryMessageFilter.shared.selectedCountries.length;
-    return count == 0 ? 'Off' : '$count selected';
   }
 
   Widget _group(String title, List<_Row> rows) {

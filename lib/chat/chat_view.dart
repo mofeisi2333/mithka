@@ -47,6 +47,7 @@ import '../theme/app_theme.dart';
 import '../theme/date_text.dart';
 import '../theme/telegram_cloud_theme.dart';
 import '../theme/theme_controller.dart';
+import 'blocked_message_runs.dart';
 import 'chat_auto_scroll_policy.dart';
 import 'chat_info_view.dart';
 import 'chat_input_bar.dart';
@@ -666,12 +667,16 @@ class _TranscriptEntry {
   final int startIndex;
 
   ChatMessage get first => messages.first;
-  bool get isImageGroup => messages.length > 1;
+  bool get isBlockedRun =>
+      messages.isNotEmpty && messages.every((message) => message.blockedByUser);
+  bool get isImageGroup => messages.length > 1 && !isBlockedRun;
 
   /// Stable identity for element reuse across index shifts (history pages
   /// prepend and shift every index).
   late final Key key = ValueKey(
-    isImageGroup
+    isBlockedRun
+        ? 'blocked-${messages.first.id}-${messages.last.id}'
+        : isImageGroup
         ? 'album-${messages.map((m) => m.id).join('-')}'
         : 'message-${first.id}',
   );
@@ -704,6 +709,7 @@ class _ChatViewState extends State<ChatView> {
   final Map<int, GlobalKey> _entryVisibilityKeys = <int, GlobalKey>{};
   Map<int, _TranscriptEntry> _trackedTranscriptEntries = const {};
   final Set<int> _reportedVisibleMessageIds = <int>{};
+  final Set<int> _expandedBlockedRunIds = <int>{};
   bool _unreadProgressUpdateScheduled = false;
   ChatMessage? _actionTarget;
   Rect? _actionRect; // global bounds of the long-pressed bubble
@@ -1726,6 +1732,14 @@ class _ChatViewState extends State<ChatView> {
     }
     final first = entry.first;
     if (first.isService) return extent + 38;
+    if (entry.isBlockedRun) {
+      if (!_expandedBlockedRunIds.contains(first.id)) return extent + 40;
+      return extent +
+          entry.messages.fold<double>(
+            0,
+            (sum, message) => sum + _estimatedMessageExtent(message),
+          );
+    }
     if (entry.isImageGroup) {
       return extent + _estimatedImageGroupExtent(entry);
     }
@@ -2124,19 +2138,93 @@ class _ChatViewState extends State<ChatView> {
     );
   }
 
-  Widget _blockedMessagePlaceholder(BuildContext context) {
+  Widget _blockedMessagePlaceholder(
+    BuildContext context,
+    _TranscriptEntry entry,
+  ) {
     final c = context.colors;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Text(
-          '\u00B7 \u00B7 \u00B7',
-          style: TextStyle(
-            fontSize: 16,
-            color: c.textSecondary.withValues(alpha: 0.5),
+    final runId = entry.first.id;
+    if (_expandedBlockedRunIds.contains(runId)) {
+      return _selectionEntry(
+        entry,
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var i = 0; i < entry.messages.length; i++)
+              _messageBubble(entry.messages[i], entry.startIndex + i),
+          ],
+        ),
+      );
+    }
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: GestureDetector(
+        key: ValueKey('blocked-message-run-$runId'),
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => _expandedBlockedRunIds.add(runId)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 28, 4),
+          child: Container(
+            constraints: const BoxConstraints(minWidth: 44, minHeight: 32),
+            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 4),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: c.card.withValues(alpha: 0.72),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: c.divider.withValues(alpha: 0.55),
+                width: 0.5,
+              ),
+            ),
+            child: Text(
+              '\u00B7 \u00B7 \u00B7',
+              style: TextStyle(fontSize: 16, height: 1, color: c.textSecondary),
+            ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _messageBubble(ChatMessage message, int messageIndex) {
+    return MessageBubble(
+      message: message,
+      peerTitle: _vm.peerTitle,
+      peerPhoto: _vm.peerPhoto,
+      isGroup: _vm.isGroup,
+      meName: _vm.meName,
+      mePhoto: _vm.mePhoto,
+      showRepeat: _vm.canForwardContent && _isRepeatTail(messageIndex),
+      onRepeat: () => _vm.repeatMessage(message),
+      onLongPress: _isSelecting ? null : _showActionMenuForMessage,
+      onDoubleTap: _isSelecting
+          ? null
+          : (m) => unawaited(_showTextSelection(m)),
+      onReply: (m) => _vm.setReply(m),
+      onAvatarTap: _openSenderProfile,
+      onAvatarLongPress: (m) {
+        if (_vm.isGroup && (m.senderName?.isNotEmpty ?? false)) {
+          _vm.insertMention(m);
+        }
+      },
+      onOpenReply: _scrollToMessage,
+      onOpenComments: _openMessageComments,
+      showCommentAttachment: _vm.isChannel,
+      onOpenImage: _openImage,
+      onOpenSticker: _openSticker,
+      onPlayVideo: _playVideo,
+      onPlayMusic: _playMusicMessage,
+      onButtonTap: _pressMessageButton,
+      onBotCommandTap: _sendCommand,
+      onHashtagTap: _openHashtagSearch,
+      isRead: _vm.isRead(message),
+      outgoingBubbleColor: _effectiveOutgoingColor(),
+      outgoingBubbleTextColor: _effectiveOutgoingTextColor(),
+      incomingBubbleColor: _effectiveIncomingColor(),
+      incomingBubbleTextColor: _effectiveIncomingTextColor(),
+      onToggleReaction: (r) => _vm.toggleReaction(message, r),
+      onShowReactionUsers: _showReactionUsers,
+      onRedial: _startCall,
     );
   }
 
@@ -4809,7 +4897,10 @@ class _ChatViewState extends State<ChatView> {
       final activeKey = _scrollTargetId == messageId ? _targetKey : _pinnedKey;
       final ctx = activeKey.currentContext;
       if (ctx != null && ctx.mounted) {
-        if (pinnedJump && _isKeyMostlyVisible(activeKey)) {
+        // Do not realign a message that is already on screen. Reply, search,
+        // and other linked-message jumps used to always force the row to 30%
+        // of the viewport, which made an already-visible target bounce.
+        if (_isKeyMostlyVisible(activeKey)) {
           if (mounted && _scrollTargetId == messageId) {
             setState(() => _setScrollTarget(null));
           }
@@ -4915,57 +5006,12 @@ class _ChatViewState extends State<ChatView> {
                   TimeSeparator(unix: message.date),
                 if (message.isService)
                   SystemBanner(text: message.text)
-                else if (message.blockedByUser)
-                  _blockedMessagePlaceholder(context)
+                else if (entry.isBlockedRun)
+                  _blockedMessagePlaceholder(context, entry)
                 else if (entry.isImageGroup)
                   _selectionEntry(entry, _imageGroupBubble(entry.messages))
                 else
-                  _selectionEntry(
-                    entry,
-                    MessageBubble(
-                      message: message,
-                      peerTitle: _vm.peerTitle,
-                      peerPhoto: _vm.peerPhoto,
-                      isGroup: _vm.isGroup,
-                      meName: _vm.meName,
-                      mePhoto: _vm.mePhoto,
-                      showRepeat:
-                          _vm.canForwardContent && _isRepeatTail(messageIndex),
-                      onRepeat: () => _vm.repeatMessage(message),
-                      onLongPress: _isSelecting
-                          ? null
-                          : _showActionMenuForMessage,
-                      onDoubleTap: _isSelecting
-                          ? null
-                          : (m) => unawaited(_showTextSelection(m)),
-                      onReply: (m) => _vm.setReply(m),
-                      onAvatarTap: _openSenderProfile,
-                      onAvatarLongPress: (m) {
-                        if (_vm.isGroup &&
-                            (m.senderName?.isNotEmpty ?? false)) {
-                          _vm.insertMention(m);
-                        }
-                      },
-                      onOpenReply: _scrollToMessage,
-                      onOpenComments: _openMessageComments,
-                      showCommentAttachment: _vm.isChannel,
-                      onOpenImage: _openImage,
-                      onOpenSticker: _openSticker,
-                      onPlayVideo: _playVideo,
-                      onPlayMusic: _playMusicMessage,
-                      onButtonTap: _pressMessageButton,
-                      onBotCommandTap: _sendCommand,
-                      onHashtagTap: _openHashtagSearch,
-                      isRead: _vm.isRead(message),
-                      outgoingBubbleColor: _effectiveOutgoingColor(),
-                      outgoingBubbleTextColor: _effectiveOutgoingTextColor(),
-                      incomingBubbleColor: _effectiveIncomingColor(),
-                      incomingBubbleTextColor: _effectiveIncomingTextColor(),
-                      onToggleReaction: (r) => _vm.toggleReaction(message, r),
-                      onShowReactionUsers: _showReactionUsers,
-                      onRedial: _startCall,
-                    ),
-                  ),
+                  _selectionEntry(entry, _messageBubble(message, messageIndex)),
               ],
             );
             return KeyedSubtree(
@@ -4993,15 +5039,22 @@ class _ChatViewState extends State<ChatView> {
   bool _transcriptCacheGrouped = false;
   int _transcriptCacheUnreadCount = -1;
   int _transcriptCacheLastReadInboxId = -1;
+  int _transcriptCacheBlockedSignature = -1;
 
   List<_TranscriptEntry> _transcriptEntries(bool groupImages) {
     final messages = _vm.messages;
+    final blockedSignature = Object.hashAll(
+      messages
+          .where((message) => message.blockedByUser)
+          .map((message) => message.id),
+    );
     final cached = _transcriptCache;
     if (cached != null &&
         identical(_transcriptCacheMessages, messages) &&
         _transcriptCacheGrouped == groupImages &&
         _transcriptCacheUnreadCount == _vm.unreadCount &&
-        _transcriptCacheLastReadInboxId == _vm.lastReadInboxId) {
+        _transcriptCacheLastReadInboxId == _vm.lastReadInboxId &&
+        _transcriptCacheBlockedSignature == blockedSignature) {
       return cached;
     }
     final entries = groupImages ? _groupedTranscript() : _plainTranscript();
@@ -5010,6 +5063,7 @@ class _ChatViewState extends State<ChatView> {
     _transcriptCacheGrouped = groupImages;
     _transcriptCacheUnreadCount = _vm.unreadCount;
     _transcriptCacheLastReadInboxId = _vm.lastReadInboxId;
+    _transcriptCacheBlockedSignature = blockedSignature;
     _transcriptIndexByKey = {
       for (var i = 0; i < entries.length; i++) entries[i].key: i,
     };
@@ -5094,10 +5148,28 @@ class _ChatViewState extends State<ChatView> {
 
   List<_TranscriptEntry> _plainTranscript() {
     final messages = _vm.messages;
-    return [
-      for (var i = 0; i < messages.length; i++)
-        _TranscriptEntry([messages[i]], i),
-    ];
+    final entries = <_TranscriptEntry>[];
+    var i = 0;
+    while (i < messages.length) {
+      final first = messages[i];
+      if (!first.blockedByUser) {
+        entries.add(_TranscriptEntry([first], i));
+        i++;
+        continue;
+      }
+      final run = <ChatMessage>[first];
+      final j = blockedMessageRunEnd(
+        messages,
+        i,
+        startsNewSection: (index) =>
+            _needsSeparator(index, messages: messages) ||
+            _needsUnreadDivider(index, messages: messages),
+      );
+      run.addAll(messages.sublist(i + 1, j));
+      entries.add(_TranscriptEntry(run, i));
+      i = j;
+    }
+    return entries;
   }
 
   List<_TranscriptEntry> _groupedTranscript() {
@@ -5106,6 +5178,20 @@ class _ChatViewState extends State<ChatView> {
     var i = 0;
     while (i < messages.length) {
       final first = messages[i];
+      if (first.blockedByUser) {
+        final run = <ChatMessage>[first];
+        final j = blockedMessageRunEnd(
+          messages,
+          i,
+          startsNewSection: (index) =>
+              _needsSeparator(index, messages: messages) ||
+              _needsUnreadDivider(index, messages: messages),
+        );
+        run.addAll(messages.sublist(i + 1, j));
+        entries.add(_TranscriptEntry(run, i));
+        i = j;
+        continue;
+      }
       if (!_canGroupImage(first)) {
         entries.add(_TranscriptEntry([first], i));
         i++;

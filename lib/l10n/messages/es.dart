@@ -1548,4 +1548,17 @@ const esMessages = <String, String>{
   'videoPlayerUpNext': "A continuación",
   'videoPlayerWaitingForFile': "Esperando el archivo de vídeo",
   'vipBadgeLabel': "VIP",
+  'blockingBlocklist': "Lista de bloqueo",
+  'blockingCountry': "Bloquear mensajes por país",
+  'blockingCountryDescription':
+      "Solo se aíslan chats privados nuevos iniciados por la otra persona. Se mueven a _Blocked, se leen, se silencian para siempre y no generan avisos.",
+  'blockingCountryOff': "Desactivado",
+  'blockingCountrySearch': "Buscar países",
+  'blockingCountrySelected': "{value1} seleccionados",
+  'blockingExemptCommonPrivateGroup': "Grupo privado en común",
+  'blockingExemptNonDefaultAvatar': "Avatar personalizado",
+  'blockingExemptPlainText': "Texto sin enlaces",
+  'blockingExemptThreeCommonGroups': "3 o más grupos en común",
+  'blockingExemptions': "Excepciones del bloqueo por país",
+  'blockingTitle': "Bloqueo",
 };

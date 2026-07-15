@@ -1429,4 +1429,17 @@ const zhHansMessages = <String, String>{
   'videoPlayerUpNext': "接下来播放",
   'videoPlayerWaitingForFile': "等待视频文件",
   'vipBadgeLabel': "VIP",
+  'blockingBlocklist': "黑名单",
+  'blockingCountry': "按国家/地区屏蔽消息",
+  'blockingCountryDescription':
+      "仅处理对方发起的新私聊。匹配的聊天会移至 _Blocked、标为已读、永久静音且不发送通知。",
+  'blockingCountryOff': "关闭",
+  'blockingCountrySearch': "搜索国家/地区",
+  'blockingCountrySelected': "已选 {value1} 个",
+  'blockingExemptCommonPrivateGroup': "有共同私密群组",
+  'blockingExemptNonDefaultAvatar': "使用了自定义头像",
+  'blockingExemptPlainText': "不含链接的纯文本",
+  'blockingExemptThreeCommonGroups': "有 3 个以上共同群组",
+  'blockingExemptions': "国家/地区屏蔽例外",
+  'blockingTitle': "屏蔽",
 };

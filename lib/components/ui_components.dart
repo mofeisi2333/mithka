@@ -309,9 +309,17 @@ class _UnreadBadgeMorphPainter extends CustomPainter {
 
 /// Group role tag: owner = yellow, admin = teal, member = purple, channel = pink.
 class RoleTag extends StatelessWidget {
-  const RoleTag({super.key, required this.role, this.title});
+  const RoleTag({
+    super.key,
+    required this.role,
+    this.title,
+    this.connectedToTrailing = false,
+    this.fontSize,
+  });
   final MemberRole role;
   final String? title;
+  final bool connectedToTrailing;
+  final double? fontSize;
 
   Color get _color => switch (role) {
     MemberRole.owner => const Color(0xFFFFB300),
@@ -333,17 +341,30 @@ class RoleTag extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.xs + 1,
-        vertical: 1.5,
-      ),
+      key: connectedToTrailing
+          ? const ValueKey('connectedSenderRoleTag')
+          : null,
+      padding: connectedToTrailing
+          ? const EdgeInsets.symmetric(horizontal: 7, vertical: 3)
+          : const EdgeInsets.symmetric(
+              horizontal: AppSpacing.xs + 1,
+              vertical: 1.5,
+            ),
       decoration: BoxDecoration(
         color: _color,
-        borderRadius: BorderRadius.circular(AppRadius.sm),
+        borderRadius: connectedToTrailing
+            ? const BorderRadiusDirectional.only(
+                topStart: Radius.circular(8),
+                bottomStart: Radius.circular(8),
+              )
+            : BorderRadius.circular(AppRadius.sm),
       ),
       child: Text(
         _label.l10n(context),
-        style: AppTextStyle.tiny(Colors.white, weight: AppTextWeight.medium),
+        style: AppTextStyle.tiny(
+          Colors.white,
+          weight: AppTextWeight.medium,
+        ).copyWith(fontSize: fontSize),
       ),
     );
   }

@@ -11,9 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('separates official, customize, and community themes', (
-    tester,
-  ) async {
+  testWidgets('separates official and community themes', (tester) async {
     await tester.binding.setSurfaceSize(const Size(900, 1800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     SharedPreferences.setMockInitialValues({});
@@ -53,12 +51,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Official'), findsOneWidget);
-    expect(find.text('Customize'), findsOneWidget);
+    expect(find.text('Customize'), findsNothing);
     expect(find.text('Community'), findsOneWidget);
-    expect(
-      tester.getTopLeft(find.text('Community')).dy,
-      lessThan(tester.getTopLeft(find.text('Customize')).dy),
-    );
     for (final title in ['Classic', 'Day', 'Dark', 'Night']) {
       expect(find.text(title), findsOneWidget);
     }
@@ -165,7 +159,7 @@ void main() {
     expect(controller.mode, AppearanceMode.light);
   });
 
-  testWidgets('theme URL and localized save action share one compact row', (
+  testWidgets('theme picker omits the custom addtheme URL control', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(320, 1000));
@@ -184,7 +178,7 @@ void main() {
         create: (_) => ThemeController(prefs),
         child: WidgetsApp(
           color: const Color(0xFF0099FF),
-          locale: const Locale('es'),
+          locale: const Locale('en'),
           supportedLocales: AppLocalizations.supportedLocales,
           localizationsDelegates: const [AppLocalizations.delegate],
           onGenerateRoute: (_) => PageRouteBuilder<void>(
@@ -195,17 +189,16 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final control = find.byKey(const ValueKey('global-theme-link-control'));
-    final action = find.byKey(const ValueKey('global-theme-save-action'));
-    expect(control, findsOneWidget);
-    expect(action, findsOneWidget);
-    final controlRect = tester.getRect(control);
-    final actionRect = tester.getRect(action);
-    expect(actionRect.top, greaterThanOrEqualTo(controlRect.top));
-    expect(actionRect.bottom, lessThanOrEqualTo(controlRect.bottom));
-    expect(actionRect.right, lessThanOrEqualTo(controlRect.right));
-    expect(find.text('https://t.me/addtheme/'), findsOneWidget);
-    expect(find.text('Guardar tema'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('global-theme-link-control')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('global-theme-save-action')),
+      findsNothing,
+    );
+    expect(find.text('https://t.me/addtheme/'), findsNothing);
+    expect(find.text('Customize'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
