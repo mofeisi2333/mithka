@@ -4,6 +4,24 @@ import 'package:mithka/components/app_icons.dart';
 import 'package:mithka/components/ui_components.dart';
 
 void main() {
+  testWidgets('colored settings tiles always use white project icons', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Center(
+          child: SettingsIconTile(
+            icon: HeroAppIcons.solidBell,
+            backgroundColor: Color(0xFFFFD44A),
+          ),
+        ),
+      ),
+    );
+
+    final icon = tester.widget<Icon>(find.byIcon(HeroAppIcons.solidBell.data));
+    expect(icon.color, const Color(0xFFFFFFFF));
+  });
+
   testWidgets('settings rows pin their trailing controls on narrow screens', (
     tester,
   ) async {

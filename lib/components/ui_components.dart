@@ -398,6 +398,38 @@ class SettingsCard extends StatelessWidget {
   }
 }
 
+/// Colored settings glyph tile used by the main settings list and nested
+/// settings menus. QQ/iOS-style colored tiles always use a white glyph,
+/// including on yellow and other light backgrounds.
+class SettingsIconTile extends StatelessWidget {
+  const SettingsIconTile({
+    super.key,
+    required this.icon,
+    required this.backgroundColor,
+    this.size = 28,
+    this.iconSize = 15,
+    this.radius = 7,
+  });
+
+  final AppIconData icon;
+  final Color backgroundColor;
+  final double size;
+  final double iconSize;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: size,
+    height: size,
+    alignment: Alignment.center,
+    decoration: BoxDecoration(
+      color: backgroundColor,
+      borderRadius: BorderRadius.circular(radius),
+    ),
+    child: AppIcon(icon, size: iconSize, color: const Color(0xFFFFFFFF)),
+  );
+}
+
 class SettingsRow extends StatelessWidget {
   const SettingsRow({
     super.key,

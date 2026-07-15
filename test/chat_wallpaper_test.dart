@@ -4,8 +4,8 @@ import 'dart:io';
 
 import 'package:archive/archive.dart';
 import 'package:flutter/widgets.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as image_lib;
 import 'package:mithka/chat/chat_wallpaper.dart';
 import 'package:mithka/chat/chat_wallpaper_view.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -34,6 +34,36 @@ void main() {
     expect(
       ChatWallpaper.fromJson(const {'kind': 'preset', 'preset_id': 'missing'}),
       isNull,
+    );
+  });
+
+  test('image-backed wallpapers do not expose color customization', () {
+    expect(
+      wallpaperSupportsColorCustomization(
+        const ChatWallpaper.telegram(
+          backgroundId: 1,
+          remoteType: 'wallpaper',
+          imagePath: '/tmp/background.jpg',
+          colors: [0x123456, 0x654321],
+        ),
+      ),
+      isFalse,
+    );
+    expect(
+      wallpaperSupportsColorCustomization(
+        const ChatWallpaper.image('/tmp/background.jpg'),
+      ),
+      isFalse,
+    );
+    expect(
+      wallpaperSupportsColorCustomization(
+        const ChatWallpaper.telegram(
+          backgroundId: 2,
+          remoteType: 'pattern',
+          imagePath: '/tmp/pattern.png',
+        ),
+      ),
+      isTrue,
     );
   });
 
@@ -747,25 +777,28 @@ void main() {
         if (!resolved.isCompleted) resolved.complete();
       });
       controller.resolvedWallpaper(pattern);
-      await resolved.future.timeout(const Duration(seconds: 2));
+      await resolved.future.timeout(const Duration(seconds: 5));
       final prepared = controller.resolvedWallpaper(pattern);
-      expect(prepared.imagePath, contains('pattern_document_v4_'));
-      final preparedSvg = await File(prepared.imagePath!).readAsString();
-      expect(preparedSvg, isNot(contains('<style>')));
-      expect(preparedSvg, contains('fill="none"'));
-      expect(preparedSvg, contains('stroke-width="4"'));
+      expect(prepared.imagePath, contains('pattern_raster_v1_'));
+      final rendered = image_lib.decodePng(
+        await File(prepared.imagePath!).readAsBytes(),
+      );
+      expect(rendered, isNotNull);
+      int alphaAt(int x, int y) {
+        final scaledX = (x * rendered!.width / 100).round().clamp(
+          0,
+          rendered.width - 1,
+        );
+        final scaledY = (y * rendered.height / 100).round().clamp(
+          0,
+          rendered.height - 1,
+        );
+        return rendered.getPixel(scaledX, scaledY).a.toInt();
+      }
 
-      final picture = await vg.loadPicture(SvgStringLoader(preparedSvg), null);
-      final rendered = await picture.picture.toImage(100, 100);
-      final bytes = await rendered.toByteData();
-      expect(bytes, isNotNull);
-      int alphaAt(int x, int y) =>
-          bytes!.getUint8((y * rendered.width + x) * 4 + 3);
       expect(alphaAt(50, 10), greaterThan(0));
       expect(alphaAt(20, 20), 0);
       expect(alphaAt(50, 50), 0);
-      picture.picture.dispose();
-      rendered.dispose();
     },
   );
 

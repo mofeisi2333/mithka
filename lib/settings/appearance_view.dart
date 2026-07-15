@@ -61,7 +61,7 @@ class AppearanceView extends StatelessWidget {
                 _card(context, [
                   _toggleRow(
                     context,
-                    HeroAppIcons.palette.data,
+                    HeroAppIcons.wandMagicSparkles.data,
                     AppStrings.t(AppStringKeys.appearanceEnableTheming),
                     theme.themingEnabled,
                     (value) => theme.themingEnabled = value,
@@ -98,7 +98,7 @@ class AppearanceView extends StatelessWidget {
                     ),
                     _toggleRow(
                       context,
-                      HeroAppIcons.palette.data,
+                      HeroAppIcons.mobileScreenButton.data,
                       AppStrings.t(AppStringKeys.appearanceUseChatThemeForUi),
                       theme.useTelegramThemeForUi,
                       theme.hasCloudTheme
@@ -131,7 +131,7 @@ class AppearanceView extends StatelessWidget {
                         pageBuilder: (_, _, _) => const _TextSizeSettingsView(),
                       ),
                     ),
-                    icon: HeroAppIcons.font.data,
+                    icon: HeroAppIcons.expand.data,
                   ),
                   _navigationRow(
                     context,
@@ -415,7 +415,7 @@ class DisplaySettingsView extends StatelessWidget {
                 _card(context, [
                   _toggleRow(
                     context,
-                    HeroAppIcons.idBadge.data,
+                    HeroAppIcons.listCheck.data,
                     AppStrings.t(AppStringKeys.appearanceShowGroupMemberTitles),
                     theme.showMemberTags,
                     (v) => theme.showMemberTags = v,
@@ -463,7 +463,7 @@ class DisplaySettingsView extends StatelessWidget {
                   ),
                   _toggleRow(
                     context,
-                    HeroAppIcons.eyeSlash.data,
+                    HeroAppIcons.ban.data,
                     AppStrings.t(
                       AppStringKeys.appearanceHideBlockedUserMessages,
                     ),
@@ -542,14 +542,14 @@ class DisplaySettingsView extends StatelessWidget {
                   ],
                   _toggleRow(
                     context,
-                    HeroAppIcons.palette.data,
+                    HeroAppIcons.wandMagicSparkles.data,
                     AppStrings.t(AppStringKeys.appearanceShowPremiumNameColor),
                     theme.showPremiumNameColors,
                     (v) => theme.showPremiumNameColors = v,
                   ),
                   _toggleRow(
                     context,
-                    HeroAppIcons.solidFaceSmile.data,
+                    HeroAppIcons.star.data,
                     AppStrings.t(
                       AppStringKeys.appearanceShowPremiumStatusEmoji,
                     ),

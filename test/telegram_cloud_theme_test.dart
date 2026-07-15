@@ -89,6 +89,26 @@ chat_outBubble=#fff3b4bd
     ]);
   });
 
+  test('parses macOS palette metadata, alpha, and outgoing gradient', () {
+    final parsed = parseTelegramThemeFile(
+      TelegramThemePlatform.macos,
+      Uint8List.fromList(
+        utf8.encode('''
+isDark=1
+background=101820
+grayText=8e8e93:0.5
+bubbleBackground_outgoing=d8f3ff,8ad4ef
+'''),
+      ),
+    )!;
+
+    expect(parsed.palette['dark'], 1);
+    expect(parsed.palette['background'], 0x101820);
+    expect(parsed.palette['grayText'], 0x808E8E93);
+    expect(parsed.palette['bubbleBackground_outgoing'], 0xD8F3FF);
+    expect(parsed.palette['bubbleBackgroundGradient_outgoing'], 0x8AD4EF);
+  });
+
   test('parses Desktop archive colors, aliases, alpha, and tiled image', () {
     final archive = Archive()
       ..addFile(
@@ -117,50 +137,62 @@ windowShadowFg: #01020380;
     expect(parsed.wallpaperExtension, '.jpg');
   });
 
-  test('cloud theme loader prefers iOS then Android then Desktop', () async {
-    final root = await Directory.systemTemp.createTemp('mithka_theme_order');
-    addTearDown(() => root.delete(recursive: true));
-    final ios = File('${root.path}/theme.tgios-theme');
-    final android = File('${root.path}/theme.attheme');
-    final desktop = File('${root.path}/theme.tdesktop-theme');
-    await ios.writeAsString(_iosTheme);
-    await android.writeAsString('''
+  test(
+    'cloud theme loader merges Android then iOS, macOS, and Desktop',
+    () async {
+      final root = await Directory.systemTemp.createTemp('mithka_theme_order');
+      addTearDown(() => root.delete(recursive: true));
+      final ios = File('${root.path}/theme.tgios-theme');
+      final android = File('${root.path}/theme.attheme');
+      final macos = File('${root.path}/theme.palette');
+      final desktop = File('${root.path}/theme.tdesktop-theme');
+      await ios.writeAsString(_iosTheme);
+      await android.writeAsString('''
 windowBackgroundWhite=#ff334455
 chat_inBubble=#ff445566
 chat_outBubble=#ff556677
+avatar_nameInMessageRed=#ff112233
 ''');
-    final desktopArchive = Archive()
-      ..addFile(
-        ArchiveFile.string(
-          'colors.tdesktop-theme',
-          'windowBg: #667788; msgInBg: #778899; msgOutBg: #8899aa;',
-        ),
+      await macos.writeAsString('groupPeerNameOrange=cc7722');
+      final desktopArchive = Archive()
+        ..addFile(
+          ArchiveFile.string(
+            'colors.tdesktop-theme',
+            'windowBg: #667788; msgInBg: #778899; msgOutBg: #8899aa;',
+          ),
+        );
+      await desktop.writeAsBytes(ZipEncoder().encode(desktopArchive)!);
+
+      final service = TelegramCloudThemeService(
+        query: (_) async => _themePreview([
+          _themeDocument(3, 'theme.tdesktop-theme', 'tgtheme-tdesktop'),
+          _themeDocument(4, 'theme.palette', 'tgtheme-macos'),
+          _themeDocument(2, 'theme.attheme', 'tgtheme-android'),
+          _themeDocument(1, 'theme.tgios-theme', 'tgtheme-ios'),
+        ]),
+        filePath: (id) async =>
+            {1: ios.path, 2: android.path, 3: desktop.path, 4: macos.path}[id],
+        supportDirectory: () async => root,
       );
-    await desktop.writeAsBytes(ZipEncoder().encode(desktopArchive)!);
 
-    final service = TelegramCloudThemeService(
-      query: (_) async => _themePreview([
-        _themeDocument(3, 'theme.tdesktop-theme', 'tgtheme-tdesktop'),
-        _themeDocument(2, 'theme.attheme', 'tgtheme-android'),
-        _themeDocument(1, 'theme.tgios-theme', 'tgtheme-ios'),
-      ]),
-      filePath: (id) async =>
-          {1: ios.path, 2: android.path, 3: desktop.path}[id],
-      supportDirectory: () async => root,
-    );
+      final theme = await service.load(
+        'https://t.me/addtheme/MountainSolitude',
+      );
 
-    final theme = await service.load('https://t.me/addtheme/MountainSolitude');
-
-    expect(theme.palette['list.plainBg'], 0x101820);
-    expect(theme.incomingColor?.toARGB32(), 0xFF22313B);
-    expect(theme.outgoingColor?.toARGB32(), 0xFFF3B4BD);
-    expect(theme.incomingTextColor?.toARGB32(), 0xFFF2F5F7);
-    expect(theme.outgoingTextColor?.toARGB32(), 0xFF101820);
-    expect(
-      theme.uiColors.pinnedRow.toARGB32(),
-      theme.uiColors.background.toARGB32(),
-    );
-  });
+      expect(theme.palette['list.plainBg'], 0x101820);
+      expect(theme.incomingColor?.toARGB32(), 0xFF445566);
+      expect(theme.outgoingColor?.toARGB32(), 0xFF556677);
+      expect(theme.incomingTextColor?.toARGB32(), 0xFFF2F5F7);
+      expect(theme.outgoingTextColor?.toARGB32(), 0xFF101820);
+      expect(
+        theme.uiColors.pinnedRow.toARGB32(),
+        theme.uiColors.background.toARGB32(),
+      );
+      expect(theme.senderNameColors[0].toARGB32(), 0xFF112233);
+      expect(theme.senderNameColors[1].toARGB32(), 0xFFCC7722);
+      expect(theme.semanticUiPreviewColors, hasLength(8));
+    },
+  );
 
   test('telegram.me theme links resolve exactly like t.me links', () async {
     final root = await Directory.systemTemp.createTemp(

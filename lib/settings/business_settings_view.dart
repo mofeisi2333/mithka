@@ -227,20 +227,12 @@ class _BusinessSettingsViewState extends State<BusinessSettingsView> {
           padding: const EdgeInsets.symmetric(horizontal: 14),
           child: Row(
             children: [
-              Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: iconColor,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Center(
-                  child: AppIcon(
-                    icon,
-                    size: 17,
-                    color: readableForeground(iconColor),
-                  ),
-                ),
+              SettingsIconTile(
+                icon: icon,
+                backgroundColor: iconColor,
+                size: 30,
+                iconSize: 17,
+                radius: 8,
               ),
               const SizedBox(width: 12),
               Expanded(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mithka/chat/chat_wallpaper_view.dart';
 import 'package:mithka/chat/link_handler.dart';
+import 'package:mithka/components/app_icons.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:mithka/settings/app_icon_controller.dart';
 import 'package:mithka/settings/appearance_view.dart';
@@ -89,6 +90,52 @@ void main() {
       expect(picker.forDarkTheme, isTrue);
     },
   );
+
+  testWidgets('Appearance uses a distinct icon for every navigation row', (
+    tester,
+  ) async {
+    await _pumpAppearance(tester, themingEnabled: true);
+
+    for (final icon in const [
+      HeroAppIcons.wandMagicSparkles,
+      HeroAppIcons.palette,
+      HeroAppIcons.image,
+      HeroAppIcons.mobileScreenButton,
+      HeroAppIcons.expand,
+      HeroAppIcons.eye,
+      HeroAppIcons.font,
+    ]) {
+      expect(find.byIcon(icon.data), findsOneWidget, reason: '$icon is reused');
+    }
+  });
+
+  testWidgets('Display settings does not reuse row icons', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final controller = ThemeController(prefs);
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: _testApp(const DisplaySettingsView()),
+      ),
+    );
+    await tester.pump();
+
+    for (final icon in const [
+      HeroAppIcons.eyeSlash,
+      HeroAppIcons.listCheck,
+      HeroAppIcons.idBadge,
+      HeroAppIcons.palette,
+      HeroAppIcons.solidFaceSmile,
+      HeroAppIcons.ban,
+      HeroAppIcons.wandMagicSparkles,
+      HeroAppIcons.star,
+    ]) {
+      expect(find.byIcon(icon.data), findsOneWidget, reason: '$icon is reused');
+    }
+  });
 
   testWidgets('theme-link prompt only enables theming after confirmation', (
     tester,

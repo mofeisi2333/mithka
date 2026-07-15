@@ -90,7 +90,7 @@ class _PrivacySecurityViewState extends State<PrivacySecurityView> {
       setting: 'userPrivacySettingShowProfileAudio',
     ),
     _PrivacyRuleEntry(
-      icon: HeroAppIcons.users,
+      icon: HeroAppIcons.comments,
       title: AppStringKeys.privacyGroupsAndChannels,
       setting: 'userPrivacySettingAllowChatInvites',
     ),
@@ -257,7 +257,7 @@ class _PrivacySecurityViewState extends State<PrivacySecurityView> {
                       null,
                     ),
                     _Row(
-                      HeroAppIcons.mobileScreenButton,
+                      HeroAppIcons.networkWired,
                       AppStrings.t(AppStringKeys.privacyLoggedInDevices),
                       '',
                       () => _open(const ActiveSessionsView()),

@@ -447,7 +447,8 @@ class _ChatWallpaperViewState extends State<ChatWallpaperView> {
 
   Widget _customizeBlock() {
     final c = context.colors;
-    final value = _selection;
+    final value = _effectiveWallpaper;
+    final hasColorCustomization = wallpaperSupportsColorCustomization(value);
     final hasEffects =
         value?.supportsBlur == true ||
         value?.supportsMotion == true ||
@@ -463,91 +464,57 @@ class _ChatWallpaperViewState extends State<ChatWallpaperView> {
             color: c.textTertiary,
           ),
         ),
-        const SizedBox(height: 9),
-        GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: _pickColor,
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 52),
-            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-            decoration: BoxDecoration(
-              color: c.card,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Row(
-              children: [
-                AppIcon(HeroAppIcons.palette, size: 19, color: c.linkBlue),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    AppStringKeys.chatWallpaperColor.l10n(context),
-                    style: TextStyle(fontSize: 14, color: c.textPrimary),
-                  ),
-                ),
-                for (final color in _activePalette.take(4)) ...[
-                  Container(
-                    width: 18,
-                    height: 18,
-                    margin: const EdgeInsets.only(left: 4),
-                    decoration: BoxDecoration(
-                      color: Color(0xFF000000 | color),
-                      shape: BoxShape.circle,
-                      border: Border.all(color: const Color(0x33000000)),
+        if (hasColorCustomization) ...[
+          const SizedBox(height: 9),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _pickColor,
+            child: Container(
+              constraints: const BoxConstraints(minHeight: 52),
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+              decoration: BoxDecoration(
+                color: c.card,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(
+                children: [
+                  AppIcon(HeroAppIcons.palette, size: 19, color: c.linkBlue),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      AppStringKeys.chatWallpaperColor.l10n(context),
+                      style: TextStyle(fontSize: 14, color: c.textPrimary),
                     ),
                   ),
-                ],
-                const SizedBox(width: 7),
-                AppIcon(
-                  HeroAppIcons.chevronRight,
-                  size: 15,
-                  color: c.textTertiary,
-                ),
-              ],
-            ),
-          ),
-        ),
-        if (_selectedPatternLabel != null) ...[
-          const SizedBox(height: 8),
-          Container(
-            constraints: const BoxConstraints(minHeight: 44),
-            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
-            decoration: BoxDecoration(
-              color: c.card,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Row(
-              children: [
-                AppIcon(HeroAppIcons.objectGroup, size: 18, color: c.linkBlue),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    _selectedPatternLabel!,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 14, color: c.textPrimary),
+                  for (final color in _activePalette.take(4)) ...[
+                    Container(
+                      width: 18,
+                      height: 18,
+                      margin: const EdgeInsets.only(left: 4),
+                      decoration: BoxDecoration(
+                        color: Color(0xFF000000 | color),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: const Color(0x33000000)),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(width: 7),
+                  AppIcon(
+                    HeroAppIcons.chevronRight,
+                    size: 15,
+                    color: c.textTertiary,
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ],
-        if (hasEffects) ...[const SizedBox(height: 8), _effects()],
+        if (hasEffects) ...[
+          SizedBox(height: hasColorCustomization ? 8 : 9),
+          _effects(),
+        ],
       ],
     );
-  }
-
-  String? get _selectedPatternLabel {
-    final value = _selection;
-    if (value?.remoteType != 'pattern') return null;
-    return _displayBackgroundName(value?.backgroundName);
-  }
-
-  String? _displayBackgroundName(String? value) {
-    final trimmed = value?.trim() ?? '';
-    if (trimmed.isEmpty) return null;
-    return trimmed
-        .replaceAll(RegExp(r'[_-]+'), ' ')
-        .replaceAllMapped(RegExp(r'(?<=[a-z0-9])(?=[A-Z])'), (_) => ' ');
   }
 
   List<ChatWallpaper> get _patternCandidates {
@@ -715,31 +682,6 @@ class _ChatWallpaperViewState extends State<ChatWallpaperView> {
         wallpaper: resolved,
         fallbackColor: context.colors.chatBackground,
         brightness: _isDarkTheme ? Brightness.dark : Brightness.light,
-        child: _patternNameOverlay(pattern),
-      ),
-    );
-  }
-
-  Widget? _patternNameOverlay(ChatWallpaper pattern) {
-    final label = _displayBackgroundName(pattern.backgroundName);
-    if (label == null) return null;
-    return Align(
-      alignment: Alignment.bottomCenter,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
-        color: const Color(0x66000000),
-        child: Text(
-          label,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: Color(0xFFFFFFFF),
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
       ),
     );
   }
@@ -1267,7 +1209,7 @@ class _ChatWallpaperViewState extends State<ChatWallpaperView> {
   }
 
   Widget _effects() {
-    final value = _selection;
+    final value = _effectiveWallpaper;
     if (value == null) return const SizedBox.shrink();
     final c = context.colors;
     return Container(
@@ -1530,6 +1472,19 @@ ChatWallpaper? effectiveThemeWallpaperForPicker({
   // cloud theme's declared defaultWallpaper / t.me/bg background.
   final value = cloudThemeWallpaper ?? global;
   return value == null ? null : controller.resolvedWallpaper(value);
+}
+
+@visibleForTesting
+bool wallpaperSupportsColorCustomization(ChatWallpaper? value) {
+  if (value == null) return true;
+  if (value.kind == ChatWallpaperKind.image ||
+      value.remoteType == 'wallpaper') {
+    return false;
+  }
+  return value.kind == ChatWallpaperKind.preset ||
+      value.remoteType == 'fill' ||
+      value.remoteType == 'pattern' ||
+      value.colors.isNotEmpty;
 }
 
 @immutable

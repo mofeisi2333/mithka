@@ -17,13 +17,44 @@ export 'telegram_theme_parsers.dart'
         parseTelegramAndroidTheme,
         parseTelegramDesktopTheme,
         parseTelegramIosTheme,
+        parseTelegramMacosTheme,
         parseTelegramThemeFile,
+        telegramThemePlatformFallbackOrder,
         telegramThemePlatformForDocument;
 
 typedef TelegramThemeQuery =
     Future<Map<String, dynamic>> Function(Map<String, dynamic> request);
 typedef TelegramThemeFilePath = Future<String?> Function(int fileId);
 typedef TelegramThemeSupportDirectory = Future<Directory> Function();
+
+enum TelegramThemeSemanticColor {
+  background,
+  basicAccent,
+  text,
+  grayText,
+  redUi,
+  greenUi,
+  darkGrayText,
+  card,
+  navBar,
+  groupedBackground,
+  primaryText,
+  secondaryText,
+  tertiaryText,
+  divider,
+  accent,
+  chatBackground,
+  searchFill,
+  inputBarBackground,
+  panelBackground,
+  pinnedRow,
+  listHeaderTint,
+  incomingBubble,
+  incomingText,
+  outgoingBubble,
+  outgoingText,
+  senderName,
+}
 
 @immutable
 class TelegramCloudTheme {
@@ -94,12 +125,7 @@ class TelegramCloudTheme {
 
   Color? get outgoingColor {
     if (outgoingColors.isEmpty) {
-      return _paletteColor(const [
-        'chat.message.outgoing.bubble.withWp.bg',
-        'chat.message.outgoing.bubble.withoutWp.bg',
-        'chat_outBubble',
-        'msgOutBg',
-      ]);
+      return semanticColor(TelegramThemeSemanticColor.outgoingBubble);
     }
     if (outgoingColors.length == 1) {
       return _themeColor(outgoingColors.first);
@@ -112,144 +138,385 @@ class TelegramCloudTheme {
   }
 
   Color? get outgoingTextColor => _paletteColor(const [
-    'chat.message.outgoing.primaryText',
     'chat_messageTextOut',
+    'chat.message.outgoing.primaryText',
+    'textBubble_outgoing',
     'historyTextOutFg',
   ]);
 
   Color? get incomingColor => _paletteColor(const [
+    'chat_inBubble',
     'chat.message.incoming.bubble.withWp.bg',
     'chat.message.incoming.bubble.withoutWp.bg',
-    'chat_inBubble',
+    'bubbleBackground_incoming',
     'msgInBg',
   ]);
 
   Color? get incomingTextColor => _paletteColor(const [
-    'chat.message.incoming.primaryText',
     'chat_messageTextIn',
+    'chat.message.incoming.primaryText',
+    'textBubble_incoming',
     'historyTextInFg',
   ]);
+
+  /// Resolves one reusable semantic variable using Telegram's fidelity order:
+  /// Android, iOS, macOS, then TDesktop.
+  Color? semanticColor(TelegramThemeSemanticColor semantic) =>
+      _paletteColor(switch (semantic) {
+        TelegramThemeSemanticColor.background => const [
+          'windowBackgroundWhite',
+          'list.plainBg',
+          'background',
+          'listBackground',
+          'windowBg',
+          'list_plainBackground',
+          'root_background',
+        ],
+        TelegramThemeSemanticColor.basicAccent => const [
+          'windowBackgroundWhiteBlueText',
+          'windowBackgroundWhiteBlueHeader',
+          'list.accent',
+          'root.tabBar.selectedIcon',
+          'basicAccent',
+          'windowActiveTextFg',
+          'activeButtonBg',
+        ],
+        TelegramThemeSemanticColor.text => const [
+          'windowBackgroundWhiteBlackText',
+          'chatList_title',
+          'list.primaryText',
+          'text',
+          'windowFg',
+        ],
+        TelegramThemeSemanticColor.grayText => const [
+          'windowBackgroundWhiteGrayText',
+          'chatList_message',
+          'list.secondaryText',
+          'grayText',
+          'windowSubTextFg',
+        ],
+        TelegramThemeSemanticColor.redUi => const [
+          'windowBackgroundWhiteRedText',
+          'list.itemDestructiveColor',
+          'list.destructiveColor',
+          'list.destructive',
+          'redUI',
+          'attentionButtonFg',
+          'boxTextFgError',
+        ],
+        TelegramThemeSemanticColor.greenUi => const [
+          'windowBackgroundWhiteGreenText',
+          'list.freeTextSuccess',
+          'list.freeTextSuccessColor',
+          'greenUI',
+          'paymentsCheckboxFg',
+          'callIconFg',
+        ],
+        TelegramThemeSemanticColor.darkGrayText => const [
+          'windowBackgroundWhiteGrayText2',
+          'chatList_dateText',
+          'list.secondaryText',
+          'darkGrayText',
+          'windowSubTextFg',
+        ],
+        TelegramThemeSemanticColor.card => const [
+          'windowBackgroundWhite',
+          'list.itemBlocksBg',
+          'list.blocksBg',
+          'background',
+          'listBackground',
+          'boxBg',
+          'windowBg',
+          'list_blocksBackground',
+        ],
+        TelegramThemeSemanticColor.navBar => const [
+          'actionBarDefault',
+          'root.navBar.opaqueBackground',
+          'root.navBar.background',
+          'background',
+          'titleBgActive',
+          'root_navigationBar',
+          'root_tabBar_background',
+        ],
+        TelegramThemeSemanticColor.groupedBackground => const [
+          'windowBackgroundGray',
+          'list.blocksBg',
+          'grayBackground',
+          'windowBg',
+          'list_blocksBackground',
+          'root_background',
+        ],
+        TelegramThemeSemanticColor.primaryText => const [
+          'windowBackgroundWhiteBlackText',
+          'chatList_title',
+          'list.primaryText',
+          'text',
+          'windowFg',
+          'list_itemPrimaryText',
+        ],
+        TelegramThemeSemanticColor.secondaryText => const [
+          'windowBackgroundWhiteGrayText',
+          'chatList_message',
+          'list.secondaryText',
+          'grayText',
+          'listGrayText',
+          'windowSubTextFg',
+          'list_itemSecondaryText',
+        ],
+        TelegramThemeSemanticColor.tertiaryText => const [
+          'chatList_dateText',
+          'list.secondaryText',
+          'darkGrayText',
+          'listGrayText',
+          'windowSubTextFg',
+          'list_itemSecondaryText',
+        ],
+        TelegramThemeSemanticColor.divider => const [
+          'divider',
+          'list_itemSeparator',
+          'chatList_itemSeparator',
+          'list.plainSeparator',
+          'border',
+          'menuSeparatorFg',
+        ],
+        TelegramThemeSemanticColor.accent => const [
+          'windowBackgroundWhiteBlueText',
+          'chat_linkText',
+          'list_itemAccent',
+          'list.accent',
+          'accent',
+          'basicAccent',
+          'link',
+          'windowActiveTextFg',
+        ],
+        TelegramThemeSemanticColor.chatBackground => const [
+          'chat_wallpaper',
+          'chat_background',
+          'chat.background',
+          'chatBackground',
+          'historyBg',
+        ],
+        TelegramThemeSemanticColor.searchFill => const [
+          'chatListSearch',
+          'list_itemBlocksBackground',
+          'root.searchBar.inputFill',
+          'grayBackground',
+          'filterInputInactiveBg',
+          'chatList_searchBarBackground',
+        ],
+        TelegramThemeSemanticColor.inputBarBackground => const [
+          'chat_messagePanelBackground',
+          'chat_inputPanel',
+          'chat_inputPanelBackground',
+          'chat.inputPanel.panelBg',
+          'background',
+          'historyComposeAreaBg',
+        ],
+        TelegramThemeSemanticColor.panelBackground => const [
+          'emojiPanBg',
+          'chat_inputPanel',
+          'chat.inputMediaPanel.panelContentVibrantOverlay',
+          'grayBackground',
+          'windowBg',
+          'list_blocksBackground',
+        ],
+        TelegramThemeSemanticColor.pinnedRow => const [
+          'chatList_pinnedItemBackground',
+          'chatListPinnedItemBackground',
+          'chatList.pinnedItemBackground',
+          'chats_pinnedOverlay',
+          'list.itemHighlightedBg',
+          'grayHighlight',
+          'dialogsBg',
+          'list.itemHighlightedBackground',
+          'list_itemHighlightedBackground',
+        ],
+        TelegramThemeSemanticColor.listHeaderTint => const [
+          'chats_menuTopBackground',
+          'chatList_sectionHeaderBackground',
+          'chatList.sectionHeaderBg',
+          'grayBackground',
+          'dialogsBg',
+        ],
+        TelegramThemeSemanticColor.incomingBubble => const [
+          'chat_inBubble',
+          'chat.message.incoming.bubble.withWp.bg',
+          'chat.message.incoming.bubble.withoutWp.bg',
+          'bubbleBackground_incoming',
+          'msgInBg',
+        ],
+        TelegramThemeSemanticColor.incomingText => const [
+          'chat_messageTextIn',
+          'chat.message.incoming.primaryText',
+          'textBubble_incoming',
+          'historyTextInFg',
+        ],
+        TelegramThemeSemanticColor.outgoingBubble => const [
+          'chat_outBubble',
+          'chat.message.outgoing.bubble.withWp.bg',
+          'chat.message.outgoing.bubble.withoutWp.bg',
+          'bubbleBackground_outgoing',
+          'msgOutBg',
+        ],
+        TelegramThemeSemanticColor.outgoingText => const [
+          'chat_messageTextOut',
+          'chat.message.outgoing.primaryText',
+          'textBubble_outgoing',
+          'historyTextOutFg',
+        ],
+        TelegramThemeSemanticColor.senderName => const [
+          'avatar_nameInMessageBlue',
+          'chat_inReplyNameText',
+          'chat_inForwardedNameText',
+          'chat.message.incoming.accentText',
+          'groupPeerNameBlue',
+          'linkBubble_incoming',
+          'historyPeer1NameFg',
+        ],
+      });
+
+  /// The compact semantic palette displayed by the global theme picker.
+  /// Values follow the imported Telegram document on every supported platform;
+  /// app defaults are used only when that semantic is absent everywhere.
+  List<Color> get semanticUiPreviewColors {
+    final base = isDark ? AppColors.dark : AppColors.light;
+    Color value(TelegramThemeSemanticColor semantic, Color fallback) =>
+        semanticColor(semantic) ?? fallback;
+    return <Color>[
+      value(TelegramThemeSemanticColor.background, base.background),
+      value(TelegramThemeSemanticColor.basicAccent, accentColor),
+      value(TelegramThemeSemanticColor.text, base.textPrimary),
+      value(TelegramThemeSemanticColor.grayText, base.textSecondary),
+      value(TelegramThemeSemanticColor.accent, accentColor),
+      value(TelegramThemeSemanticColor.redUi, const Color(0xFFFF3B30)),
+      value(TelegramThemeSemanticColor.greenUi, const Color(0xFF34C759)),
+      value(TelegramThemeSemanticColor.darkGrayText, base.textTertiary),
+    ];
+  }
+
+  Color get senderNameColor =>
+      semanticColor(TelegramThemeSemanticColor.senderName) ?? accentColor;
+
+  /// Telegram's assigned sender-name colors in `accent_color_id` order:
+  /// red, orange, violet, green, cyan, blue, and pink.
+  ///
+  /// Android names win over iOS, macOS, and TDesktop aliases. The semantic
+  /// fallback samples are reached only when an imported theme has no variable
+  /// for that slot.
+  List<Color> get senderNameColors {
+    const names = <String>[
+      'Red',
+      'Orange',
+      'Violet',
+      'Green',
+      'Cyan',
+      'Blue',
+      'Pink',
+    ];
+    const lowerNames = <String>[
+      'red',
+      'orange',
+      'violet',
+      'green',
+      'cyan',
+      'blue',
+      'pink',
+    ];
+    const fallback = <Color>[
+      Color(0xFFE2B4B4),
+      Color(0xFFE5EAA8),
+      Color(0xFFB39DC8),
+      Color(0xFFBAE2B4),
+      Color(0xFFA5E1DE),
+      Color(0xFFB4C4E2),
+      Color(0xFFD59EBB),
+    ];
+    return <Color>[
+      for (var index = 0; index < names.length; index++)
+        _paletteColor(<String>[
+              'avatar_nameInMessage${names[index]}',
+              'chat.message.incoming.authorName.${lowerNames[index]}',
+              'chat.message.incoming.authorName${names[index]}',
+              'chat.peerName.${lowerNames[index]}',
+              'chat_messageName${names[index]}',
+              'chat_messageAuthor${names[index]}',
+              'groupPeerName${names[index]}',
+              if (index == 5) 'groupPeerNameLightBlue',
+              'historyPeer${index + 1}NameFg',
+            ]) ??
+            fallback[index],
+    ];
+  }
+
+  Color senderNameColorForAccentId(int accentColorId) {
+    final colors = senderNameColors;
+    if (accentColorId >= 0 && accentColorId < colors.length) {
+      return colors[accentColorId];
+    }
+    return colors.first;
+  }
 
   /// Semantic UI variables derived from Telegram's platform-specific keys.
   /// Consumers should use these tokens instead of reading raw palette keys.
   AppColors get uiColors {
     final base = isDark ? AppColors.dark : AppColors.light;
-    Color value(List<String> keys, Color fallback) =>
-        _paletteColor(keys) ?? fallback;
-    final background = value(const [
-      'list.plainBg',
-      'windowBackgroundWhite',
-      'windowBg',
-      'chatList_background',
-      'list_plainBackground',
-      'root_background',
-    ], base.background);
-    final card = value(const [
-      'list.itemBlocksBg',
-      'list.blocksBg',
-      'windowBackgroundWhite',
-      'boxBg',
-      'list_plainBackground',
-      'list_blocksBackground',
-    ], base.card);
-    final primary = value(const [
-      'list.primaryText',
-      'windowBackgroundWhiteBlackText',
-      'windowFg',
-      'list_itemPrimaryText',
-      'chatList_title',
-    ], base.textPrimary);
-    final secondary = value(const [
-      'list.secondaryText',
-      'windowBackgroundWhiteGrayText',
-      'windowSubTextFg',
-      'list_itemSecondaryText',
-      'chatList_message',
-    ], base.textSecondary);
+    Color value(TelegramThemeSemanticColor semantic, Color fallback) =>
+        semanticColor(semantic) ?? fallback;
+    final background = value(
+      TelegramThemeSemanticColor.background,
+      base.background,
+    );
+    final card = value(TelegramThemeSemanticColor.card, base.card);
+    final primary = value(
+      TelegramThemeSemanticColor.primaryText,
+      base.textPrimary,
+    );
+    final secondary = value(
+      TelegramThemeSemanticColor.secondaryText,
+      base.textSecondary,
+    );
     final chatBackground =
         _wallpaperColor() ??
-        value(const ['chat_wallpaper', 'chat_background'], base.chatBackground);
-    final accent = value(const [
-      'list.accent',
-      'windowBackgroundWhiteBlueText',
-      'windowActiveTextFg',
-      'list_itemAccent',
-      'chat_linkText',
-    ], accentColor);
+        value(TelegramThemeSemanticColor.chatBackground, base.chatBackground);
+    final accent = value(TelegramThemeSemanticColor.accent, accentColor);
     return base.copyWith(
       background: background,
-      pinnedRow: value(const [
-        'chatList.pinnedItemBackground',
-        'chatList_pinnedItemBackground',
-        'chatListPinnedItemBackground',
-        'chats_pinnedOverlay',
-        'list.itemHighlightedBg',
-        'list.itemHighlightedBackground',
-        'list_itemHighlightedBackground',
-      ], background),
-      listHeaderTint: value(const [
-        'chatList.sectionHeaderBg',
-        'chats_menuTopBackground',
-        'chatList_sectionHeaderBackground',
-      ], background),
+      pinnedRow: value(TelegramThemeSemanticColor.pinnedRow, background),
+      listHeaderTint: value(
+        TelegramThemeSemanticColor.listHeaderTint,
+        background,
+      ),
       card: card,
-      navBar: value(const [
-        'root.navBar.opaqueBackground',
-        'root.navBar.background',
-        'actionBarDefault',
-        'titleBgActive',
-        'root_navigationBar',
-        'root_tabBar_background',
-      ], card),
-      groupedBackground: value(const [
-        'list.blocksBg',
-        'windowBackgroundGray',
-        'windowBg',
-        'list_blocksBackground',
-        'root_background',
-      ], base.groupedBackground),
+      navBar: value(TelegramThemeSemanticColor.navBar, card),
+      groupedBackground: value(
+        TelegramThemeSemanticColor.groupedBackground,
+        base.groupedBackground,
+      ),
       chatBackground: chatBackground,
-      searchFill: value(const [
-        'root.searchBar.inputFill',
-        'chatListSearch',
-        'filterInputInactiveBg',
-        'chatList_searchBarBackground',
-        'list_itemBlocksBackground',
-      ], base.searchFill),
-      inputBarBackground: value(const [
-        'chat.inputPanel.panelBg',
-        'chat_messagePanelBackground',
-        'historyComposeAreaBg',
-        'chat_inputPanel',
-        'chat_inputPanelBackground',
-      ], base.inputBarBackground),
-      panelBackground: value(const [
-        'chat.inputMediaPanel.panelContentVibrantOverlay',
-        'windowBackgroundGray',
-        'emojiPanBg',
-        'chat_inputPanel',
-        'list_blocksBackground',
-      ], base.panelBackground),
-      bubbleIncoming: incomingColor ?? base.bubbleIncoming,
-      bubbleIncomingText: value(const [
-        'chat.message.incoming.primaryText',
-        'chat_messageTextIn',
-        'historyTextInFg',
-        'chat_inPrimaryText',
-      ], base.bubbleIncomingText),
+      searchFill: value(TelegramThemeSemanticColor.searchFill, base.searchFill),
+      inputBarBackground: value(
+        TelegramThemeSemanticColor.inputBarBackground,
+        base.inputBarBackground,
+      ),
+      panelBackground: value(
+        TelegramThemeSemanticColor.panelBackground,
+        base.panelBackground,
+      ),
+      bubbleIncoming: value(
+        TelegramThemeSemanticColor.incomingBubble,
+        base.bubbleIncoming,
+      ),
+      bubbleIncomingText: value(
+        TelegramThemeSemanticColor.incomingText,
+        base.bubbleIncomingText,
+      ),
       textPrimary: primary,
       textSecondary: secondary,
-      textTertiary: value(const [
-        'list_itemSecondaryText',
-        'chatList_dateText',
-      ], base.textTertiary),
-      divider: value(const [
-        'list.plainSeparator',
-        'divider',
-        'menuSeparatorFg',
-        'list_itemSeparator',
-        'chatList_itemSeparator',
-      ], base.divider),
+      textTertiary: value(
+        TelegramThemeSemanticColor.tertiaryText,
+        base.textTertiary,
+      ),
+      divider: value(TelegramThemeSemanticColor.divider, base.divider),
       linkBlue: accent,
       onAccent: readableForeground(accent),
     );
@@ -532,8 +799,9 @@ class TelegramCloudThemeService {
     List<Map<String, dynamic>> documents, {
     required String slug,
   }) async {
-    // Deliberate fidelity order: iOS first, then Android, then Desktop.
-    for (final platform in TelegramThemePlatform.values) {
+    final mergedPalette = <String, int>{};
+    ChatWallpaper? wallpaper;
+    for (final platform in telegramThemePlatformFallbackOrder) {
       for (final document in documents) {
         final fileName = _documentName(document);
         final mimeType = document.str('mime_type') ?? '';
@@ -554,17 +822,23 @@ class TelegramCloudThemeService {
             await File(path).readAsBytes(),
           );
           if (parsed == null || !parsed.isUseful) continue;
-          return _LoadedPlatformTheme(
-            palette: parsed.palette,
-            wallpaper: await _wallpaperFromThemeFile(parsed, slug: slug),
-          );
+          for (final entry in parsed.palette.entries) {
+            mergedPalette.putIfAbsent(entry.key, () => entry.value);
+          }
+          wallpaper ??= await _wallpaperFromThemeFile(parsed, slug: slug);
+          break;
         } catch (_) {
           // Older cloud themes often omit one or more platform documents.
           // Continue to the next matching file instead of failing the link.
         }
       }
     }
-    return null;
+    return mergedPalette.isEmpty && wallpaper == null
+        ? null
+        : _LoadedPlatformTheme(
+            palette: Map.unmodifiable(mergedPalette),
+            wallpaper: wallpaper,
+          );
   }
 
   Future<ChatWallpaper?> _wallpaperFromThemeFile(
@@ -806,8 +1080,10 @@ String? _baseThemeFromPalette(Map<String, int> palette) {
   if (dark == 1) return 'builtInThemeNight';
   if (dark == 0) return 'builtInThemeDay';
   final background = _firstPaletteValue(palette, const [
-    'list.plainBg',
     'windowBackgroundWhite',
+    'list.plainBg',
+    'background',
+    'listBackground',
     'windowBg',
     'list_plainBackground',
   ]);
@@ -820,25 +1096,30 @@ String? _baseThemeFromPalette(Map<String, int> palette) {
 
 int? _accentFromPalette(Map<String, int> palette) =>
     _firstPaletteValue(palette, const [
-      'list.accent',
       'windowBackgroundWhiteBlueText',
-      'windowActiveTextFg',
       'list_itemAccent',
       'chat_linkText',
+      'list.accent',
+      'accent',
+      'basicAccent',
+      'windowActiveTextFg',
     ]);
 
 List<int> _outgoingFromPalette(Map<String, int> palette) {
   final first = _firstPaletteValue(palette, const [
+    'chat_outBubble',
     'chat.message.outgoing.bubble.withWp.bg',
     'chat.message.outgoing.bubble.withoutWp.bg',
-    'chat_outBubble',
+    'bubbleBackground_outgoing',
     'msgOutBg',
   ]);
   if (first == null) return const [];
   final second = _firstPaletteValue(palette, const [
+    'chat_outBubbleGradient1',
     'chat.message.outgoing.bubble.withWp.gradientBg',
     'chat.message.outgoing.bubble.withoutWp.gradientBg',
-    'chat_outBubbleGradient1',
+    'bubbleBackgroundGradient_outgoing',
+    'msgOutBgSelected',
   ]);
   return second == null || second == first ? [first] : [first, second];
 }

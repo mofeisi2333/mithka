@@ -607,6 +607,7 @@ class ChatWallpaperController extends ChangeNotifier {
   final Set<String> _loadedLocal = {};
   final Set<String> _loading = {};
   final Set<String> _resolvingFiles = {};
+  Future<void> _patternPreparationTail = Future<void>.value();
   final Map<String, List<ChatWallpaper>> _installedBackgrounds = {};
   final Map<String, ChatWallpaper?> _defaultBackgrounds = {};
   final Map<int, List<ChatWallpaper>> _savedBackgrounds = {};
@@ -1611,7 +1612,7 @@ class ChatWallpaperController extends ChangeNotifier {
         if (!_wallpaperFileKeys.contains(key)) return;
         final previous = _resolvedFilePaths[key];
         if (previous == path ||
-            previous?.toLowerCase().endsWith('.svg') == true) {
+            (previous != null && _isPreparedPatternPath(previous))) {
           return;
         }
         _resolvedFilePaths[key] = path;
@@ -1840,7 +1841,9 @@ class ChatWallpaperController extends ChangeNotifier {
         }
         if (path == null || path.isEmpty) return;
         if (wallpaper.remoteType == 'pattern') {
-          path = await _preparePatternFile(wallpaper.fileId, path);
+          path = await _queuePatternPreparation(
+            () => _preparePatternFile(wallpaper.fileId, path!),
+          );
         }
         if (_resolvedFilePaths[key] != path) {
           _resolvedFilePaths[key] = path;
@@ -1855,25 +1858,45 @@ class ChatWallpaperController extends ChangeNotifier {
     }());
   }
 
+  Future<String> _queuePatternPreparation(Future<String> Function() operation) {
+    final result = Completer<String>();
+    _patternPreparationTail = _patternPreparationTail.then((_) async {
+      try {
+        result.complete(await operation());
+      } catch (error, stackTrace) {
+        result.completeError(error, stackTrace);
+      }
+    });
+    return result.future;
+  }
+
   Future<String> _preparePatternFile(int fileId, String sourcePath) async {
-    if (_isPreparedPatternPath(sourcePath)) return sourcePath;
+    if (_isRasterizedPatternPath(sourcePath)) return sourcePath;
     final support = await _supportDirectory();
     final folder = Directory(
       '${support.path}/chat_wallpapers/${_activeSlot()}/telegram',
     );
     await folder.create(recursive: true);
-    // Reuse prepared masks across cards, the full preview, the chat view, and
-    // app restarts. This avoids repeatedly decompressing TGV and reparsing SVG
-    // just because the same Telegram pattern appears at different sizes.
-    for (final extension in const ['svg', 'png']) {
-      final cached = File(
+    // Cache the rendered transparent mask rather than only the normalized SVG.
+    // Image.file then shares Flutter's in-memory image cache across previews
+    // and chats, while this file avoids parsing/rasterizing again after restart.
+    final destination = File('${folder.path}/pattern_raster_v1_$fileId.png');
+    if (await destination.exists() && await destination.length() > 0) {
+      return destination.path;
+    }
+
+    // Reuse the normalized v4 document left by an earlier build as the source
+    // for this one-time raster migration.
+    var source = File(sourcePath);
+    for (final extension in const ['png', 'svg']) {
+      final prepared = File(
         '${folder.path}/pattern_document_v4_$fileId.$extension',
       );
-      if (await cached.exists() && await cached.length() > 0) {
-        return cached.path;
+      if (await prepared.exists() && await prepared.length() > 0) {
+        source = prepared;
+        break;
       }
     }
-    final source = File(sourcePath);
     final bytes = await source.readAsBytes();
     final isGzip = bytes.length >= 2 && bytes[0] == 0x1f && bytes[1] == 0x8b;
     final decoded = isGzip ? GZipDecoder().decodeBytes(bytes) : bytes;
@@ -1883,10 +1906,6 @@ class ChatWallpaperController extends ChangeNotifier {
         decoded[1] == 0x50 &&
         decoded[2] == 0x4e &&
         decoded[3] == 0x47;
-    final extension = isPng ? 'png' : 'svg';
-    final destination = File(
-      '${folder.path}/pattern_document_v4_$fileId.$extension',
-    );
     // Telegram's pattern documents are authored as the final alpha mask. In
     // particular, the official Paris asset already contains fine, rounded
     // `fill:none` strokes. flutter_svg does not resolve the Illustrator CSS
@@ -1897,8 +1916,8 @@ class ChatWallpaperController extends ChangeNotifier {
       await destination.writeAsBytes(decoded, flush: true);
     } else {
       final sourceSvg = utf8.decode(decoded, allowMalformed: true);
-      await destination.writeAsString(
-        inlineTelegramPatternSvgStyles(sourceSvg),
+      await destination.writeAsBytes(
+        await _rasterizePatternSvg(inlineTelegramPatternSvgStyles(sourceSvg)),
         flush: true,
       );
     }
@@ -2556,10 +2575,49 @@ Color _representativeFillColor(List<int> colors) {
   return color;
 }
 
+Future<List<int>> _rasterizePatternSvg(String source) async {
+  final pictureInfo = await vg.loadPicture(SvgStringLoader(source), null);
+  ui.Picture? scaledPicture;
+  ui.Image? raster;
+  try {
+    final sourceWidth =
+        pictureInfo.size.width.isFinite && pictureInfo.size.width > 0
+        ? pictureInfo.size.width
+        : 1024.0;
+    final sourceHeight =
+        pictureInfo.size.height.isFinite && pictureInfo.size.height > 0
+        ? pictureInfo.size.height
+        : 1024.0;
+    const targetLongEdge = 1536.0;
+    final scale = targetLongEdge / math.max(sourceWidth, sourceHeight);
+    final targetWidth = math.max(1, (sourceWidth * scale).round());
+    final targetHeight = math.max(1, (sourceHeight * scale).round());
+
+    final recorder = ui.PictureRecorder();
+    ui.Canvas(recorder)
+      ..scale(targetWidth / sourceWidth, targetHeight / sourceHeight)
+      ..drawPicture(pictureInfo.picture);
+    scaledPicture = recorder.endRecording();
+    raster = await scaledPicture.toImage(targetWidth, targetHeight);
+    final bytes = await raster.toByteData(format: ui.ImageByteFormat.png);
+    if (bytes == null) throw StateError('Could not rasterize pattern SVG');
+    return bytes.buffer.asUint8List(bytes.offsetInBytes, bytes.lengthInBytes);
+  } finally {
+    raster?.dispose();
+    scaledPicture?.dispose();
+    pictureInfo.picture.dispose();
+  }
+}
+
+bool _isRasterizedPatternPath(String path) {
+  final lower = path.toLowerCase();
+  return lower.contains('pattern_raster_v1_') && lower.endsWith('.png');
+}
+
 bool _isPreparedPatternPath(String path) {
   final lower = path.toLowerCase();
-  return lower.contains('pattern_document_v4_') &&
-      (lower.endsWith('.svg') || lower.endsWith('.png'));
+  return _isRasterizedPatternPath(path) ||
+      (lower.contains('pattern_document_v4_') && lower.endsWith('.png'));
 }
 
 /// `flutter_svg` intentionally supports presentation attributes but not the

@@ -366,7 +366,7 @@ class _ProxyViewState extends State<ProxyView> {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
             children: [
-              AppIcon(HeroAppIcons.plus, size: 18, color: AppTheme.brand),
+              AppIcon(HeroAppIcons.link, size: 18, color: AppTheme.brand),
               const SizedBox(width: 10),
               Text(
                 AppStrings.t(AppStringKeys.proxyAddFromLink),

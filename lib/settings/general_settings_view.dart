@@ -138,7 +138,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
         _sectionHeader(AppStrings.t(AppStringKeys.generalAutoDownloadMedia)),
         _card([
           _toggleRowWithSubtitle(
-            HeroAppIcons.mobileScreenButton.data,
+            HeroAppIcons.mobileScreenButton,
             const Color(0xFF34C759),
             AppStrings.t(AppStringKeys.generalAutoDownloadMobileData),
             auto.mobileHighResImages
@@ -151,7 +151,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
           ),
           const InsetDivider(leadingInset: 56),
           _toggleRowWithSubtitle(
-            HeroAppIcons.image.data,
+            HeroAppIcons.image,
             const Color(0xFF1D9BF0),
             AppStrings.t(AppStringKeys.generalAutoDownloadWifi),
             auto.wifiHighResImages
@@ -179,15 +179,8 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
     }
   }
 
-  Widget _iconBadge(IconData icon, Color color) => Container(
-    width: 28,
-    height: 28,
-    decoration: BoxDecoration(
-      color: color,
-      borderRadius: BorderRadius.circular(7),
-    ),
-    child: Icon(icon, size: 15, color: readableForeground(color)),
-  );
+  Widget _iconBadge(AppIconData icon, Color color) =>
+      SettingsIconTile(icon: icon, backgroundColor: color);
 
   Widget _card(List<Widget> children) {
     return Container(
@@ -213,10 +206,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
                 children: [
-                  _iconBadge(
-                    HeroAppIcons.solidFolder.data,
-                    const Color(0xFF16B0A0),
-                  ),
+                  _iconBadge(HeroAppIcons.solidFolder, const Color(0xFF16B0A0)),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
@@ -287,7 +277,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
         _sectionHeader(AppStrings.t(AppStringKeys.audioSearchChatTab)),
         _card([
           _toggleRow(
-            HeroAppIcons.reply.data,
+            HeroAppIcons.reply,
             const Color(0xFF3C8CF0),
             AppStrings.t(AppStringKeys.generalSendMessageWithEnter),
             _enterToSend,
@@ -298,7 +288,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
           ),
           const InsetDivider(leadingInset: 56),
           _toggleRow(
-            HeroAppIcons.download.data,
+            HeroAppIcons.download,
             const Color(0xFF3C8CF0),
             AppStrings.t(AppStringKeys.generalOpenChatAtLatestMessage),
             theme.openChatsAtLatest,
@@ -306,7 +296,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
           ),
           const InsetDivider(leadingInset: 56),
           _toggleRow(
-            HeroAppIcons.arrowsRotate.data,
+            HeroAppIcons.arrowsRotate,
             const Color(0xFF16B0A0),
             AppStrings.t(AppStringKeys.generalRepeatPreserveSender),
             theme.preserveSenderWhenRepeating,
@@ -344,7 +334,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
             children: [
-              _iconBadge(icon.data, color),
+              _iconBadge(icon, color),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
@@ -368,7 +358,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
   }
 
   Widget _toggleRow(
-    IconData icon,
+    AppIconData icon,
     Color color,
     String title,
     bool value,
@@ -400,7 +390,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
   }
 
   Widget _toggleRowWithSubtitle(
-    IconData icon,
+    AppIconData icon,
     Color color,
     String title,
     String subtitle,

@@ -1035,6 +1035,9 @@ abstract final class AppStringKeys {
   static const globalThemeInstalled = 'globalThemeInstalled';
   static const globalThemeLoading = 'globalThemeLoading';
   static const globalThemeNight = 'globalThemeNight';
+  static const globalThemeSwitchModeAction = 'globalThemeSwitchModeAction';
+  static const globalThemeSwitchToDark = 'globalThemeSwitchToDark';
+  static const globalThemeSwitchToLight = 'globalThemeSwitchToLight';
   static const globalThemeOfficial = 'globalThemeOfficial';
   static const globalThemePreview = 'globalThemePreview';
   static const globalThemeReset = 'globalThemeReset';

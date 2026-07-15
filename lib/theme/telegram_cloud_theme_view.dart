@@ -3,7 +3,7 @@ import 'package:mithka/l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
 import '../chat/chat_wallpaper.dart';
-import '../components/app_icons.dart';
+import '../components/app_confirm_dialog.dart';
 import '../components/ui_components.dart';
 import 'app_theme.dart';
 import 'telegram_cloud_theme.dart';
@@ -14,10 +14,12 @@ class TelegramCloudThemePreviewView extends StatelessWidget {
     super.key,
     required this.theme,
     this.targetBrightness,
+    this.currentAppBrightness,
   });
 
   final TelegramCloudTheme theme;
   final Brightness? targetBrightness;
+  final Brightness? currentAppBrightness;
 
   @override
   Widget build(BuildContext context) {
@@ -34,7 +36,7 @@ class TelegramCloudThemePreviewView extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.all(AppSpacing.xl),
               children: [
-                _identity(context, colors),
+                _identity(colors),
                 const SizedBox(height: AppSpacing.xl),
                 _chatPreview(context, colors),
               ],
@@ -46,53 +48,24 @@ class TelegramCloudThemePreviewView extends StatelessWidget {
     );
   }
 
-  Widget _identity(BuildContext context, AppColors colors) => Container(
+  Widget _identity(AppColors colors) => Container(
     padding: const EdgeInsets.all(AppSpacing.xxl),
     decoration: BoxDecoration(
       color: colors.card,
       borderRadius: BorderRadius.circular(AppRadius.card),
     ),
-    child: Row(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          width: 48,
-          height: 48,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: theme.accentColor.withValues(alpha: 0.16),
-            borderRadius: BorderRadius.circular(AppRadius.control),
-          ),
-          child: AppIcon(
-            HeroAppIcons.palette,
-            size: AppIconSize.toolbar,
-            color: theme.accentColor,
+        Text(
+          theme.title,
+          style: AppTextStyle.title(
+            colors.textPrimary,
+            weight: AppTextWeight.semibold,
           ),
         ),
-        const SizedBox(width: AppSpacing.lg),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                theme.title,
-                style: AppTextStyle.title(
-                  colors.textPrimary,
-                  weight: AppTextWeight.semibold,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.xs),
-              Text(
-                '@${theme.slug}',
-                style: AppTextStyle.footnote(colors.textSecondary),
-              ),
-              const SizedBox(height: AppSpacing.xs),
-              Text(
-                AppStringKeys.cloudThemeOfficialDescription.l10n(context),
-                style: AppTextStyle.caption(colors.textTertiary),
-              ),
-            ],
-          ),
-        ),
+        const SizedBox(height: AppSpacing.xs),
+        Text(theme.slug, style: AppTextStyle.footnote(colors.textSecondary)),
       ],
     ),
   );
@@ -171,13 +144,7 @@ class TelegramCloudThemePreviewView extends StatelessWidget {
       minimum: const EdgeInsets.all(AppSpacing.xl),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: () {
-          context.read<ThemeController>().installCloudTheme(
-            theme,
-            brightness: targetBrightness,
-          );
-          Navigator.of(context).pop();
-        },
+        onTap: () => _applyTheme(context, colors),
         child: Container(
           height: 48,
           alignment: Alignment.center,
@@ -196,4 +163,35 @@ class TelegramCloudThemePreviewView extends StatelessWidget {
       ),
     ),
   );
+
+  Future<void> _applyTheme(BuildContext context, AppColors colors) async {
+    final controller = context.read<ThemeController>();
+    final target = theme.isBuiltIn
+        ? targetBrightness ??
+              (theme.isDark ? Brightness.dark : Brightness.light)
+        : (theme.isDark ? Brightness.dark : Brightness.light);
+    final current =
+        currentAppBrightness ??
+        switch (controller.mode) {
+          AppearanceMode.light => Brightness.light,
+          AppearanceMode.dark => Brightness.dark,
+          AppearanceMode.system => MediaQuery.platformBrightnessOf(context),
+        };
+    if (!theme.isBuiltIn && target != current) {
+      final confirmed = await showAppConfirmDialog(
+        context,
+        title: target == Brightness.dark
+            ? AppStringKeys.globalThemeSwitchToDark
+            : AppStringKeys.globalThemeSwitchToLight,
+        confirmText: AppStringKeys.globalThemeSwitchModeAction,
+        colors: colors,
+      );
+      if (!context.mounted || !confirmed) return;
+      controller.mode = target == Brightness.dark
+          ? AppearanceMode.dark
+          : AppearanceMode.light;
+    }
+    controller.installCloudTheme(theme, brightness: target);
+    if (context.mounted) Navigator.of(context).pop();
+  }
 }

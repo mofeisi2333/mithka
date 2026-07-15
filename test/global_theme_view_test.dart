@@ -86,6 +86,12 @@ void main() {
       find.byKey(const ValueKey('global-theme-color-grid')),
       findsOneWidget,
     );
+    for (var index = 0; index < 8; index++) {
+      expect(
+        find.byKey(ValueKey('global-theme-semantic-swatch-$index')),
+        findsOneWidget,
+      );
+    }
     expect(
       find.byKey(const ValueKey('global-theme-accent-list')),
       findsOneWidget,
@@ -95,6 +101,12 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Use default theme'), findsNothing);
+    expect(
+      find.text(
+        'Import a Telegram theme for chats. Applying its colors to the rest of the app is optional.',
+      ),
+      findsNothing,
+    );
 
     final selectedPill = tester.getSize(
       find.byKey(const ValueKey('global-theme-brightness-light')),
@@ -102,7 +114,58 @@ void main() {
     expect(selectedPill.height, 36);
   });
 
-  testWidgets('theme URL and localized preview action share one compact row', (
+  testWidgets('day and night selection previews only the theme page', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({'appearanceMode': 'light'});
+    final prefs = await SharedPreferences.getInstance();
+    final controller = ThemeController(prefs);
+    final service = TelegramCloudThemeService(
+      query: (_) async => {
+        '@type': 'installedCloudThemes',
+        'themes': const <Object>[],
+      },
+    );
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: WidgetsApp(
+          color: const Color(0xFF0099FF),
+          locale: const Locale('en'),
+          supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: const [AppLocalizations.delegate],
+          onGenerateRoute: (_) => PageRouteBuilder<void>(
+            pageBuilder: (_, _, _) => Theme(
+              data: ThemeData(
+                brightness: Brightness.light,
+                extensions: [AppColors.light],
+              ),
+              child: GlobalThemeView(themeService: service),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const ValueKey('global-theme-brightness-dark')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      Theme.of(
+        tester.element(
+          find.byKey(const ValueKey('global-theme-brightness-picker')),
+        ),
+      ).brightness,
+      Brightness.dark,
+    );
+    expect(controller.mode, AppearanceMode.light);
+  });
+
+  testWidgets('theme URL and localized save action share one compact row', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(320, 1000));
@@ -133,7 +196,7 @@ void main() {
     await tester.pumpAndSettle();
 
     final control = find.byKey(const ValueKey('global-theme-link-control'));
-    final action = find.byKey(const ValueKey('global-theme-preview-action'));
+    final action = find.byKey(const ValueKey('global-theme-save-action'));
     expect(control, findsOneWidget);
     expect(action, findsOneWidget);
     final controlRect = tester.getRect(control);
@@ -141,11 +204,12 @@ void main() {
     expect(actionRect.top, greaterThanOrEqualTo(controlRect.top));
     expect(actionRect.bottom, lessThanOrEqualTo(controlRect.bottom));
     expect(actionRect.right, lessThanOrEqualTo(controlRect.right));
-    expect(find.text('Vista previa del tema'), findsOneWidget);
+    expect(find.text('https://t.me/addtheme/'), findsOneWidget);
+    expect(find.text('Guardar tema'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('manual dark mode installs a community theme into dark slot', (
+  testWidgets('conflicting imported theme confirms before switching mode', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(600, 1200));
@@ -198,10 +262,23 @@ void main() {
       isA<BoxDecoration>(),
     );
     await tester.tap(find.text('Mountain Solitude'));
-    await tester.pump();
+    await tester.pumpAndSettle();
 
-    expect(controller.darkCloudTheme?.slug, 'MountainSolitude');
+    expect(find.text('Switch to Light mode?'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('app-confirm-cancel')));
+    await tester.pumpAndSettle();
+
     expect(controller.lightCloudTheme, isNull);
+    expect(controller.darkCloudTheme, isNull);
+
+    await tester.tap(find.text('Mountain Solitude'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('app-confirm-accept')));
+    await tester.pumpAndSettle();
+
+    expect(controller.lightCloudTheme?.slug, 'MountainSolitude');
+    expect(controller.darkCloudTheme, isNull);
+    expect(controller.mode, AppearanceMode.light);
   });
 }
 

@@ -48,7 +48,7 @@ class _TranslationSettingsViewState extends State<TranslationSettingsView> {
                 _card(context, [
                   _switchRow(
                     context,
-                    icon: HeroAppIcons.language.data,
+                    icon: HeroAppIcons.language,
                     title: AppStrings.t(AppStringKeys.translationSettingsTitle),
                     value: translation.enabled,
                     onChanged: (v) => translation.enabled = v,
@@ -58,7 +58,7 @@ class _TranslationSettingsViewState extends State<TranslationSettingsView> {
                 _card(context, [
                   _navRow(
                     context,
-                    icon: HeroAppIcons.networkWired.data,
+                    icon: HeroAppIcons.networkWired,
                     title: AppStrings.t(
                       AppStringKeys.translationSettingsService,
                     ),
@@ -68,7 +68,7 @@ class _TranslationSettingsViewState extends State<TranslationSettingsView> {
                   const InsetDivider(leadingInset: 56),
                   _navRow(
                     context,
-                    icon: HeroAppIcons.globe.data,
+                    icon: HeroAppIcons.globe,
                     title: AppStrings.t(
                       AppStringKeys.translationSettingsTargetLanguage,
                     ),
@@ -133,7 +133,7 @@ class _TranslationSettingsViewState extends State<TranslationSettingsView> {
                             children: [
                               _iconBadge(
                                 context,
-                                HeroAppIcons.networkWired.data,
+                                HeroAppIcons.networkWired,
                                 const Color(0xFF34A2DF),
                               ),
                               const SizedBox(width: 12),
@@ -204,7 +204,7 @@ class _TranslationSettingsViewState extends State<TranslationSettingsView> {
                         children: [
                           _iconBadge(
                             context,
-                            HeroAppIcons.globe.data,
+                            HeroAppIcons.globe,
                             const Color(0xFF34A2DF),
                           ),
                           const SizedBox(width: 12),
@@ -247,7 +247,7 @@ class _TranslationSettingsViewState extends State<TranslationSettingsView> {
 
   Widget _switchRow(
     BuildContext context, {
-    required IconData icon,
+    required AppIconData icon,
     required String title,
     required bool value,
     required ValueChanged<bool> onChanged,
@@ -279,7 +279,7 @@ class _TranslationSettingsViewState extends State<TranslationSettingsView> {
 
   Widget _navRow(
     BuildContext context, {
-    required IconData icon,
+    required AppIconData icon,
     required String title,
     required String trailing,
     required VoidCallback? onTap,
@@ -332,14 +332,6 @@ class _TranslationSettingsViewState extends State<TranslationSettingsView> {
     );
   }
 
-  Widget _iconBadge(BuildContext context, IconData icon, Color color) =>
-      Container(
-        width: 28,
-        height: 28,
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(7),
-        ),
-        child: Icon(icon, size: 15, color: readableForeground(color)),
-      );
+  Widget _iconBadge(BuildContext context, AppIconData icon, Color color) =>
+      SettingsIconTile(icon: icon, backgroundColor: color);
 }

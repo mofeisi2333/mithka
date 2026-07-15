@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../chat/chat_wallpaper.dart';
 import '../chat/chat_wallpaper_color_view.dart';
+import '../components/app_confirm_dialog.dart';
 import '../components/app_icons.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
@@ -43,6 +44,8 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
   bool _initializedTargetBrightness = false;
   List<TelegramCloudTheme>? _communityThemes;
   Brightness _targetBrightness = Brightness.light;
+  Brightness _appBrightness = Brightness.light;
+  AppColors _pageColors = AppColors.light;
 
   TelegramCloudThemeService get _themeService =>
       widget.themeService ?? TelegramCloudThemeService();
@@ -78,6 +81,7 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
           pageBuilder: (_, _, _) => TelegramCloudThemePreviewView(
             theme: theme,
             targetBrightness: _targetBrightness,
+            currentAppBrightness: _appBrightness,
           ),
           transitionsBuilder: (_, animation, _, child) =>
               FadeTransition(opacity: animation, child: child),
@@ -108,18 +112,65 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
     setState(() => _communityThemes = themes);
   }
 
+  Future<void> _applyImportedTheme(
+    ThemeController controller,
+    TelegramCloudTheme theme,
+  ) async {
+    final target = theme.isDark ? Brightness.dark : Brightness.light;
+    if (target != _appBrightness) {
+      final confirmed = await showAppConfirmDialog(
+        context,
+        title: target == Brightness.dark
+            ? AppStringKeys.globalThemeSwitchToDark
+            : AppStringKeys.globalThemeSwitchToLight,
+        confirmText: AppStringKeys.globalThemeSwitchModeAction,
+        colors: _pageColors,
+      );
+      if (!mounted || !confirmed) return;
+      setState(() => _targetBrightness = target);
+      controller.mode = target == Brightness.dark
+          ? AppearanceMode.dark
+          : AppearanceMode.light;
+    }
+    controller.installCloudTheme(theme, brightness: target);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     final controller = context.watch<ThemeController>();
     final theme = controller.cloudThemeFor(_targetBrightness);
+    _pageColors =
+        theme?.uiColors ??
+        (_targetBrightness == Brightness.dark
+            ? AppColors.dark
+            : AppColors.light);
+    final inheritedTheme = Theme.of(context);
+    _appBrightness = inheritedTheme.brightness;
+    return Theme(
+      data: inheritedTheme.copyWith(
+        brightness: _targetBrightness,
+        extensions: [_pageColors],
+      ),
+      child: Builder(
+        builder: (previewContext) =>
+            _buildPage(previewContext, controller: controller, theme: theme),
+      ),
+    );
+  }
+
+  Widget _buildPage(
+    BuildContext previewContext, {
+    required ThemeController controller,
+    required TelegramCloudTheme? theme,
+  }) {
+    final c = _pageColors;
     return ColoredBox(
       color: c.groupedBackground,
       child: Column(
         children: [
           NavHeader(
             title: AppStringKeys.globalThemeTitle,
-            onBack: () => Navigator.of(context).pop(),
+            onBack: () => Navigator.of(previewContext).pop(),
           ),
           Expanded(
             child: ListView(
@@ -140,15 +191,6 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
                 _sectionTitle(AppStringKeys.globalThemeCustomize),
                 const SizedBox(height: 8),
                 _themeLinkControl(),
-                const SizedBox(height: 8),
-                Text(
-                  AppStringKeys.globalThemeDescription.l10n(context),
-                  style: TextStyle(
-                    fontSize: 12,
-                    height: 1.35,
-                    color: c.textTertiary,
-                  ),
-                ),
               ],
             ),
           ),
@@ -158,7 +200,7 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
   }
 
   Widget _brightnessPicker() {
-    final c = context.colors;
+    final c = _pageColors;
     return Container(
       key: const ValueKey('global-theme-brightness-picker'),
       height: 40,
@@ -194,7 +236,7 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
     required AppIconData icon,
     required String label,
   }) {
-    final c = context.colors;
+    final c = _pageColors;
     final selected = _targetBrightness == brightness;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -241,7 +283,7 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
   }
 
   Widget _sectionTitle(String key) {
-    final c = context.colors;
+    final c = _pageColors;
     return Text(
       key.l10n(context),
       style: TextStyle(
@@ -263,7 +305,7 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
         child: Center(
           child: Text(
             AppStringKeys.globalThemeLoading.l10n(context),
-            style: TextStyle(fontSize: 13, color: context.colors.textTertiary),
+            style: TextStyle(fontSize: 13, color: _pageColors.textTertiary),
           ),
         ),
       );
@@ -274,7 +316,7 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
         child: Center(
           child: Text(
             AppStringKeys.globalThemeCommunityEmpty.l10n(context),
-            style: TextStyle(fontSize: 13, color: context.colors.textTertiary),
+            style: TextStyle(fontSize: 13, color: _pageColors.textTertiary),
           ),
         ),
       );
@@ -304,10 +346,12 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
           return _installedThemeCard(
             theme,
             selected: selectedTheme?.slug == theme.slug,
-            onTap: () => controller.installCloudTheme(
-              theme,
-              brightness: _targetBrightness,
-            ),
+            onTap: () => theme.isBuiltIn
+                ? controller.installCloudTheme(
+                    theme,
+                    brightness: _targetBrightness,
+                  )
+                : _applyImportedTheme(controller, theme),
           );
         },
       ),
@@ -319,7 +363,7 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
     required bool selected,
     required VoidCallback onTap,
   }) {
-    final c = context.colors;
+    final c = _pageColors;
     final themeColors = theme.uiColors;
     final outgoing = theme.outgoingColor ?? themeColors.linkBlue;
     final wallpaperController = ChatWallpaperController.shared;
@@ -433,7 +477,7 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
     ThemeController controller,
     TelegramCloudTheme? theme,
   ) {
-    final c = context.colors;
+    final c = _pageColors;
     final colors = theme?.uiColors;
     return Container(
       padding: const EdgeInsets.all(16),
@@ -446,23 +490,6 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
         children: [
           Row(
             children: [
-              Container(
-                width: 46,
-                height: 46,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: (theme?.accentColor ?? c.linkBlue).withValues(
-                    alpha: 0.16,
-                  ),
-                  borderRadius: BorderRadius.circular(13),
-                ),
-                child: AppIcon(
-                  HeroAppIcons.palette,
-                  size: 23,
-                  color: theme?.accentColor ?? c.linkBlue,
-                ),
-              ),
-              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -479,7 +506,7 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
                     if (theme != null) ...[
                       const SizedBox(height: 3),
                       Text(
-                        '@${theme.slug}',
+                        theme.slug,
                         style: TextStyle(fontSize: 13, color: c.textSecondary),
                       ),
                     ],
@@ -488,7 +515,7 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
               ),
               if (theme != null) ...[
                 const SizedBox(width: 12),
-                _themeColorGrid(theme, colors!),
+                _themeColorGrid(theme),
               ],
             ],
           ),
@@ -503,9 +530,10 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
     );
   }
 
-  Widget _swatch(Color color) => Container(
-    width: 22,
-    height: 22,
+  Widget _swatch(Color color, int index) => Container(
+    key: ValueKey('global-theme-semantic-swatch-$index'),
+    width: 18,
+    height: 18,
     decoration: BoxDecoration(
       color: color,
       shape: BoxShape.circle,
@@ -516,23 +544,19 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
     ),
   );
 
-  Widget _themeColorGrid(TelegramCloudTheme theme, AppColors colors) {
-    final swatches = <Color>[
-      colors.background,
-      colors.card,
-      colors.navBar,
-      colors.linkBlue,
-      theme.incomingColor ?? colors.bubbleIncoming,
-      theme.outgoingColor ?? theme.accentColor,
-    ];
+  Widget _themeColorGrid(TelegramCloudTheme theme) {
+    final swatches = theme.semanticUiPreviewColors;
     return SizedBox(
       key: const ValueKey('global-theme-color-grid'),
-      width: 74,
+      width: 84,
       child: Wrap(
         spacing: 4,
         runSpacing: 4,
         alignment: WrapAlignment.end,
-        children: [for (final color in swatches) _swatch(color)],
+        children: [
+          for (var index = 0; index < swatches.length; index++)
+            _swatch(swatches[index], index),
+        ],
       ),
     );
   }
@@ -541,7 +565,7 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
     ThemeController controller,
     TelegramCloudTheme theme,
   ) {
-    final c = context.colors;
+    final c = _pageColors;
     final selected = theme.accentColor.toARGB32();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -552,12 +576,12 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
         ),
         const SizedBox(height: 9),
         SizedBox(
-          height: 44,
+          height: 36,
           child: ListView.separated(
             key: const ValueKey('global-theme-accent-list'),
             scrollDirection: Axis.horizontal,
             itemCount: _officialAccentPresets.length + 1,
-            separatorBuilder: (_, _) => const SizedBox(width: 10),
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
             itemBuilder: (context, index) {
               if (index < _officialAccentPresets.length) {
                 final color = _officialAccentPresets[index];
@@ -575,8 +599,8 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
                 behavior: HitTestBehavior.opaque,
                 onTap: () => _chooseCustomAccent(controller, theme),
                 child: Container(
-                  width: 42,
-                  height: 42,
+                  width: 34,
+                  height: 34,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: c.searchFill,
@@ -585,7 +609,7 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
                   ),
                   child: AppIcon(
                     HeroAppIcons.palette,
-                    size: 19,
+                    size: 16,
                     color: c.linkBlue,
                   ),
                 ),
@@ -605,23 +629,21 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
     behavior: HitTestBehavior.opaque,
     onTap: onTap,
     child: Container(
-      width: 42,
-      height: 42,
+      width: 34,
+      height: 34,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: color,
         shape: BoxShape.circle,
         border: Border.all(
-          color: selected
-              ? context.colors.textPrimary
-              : const Color(0x22000000),
+          color: selected ? _pageColors.textPrimary : const Color(0x22000000),
           width: selected ? 2.5 : 1,
         ),
       ),
       child: selected
           ? AppIcon(
               HeroAppIcons.check,
-              size: 17,
+              size: 14,
               color: readableForeground(color),
             )
           : null,
@@ -659,7 +681,7 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
   }
 
   Widget _themeLinkControl() {
-    final c = context.colors;
+    final c = _pageColors;
     return LayoutBuilder(
       builder: (context, constraints) {
         final actionWidth = (constraints.maxWidth * 0.38)
@@ -679,21 +701,42 @@ class _GlobalThemeViewState extends State<GlobalThemeView> {
               AppIcon(HeroAppIcons.link, size: 18, color: c.textTertiary),
               const SizedBox(width: 8),
               Expanded(
-                child: EditableText(
-                  controller: _linkController,
-                  focusNode: _focusNode,
-                  style: TextStyle(fontSize: 15, color: c.textPrimary),
-                  cursorColor: c.linkBlue,
-                  backgroundCursorColor: c.textTertiary,
-                  selectionColor: c.linkBlue.withValues(alpha: 0.25),
-                  textInputAction: TextInputAction.done,
-                  keyboardType: TextInputType.url,
-                  onSubmitted: (_) => _loadTheme(),
+                child: Stack(
+                  alignment: Alignment.centerLeft,
+                  children: [
+                    ValueListenableBuilder<TextEditingValue>(
+                      valueListenable: _linkController,
+                      builder: (context, value, _) => value.text.isEmpty
+                          ? IgnorePointer(
+                              child: Text(
+                                'https://t.me/addtheme/',
+                                maxLines: 1,
+                                overflow: TextOverflow.clip,
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  color: c.textTertiary,
+                                ),
+                              ),
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                    EditableText(
+                      controller: _linkController,
+                      focusNode: _focusNode,
+                      style: TextStyle(fontSize: 15, color: c.textPrimary),
+                      cursorColor: c.linkBlue,
+                      backgroundCursorColor: c.textTertiary,
+                      selectionColor: c.linkBlue.withValues(alpha: 0.25),
+                      textInputAction: TextInputAction.done,
+                      keyboardType: TextInputType.url,
+                      onSubmitted: (_) => _loadTheme(),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(width: 7),
               GestureDetector(
-                key: const ValueKey('global-theme-preview-action'),
+                key: const ValueKey('global-theme-save-action'),
                 behavior: HitTestBehavior.opaque,
                 onTap: _loading ? null : _loadTheme,
                 child: AnimatedContainer(
