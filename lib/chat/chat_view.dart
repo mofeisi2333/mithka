@@ -52,6 +52,7 @@ import 'chat_input_bar.dart';
 import 'chat_media_drop_region.dart';
 import 'chat_picker_view.dart';
 import 'chat_search_view.dart';
+import 'chat_session_cache.dart';
 import 'chat_unread_progress.dart';
 import 'chat_view_model.dart';
 import 'chat_wallpaper.dart';
@@ -687,20 +688,10 @@ class _ChatScrollSnapshot {
   final double? anchorViewportOffset;
 }
 
-class _ChatSessionRenderState {
-  const _ChatSessionRenderState({
-    required this.messages,
-    required this.anchoredHistory,
-  });
-
-  final List<ChatMessage> messages;
-  final bool anchoredHistory;
-}
-
 class _ChatViewState extends State<ChatView> {
   late final bool _openAtLatest;
   late final _ChatScrollSnapshot? _sessionScrollSnapshot;
-  late final _ChatSessionRenderState? _sessionRenderState;
+  late final ChatSessionRenderState? _sessionRenderState;
   late final ChatViewModel _vm;
   late final ScrollController _scroll;
   final _pinnedKey = GlobalKey(); // the pinned message's row, for scroll-to
@@ -762,7 +753,7 @@ class _ChatViewState extends State<ChatView> {
   static const _initialUnreadAlignment = 0.12;
   static OverlayEntry? _globalPictureInPictureVideo;
   static final Map<int, _ChatScrollSnapshot> _sessionScrollSnapshots = {};
-  static final Map<int, _ChatSessionRenderState> _sessionRenderStates = {};
+  static final ChatSessionCache _sessionCache = ChatSessionCache();
   late final ChatAutoScrollPolicy _autoScrollPolicy;
   final ChatWallpaperController _wallpaperController =
       ChatWallpaperController.shared;
@@ -781,7 +772,7 @@ class _ChatViewState extends State<ChatView> {
     unawaited(_wallpaperController.loadDefaultWallpaper(dark: true));
     _openAtLatest = context.read<ThemeController>().openChatsAtLatest;
     _sessionRenderState = widget.initialMessageId == null
-        ? _sessionRenderStates[widget.chatId]
+        ? _sessionCache.read(widget.chatId)
         : null;
     _sessionScrollSnapshot = widget.initialMessageId == null
         ? _sessionScrollSnapshots[widget.chatId]
@@ -868,6 +859,8 @@ class _ChatViewState extends State<ChatView> {
       openAtLatest: _openAtLatest,
       hasSnapshot: snapshot != null,
       snapshotWasAtBottom: snapshot?.wasAtLoadedBottom ?? false,
+      hasCachedLatestTranscript:
+          _sessionRenderState != null && !_sessionRenderState.anchoredHistory,
     );
   }
 
@@ -966,16 +959,19 @@ class _ChatViewState extends State<ChatView> {
     if (_exitStatePrepared) return;
     _exitStatePrepared = true;
     if (!_maintainSessionScrollAnchor) _saveSessionScrollSnapshot();
-    final snapshot = _sessionScrollSnapshots[widget.chatId];
-    if (snapshot != null && _vm.messages.isNotEmpty) {
-      _sessionRenderStates[widget.chatId] = _ChatSessionRenderState(
-        messages: List<ChatMessage>.unmodifiable(_vm.messages),
-        anchoredHistory: _vm.anchoredHistory,
-      );
-    }
+    _cacheCurrentTranscript();
     if (_isAtLoadedBottom(80)) {
       unawaited(_vm.markLoadedMessagesRead());
     }
+  }
+
+  void _cacheCurrentTranscript() {
+    if (widget.initialMessageId != null || !_vm.initialLoaded) return;
+    _sessionCache.store(
+      chatId: widget.chatId,
+      messages: _vm.messages,
+      anchoredHistory: _vm.anchoredHistory,
+    );
   }
 
   void _handleBack() {
@@ -1411,6 +1407,7 @@ class _ChatViewState extends State<ChatView> {
     if (!_loadingOlderFromScroll) {
       setState(() {});
     }
+    _cacheCurrentTranscript();
     _scheduleSessionScrollAnchorMaintenance();
   }
 

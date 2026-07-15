@@ -38,9 +38,11 @@ bool shouldOpenChatAtBottom({
   required bool openAtLatest,
   required bool hasSnapshot,
   required bool snapshotWasAtBottom,
+  bool hasCachedLatestTranscript = false,
 }) {
   if (hasExplicitTarget) return false;
   if (hasSnapshot) return snapshotWasAtBottom;
+  if (hasCachedLatestTranscript) return true;
   return openAtLatest;
 }
 

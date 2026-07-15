@@ -63,6 +63,19 @@ void main() {
       );
     });
 
+    test('a cached latest transcript never paints from offset zero', () {
+      expect(
+        shouldOpenChatAtBottom(
+          hasExplicitTarget: false,
+          openAtLatest: false,
+          hasSnapshot: false,
+          snapshotWasAtBottom: false,
+          hasCachedLatestTranscript: true,
+        ),
+        isTrue,
+      );
+    });
+
     test('restores the anchor to the same viewport y position', () {
       expect(
         correctedChatSessionScrollOffset(
