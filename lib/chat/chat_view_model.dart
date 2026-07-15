@@ -3569,6 +3569,10 @@ class ChatViewModel extends ChangeNotifier {
 
   /// Mark messages from Telegram-blocked users so the renderer can show a
   /// compact placeholder instead of the full bubble.
+  ///
+  /// Only ever called from _applyKeywordFilter (right after `messages` is
+  /// reassigned): the chat_view transcript memo relies on list identity to
+  /// notice blocked-state changes, so never flip these flags elsewhere.
   void _markBlockedUserMessages() {
     final svc = BlockedUserService.shared;
     if (!svc.enabled) {

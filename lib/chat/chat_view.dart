@@ -5039,22 +5039,20 @@ class _ChatViewState extends State<ChatView> {
   bool _transcriptCacheGrouped = false;
   int _transcriptCacheUnreadCount = -1;
   int _transcriptCacheLastReadInboxId = -1;
-  int _transcriptCacheBlockedSignature = -1;
 
   List<_TranscriptEntry> _transcriptEntries(bool groupImages) {
     final messages = _vm.messages;
-    final blockedSignature = Object.hashAll(
-      messages
-          .where((message) => message.blockedByUser)
-          .map((message) => message.id),
-    );
+    // blockedByUser is only written inside _applyKeywordFilter, which always
+    // reassigns `messages` first — so the identity check below already covers
+    // blocked-state changes. (A previous per-build Object.hashAll signature
+    // over every message re-verified this at O(n) per frame; keep the flag
+    // writes behind _applyKeywordFilter or the memo goes stale.)
     final cached = _transcriptCache;
     if (cached != null &&
         identical(_transcriptCacheMessages, messages) &&
         _transcriptCacheGrouped == groupImages &&
         _transcriptCacheUnreadCount == _vm.unreadCount &&
-        _transcriptCacheLastReadInboxId == _vm.lastReadInboxId &&
-        _transcriptCacheBlockedSignature == blockedSignature) {
+        _transcriptCacheLastReadInboxId == _vm.lastReadInboxId) {
       return cached;
     }
     final entries = groupImages ? _groupedTranscript() : _plainTranscript();
@@ -5063,7 +5061,6 @@ class _ChatViewState extends State<ChatView> {
     _transcriptCacheGrouped = groupImages;
     _transcriptCacheUnreadCount = _vm.unreadCount;
     _transcriptCacheLastReadInboxId = _vm.lastReadInboxId;
-    _transcriptCacheBlockedSignature = blockedSignature;
     _transcriptIndexByKey = {
       for (var i = 0; i < entries.length; i++) entries[i].key: i,
     };
