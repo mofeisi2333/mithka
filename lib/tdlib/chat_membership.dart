@@ -19,17 +19,22 @@ bool isJoinedMemberStatus(Map<String, dynamic>? status) {
 Future<bool> isJoinedGroupOrChannelChat(
   int chatId, {
   Map<String, dynamic>? chat,
+  int? clientId,
 }) async {
+  Future<Map<String, dynamic>> query(Map<String, dynamic> request) {
+    return clientId == null
+        ? TdClient.shared.query(request)
+        : TdClient.shared.queryTo(request, clientId);
+  }
+
   try {
-    final raw =
-        chat ??
-        await TdClient.shared.query({'@type': 'getChat', 'chat_id': chatId});
+    final raw = chat ?? await query({'@type': 'getChat', 'chat_id': chatId});
     final type = raw.obj('type');
     switch (type?.type) {
       case 'chatTypeBasicGroup':
         final id = type?.int64('basic_group_id');
         if (id == null) return true;
-        final group = await TdClient.shared.query({
+        final group = await query({
           '@type': 'getBasicGroup',
           'basic_group_id': id,
         });
@@ -37,7 +42,7 @@ Future<bool> isJoinedGroupOrChannelChat(
       case 'chatTypeSupergroup':
         final id = type?.int64('supergroup_id');
         if (id == null) return true;
-        final group = await TdClient.shared.query({
+        final group = await query({
           '@type': 'getSupergroup',
           'supergroup_id': id,
         });

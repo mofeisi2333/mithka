@@ -5,11 +5,15 @@ class ChatDeepLinkRequest {
     required this.chatId,
     required this.title,
     this.messageId,
+    this.accountUserId,
+    this.accountSlot,
   });
 
   final int chatId;
   final String title;
   final int? messageId;
+  final int? accountUserId;
+  final int? accountSlot;
 }
 
 class ChatDeepLinkController extends ChangeNotifier {
@@ -19,11 +23,19 @@ class ChatDeepLinkController extends ChangeNotifier {
 
   ChatDeepLinkRequest? _pending;
 
-  void openChat({required int chatId, required String title, int? messageId}) {
+  void openChat({
+    required int chatId,
+    required String title,
+    int? messageId,
+    int? accountUserId,
+    int? accountSlot,
+  }) {
     _pending = ChatDeepLinkRequest(
       chatId: chatId,
       title: title,
       messageId: messageId,
+      accountUserId: accountUserId,
+      accountSlot: accountSlot,
     );
     notifyListeners();
   }

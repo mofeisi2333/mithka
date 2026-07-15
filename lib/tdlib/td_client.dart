@@ -97,6 +97,11 @@ class TdClient {
   // Multicast of the ACTIVE account's updates.
   final StreamController<Map<String, dynamic>> _updates =
       StreamController.broadcast(sync: true);
+  final StreamController<Map<String, dynamic>> _allUpdates =
+      StreamController.broadcast(sync: true);
+  final StreamController<int> _activeSlotChanges = StreamController.broadcast(
+    sync: true,
+  );
   final Map<int, Map<String, dynamic>> _latestChatFoldersByClient = {};
   final Map<int, Map<String, dynamic>> _latestEmojiChatThemesByClient = {};
 
@@ -116,9 +121,11 @@ class TdClient {
   static const _liveClientIdsKey = 'drachma.debugLiveClientIds';
 
   int get activeSlot => _activeSlot;
+  int get activeClientId => _activeClientId;
   bool get hasActiveClient => _activeClientId != 0;
   List<int> get configuredSlots => List.unmodifiable(_slots);
   int? clientId(int slot) => _clientForSlot[slot];
+  int? slotForClient(int clientId) => _slotForClient[clientId];
   Map<String, dynamic>? get latestChatFoldersUpdate =>
       _latestChatFoldersByClient[_activeClientId];
   Map<String, dynamic>? get latestEmojiChatThemesUpdate =>
@@ -774,10 +781,12 @@ class TdClient {
   void setActive(int slot) {
     final cid = _clientForSlot[slot];
     if (cid == null) return;
+    final changed = slot != _activeSlot;
     _activeSlot = slot;
     _activeClientId = cid;
     _persist();
     _applySavedProxyToClientOnce(cid);
+    if (changed) _activeSlotChanges.add(slot);
   }
 
   /// Discards an account slot: closes its TDLib client and forgets it, so it
@@ -904,7 +913,8 @@ class TdClient {
       _latestEmojiChatThemesByClient[clientId] = object;
     }
 
-    // Only surface the active account's updates to the UI.
+    _allUpdates.add(object);
+    // Most UI consumers only need the active account's updates.
     if (clientId == _activeClientId) _updates.add(object);
 
     // Internal: receive isolate reported a fatal error (e.g. td_receive threw
@@ -1128,6 +1138,12 @@ class TdClient {
 
   /// A fresh stream of the ACTIVE account's TDLib updates.
   Stream<Map<String, dynamic>> subscribe() => _updates.stream;
+
+  /// Updates from every configured account. Consumers must use @client_id to
+  /// keep account-scoped identifiers separate.
+  Stream<Map<String, dynamic>> subscribeAll() => _allUpdates.stream;
+
+  Stream<int> subscribeActiveSlotChanges() => _activeSlotChanges.stream;
 
   /// Broadcasts a local state correction to the same subscribers as TDLib
   /// updates. Use this only after sending the corresponding TDLib request, so

@@ -13,6 +13,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../auth/account_store.dart';
+import '../auth/auth_manager.dart';
 import '../call/call_manager.dart';
 import '../call/call_screen.dart';
 import '../call/group_call_screen.dart';
@@ -245,6 +247,25 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
   }
 
   void _openMessageDeepLink(ChatDeepLinkRequest request) {
+    final accounts = context.read<AccountStore>();
+    final requestedSlot =
+        request.accountSlot ??
+        accounts.summaries
+            .where((account) => account.userId == request.accountUserId)
+            .map((account) => account.slot)
+            .firstOrNull;
+    if (requestedSlot != null && requestedSlot != accounts.activeSlot) {
+      accounts.switchTo(requestedSlot, context.read<AuthManager>());
+      final controller = _chatDeepLinks;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        controller?.openChat(
+          chatId: request.chatId,
+          title: request.title,
+          messageId: request.messageId,
+        );
+      });
+      return;
+    }
     if (_usesTabletSplit(context)) {
       setState(() {
         _selection = 0;

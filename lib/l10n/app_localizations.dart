@@ -1330,12 +1330,44 @@ abstract final class AppStringKeys {
   static const myAlbumNoPhotos = 'myAlbumNoPhotos';
   static const netemoMusicLabel = 'netemoMusicLabel';
   static const notificationGroupMessages = 'notificationGroupMessages';
+  static const notificationAllAccounts = 'notificationAllAccounts';
+  static const notificationAllAccountsDescription =
+      'notificationAllAccountsDescription';
+  static const notificationAllAccountsDescriptionOff =
+      'notificationAllAccountsDescriptionOff';
+  static const notificationAllStories = 'notificationAllStories';
+  static const notificationChannels = 'notificationChannels';
+  static const notificationException = 'notificationException';
+  static const notificationExceptions = 'notificationExceptions';
   static const notificationInAppBanners = 'notificationInAppBanners';
+  static const notificationInAppPreview = 'notificationInAppPreview';
+  static const notificationInAppSection = 'notificationInAppSection';
+  static const notificationInAppSounds = 'notificationInAppSounds';
+  static const notificationInAppVibrate = 'notificationInAppVibrate';
+  static const notificationMentions = 'notificationMentions';
+  static const notificationMessageNotifications =
+      'notificationMessageNotifications';
+  static const notificationNamesOnLockScreen = 'notificationNamesOnLockScreen';
+  static const notificationNamesOnLockScreenDescription =
+      'notificationNamesOnLockScreenDescription';
   static const notificationNewMessage = 'notificationNewMessage';
+  static const notificationNoStories = 'notificationNoStories';
+  static const notificationNotifications = 'notificationNotifications';
+  static const notificationOptions = 'notificationOptions';
+  static const notificationPinnedMessages = 'notificationPinnedMessages';
   static const notificationPreview = 'notificationPreview';
   static const notificationPrivateMessages = 'notificationPrivateMessages';
+  static const notificationReactionMessages = 'notificationReactionMessages';
+  static const notificationReactions = 'notificationReactions';
+  static const notificationShowNotificationsFrom =
+      'notificationShowNotificationsFrom';
   static const notificationSound = 'notificationSound';
+  static const notificationStories = 'notificationStories';
+  static const notificationStoryPoster = 'notificationStoryPoster';
   static const notificationTitle = 'notificationTitle';
+  static const notificationTopFive = 'notificationTopFive';
+  static const notificationTopFiveDescription =
+      'notificationTopFiveDescription';
   static const pinnedMessagesEmpty = 'pinnedMessagesEmpty';
   static const pinnedMessagesSentBy = 'pinnedMessagesSentBy';
   static const pollComposerAddOption = 'pollComposerAddOption';

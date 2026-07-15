@@ -8,6 +8,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -24,8 +25,10 @@ import '../tdlib/chat_membership.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
+import 'notification_preferences.dart';
 import 'notification_target.dart';
 import 'scope_notification_settings.dart';
+import 'system_notification_details.dart';
 
 enum NotificationSurface { none, inApp, system }
 
@@ -81,6 +84,8 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
   final TdClient _client = TdClient.shared;
+  final NotificationPreferences _notificationPreferences =
+      NotificationPreferences.shared;
   StreamSubscription? _sub;
   AppLifecycleState _state = AppLifecycleState.resumed;
   bool _ready = false;
@@ -93,7 +98,7 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
   InAppNotificationBannerData? _inAppBanner;
   Timer? _inAppBannerTimer;
   final Map<Object, _VisibleChatRegistration> _visibleChats = {};
-  final Map<int, Map<String, dynamic>> _chatNotificationSettings = {};
+  final Map<(int, int), Map<String, dynamic>> _chatNotificationSettings = {};
 
   bool get inAppBannersEnabled => _inAppBannersEnabled;
   InAppNotificationBannerData? get inAppBanner => _inAppBanner;
@@ -101,6 +106,7 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
   Future<void> start(SharedPreferences preferences) async {
     if (_ready) return;
     _preferences = preferences;
+    _notificationPreferences.initialize(preferences);
     _inAppBannersEnabled = preferences.getBool(_inAppBannersKey) ?? true;
     WidgetsBinding.instance.addObserver(this);
     _state =
@@ -145,7 +151,7 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
           AndroidFlutterLocalNotificationsPlugin
         >()
         ?.createNotificationChannel(_androidChannel);
-    _sub = _client.subscribe().listen(_handle);
+    _sub = _client.subscribeAll().listen(_handle);
     _ready = true;
     // Foreground banners don't require notification permission. Subscribe
     // before asking so an OS permission sheet can't create a blind spot.
@@ -180,14 +186,16 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
   }
 
   Future<void> _handle(Map<String, dynamic> update) async {
+    final clientId = update.integer('@client_id') ?? _client.activeClientId;
+    final isActiveAccount = clientId == _client.activeClientId;
     if (update.type == 'updateChatNotificationSettings') {
-      _applyChatNotificationSettingsUpdate(update);
+      _applyChatNotificationSettingsUpdate(update, clientId: clientId);
       return;
     }
     if (update.type == 'updateScopeNotificationSettings') {
       final scope = update.obj('scope')?.type;
       final settings = update.obj('notification_settings');
-      if (scope != null && settings != null) {
+      if (isActiveAccount && scope != null && settings != null) {
         ScopeNotificationSettings.shared.update(
           scope,
           settings.integer('mute_for') ?? 0,
@@ -196,7 +204,11 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
           scope,
           settings.boolean('show_preview') ?? true,
         );
-        await _dismissBannerIfMuted();
+        ScopeNotificationSettings.shared.updateSoundId(
+          scope,
+          settings.int64('sound_id') ?? -1,
+        );
+        await _dismissBannerIfMuted(clientId: clientId);
       }
       return;
     }
@@ -205,12 +217,13 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
       final group = update.obj(
         update.type == 'updateBasicGroup' ? 'basic_group' : 'supergroup',
       );
-      if (!isJoinedMemberStatus(group?.obj('status'))) {
-        unawaited(_dismissBannerIfNoLongerJoined());
+      if (isActiveAccount && !isJoinedMemberStatus(group?.obj('status'))) {
+        unawaited(_dismissBannerIfNoLongerJoined(clientId: clientId));
       }
       return;
     }
     if (update.type != 'updateNewMessage') return;
+    if (!isActiveAccount && !_notificationPreferences.allAccounts) return;
 
     final raw = update.obj('message');
     if (raw == null || (raw.boolean('is_outgoing') ?? false)) return;
@@ -220,11 +233,19 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
     final content = raw.obj('content');
     if (chatId == null || messageId == null || content == null) return;
 
-    final chat = await _chat(chatId);
+    final chat = await _chat(chatId, clientId: clientId);
+    final effective = chat == null
+        ? null
+        : await _effectiveSettings(chat, clientId);
     if (chat == null ||
-        _isMuted(chat) ||
-        !await isJoinedGroupOrChannelChat(chatId, chat: chat) ||
-        await _isCountryFiltered(chat)) {
+        effective == null ||
+        effective.muted ||
+        !await isJoinedGroupOrChannelChat(
+          chatId,
+          chat: chat,
+          clientId: clientId,
+        ) ||
+        await _isCountryFiltered(chat, clientId)) {
       return;
     }
 
@@ -236,15 +257,22 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
       systemNotificationsAvailable: _notificationsAvailable,
     );
     if (surface == NotificationSurface.inApp) {
-      if (_isChatVisible(chatId)) return;
-      final sender = ScopeNotificationSettings.shared.showPreview(chat)
-          ? await _senderLabel(raw, chat)
+      if (isActiveAccount && _isChatVisible(chatId)) return;
+      final sender =
+          effective.showPreview && _notificationPreferences.inAppPreview
+          ? await _senderLabel(raw, chat, clientId)
           : null;
-      final latestChat = await _chat(chatId);
-      if (latestChat == null || _isMuted(latestChat)) return;
-      final showPreview = ScopeNotificationSettings.shared.showPreview(
-        latestChat,
-      );
+      final latestChat = await _chat(chatId, clientId: clientId);
+      final latestEffective = latestChat == null
+          ? null
+          : await _effectiveSettings(latestChat, clientId);
+      if (latestChat == null ||
+          latestEffective == null ||
+          latestEffective.muted) {
+        return;
+      }
+      final showPreview =
+          latestEffective.showPreview && _notificationPreferences.inAppPreview;
       final title = latestChat.str('title') ?? 'Mithka';
       final body = showPreview
           ? messageText
@@ -255,6 +283,7 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
             chatId: chatId,
             messageId: messageId,
             title: title,
+            accountSlot: _client.slotForClient(clientId),
           ),
           title: title,
           body: !showPreview || sender == null || sender.isEmpty
@@ -267,23 +296,39 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
           },
         ),
       );
+      if (_notificationPreferences.inAppSounds) {
+        unawaited(SystemSound.play(SystemSoundType.alert));
+      }
+      if (_notificationPreferences.inAppVibrate) {
+        unawaited(HapticFeedback.mediumImpact());
+      }
       return;
     }
     if (surface != NotificationSurface.system) return;
-    final latestChat = await _chat(chatId);
-    if (latestChat == null || _isMuted(latestChat)) return;
-    final title = latestChat.str('title') ?? 'Mithka';
-    final showPreview = ScopeNotificationSettings.shared.showPreview(
-      latestChat,
-    );
+    final latestChat = await _chat(chatId, clientId: clientId);
+    final latestEffective = latestChat == null
+        ? null
+        : await _effectiveSettings(latestChat, clientId);
+    if (latestChat == null ||
+        latestEffective == null ||
+        latestEffective.muted) {
+      return;
+    }
+    final chatTitle = latestChat.str('title') ?? 'Mithka';
+    final title = _notificationPreferences.namesOnLockScreen
+        ? chatTitle
+        : 'Mithka';
+    final showPreview = latestEffective.showPreview;
     final body = showPreview
         ? messageText
         : AppStrings.t(AppStringKeys.notificationNewMessage);
     final payload = jsonEncode({
       'chat_id': chatId,
       'message_id': messageId,
-      'title': title,
+      'title': chatTitle,
+      'account_slot': _client.slotForClient(clientId),
     });
+    final chatIconPath = await _notificationChatIconPath(latestChat, clientId);
 
     _notificationSeed = (_notificationSeed + 1) & 0x7fffffff;
     try {
@@ -291,20 +336,10 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
         id: _notificationSeed,
         title: title,
         body: body,
-        notificationDetails: const NotificationDetails(
-          android: AndroidNotificationDetails(
-            'messages',
-            'Messages',
-            channelDescription: 'Incoming Mithka messages',
-            importance: Importance.high,
-            priority: Priority.high,
-            category: AndroidNotificationCategory.message,
-          ),
-          iOS: DarwinNotificationDetails(
-            presentAlert: true,
-            presentBadge: true,
-            presentSound: true,
-          ),
+        notificationDetails: systemNotificationDetailsForChatIcon(
+          chatIconPath,
+          playSound: latestEffective.soundEnabled,
+          showOnLockScreen: _notificationPreferences.namesOnLockScreen,
         ),
         payload: payload,
       );
@@ -316,6 +351,42 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
     }
   }
 
+  Future<String?> _notificationChatIconPath(
+    Map<String, dynamic> chat,
+    int clientId,
+  ) async {
+    final photo = TDParse.smallPhoto(chat.obj('photo'));
+    if (photo == null) return null;
+    final existing = await _readableNotificationIconPath(photo.localPath);
+    if (existing != null) return existing;
+    try {
+      final downloaded = await _query({
+        '@type': 'downloadFile',
+        'file_id': photo.id,
+        'priority': 16,
+        'offset': 0,
+        'limit': 0,
+        'synchronous': true,
+      }, clientId).timeout(const Duration(seconds: 2));
+      return _readableNotificationIconPath(
+        downloaded.obj('local')?.str('path'),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String?> _readableNotificationIconPath(String? path) async {
+    if (path == null || path.isEmpty) return null;
+    try {
+      final file = File(path);
+      if (!await file.exists() || await file.length() <= 0) return null;
+      return path;
+    } catch (_) {
+      return null;
+    }
+  }
+
   bool _isNotificationAuthorizationError(PlatformException error) {
     final text = '${error.code} ${error.message} ${error.details}';
     return text.contains('not authorized') ||
@@ -323,36 +394,60 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
         text.contains('Error 2003');
   }
 
-  void _applyChatNotificationSettingsUpdate(Map<String, dynamic> update) {
+  void _applyChatNotificationSettingsUpdate(
+    Map<String, dynamic> update, {
+    required int clientId,
+  }) {
     final chatId = update.int64('chat_id');
     final settings = update.obj('notification_settings');
     if (chatId == null || settings == null) return;
-    _chatNotificationSettings[chatId] = Map<String, dynamic>.from(settings);
+    _chatNotificationSettings[(clientId, chatId)] = Map<String, dynamic>.from(
+      settings,
+    );
     final useDefault = settings.boolean('use_default_mute_for') ?? false;
     if (!useDefault) {
       if ((settings.integer('mute_for') ?? 0) > 0 &&
-          _inAppBanner?.target.chatId == chatId) {
+          _inAppBanner?.target.chatId == chatId &&
+          _targetClientId(_inAppBanner!.target) == clientId) {
         dismissInAppBanner();
       }
       return;
     }
-    unawaited(_dismissBannerIfMuted(chatId: chatId));
+    unawaited(_dismissBannerIfMuted(chatId: chatId, clientId: clientId));
   }
 
-  Future<void> _dismissBannerIfMuted({int? chatId}) async {
-    final targetChatId = _inAppBanner?.target.chatId;
+  Future<void> _dismissBannerIfMuted({int? chatId, int? clientId}) async {
+    final target = _inAppBanner?.target;
+    final targetChatId = target?.chatId;
     if (targetChatId == null || chatId != null && targetChatId != chatId) {
       return;
     }
-    final chat = await _chat(targetChatId);
-    if (chat != null && _isMuted(chat)) dismissInAppBanner();
+    final targetClientId = target == null
+        ? _client.activeClientId
+        : _targetClientId(target);
+    if (clientId != null && clientId != targetClientId) return;
+    final chat = await _chat(targetChatId, clientId: targetClientId);
+    if (chat != null &&
+        (await _effectiveSettings(chat, targetClientId)).muted) {
+      dismissInAppBanner();
+    }
   }
 
-  Future<void> _dismissBannerIfNoLongerJoined() async {
-    final chatId = _inAppBanner?.target.chatId;
+  Future<void> _dismissBannerIfNoLongerJoined({required int clientId}) async {
+    final target = _inAppBanner?.target;
+    final chatId = target?.chatId;
     if (chatId == null) return;
-    final chat = await _chat(chatId);
-    if (chat != null && !await isJoinedGroupOrChannelChat(chatId, chat: chat)) {
+    final targetClientId = target == null
+        ? _client.activeClientId
+        : _targetClientId(target);
+    if (targetClientId != clientId) return;
+    final chat = await _chat(chatId, clientId: clientId);
+    if (chat != null &&
+        !await isJoinedGroupOrChannelChat(
+          chatId,
+          chat: chat,
+          clientId: clientId,
+        )) {
       dismissInAppBanner();
     }
   }
@@ -361,22 +456,44 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
   void applyChatNotificationSettingsUpdateForTesting(
     Map<String, dynamic> update,
   ) {
-    _applyChatNotificationSettingsUpdate(update);
+    _applyChatNotificationSettingsUpdate(
+      update,
+      clientId: update.integer('@client_id') ?? _client.activeClientId,
+    );
   }
 
-  Future<Map<String, dynamic>?> _chat(int chatId) async {
+  Future<Map<String, dynamic>?> _chat(
+    int chatId, {
+    required int clientId,
+  }) async {
     try {
-      return await _client.query({'@type': 'getChat', 'chat_id': chatId});
+      return await _query({'@type': 'getChat', 'chat_id': chatId}, clientId);
     } catch (_) {
       return null;
     }
+  }
+
+  Future<Map<String, dynamic>> _query(
+    Map<String, dynamic> request,
+    int clientId,
+  ) {
+    return clientId == _client.activeClientId
+        ? _client.query(request)
+        : _client.queryTo(request, clientId);
+  }
+
+  int _targetClientId(NotificationTarget target) {
+    final slot = target.accountSlot;
+    return slot == null
+        ? _client.activeClientId
+        : (_client.clientId(slot) ?? _client.activeClientId);
   }
 
   bool _isMuted(Map<String, dynamic> chat) {
     final chatId = chat.int64('id');
     final latestSettings = chatId == null
         ? null
-        : _chatNotificationSettings[chatId];
+        : _chatNotificationSettings[(_client.activeClientId, chatId)];
     if (latestSettings == null) {
       return ScopeNotificationSettings.shared.isMuted(chat);
     }
@@ -389,7 +506,66 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
   @visibleForTesting
   bool isChatMutedForTesting(Map<String, dynamic> chat) => _isMuted(chat);
 
-  Future<bool> _isCountryFiltered(Map<String, dynamic> chat) async {
+  Future<_EffectiveNotificationSettings> _effectiveSettings(
+    Map<String, dynamic> chat,
+    int clientId,
+  ) async {
+    final chatId = chat.int64('id');
+    final latest = chatId == null
+        ? null
+        : _chatNotificationSettings[(clientId, chatId)];
+    final settings = latest ?? chat.obj('notification_settings');
+    final useDefaultMute = settings?.boolean('use_default_mute_for') ?? false;
+    final useDefaultPreview =
+        settings?.boolean('use_default_show_preview') ?? true;
+    final useDefaultSound = settings?.boolean('use_default_sound') ?? true;
+
+    if (clientId == _client.activeClientId) {
+      final effectiveChat = latest == null
+          ? chat
+          : {...chat, 'notification_settings': latest};
+      return _EffectiveNotificationSettings(
+        muted: ScopeNotificationSettings.shared.isMuted(effectiveChat),
+        showPreview: ScopeNotificationSettings.shared.showPreview(
+          effectiveChat,
+        ),
+        soundEnabled: ScopeNotificationSettings.shared.soundEnabled(
+          effectiveChat,
+        ),
+      );
+    }
+
+    Map<String, dynamic>? scopeSettings;
+    if (useDefaultMute || useDefaultPreview || useDefaultSound) {
+      try {
+        scopeSettings = await _query({
+          '@type': 'getScopeNotificationSettings',
+          'scope': {
+            '@type': ScopeNotificationSettings.shared.scopeTagForChat(chat),
+          },
+        }, clientId);
+      } catch (_) {}
+    }
+    final muteFor = useDefaultMute
+        ? (scopeSettings?.integer('mute_for') ?? 0)
+        : (settings?.integer('mute_for') ?? 0);
+    final showPreview = useDefaultPreview
+        ? (scopeSettings?.boolean('show_preview') ?? true)
+        : (settings?.boolean('show_preview') ?? true);
+    final soundId = useDefaultSound
+        ? (scopeSettings?.int64('sound_id') ?? -1)
+        : (settings?.int64('sound_id') ?? -1);
+    return _EffectiveNotificationSettings(
+      muted: muteFor > 0,
+      showPreview: showPreview,
+      soundEnabled: soundId != 0,
+    );
+  }
+
+  Future<bool> _isCountryFiltered(
+    Map<String, dynamic> chat,
+    int clientId,
+  ) async {
     final type = chat.obj('type');
     if (type?.type != 'chatTypePrivate' && type?.type != 'chatTypeSecret') {
       return false;
@@ -397,7 +573,10 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
     final userId = type?.int64('user_id');
     if (userId == null) return false;
     try {
-      final user = await _client.query({'@type': 'getUser', 'user_id': userId});
+      final user = await _query({
+        '@type': 'getUser',
+        'user_id': userId,
+      }, clientId);
       return CountryMessageFilter.shared.matchesUser(
         isContact: user.boolean('is_contact') ?? false,
         phoneNumber: user.str('phone_number'),
@@ -417,6 +596,7 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
   Future<String?> _senderLabel(
     Map<String, dynamic> message,
     Map<String, dynamic> chat,
+    int clientId,
   ) async {
     final kind = TDParse.chatKind(chat);
     if (kind != ChatKind.group && kind != ChatKind.channel) return null;
@@ -426,15 +606,15 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
         case 'messageSenderUser':
           final userId = sender?.int64('user_id');
           if (userId == null) return null;
-          final user = await _client.query({
+          final user = await _query({
             '@type': 'getUser',
             'user_id': userId,
-          });
+          }, clientId);
           return TDParse.userName(user);
         case 'messageSenderChat':
           final senderChatId = sender?.int64('chat_id');
           if (senderChatId == null) return null;
-          return (await _chat(senderChatId))?.str('title');
+          return (await _chat(senderChatId, clientId: clientId))?.str('title');
       }
     } catch (_) {}
     return null;
@@ -516,6 +696,8 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
     final previous = _lastOpenedTarget;
     if (previous?.chatId == target.chatId &&
         previous?.messageId == target.messageId &&
+        previous?.accountUserId == target.accountUserId &&
+        previous?.accountSlot == target.accountSlot &&
         now.difference(
               _lastOpenedAt ?? DateTime.fromMillisecondsSinceEpoch(0),
             ) <
@@ -528,6 +710,8 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
       chatId: target.chatId,
       title: target.title ?? 'Mithka',
       messageId: target.messageId,
+      accountUserId: target.accountUserId,
+      accountSlot: target.accountSlot,
     );
   }
 
@@ -542,6 +726,18 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
       _notificationTapChannel.setMethodCallHandler(null);
     }
   }
+}
+
+class _EffectiveNotificationSettings {
+  const _EffectiveNotificationSettings({
+    required this.muted,
+    required this.showPreview,
+    required this.soundEnabled,
+  });
+
+  final bool muted;
+  final bool showPreview;
+  final bool soundEnabled;
 }
 
 class _VisibleChatRegistration {

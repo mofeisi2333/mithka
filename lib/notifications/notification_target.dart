@@ -7,12 +7,14 @@ class NotificationTarget {
     this.messageId,
     this.title,
     this.accountUserId,
+    this.accountSlot,
   });
 
   final int chatId;
   final int? messageId;
   final String? title;
   final int? accountUserId;
+  final int? accountSlot;
 
   /// Decodes the payload attached to a notification created by Mithka.
   static NotificationTarget? fromLocalPayload(String? payload) {
@@ -83,6 +85,7 @@ class NotificationTarget {
       messageId: _integer(data['message_id']),
       title: title == null || title.isEmpty ? null : title,
       accountUserId: _integer(data['account_user_id']),
+      accountSlot: _integer(data['account_slot']),
     );
   }
 

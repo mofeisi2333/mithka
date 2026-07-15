@@ -5,12 +5,13 @@ void main() {
   group('NotificationTarget.fromLocalPayload', () {
     test('keeps TDLib chat and message identifiers', () {
       final target = NotificationTarget.fromLocalPayload(
-        '{"chat_id":"-100123","message_id":"456789","title":"Group"}',
+        '{"chat_id":"-100123","message_id":"456789","title":"Group","account_slot":2}',
       );
 
       expect(target?.chatId, -100123);
       expect(target?.messageId, 456789);
       expect(target?.title, 'Group');
+      expect(target?.accountSlot, 2);
     });
 
     test('rejects invalid payloads', () {
