@@ -22,6 +22,7 @@ import 'package:mithka/chat/music_player_controller.dart';
 import 'package:mithka/chat/rich_text_composer_view.dart';
 import 'package:mithka/chat/secret_chat_service.dart';
 import 'package:mithka/chat/sponsored_messages_cache.dart';
+import 'package:mithka/chat/sticker_item.dart';
 import 'package:mithka/components/app_icons.dart';
 import 'package:mithka/components/keyboard_dismiss_on_tap.dart';
 import 'package:mithka/components/photo_avatar.dart';
@@ -782,6 +783,36 @@ void main() {
   });
 
   group('ChatInputBar', () {
+    test('builds awaitable sticker send requests', () {
+      final vm = ChatViewModel(chatId: 42, title: 'Test', markReadOnOpen: false)
+        ..paidMessageStarCount = 3;
+      addTearDown(vm.dispose);
+
+      final request = vm.stickerMessageRequest(
+        const StickerItem(
+          id: 100,
+          remoteId: 'remote-sticker',
+          width: 512,
+          height: 384,
+          emoji: '🙂',
+        ),
+      );
+
+      expect(request['@type'], 'sendMessage');
+      expect(request['chat_id'], 42);
+      expect(request['options'], {
+        '@type': 'messageSendOptions',
+        'paid_message_star_count': 3,
+      });
+      expect(request['input_message_content'], {
+        '@type': 'inputMessageSticker',
+        'sticker': {'@type': 'inputFileRemote', 'id': 'remote-sticker'},
+        'width': 512,
+        'height': 384,
+        'emoji': '🙂',
+      });
+    });
+
     testWidgets('more panel paints the bottom safe area with its background', (
       tester,
     ) async {

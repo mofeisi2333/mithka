@@ -1167,23 +1167,40 @@ class ChatViewModel extends ChangeNotifier {
     }
   }
 
-  void sendSticker(StickerItem sticker) {
+  Future<bool> sendSticker(StickerItem sticker) async {
+    if (!canSendMessages) return false;
+    try {
+      final pendingMessage = await _client.query(
+        stickerMessageRequest(sticker),
+      );
+      final pendingMessageId = pendingMessage.int64('id');
+      if (pendingMessageId != null &&
+          pendingMessage.obj('sending_state') != null) {
+        await _waitForMessageSend(pendingMessageId);
+      }
+      return true;
+    } catch (error) {
+      debugPrint('Failed to send sticker: $error');
+      return false;
+    }
+  }
+
+  @visibleForTesting
+  Map<String, dynamic> stickerMessageRequest(StickerItem sticker) {
     final input = sticker.remoteId != null
         ? {'@type': 'inputFileRemote', 'id': sticker.remoteId}
         : {'@type': 'inputFileId', 'id': sticker.id};
-    _client.send(
-      _withPaidMessageOptions({
-        '@type': 'sendMessage',
-        'chat_id': chatId,
-        'input_message_content': {
-          '@type': 'inputMessageSticker',
-          'sticker': input,
-          'width': sticker.width,
-          'height': sticker.height,
-          'emoji': sticker.emoji,
-        },
-      }),
-    );
+    return _withPaidMessageOptions({
+      '@type': 'sendMessage',
+      'chat_id': chatId,
+      'input_message_content': {
+        '@type': 'inputMessageSticker',
+        'sticker': input,
+        'width': sticker.width,
+        'height': sticker.height,
+        'emoji': sticker.emoji,
+      },
+    });
   }
 
   void sendDocument(String path, {String caption = ''}) {
