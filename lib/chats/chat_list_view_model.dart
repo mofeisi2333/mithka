@@ -11,7 +11,9 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:mithka/l10n/app_localizations.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../communities/community_models.dart';
 import '../notifications/scope_notification_settings.dart';
 import '../settings/keyword_blocker.dart';
 import '../tdlib/chat_membership.dart';
@@ -27,6 +29,18 @@ class ChatFilterOption {
   final int? folderId;
 
   bool get isAll => folderId == null;
+}
+
+class _CommunityLookup {
+  const _CommunityLookup({
+    required this.chatId,
+    required this.peerId,
+    required this.isBot,
+  });
+
+  final int chatId;
+  final int peerId;
+  final bool isBot;
 }
 
 class ChatListViewModel extends ChangeNotifier {
@@ -46,6 +60,12 @@ class ChatListViewModel extends ChangeNotifier {
   List<ChatSummary> get chats => _chats;
   List<ChatSummary> get archived => _archived;
   List<ChatSummary> get filtered => _filtered;
+  List<CommunityChatListEntry> get chatListEntries =>
+      CommunityChatListProjection.build(
+        chats: _chats,
+        communityByChat: _communityByChat,
+        communities: _communities,
+      );
   List<ChatFilterOption> get filters => _filters;
   ChatFilterOption get selectedFilter => _selectedFilter;
   bool get isAllFilter => _selectedFilter.isAll;
@@ -62,6 +82,14 @@ class ChatListViewModel extends ChangeNotifier {
   final Set<int> _resolvingPeers = {};
   final Set<int> _resolvingForums = {};
   final Set<int> _resolvingFolders = {};
+  final Map<int, CommunitySummary> _communities = {};
+  final Map<int, int> _communityByChat = {};
+  final Map<int, int> _chatBySupergroup = {};
+  final Map<int, int> _chatByUser = {};
+  final Set<int> _communityPreferencesLoaded = {};
+  final Set<int> _queuedCommunityChats = {};
+  final List<_CommunityLookup> _communityLookupQueue = [];
+  int _communityLookupsInFlight = 0;
 
   final TdClient _client = TdClient.shared;
   StreamSubscription? _sub;
@@ -79,9 +107,50 @@ class ChatListViewModel extends ChangeNotifier {
     if (_listening) return;
     _listening = true;
     _subscribe();
+    for (final update in _client.latestCommunityUpdates) {
+      final community = update.obj('community');
+      if (community != null) _applyCommunity(community);
+    }
     _loadFilters();
     _loadChats(_initialPageSize);
     _deferWarmCaches();
+  }
+
+  CommunitySummary? community(int communityId) => _communities[communityId];
+
+  List<CommunitySummary> get availableCommunities {
+    final communities = _communities.values
+        .where(
+          (community) =>
+              community.haveAccess && chatsInCommunity(community.id).isNotEmpty,
+        )
+        .toList();
+    communities.sort(
+      (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+    );
+    return communities;
+  }
+
+  List<ChatSummary> chatsInCommunity(int communityId) {
+    final chats = _map.values
+        .where(
+          (chat) =>
+              _communityByChat[chat.id] == communityId &&
+              (_joinedChatCache[chat.id] ?? true),
+        )
+        .toList();
+    chats.sort(_compare);
+    return chats;
+  }
+
+  int? communityForChat(int chatId) => _communityByChat[chatId];
+
+  void setCommunityCollapsed(int communityId, bool collapsed) {
+    final community = _communities[communityId];
+    if (community == null || community.collapsed == collapsed) return;
+    community.collapsed = collapsed;
+    _scheduleResort();
+    unawaited(_saveCommunityCollapsed(communityId, collapsed));
   }
 
   /// Called when the current user's id becomes known so we can flag the
@@ -584,6 +653,27 @@ class ChatListViewModel extends ChangeNotifier {
         _mutate(id, (s) => s.photo = TDParse.smallPhoto(update.obj('photo')));
         _scheduleResort();
 
+      case 'updateCommunity':
+        final community = update.obj('community');
+        if (community == null) return;
+        _applyCommunity(community);
+
+      case 'updateSupergroupFullInfo':
+        final supergroupId = update.int64('supergroup_id');
+        final chatId = supergroupId == null
+            ? null
+            : _chatBySupergroup[supergroupId];
+        final fullInfo = update.obj('supergroup_full_info');
+        if (chatId == null || fullInfo == null) return;
+        _applyChatCommunityId(chatId, fullInfo.int64('community_id'));
+
+      case 'updateUserFullInfo':
+        final userId = update.int64('user_id');
+        final chatId = userId == null ? null : _chatByUser[userId];
+        final fullInfo = update.obj('user_full_info');
+        if (chatId == null || fullInfo == null) return;
+        _applyChatCommunityId(chatId, fullInfo.int64('community_id'));
+
       case 'updateUser':
         final user = update.obj('user');
         final id = user?.int64('id');
@@ -655,8 +745,10 @@ class ChatListViewModel extends ChangeNotifier {
     if (_meId != null) summary.isSavedMessages = summary.peerUserId == _meId;
     summary.lastMessage = _previewText(summary.lastMessage);
     _map[summary.id] = summary;
+    _indexCommunityPeer(summary.id, raw);
     _applyPositions(summary.id, raw.objects('positions'));
     _resolveForumIfNeeded(summary, raw);
+    _resolveCommunityIfNeeded(summary, raw);
     _resolvePeerIfNeeded(summary);
     _resolveSenderIfNeeded(summary.id, raw.obj('last_message'));
     if (schedule) {
@@ -704,6 +796,133 @@ class ChatListViewModel extends ChangeNotifier {
     }
     _joinedChatCache[id] = false;
     _scheduleResort();
+  }
+
+  // MARK: - Telegram Communities
+
+  void _applyCommunity(Map<String, dynamic> object) {
+    if (!_listening) return;
+    final id = object.int64('id');
+    if (id == null || id == 0) return;
+    final existing = _communities[id];
+    final community = CommunitySummary.fromTd(
+      object,
+      collapsed: existing?.collapsed ?? true,
+    );
+    if (existing == null) {
+      _communities[id] = community;
+    } else {
+      existing.merge(community);
+    }
+    _scheduleResort();
+    if (_communityPreferencesLoaded.add(id)) {
+      unawaited(_loadCommunityCollapsed(id));
+    }
+  }
+
+  void _applyChatCommunityId(int chatId, int? communityId) {
+    if (!_listening) return;
+    // Older TDLib builds don't expose this field. A missing field is not the
+    // same as the explicit zero used when a chat is removed from a community.
+    if (communityId == null) return;
+    if (communityId == 0) {
+      if (_communityByChat.remove(chatId) != null) _scheduleResort();
+      return;
+    }
+    if (_communityByChat[chatId] == communityId) return;
+    _communityByChat[chatId] = communityId;
+    _scheduleResort();
+  }
+
+  void _indexCommunityPeer(int chatId, Map<String, dynamic> chat) {
+    final type = chat.obj('type');
+    switch (type?.type) {
+      case 'chatTypeSupergroup':
+        final supergroupId = type?.int64('supergroup_id');
+        if (supergroupId != null) _chatBySupergroup[supergroupId] = chatId;
+      case 'chatTypePrivate':
+        final userId = type?.int64('user_id');
+        if (userId != null) _chatByUser[userId] = chatId;
+    }
+  }
+
+  void _resolveCommunityIfNeeded(
+    ChatSummary summary,
+    Map<String, dynamic> chat,
+  ) {
+    final type = chat.obj('type');
+    if (type?.type != 'chatTypeSupergroup') return;
+    final supergroupId = type?.int64('supergroup_id');
+    if (supergroupId == null) return;
+    _queueCommunityLookup(
+      _CommunityLookup(chatId: summary.id, peerId: supergroupId, isBot: false),
+    );
+  }
+
+  void _resolveBotCommunityIfNeeded(int userId, Map<String, dynamic> user) {
+    if (user.obj('type')?.type != 'userTypeBot') return;
+    final chatId = _chatByUser[userId];
+    if (chatId == null) return;
+    _queueCommunityLookup(
+      _CommunityLookup(chatId: chatId, peerId: userId, isBot: true),
+    );
+  }
+
+  void _queueCommunityLookup(_CommunityLookup lookup) {
+    if (!_queuedCommunityChats.add(lookup.chatId)) return;
+    _communityLookupQueue.add(lookup);
+    _pumpCommunityLookups();
+  }
+
+  void _pumpCommunityLookups() {
+    if (!_listening) return;
+    while (_communityLookupsInFlight < 3 && _communityLookupQueue.isNotEmpty) {
+      final lookup = _communityLookupQueue.removeAt(0);
+      _communityLookupsInFlight++;
+      unawaited(
+        _performCommunityLookup(lookup).whenComplete(() {
+          _communityLookupsInFlight--;
+          _pumpCommunityLookups();
+        }),
+      );
+    }
+  }
+
+  Future<void> _performCommunityLookup(_CommunityLookup lookup) async {
+    try {
+      final fullInfo = await _client.query(
+        lookup.isBot
+            ? {'@type': 'getUserFullInfo', 'user_id': lookup.peerId}
+            : {
+                '@type': 'getSupergroupFullInfo',
+                'supergroup_id': lookup.peerId,
+              },
+      );
+      _applyChatCommunityId(lookup.chatId, fullInfo.int64('community_id'));
+    } catch (_) {
+      // Community metadata is additive. A failed lookup must never prevent the
+      // underlying chat from appearing in the normal chat list.
+    }
+  }
+
+  String _communityCollapsedKey(int communityId) =>
+      'mithka.community.${_client.activeSlot}.$communityId.collapsed';
+
+  Future<void> _loadCommunityCollapsed(int communityId) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!_listening) return;
+    final stored = prefs.getBool(_communityCollapsedKey(communityId));
+    final community = _communities[communityId];
+    if (stored == null || community == null || community.collapsed == stored) {
+      return;
+    }
+    community.collapsed = stored;
+    _scheduleResort();
+  }
+
+  Future<void> _saveCommunityCollapsed(int communityId, bool collapsed) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_communityCollapsedKey(communityId), collapsed);
   }
 
   String _previewText(String text) {
@@ -805,6 +1024,7 @@ class ChatListViewModel extends ChangeNotifier {
       chat.peerEmojiStatusId = status;
       changed = true;
     }
+    _resolveBotCommunityIfNeeded(userId, user);
     if (changed) _scheduleResort();
   }
 

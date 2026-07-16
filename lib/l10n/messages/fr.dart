@@ -547,6 +547,17 @@ const frMessages = <String, String>{
   'cloudThemeLoadFailed': "Impossible de charger ce thème Telegram",
   'cloudThemeOfficialDescription': "Thème cloud officiel Telegram",
   'cloudThemePreviewTitle': "Aperçu du thème",
+  'communityChatAddedService':
+      "Cette discussion a été ajoutée à une communauté",
+  'communityChatCount': "{value1} discussions",
+  'communityChatRemovedService':
+      "Cette discussion a été retirée de sa communauté",
+  'communityChatsYouAreIn': "DISCUSSIONS QUE VOUS AVEZ REJOINTES",
+  'communityNoChats': "Aucune discussion de la communauté ne correspond",
+  'communityShowAsOneChat': "Afficher comme une discussion",
+  'communityShowAsOneChatDescription':
+      "Regroupez cette communauté dans un seul élément extensible de la liste.",
+  'communityTitle': "Communauté",
   'commonUiDraftBadge': "[Brouillon]",
   'commonUiGroupOwner': "Propriétaire",
   'commonUiMentionedBySomeoneBadge': "[Quelqu’un m’a mentionné]",
@@ -629,6 +640,8 @@ const frMessages = <String, String>{
   'editProfileAnimatedAvatar': "Avatar animé",
   'editProfileAnimatedAvatarDescription':
       "Utilisez une courte vidéo, un GIF, un APNG ou une Live Photo",
+  'editProfileAnimatedAvatarPremiumRequired':
+      "Les avatars animés nécessitent Telegram Premium",
   'editProfileAvatarUpdated': "Photo de profil mise à jour",
   'editProfileAvatarUpdateFailed': "Échec du changement de photo : {value1}",
   'editProfileBio': "Bio",

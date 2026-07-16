@@ -693,6 +693,15 @@ abstract final class AppStringKeys {
   static const cloudThemeLoadFailed = 'cloudThemeLoadFailed';
   static const cloudThemeOfficialDescription = 'cloudThemeOfficialDescription';
   static const cloudThemePreviewTitle = 'cloudThemePreviewTitle';
+  static const communityChatAddedService = 'communityChatAddedService';
+  static const communityChatCount = 'communityChatCount';
+  static const communityChatRemovedService = 'communityChatRemovedService';
+  static const communityChatsYouAreIn = 'communityChatsYouAreIn';
+  static const communityNoChats = 'communityNoChats';
+  static const communityShowAsOneChat = 'communityShowAsOneChat';
+  static const communityShowAsOneChatDescription =
+      'communityShowAsOneChatDescription';
+  static const communityTitle = 'communityTitle';
   static const commonUiDraftBadge = 'commonUiDraftBadge';
   static const commonUiGroupOwner = 'commonUiGroupOwner';
   static const commonUiMentionedBySomeoneBadge =
@@ -943,6 +952,8 @@ abstract final class AppStringKeys {
   static const editProfileAnimatedAvatar = 'editProfileAnimatedAvatar';
   static const editProfileAnimatedAvatarDescription =
       'editProfileAnimatedAvatarDescription';
+  static const editProfileAnimatedAvatarPremiumRequired =
+      'editProfileAnimatedAvatarPremiumRequired';
   static const editProfileAvatarUpdated = 'editProfileAvatarUpdated';
   static const editProfileAvatarUpdateFailed = 'editProfileAvatarUpdateFailed';
   static const editProfileBio = 'editProfileBio';

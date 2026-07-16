@@ -19,10 +19,13 @@ import '../channels/forum_topic_browser_view.dart';
 import '../chat/chat_view.dart';
 import '../chat/custom_emoji.dart';
 import '../chat/link_handler.dart';
+import '../communities/community_models.dart';
+import '../communities/community_view.dart';
 import '../components/app_icons.dart';
 import '../components/drawer_controller.dart' as dc;
 import '../components/photo_avatar.dart';
 import '../components/toast.dart';
+import '../components/ui_components.dart';
 import '../contacts/add_people_view.dart';
 import '../contacts/create_group_view.dart';
 import '../profile/emoji_status_picker.dart';
@@ -98,17 +101,33 @@ double chatListItemScrollOffset({
   required double maxScrollExtent,
 }) => math.min(itemIndex * rowHeight, maxScrollExtent);
 
+class CommunityListSelection {
+  const CommunityListSelection({
+    required this.community,
+    required this.chats,
+    required this.onCollapsedChanged,
+  });
+
+  final CommunitySummary community;
+  final List<ChatSummary> chats;
+  final ValueChanged<bool> onCollapsedChanged;
+}
+
 class ChatListView extends StatefulWidget {
   const ChatListView({
     super.key,
     this.controller,
     this.onChatSelected,
+    this.onCommunitySelected,
     this.selectedChatId,
+    this.selectedCommunityId,
   });
 
   final ChatListController? controller;
   final ValueChanged<ChatListSelection>? onChatSelected;
+  final ValueChanged<CommunityListSelection>? onCommunitySelected;
   final int? selectedChatId;
+  final int? selectedCommunityId;
 
   @override
   State<ChatListView> createState() => _ChatListViewState();
@@ -294,6 +313,29 @@ class _ChatListViewState extends State<ChatListView>
     );
   }
 
+  void _openCommunity(CommunityGroupEntry entry) {
+    final selection = CommunityListSelection(
+      community: entry.community,
+      chats: _model.chatsInCommunity(entry.community.id),
+      onCollapsedChanged: (value) =>
+          _model.setCommunityCollapsed(entry.community.id, value),
+    );
+    final onCommunitySelected = widget.onCommunitySelected;
+    if (onCommunitySelected != null) {
+      onCommunitySelected(selection);
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CommunityView(
+          community: selection.community,
+          chats: selection.chats,
+          onCollapsedChanged: selection.onCollapsedChanged,
+        ),
+      ),
+    );
+  }
+
   void _showAddMenu() {
     Navigator.of(
       context,
@@ -354,7 +396,30 @@ class _ChatListViewState extends State<ChatListView>
         _createChannel();
       case AppStringKeys.chatListAddFriendOrGroup:
         _showAddMenu();
+      case AppStringKeys.communityTitle:
+        _openCommunityDirectory();
     }
+  }
+
+  void _openCommunityDirectory() {
+    final entries = [
+      for (final community in _model.availableCommunities)
+        CommunityGroupEntry(
+          community: community,
+          chats: _model.chatsInCommunity(community.id),
+        ),
+    ];
+    if (entries.isEmpty) return;
+    if (entries.length == 1) {
+      _openCommunity(entries.single);
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            _CommunityDirectoryView(entries: entries, onOpen: _openCommunity),
+      ),
+    );
   }
 
   Future<void> _openQrScanner() async {
@@ -503,11 +568,13 @@ class _ChatListViewState extends State<ChatListView>
   }
 
   double? _firstUnreadScrollOffset() {
-    final chats = _model.chats;
-    final chatIndex = chats.indexWhere((chat) => chat.showsRedUnreadIndicator);
-    if (chatIndex < 0) return null;
+    final entries = _model.chatListEntries;
+    final entryIndex = entries.indexWhere(
+      (entry) => entry.showsUnreadIndicator,
+    );
+    if (entryIndex < 0) return null;
 
-    var itemIndex = chatIndex;
+    var itemIndex = entryIndex;
     if (_model.isAllFilter && _model.filtered.isNotEmpty) itemIndex++;
     final archiveMode = context
         .read<ThemeController>()
@@ -516,10 +583,10 @@ class _ChatListViewState extends State<ChatListView>
         _model.archived.isNotEmpty &&
         archiveMode.isInline) {
       final archiveIndex = archiveMode.insertionIndex(
-        chatCount: chats.length,
+        chatCount: entries.length,
         visibleRows: _lastVisibleRows,
       );
-      if (archiveIndex <= chatIndex) itemIndex++;
+      if (archiveIndex <= entryIndex) itemIndex++;
     }
     return chatListItemScrollOffset(
       itemIndex: itemIndex,
@@ -870,7 +937,7 @@ class _ChatListViewState extends State<ChatListView>
             ((geo.maxHeight - searchHeight) / rowH).ceil(),
           );
           _lastVisibleRows = visibleRows;
-          final chats = _model.chats;
+          final entries = _model.chatListEntries;
           final hasFiltered = _model.isAllFilter && _model.filtered.isNotEmpty;
           final hasArchive = _model.isAllFilter && _model.archived.isNotEmpty;
           final showPulledDownArchive =
@@ -878,13 +945,13 @@ class _ChatListViewState extends State<ChatListView>
               archiveMode == ArchivedChatsDisplayMode.pullDown &&
               _archiveRevealed;
           final archiveIndex = archiveMode.insertionIndex(
-            chatCount: chats.length,
+            chatCount: entries.length,
             visibleRows: visibleRows,
           );
           final showInlineArchive = hasArchive && archiveMode.isInline;
 
           Widget list;
-          if (chats.isEmpty &&
+          if (entries.isEmpty &&
               _model.isInitialLoading &&
               !showInlineArchive &&
               !hasFiltered) {
@@ -897,7 +964,7 @@ class _ChatListViewState extends State<ChatListView>
               itemCount: visibleRows,
               itemBuilder: (context, i) => const _ChatRowPlaceholder(),
             );
-          } else if (chats.isEmpty && !showInlineArchive && !hasFiltered) {
+          } else if (entries.isEmpty && !showInlineArchive && !hasFiltered) {
             list = ListView(
               controller: _scrollController,
               physics: const AlwaysScrollableScrollPhysics(
@@ -919,7 +986,7 @@ class _ChatListViewState extends State<ChatListView>
               ),
               padding: EdgeInsets.zero,
               itemCount:
-                  chats.length +
+                  entries.length +
                   (showInlineArchive ? 1 : 0) +
                   (hasFiltered ? 1 : 0),
               itemBuilder: (context, index) {
@@ -930,10 +997,14 @@ class _ChatListViewState extends State<ChatListView>
                 if (showInlineArchive && listIndex == archiveIndex) {
                   return _assistantRow();
                 }
-                final chatIndex = showInlineArchive && listIndex > archiveIndex
+                final entryIndex = showInlineArchive && listIndex > archiveIndex
                     ? listIndex - 1
                     : listIndex;
-                return _swipeRow(chats[chatIndex]);
+                final entry = entries[entryIndex];
+                return switch (entry) {
+                  CommunityChatEntry(:final chat) => _swipeRow(chat),
+                  CommunityGroupEntry() => _communityRow(entry),
+                };
               },
             );
           }
@@ -1136,6 +1207,23 @@ class _ChatListViewState extends State<ChatListView>
     );
   }
 
+  Widget _communityRow(CommunityGroupEntry entry) {
+    return GestureDetector(
+      key: ValueKey('community-${entry.community.id}'),
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _openCommunity(entry),
+      child: CommunityChatListRow(
+        entry: entry,
+        selected: widget.selectedCommunityId == entry.community.id,
+        onClearUnread: () {
+          for (final chat in entry.chats) {
+            _model.markRead(chat);
+          }
+        },
+      ),
+    );
+  }
+
   Widget _swipeRow(ChatSummary chat) {
     if (context.watch<ThemeController>().disableChatListSwipeActions) {
       return GestureDetector(
@@ -1294,7 +1382,10 @@ class _ChatListViewState extends State<ChatListView>
           alignment: Alignment.topRight,
           child: GestureDetector(
             onTap: () {},
-            child: PlusMenu(onSelect: _selectPlusMenuItem),
+            child: PlusMenu(
+              onSelect: _selectPlusMenuItem,
+              showCommunities: _model.availableCommunities.isNotEmpty,
+            ),
           ),
         ),
       ),
@@ -1399,6 +1490,48 @@ class _ChatRowPlaceholder extends StatelessWidget {
   }
 }
 
+class _CommunityDirectoryView extends StatelessWidget {
+  const _CommunityDirectoryView({required this.entries, required this.onOpen});
+
+  final List<CommunityGroupEntry> entries;
+  final ValueChanged<CommunityGroupEntry> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Scaffold(
+      backgroundColor: c.background,
+      body: Column(
+        children: [
+          NavHeader(
+            title: AppStringKeys.communityTitle,
+            onBack: () => Navigator.of(context).pop(),
+          ),
+          Expanded(
+            child: ListView.builder(
+              padding: EdgeInsets.zero,
+              itemCount: entries.length,
+              itemBuilder: (context, index) {
+                final entry = entries[index];
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      onOpen(entry);
+                    });
+                  },
+                  child: CommunityChatListRow(entry: entry),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PlaceholderBar extends StatelessWidget {
   const _PlaceholderBar({
     required this.height,
@@ -1425,14 +1558,25 @@ class _PlaceholderBar extends StatelessWidget {
 
 /// Reference-style "+" dropdown of create actions.
 class PlusMenu extends StatelessWidget {
-  const PlusMenu({super.key, required this.onSelect});
+  const PlusMenu({
+    super.key,
+    required this.onSelect,
+    this.showCommunities = false,
+  });
   final ValueChanged<String> onSelect;
+  final bool showCommunities;
 
-  static const _items = [
+  static const _baseItems = [
     (HeroAppIcons.qrcode, AppStringKeys.chatListScanQrCode),
     (HeroAppIcons.circlePlus, AppStringKeys.chatListCreateGroup),
     (HeroAppIcons.grip, AppStringKeys.chatListCreateChannel),
     (HeroAppIcons.userPlus, AppStringKeys.chatListAddFriendOrGroup),
+  ];
+
+  List<(AppIconData, String)> get _items => [
+    if (showCommunities)
+      (HeroAppIcons.objectGroup, AppStringKeys.communityTitle),
+    ..._baseItems,
   ];
 
   @override
