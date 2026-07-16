@@ -234,6 +234,7 @@ abstract final class AppStringKeys {
   static const appearanceDisplay = 'appearanceDisplay';
   static const appearanceDisplayOwnChatAsFavorites =
       'appearanceDisplayOwnChatAsFavorites';
+  static const appearanceGestures = 'appearanceGestures';
   static const appearanceDownloadFailed = 'appearanceDownloadFailed';
   static const appearanceEmojiFont = 'appearanceEmojiFont';
   static const appearanceEmojiFontCatalogDescription =
@@ -253,6 +254,13 @@ abstract final class AppStringKeys {
   static const appearanceFontSize = 'appearanceFontSize';
   static const appearanceFontUnused = 'appearanceFontUnused';
   static const appearanceGoogleDownloaded = 'appearanceGoogleDownloaded';
+  static const gesturesChatActions = 'gesturesChatActions';
+  static const gesturesChatListSwipe = 'gesturesChatListSwipe';
+  static const gesturesDoNothing = 'gesturesDoNothing';
+  static const gesturesHoldSwipeActions = 'gesturesHoldSwipeActions';
+  static const gesturesSwitchAccounts = 'gesturesSwitchAccounts';
+  static const gesturesSwitchFolders = 'gesturesSwitchFolders';
+  static const gesturesThreeFingerSwipe = 'gesturesThreeFingerSwipe';
   static const appearanceGroupAssistantPosition =
       'appearanceGroupAssistantPosition';
   static const appearanceHideBlockedUserMessages =

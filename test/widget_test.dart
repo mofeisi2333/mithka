@@ -1968,7 +1968,7 @@ void main() {
       expect(prefs.getString('chatFolderDisplayMode'), 'menu');
     });
 
-    test('only applies chat list swipe settings in tabbed mode', () async {
+    test('migrates legacy folder swipe preferences', () async {
       SharedPreferences.setMockInitialValues({
         'chatFolderDisplayMode': 'tabs',
         'disableChatListSwipeActions': true,
@@ -1977,16 +1977,35 @@ void main() {
       final prefs = await SharedPreferences.getInstance();
       final theme = ThemeController(prefs);
 
+      expect(theme.chatListSwipeBehavior, ChatListSwipeBehavior.switchFolders);
       expect(theme.disableChatListSwipeActions, isTrue);
       expect(theme.chatListFolderSwipeSwitching, isTrue);
+      expect(prefs.getString('chatListSwipeBehavior'), 'switchFolders');
 
       theme.chatFolderDisplayMode = ChatFolderDisplayMode.menu;
-      expect(theme.disableChatListSwipeActions, isFalse);
-      expect(theme.chatListFolderSwipeSwitching, isFalse);
-
-      theme.chatFolderDisplayMode = ChatFolderDisplayMode.tabs;
       expect(theme.disableChatListSwipeActions, isTrue);
       expect(theme.chatListFolderSwipeSwitching, isTrue);
+    });
+
+    test('uses gesture defaults and persists explicit choices', () async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final theme = ThemeController(prefs);
+
+      expect(theme.chatListSwipeBehavior, ChatListSwipeBehavior.chatActions);
+      expect(
+        theme.threeFingerSwipeBehavior,
+        ThreeFingerSwipeBehavior.switchFolders,
+      );
+      expect(theme.chatListHoldSwipeActions, isFalse);
+
+      theme.chatListSwipeBehavior = ChatListSwipeBehavior.switchFolders;
+      theme.chatListHoldSwipeActions = true;
+      theme.threeFingerSwipeBehavior = ThreeFingerSwipeBehavior.switchAccounts;
+
+      expect(prefs.getString('chatListSwipeBehavior'), 'switchFolders');
+      expect(prefs.getBool('chatListHoldSwipeActions'), isTrue);
+      expect(prefs.getString('threeFingerSwipeBehavior'), 'switchAccounts');
     });
   });
 

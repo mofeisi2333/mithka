@@ -15,6 +15,8 @@ import 'package:flutter/material.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
+import '../auth/account_store.dart';
+import '../auth/auth_manager.dart';
 import '../channels/forum_topic_browser_view.dart';
 import '../chat/chat_view.dart';
 import '../chat/custom_emoji.dart';
@@ -166,6 +168,9 @@ class _ChatListViewState extends State<ChatListView>
   double _refreshPullDistance = 0;
   bool _isRefreshing = false;
   int _lastVisibleRows = 1;
+  final Map<int, Offset> _gesturePointers = <int, Offset>{};
+  Offset? _threeFingerSwipeOrigin;
+  bool _threeFingerSwipeHandled = false;
 
   static const double _refreshPullThreshold = 72;
 
@@ -622,26 +627,102 @@ class _ChatListViewState extends State<ChatListView>
         }
       });
     }
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Container(
-          color: c.background,
-          child: Column(
-            children: [
-              _header(),
-              if (folderMode == ChatFolderDisplayMode.tabs &&
-                  _model.filters.length > 1)
-                _chatFolderTabs(),
-              Expanded(child: _chatList()),
-            ],
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: _handleGesturePointerDown,
+      onPointerMove: _handleGesturePointerMove,
+      onPointerUp: _handleGesturePointerEnd,
+      onPointerCancel: _handleGesturePointerEnd,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            color: c.background,
+            child: Column(
+              children: [
+                _header(),
+                if (folderMode == ChatFolderDisplayMode.tabs &&
+                    _model.filters.length > 1)
+                  _chatFolderTabs(),
+                Expanded(child: _chatList()),
+              ],
+            ),
           ),
-        ),
-        if (_showPlusMenu) _plusMenuOverlay(),
-        if (folderMode == ChatFolderDisplayMode.menu && _showFilterMenu)
-          _filterMenuOverlay(),
-      ],
+          if (_showPlusMenu) _plusMenuOverlay(),
+          if (folderMode == ChatFolderDisplayMode.menu && _showFilterMenu)
+            _filterMenuOverlay(),
+        ],
+      ),
     );
+  }
+
+  Offset _gestureCentroid() {
+    var dx = 0.0;
+    var dy = 0.0;
+    for (final position in _gesturePointers.values) {
+      dx += position.dx;
+      dy += position.dy;
+    }
+    return Offset(dx / _gesturePointers.length, dy / _gesturePointers.length);
+  }
+
+  void _handleGesturePointerDown(PointerDownEvent event) {
+    _gesturePointers[event.pointer] = event.position;
+    if (_gesturePointers.length == 3) {
+      _threeFingerSwipeOrigin = _gestureCentroid();
+      _threeFingerSwipeHandled = false;
+    } else if (_gesturePointers.length > 3) {
+      _threeFingerSwipeOrigin = null;
+    }
+  }
+
+  void _handleGesturePointerMove(PointerMoveEvent event) {
+    if (!_gesturePointers.containsKey(event.pointer)) return;
+    _gesturePointers[event.pointer] = event.position;
+    final origin = _threeFingerSwipeOrigin;
+    if (_gesturePointers.length != 3 ||
+        origin == null ||
+        _threeFingerSwipeHandled) {
+      return;
+    }
+    final delta = _gestureCentroid() - origin;
+    if (delta.dx.abs() < 64 || delta.dx.abs() < delta.dy.abs() * 1.25) return;
+    _threeFingerSwipeHandled = true;
+    _performThreeFingerSwipe(delta.dx);
+  }
+
+  void _handleGesturePointerEnd(PointerEvent event) {
+    _gesturePointers.remove(event.pointer);
+    if (_gesturePointers.length < 3) {
+      _threeFingerSwipeOrigin = null;
+      _threeFingerSwipeHandled = false;
+    }
+  }
+
+  void _performThreeFingerSwipe(double horizontalDelta) {
+    switch (context.read<ThemeController>().threeFingerSwipeBehavior) {
+      case ThreeFingerSwipeBehavior.switchFolders:
+        _switchFolderBySwipe(horizontalDelta < 0 ? -1000 : 1000);
+        return;
+      case ThreeFingerSwipeBehavior.switchAccounts:
+        _switchAccountBySwipe(horizontalDelta);
+        return;
+      case ThreeFingerSwipeBehavior.disabled:
+        return;
+    }
+  }
+
+  void _switchAccountBySwipe(double horizontalDelta) {
+    final accounts = context.read<AccountStore>();
+    final summaries = accounts.summaries;
+    if (summaries.length < 2) return;
+    final current = summaries.indexWhere(
+      (account) => account.slot == accounts.activeSlot,
+    );
+    if (current < 0) return;
+    final step = horizontalDelta < 0 ? 1 : -1;
+    final next = (current + step) % summaries.length;
+    accounts.switchTo(summaries[next].slot, context.read<AuthManager>());
   }
 
   // MARK: - Header
@@ -1225,7 +1306,11 @@ class _ChatListViewState extends State<ChatListView>
   }
 
   Widget _swipeRow(ChatSummary chat) {
-    if (context.watch<ThemeController>().disableChatListSwipeActions) {
+    final theme = context.watch<ThemeController>();
+    final holdForActions =
+        theme.chatListSwipeBehavior == ChatListSwipeBehavior.switchFolders &&
+        theme.chatListHoldSwipeActions;
+    if (theme.disableChatListSwipeActions && !holdForActions) {
       return GestureDetector(
         key: ValueKey(chat.id),
         behavior: HitTestBehavior.opaque,
@@ -1279,6 +1364,7 @@ class _ChatListViewState extends State<ChatListView>
       onOpenChanged: (id) => setState(() => _openSwipeChat = id),
       onTap: () => _openChat(chat),
       actions: actions,
+      requiresLongPressDrag: holdForActions,
       child: ChatRowView(
         chat: chat,
         selected: widget.selectedChatId == chat.id,
@@ -1752,6 +1838,7 @@ class ChatSwipeRow extends StatefulWidget {
     required this.actions,
     required this.onTap,
     required this.child,
+    this.requiresLongPressDrag = false,
   });
 
   final int rowId;
@@ -1760,6 +1847,7 @@ class ChatSwipeRow extends StatefulWidget {
   final List<SwipeActionItem> actions;
   final VoidCallback onTap;
   final Widget child;
+  final bool requiresLongPressDrag;
 
   @override
   State<ChatSwipeRow> createState() => _ChatSwipeRowState();
@@ -1776,6 +1864,7 @@ class _ChatSwipeRowState extends State<ChatSwipeRow>
   VoidCallback? _animationListener;
   double _offset = 0;
   bool _longPressHighlighted = false;
+  double _longPressStartOffset = 0;
 
   double get _totalWidth => widget.actions.length * _buttonWidth;
 
@@ -1850,6 +1939,16 @@ class _ChatSwipeRowState extends State<ChatSwipeRow>
     if (widget.openRowId == widget.rowId) widget.onOpenChanged(null);
   }
 
+  void _settle(double velocity) {
+    if (velocity < -520 || (velocity <= 360 && _offset < -_totalWidth * 0.38)) {
+      _animateTo(-_totalWidth);
+      widget.onOpenChanged(widget.rowId);
+    } else {
+      _animateTo(0);
+      if (widget.openRowId == widget.rowId) widget.onOpenChanged(null);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return ClipRect(
@@ -1897,30 +1996,44 @@ class _ChatSwipeRowState extends State<ChatSwipeRow>
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: () => _offset != 0 ? _close() : widget.onTap(),
-              onLongPressStart: (_) =>
-                  setState(() => _longPressHighlighted = true),
-              onLongPressEnd: (_) =>
-                  setState(() => _longPressHighlighted = false),
-              onLongPressCancel: () =>
-                  setState(() => _longPressHighlighted = false),
-              onHorizontalDragStart: (_) => _stopAnimation(),
-              onHorizontalDragUpdate: (d) {
-                setState(
-                  () => _offset = _rubberBandOffset(_offset + d.delta.dx),
-                );
+              onLongPressStart: (_) {
+                _stopAnimation();
+                _longPressStartOffset = _offset;
+                setState(() => _longPressHighlighted = true);
               },
-              onHorizontalDragEnd: (d) {
-                final vx = d.primaryVelocity ?? 0;
-                if (vx < -520 || (vx <= 360 && _offset < -_totalWidth * 0.38)) {
-                  _animateTo(-_totalWidth);
-                  widget.onOpenChanged(widget.rowId);
-                } else {
-                  _animateTo(0);
-                  if (widget.openRowId == widget.rowId) {
-                    widget.onOpenChanged(null);
-                  }
+              onLongPressMoveUpdate: widget.requiresLongPressDrag
+                  ? (details) {
+                      setState(() {
+                        _offset = _rubberBandOffset(
+                          _longPressStartOffset +
+                              details.localOffsetFromOrigin.dx,
+                        );
+                      });
+                    }
+                  : null,
+              onLongPressEnd: (details) {
+                setState(() => _longPressHighlighted = false);
+                if (widget.requiresLongPressDrag) {
+                  _settle(details.velocity.pixelsPerSecond.dx);
                 }
               },
+              onLongPressCancel: () =>
+                  setState(() => _longPressHighlighted = false),
+              onHorizontalDragStart: widget.requiresLongPressDrag
+                  ? null
+                  : (_) => _stopAnimation(),
+              onHorizontalDragUpdate: widget.requiresLongPressDrag
+                  ? null
+                  : (details) {
+                      setState(
+                        () => _offset = _rubberBandOffset(
+                          _offset + details.delta.dx,
+                        ),
+                      );
+                    },
+              onHorizontalDragEnd: widget.requiresLongPressDrag
+                  ? null
+                  : (details) => _settle(details.primaryVelocity ?? 0),
               child: Stack(
                 children: [
                   widget.child,

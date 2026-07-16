@@ -5165,6 +5165,7 @@ class _ChatViewState extends State<ChatView> {
     Rect? rect, [
     MessageActionSource source = MessageActionSource.normal,
   ]) {
+    EmojiStore.shared.loadIfNeeded();
     setState(() {
       _actionTarget = message;
       _actionRect = rect;
@@ -5645,21 +5646,29 @@ class _ChatViewState extends State<ChatView> {
               top: reactionTop,
               left: 10,
               right: 10,
-              child: _reactionExpanded
-                  ? Align(alignment: align, child: _expandedReactionPicker())
-                  : Align(
+              child: AnimatedBuilder(
+                animation: EmojiStore.shared,
+                builder: (context, _) {
+                  if (_reactionExpanded) {
+                    return Align(
                       alignment: align,
-                      child: QuickReactionBar(
-                        reactions: context
-                            .watch<ThemeController>()
-                            .quickReactions,
-                        onReaction: _reactQuick,
-                        onExpand: () {
-                          EmojiStore.shared.loadIfNeeded();
-                          setState(() => _reactionExpanded = true);
-                        },
-                      ),
+                      child: _expandedReactionPicker(),
+                    );
+                  }
+                  final reactions = effectiveQuickReactions(
+                    context.watch<ThemeController>().quickReactions,
+                    allowCustomEmoji: EmojiStore.shared.isPremium,
+                  );
+                  return Align(
+                    alignment: align,
+                    child: QuickReactionBar(
+                      reactions: reactions,
+                      onReaction: _reactQuick,
+                      onExpand: () => setState(() => _reactionExpanded = true),
                     ),
+                  );
+                },
+              ),
             ),
           if (showActionMenu)
             Positioned(
