@@ -10,6 +10,7 @@ import '../components/ui_components.dart';
 import '../profile/emoji_status_picker.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
+import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 
 /// Telegram Business settings which belong to the current account. The data is
@@ -51,10 +52,9 @@ class _BusinessSettingsViewState extends State<BusinessSettingsView> {
         _location = business?.obj('location');
         _openingHours = business?.obj('opening_hours');
         _startPage = business?.obj('start_page');
-        _emojiStatusId =
-            me.obj('emoji_status')?.obj('type')?.int64('custom_emoji_id') ??
-            me.obj('emoji_status')?.int64('custom_emoji_id') ??
-            0;
+        _emojiStatusId = TDParse.emojiStatusCustomEmojiId(
+          me.obj('emoji_status'),
+        );
       });
     } catch (_) {
       // Requests below will surface a useful TDLib error through a toast.
@@ -227,16 +227,12 @@ class _BusinessSettingsViewState extends State<BusinessSettingsView> {
           padding: const EdgeInsets.symmetric(horizontal: 14),
           child: Row(
             children: [
-              Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: iconColor,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Center(
-                  child: AppIcon(icon, size: 17, color: Colors.white),
-                ),
+              SettingsIconTile(
+                icon: icon,
+                backgroundColor: iconColor,
+                size: 30,
+                iconSize: 17,
+                radius: 8,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -641,9 +637,8 @@ class _BusinessOpeningHoursViewState extends State<_BusinessOpeningHoursView> {
                     children: [
                       _hoursRow(
                         AppStrings.t(AppStringKeys.businessSettingsAlwaysOpen),
-                        CupertinoSwitch(
+                        AppSwitch(
                           value: _alwaysOpen,
-                          activeTrackColor: AppTheme.brand,
                           onChanged: (value) =>
                               setState(() => _alwaysOpen = value),
                         ),
@@ -719,9 +714,12 @@ class _BusinessOpeningHoursViewState extends State<_BusinessOpeningHoursView> {
         Expanded(
           child: Text(
             title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(fontSize: 16, color: context.colors.textPrimary),
           ),
         ),
+        const SizedBox(width: 12),
         trailing,
       ],
     ),
@@ -738,6 +736,8 @@ class _BusinessOpeningHoursViewState extends State<_BusinessOpeningHoursView> {
             width: 92,
             child: Text(
               AppStrings.t(_dayKeys[day]),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 15, color: c.textPrimary),
             ),
           ),
@@ -764,9 +764,8 @@ class _BusinessOpeningHoursViewState extends State<_BusinessOpeningHoursView> {
           ] else
             const Spacer(),
           const SizedBox(width: 10),
-          CupertinoSwitch(
+          AppSwitch(
             value: value.enabled,
-            activeTrackColor: AppTheme.brand,
             onChanged: (enabled) => setState(() => value.enabled = enabled),
           ),
         ],

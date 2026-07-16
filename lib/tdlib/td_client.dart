@@ -29,6 +29,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config/secrets.dart';
 import '../settings/api_credentials_config.dart';
 import '../settings/proxy_config.dart';
+import '../settings/transfer_boost_config.dart';
 import 'avatar_animation_index.dart';
 import 'json_helpers.dart';
 import 'td_bindings.dart';
@@ -73,6 +74,19 @@ class _TdSessionStringInfo {
   final bool isBot;
 }
 
+@visibleForTesting
+List<int> closeStaleDebugTdlibClients(
+  Iterable<int> clientIds,
+  void Function(int clientId, String request) send,
+) {
+  final staleClientIds = clientIds.where((id) => id > 0).toSet().toList();
+  final closeRequest = jsonEncode({'@type': 'close'});
+  for (final clientId in staleClientIds) {
+    send(clientId, closeRequest);
+  }
+  return staleClientIds;
+}
+
 class TdClient {
   TdClient._();
   static final TdClient shared = TdClient._();
@@ -97,8 +111,15 @@ class TdClient {
   // Multicast of the ACTIVE account's updates.
   final StreamController<Map<String, dynamic>> _updates =
       StreamController.broadcast(sync: true);
+  final StreamController<Map<String, dynamic>> _allUpdates =
+      StreamController.broadcast(sync: true);
+  final StreamController<int> _activeSlotChanges = StreamController.broadcast(
+    sync: true,
+  );
   final Map<int, Map<String, dynamic>> _latestChatFoldersByClient = {};
   final Map<int, Map<String, dynamic>> _latestEmojiChatThemesByClient = {};
+  final Map<int, Map<int, Map<String, dynamic>>> _latestCommunitiesByClient =
+      {};
 
   // Accounts
   final Map<int, int> _clientForSlot = {};
@@ -116,13 +137,19 @@ class TdClient {
   static const _liveClientIdsKey = 'drachma.debugLiveClientIds';
 
   int get activeSlot => _activeSlot;
+  int get activeClientId => _activeClientId;
   bool get hasActiveClient => _activeClientId != 0;
   List<int> get configuredSlots => List.unmodifiable(_slots);
   int? clientId(int slot) => _clientForSlot[slot];
+  int? slotForClient(int clientId) => _slotForClient[clientId];
   Map<String, dynamic>? get latestChatFoldersUpdate =>
       _latestChatFoldersByClient[_activeClientId];
+  Map<String, dynamic>? latestChatFoldersUpdateForClient(int clientId) =>
+      _latestChatFoldersByClient[clientId];
   Map<String, dynamic>? get latestEmojiChatThemesUpdate =>
       _latestEmojiChatThemesByClient[_activeClientId];
+  Iterable<Map<String, dynamic>> get latestCommunityUpdates =>
+      _latestCommunitiesByClient[_activeClientId]?.values ?? const [];
 
   // MARK: - Lifecycle
 
@@ -137,6 +164,21 @@ class TdClient {
     );
 
     _prefs = await SharedPreferences.getInstance();
+    final transferBoost = TransferBoostConfig.fromPrefs(_prefs);
+    _bindings.configureTransferBoost(
+      downloadChunkSize: transferBoost.downloadEnabled
+          ? transferBoost.downloadChunkSizeBytes
+          : 0,
+      downloadParallelism: transferBoost.downloadEnabled
+          ? transferBoost.downloadParallelism
+          : 0,
+      uploadChunkSize: transferBoost.uploadEnabled
+          ? transferBoost.uploadChunkSizeBytes
+          : 0,
+      uploadParallelism: transferBoost.uploadEnabled
+          ? transferBoost.uploadParallelism
+          : 0,
+    );
     _supportDir = (await getApplicationSupportDirectory()).path;
     if (kDebugMode) await _closeStaleDebugClients();
 
@@ -283,6 +325,7 @@ class TdClient {
     _slotForClient.remove(oldClientId);
     _latestChatFoldersByClient.remove(oldClientId);
     _latestEmojiChatThemesByClient.remove(oldClientId);
+    _latestCommunitiesByClient.remove(oldClientId);
     _proxyAppliedClients.remove(oldClientId);
     await deleteSlotData(slot);
 
@@ -774,10 +817,12 @@ class TdClient {
   void setActive(int slot) {
     final cid = _clientForSlot[slot];
     if (cid == null) return;
+    final changed = slot != _activeSlot;
     _activeSlot = slot;
     _activeClientId = cid;
     _persist();
     _applySavedProxyToClientOnce(cid);
+    if (changed) _activeSlotChanges.add(slot);
   }
 
   /// Discards an account slot: closes its TDLib client and forgets it, so it
@@ -844,6 +889,7 @@ class TdClient {
       _slotForClient.remove(cid);
       _latestChatFoldersByClient.remove(cid);
       _latestEmojiChatThemesByClient.remove(cid);
+      _latestCommunitiesByClient.remove(cid);
       _proxyAppliedClients.remove(cid);
     }
   }
@@ -903,8 +949,19 @@ class TdClient {
     if (object.type == 'updateEmojiChatThemes') {
       _latestEmojiChatThemesByClient[clientId] = object;
     }
+    if (object.type == 'updateCommunity') {
+      final community = object.obj('community');
+      final communityId = community?.int64('id');
+      if (community != null && communityId != null) {
+        _latestCommunitiesByClient.putIfAbsent(
+          clientId,
+          () => {},
+        )[communityId] = object;
+      }
+    }
 
-    // Only surface the active account's updates to the UI.
+    _allUpdates.add(object);
+    // Most UI consumers only need the active account's updates.
     if (clientId == _activeClientId) _updates.add(object);
 
     // Internal: receive isolate reported a fatal error (e.g. td_receive threw
@@ -941,6 +998,17 @@ class TdClient {
         .whereType<int>()
         .toList();
     if (ids == null || ids.isEmpty) return;
+    final closedIds = closeStaleDebugTdlibClients(ids, _bindings.send);
+    if (closedIds.isNotEmpty) {
+      debugPrint(
+        '🔑 [Mithka] closing stale TDLib clients after hot restart: '
+        '${closedIds.join(', ')}',
+      );
+      // `close` is asynchronous inside TDLib. Give the native clients time to
+      // release their database handles before creating replacements that use
+      // the same account directories.
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
     await _prefs.remove(_liveClientIdsKey);
   }
 
@@ -1128,6 +1196,12 @@ class TdClient {
 
   /// A fresh stream of the ACTIVE account's TDLib updates.
   Stream<Map<String, dynamic>> subscribe() => _updates.stream;
+
+  /// Updates from every configured account. Consumers must use @client_id to
+  /// keep account-scoped identifiers separate.
+  Stream<Map<String, dynamic>> subscribeAll() => _allUpdates.stream;
+
+  Stream<int> subscribeActiveSlotChanges() => _activeSlotChanges.stream;
 
   /// Broadcasts a local state correction to the same subscribers as TDLib
   /// updates. Use this only after sending the corresponding TDLib request, so

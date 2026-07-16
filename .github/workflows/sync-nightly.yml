@@ -1,11 +1,13 @@
 name: 🌙 Sync Nightly
 
-# Mirror master to nightly once per day. A generated GITHUB_TOKEN push doesn't
-# trigger other workflows, so a changed sync explicitly dispatches release.yml.
+# Merge master into nightly twice per day. Every sync that incorporates new
+# master commits increments the app's patch version once. A generated
+# GITHUB_TOKEN push doesn't trigger other workflows, so a changed sync
+# explicitly dispatches release.yml.
 
 on:
   schedule:
-    - cron: '0 12 * * *'
+    - cron: '0 0,12 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -28,29 +30,82 @@ jobs:
           ref: master
           fetch-depth: 0
 
-      - name: Fast-forward nightly when master changed
+      - name: Merge changed master into a versioned nightly
         id: sync
         run: |
           git fetch origin master
-          master_sha="$(git rev-parse origin/master)"
+          master_raw="$(git show origin/master:pubspec.yaml | awk '/^version:/ { print $2; exit }')"
+          test -n "$master_raw"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           if git ls-remote --exit-code --heads origin nightly >/dev/null 2>&1; then
             git fetch origin nightly
-            nightly_sha="$(git rev-parse origin/nightly)"
-            if [ "$master_sha" = "$nightly_sha" ]; then
+            if git merge-base --is-ancestor origin/master origin/nightly; then
               echo "changed=false" >> "$GITHUB_OUTPUT"
-              echo "nightly is already at $master_sha"
+              echo "nightly already contains the current master"
               exit 0
             fi
-            if ! git merge-base --is-ancestor origin/nightly origin/master; then
-              echo "nightly has diverged from master; refusing to overwrite it" >&2
-              exit 1
+
+            previous_raw="$(git show origin/nightly:pubspec.yaml | awk '/^version:/ { print $2; exit }')"
+            test -n "$previous_raw"
+            git checkout -B nightly origin/nightly
+            if ! git merge --no-commit --no-ff origin/master; then
+              conflicts="$(git diff --name-only --diff-filter=U)"
+              if [ "$conflicts" != "pubspec.yaml" ]; then
+                echo "nightly merge has conflicts outside pubspec.yaml:" >&2
+                printf '%s\n' "$conflicts" >&2
+                exit 1
+              fi
+              # Both branches may have changed the version line. The generated
+              # nightly version below is based on both values, so start from
+              # master's copy of the rest of pubspec.yaml.
+              git checkout --theirs -- pubspec.yaml
+              git add pubspec.yaml
             fi
+          else
+            previous_raw="$master_raw"
+            git checkout -B nightly origin/master
           fi
 
-          git push origin "$master_sha:refs/heads/nightly"
+          master_semver="${master_raw%%+*}"
+          previous_semver="${previous_raw%%+*}"
+          IFS=. read -r master_major master_minor master_patch master_extra <<< "$master_semver"
+          IFS=. read -r previous_major previous_minor previous_patch previous_extra <<< "$previous_semver"
+          for component in "$master_major" "$master_minor" "$master_patch" \
+            "$previous_major" "$previous_minor" "$previous_patch"; do
+            case "$component" in
+              ''|*[!0-9]*) echo "Invalid app version component: $component" >&2; exit 1 ;;
+            esac
+          done
+          if [ -n "$master_extra" ] || [ -n "$previous_extra" ]; then
+            echo "Expected X.Y.Z versions, got $master_semver and $previous_semver" >&2
+            exit 1
+          fi
+
+          if [ "$master_major" = "$previous_major" ] && \
+            [ "$master_minor" = "$previous_minor" ] && \
+            [ "$previous_patch" -ge "$master_patch" ]; then
+            nightly_patch=$((previous_patch + 1))
+          else
+            nightly_patch=$((master_patch + 1))
+          fi
+          nightly_version="$master_major.$master_minor.$nightly_patch"
+          case "$master_raw" in
+            *+*) nightly_raw="$nightly_version+${master_raw#*+}" ;;
+            *) nightly_raw="$nightly_version" ;;
+          esac
+
+          sed -i -E "s/^version:.*/version: $nightly_raw/" pubspec.yaml
+          test "$(awk '/^version:/ { print $2; exit }' pubspec.yaml)" = "$nightly_raw"
+          git add pubspec.yaml
+          git diff --check --cached -- pubspec.yaml
+          git commit -m "chore: sync nightly $nightly_version"
+          git push origin HEAD:nightly
           echo "changed=true" >> "$GITHUB_OUTPUT"
-          echo "nightly now points to $master_sha"
+          echo "nightly_version=$nightly_version" >> "$GITHUB_OUTPUT"
+          echo "nightly now contains master at app version $nightly_raw"
 
       - name: Dispatch nightly prerelease
         if: steps.sync.outputs.changed == 'true'

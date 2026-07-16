@@ -2510,6 +2510,8 @@ abstract final class TDParse {
     'messageVideoChatEnded',
     'messageForumTopicCreated',
     'messageChatBoost',
+    'messageChatAddedToCommunity',
+    'messageChatRemovedFromCommunity',
   };
 
   static bool isServiceContent(String? type) =>
@@ -2537,6 +2539,9 @@ abstract final class TDParse {
         return telegramText(AppStringKeys.tdMessageMemberLeftGroup);
       case 'messagePinMessage':
         return telegramText(AppStringKeys.tdMessageMessagePinned);
+      case 'messageCustomServiceAction':
+        return _cleanString(content?.str('text')) ??
+            telegramText(AppStringKeys.tdMessageSystemMessage);
       case 'messagePaidMessagePriceChanged':
       case 'messageDirectMessagePriceChanged':
         final stars =
@@ -2572,6 +2577,10 @@ abstract final class TDParse {
         return AppStrings.t(AppStringKeys.groupManagementLogCreatedTopic);
       case 'messageChatBoost':
         return telegramText(AppStringKeys.tdMessageBoostedGroup);
+      case 'messageChatAddedToCommunity':
+        return AppStrings.t(AppStringKeys.communityChatAddedService);
+      case 'messageChatRemovedFromCommunity':
+        return AppStrings.t(AppStringKeys.communityChatRemovedService);
       case 'messageChatSetBackground':
         return AppStrings.t(AppStringKeys.chatWallpaperChanged);
       case 'messageChatSetTheme':
@@ -2723,6 +2732,19 @@ abstract final class TDParse {
     return AppStrings.t(AppStringKeys.chatUserFallbackName, {
       'value1': user.int64('id') ?? 0,
     });
+  }
+
+  /// The custom emoji that represents a TDLib `emojiStatus` in compact UI.
+  ///
+  /// Regular statuses expose `custom_emoji_id`, while upgraded gifts expose
+  /// their display model through `model_custom_emoji_id`.
+  static int emojiStatusCustomEmojiId(Map<String, dynamic>? emojiStatus) {
+    final type = emojiStatus?.obj('type');
+    return type?.int64('custom_emoji_id') ??
+        type?.int64('model_custom_emoji_id') ??
+        emojiStatus?.int64('custom_emoji_id') ??
+        emojiStatus?.int64('model_custom_emoji_id') ??
+        0;
   }
 
   static final _nonDigitsRegExp = RegExp(r'\D');

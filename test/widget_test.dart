@@ -22,6 +22,7 @@ import 'package:mithka/chat/music_player_controller.dart';
 import 'package:mithka/chat/rich_text_composer_view.dart';
 import 'package:mithka/chat/secret_chat_service.dart';
 import 'package:mithka/chat/sponsored_messages_cache.dart';
+import 'package:mithka/chat/sticker_item.dart';
 import 'package:mithka/components/app_icons.dart';
 import 'package:mithka/components/keyboard_dismiss_on_tap.dart';
 import 'package:mithka/components/photo_avatar.dart';
@@ -782,6 +783,36 @@ void main() {
   });
 
   group('ChatInputBar', () {
+    test('builds awaitable sticker send requests', () {
+      final vm = ChatViewModel(chatId: 42, title: 'Test', markReadOnOpen: false)
+        ..paidMessageStarCount = 3;
+      addTearDown(vm.dispose);
+
+      final request = vm.stickerMessageRequest(
+        const StickerItem(
+          id: 100,
+          remoteId: 'remote-sticker',
+          width: 512,
+          height: 384,
+          emoji: '🙂',
+        ),
+      );
+
+      expect(request['@type'], 'sendMessage');
+      expect(request['chat_id'], 42);
+      expect(request['options'], {
+        '@type': 'messageSendOptions',
+        'paid_message_star_count': 3,
+      });
+      expect(request['input_message_content'], {
+        '@type': 'inputMessageSticker',
+        'sticker': {'@type': 'inputFileRemote', 'id': 'remote-sticker'},
+        'width': 512,
+        'height': 384,
+        'emoji': '🙂',
+      });
+    });
+
     testWidgets('more panel paints the bottom safe area with its background', (
       tester,
     ) async {
@@ -1937,7 +1968,7 @@ void main() {
       expect(prefs.getString('chatFolderDisplayMode'), 'menu');
     });
 
-    test('only applies chat list swipe settings in tabbed mode', () async {
+    test('migrates legacy folder swipe preferences', () async {
       SharedPreferences.setMockInitialValues({
         'chatFolderDisplayMode': 'tabs',
         'disableChatListSwipeActions': true,
@@ -1946,16 +1977,35 @@ void main() {
       final prefs = await SharedPreferences.getInstance();
       final theme = ThemeController(prefs);
 
+      expect(theme.chatListSwipeBehavior, ChatListSwipeBehavior.switchFolders);
       expect(theme.disableChatListSwipeActions, isTrue);
       expect(theme.chatListFolderSwipeSwitching, isTrue);
+      expect(prefs.getString('chatListSwipeBehavior'), 'switchFolders');
 
       theme.chatFolderDisplayMode = ChatFolderDisplayMode.menu;
-      expect(theme.disableChatListSwipeActions, isFalse);
-      expect(theme.chatListFolderSwipeSwitching, isFalse);
-
-      theme.chatFolderDisplayMode = ChatFolderDisplayMode.tabs;
       expect(theme.disableChatListSwipeActions, isTrue);
       expect(theme.chatListFolderSwipeSwitching, isTrue);
+    });
+
+    test('uses gesture defaults and persists explicit choices', () async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final theme = ThemeController(prefs);
+
+      expect(theme.chatListSwipeBehavior, ChatListSwipeBehavior.chatActions);
+      expect(
+        theme.threeFingerSwipeBehavior,
+        ThreeFingerSwipeBehavior.switchFolders,
+      );
+      expect(theme.chatListHoldSwipeActions, isFalse);
+
+      theme.chatListSwipeBehavior = ChatListSwipeBehavior.switchFolders;
+      theme.chatListHoldSwipeActions = true;
+      theme.threeFingerSwipeBehavior = ThreeFingerSwipeBehavior.switchAccounts;
+
+      expect(prefs.getString('chatListSwipeBehavior'), 'switchFolders');
+      expect(prefs.getBool('chatListHoldSwipeActions'), isTrue);
+      expect(prefs.getString('threeFingerSwipeBehavior'), 'switchAccounts');
     });
   });
 
@@ -2755,27 +2805,33 @@ void main() {
   });
 
   group('CountryMessageFilter', () {
-    test('matches only selected-country non-contacts', () async {
-      SharedPreferences.setMockInitialValues({
-        'countryMessageFilter.selectedCountries': ['JP', 'US'],
-      });
-      final prefs = await SharedPreferences.getInstance();
-      final filter = CountryMessageFilter()..initialize(prefs);
+    test(
+      'matches selected countries and applies configured exemptions',
+      () async {
+        SharedPreferences.setMockInitialValues({
+          'countryMessageFilter.selectedCountries': ['JP', 'US'],
+        });
+        final prefs = await SharedPreferences.getInstance();
+        final filter = CountryMessageFilter()..initialize(prefs);
 
-      expect(
-        filter.matchesUser(isContact: false, phoneNumber: '+81 90 1234 5678'),
-        isTrue,
-      );
-      expect(
-        filter.matchesUser(isContact: true, phoneNumber: '+81 90 1234 5678'),
-        isFalse,
-      );
-      expect(
-        filter.matchesUser(isContact: false, phoneNumber: '+44 20 7946 0958'),
-        isFalse,
-      );
-      expect(filter.matchesUser(isContact: false), isFalse);
-    });
+        expect(filter.matchesUser(phoneNumber: '+81 90 1234 5678'), isTrue);
+        expect(
+          filter.matchesUser(isContact: true, phoneNumber: '+81 90 1234 5678'),
+          isTrue,
+        );
+        expect(filter.matchesUser(phoneNumber: '+44 20 7946 0958'), isFalse);
+        expect(filter.matchesUser(), isFalse);
+        expect(
+          filter.shouldExempt(
+            hasCommonPrivateGroup: false,
+            commonGroupCount: 0,
+            isPlainTextWithoutLinks: true,
+            hasNonDefaultAvatar: false,
+          ),
+          isTrue,
+        );
+      },
+    );
   });
 
   group('AppFontChoice', () {

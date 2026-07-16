@@ -25,6 +25,7 @@ import 'file_detail_view.dart';
 import 'full_image_viewer.dart';
 import 'link_handler.dart';
 import 'music_player_controller.dart';
+import 'video_playback_queue.dart';
 import 'video_player_view.dart';
 import 'voice_audio.dart';
 
@@ -1068,14 +1069,8 @@ class _SharedMediaViewState extends State<SharedMediaView> {
           Navigator.of(context).push(
             MaterialPageRoute(
               fullscreenDialog: true,
-              builder: (_) => VideoPlayerView(
-                video: video,
-                thumb: message.image,
-                width: message.imageWidth,
-                height: message.imageHeight,
-                sourceChatId: _sourceChatIdFor(message),
-                messageId: message.id,
-              ),
+              builder: (_) =>
+                  VideoPlaylistPlayerView(queue: _videoQueue(media, message)),
             ),
           );
           return;
@@ -1149,13 +1144,13 @@ class _SharedMediaViewState extends State<SharedMediaView> {
     return ListView.builder(
       padding: EdgeInsets.zero,
       itemCount: items.length,
-      itemBuilder: (context, i) => _listRow(items[i]),
+      itemBuilder: (context, i) => _listRow(items[i], items),
     );
   }
 
-  Widget _listRow(ChatMessage m) {
+  Widget _listRow(ChatMessage m, List<ChatMessage> items) {
     final c = context.colors;
-    if (_tabs[_tab].videoOnly && m.video != null) return _videoRow(m);
+    if (_tabs[_tab].videoOnly && m.video != null) return _videoRow(m, items);
     if (_tabs[_tab].musicOnly && m.music != null) return _musicRow(m);
     final isVoice = m.voice != null;
     if (isVoice) return _voiceRow(m);
@@ -1449,7 +1444,7 @@ class _SharedMediaViewState extends State<SharedMediaView> {
     );
   }
 
-  Widget _videoRow(ChatMessage message) {
+  Widget _videoRow(ChatMessage message, List<ChatMessage> items) {
     final c = context.colors;
     final state = _stateFor(message);
     final title = _videoTitle(message);
@@ -1467,14 +1462,8 @@ class _SharedMediaViewState extends State<SharedMediaView> {
         Navigator.of(context).push(
           MaterialPageRoute(
             fullscreenDialog: true,
-            builder: (_) => VideoPlayerView(
-              video: video,
-              thumb: message.image,
-              width: message.imageWidth,
-              height: message.imageHeight,
-              sourceChatId: _sourceChatIdFor(message),
-              messageId: message.id,
-            ),
+            builder: (_) =>
+                VideoPlaylistPlayerView(queue: _videoQueue(items, message)),
           ),
         );
       },
@@ -1906,6 +1895,32 @@ class _SharedMediaViewState extends State<SharedMediaView> {
   }
 
   int _sourceChatIdFor(ChatMessage message) => message.chatId ?? widget.chatId;
+
+  VideoPlaybackQueue _videoQueue(
+    List<ChatMessage> candidates,
+    ChatMessage current,
+  ) {
+    final videos = candidates
+        .where((message) => message.video != null)
+        .toList();
+    if (!videos.any((message) => message.id == current.id)) videos.add(current);
+    final index = videos.indexWhere((message) => message.id == current.id);
+    return VideoPlaybackQueue(
+      items: [
+        for (final message in videos)
+          VideoPlaybackItem(
+            video: message.video!,
+            thumb: message.image,
+            width: message.imageWidth,
+            height: message.imageHeight,
+            sourceChatId: _sourceChatIdFor(message),
+            messageId: message.id,
+            title: _videoTitle(message),
+          ),
+      ],
+      index: index < 0 ? 0 : index,
+    );
+  }
 
   String _sourceTitleFor(ChatMessage message) {
     final sourceChatId = message.chatId;

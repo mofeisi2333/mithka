@@ -30,6 +30,7 @@ import '../components/ui_components.dart';
 import '../l10n/telegram_language_controller.dart';
 import '../media/app_asset_picker.dart';
 import '../settings/rich_message_relay_config.dart';
+import '../settings/rich_message_relay_view.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
@@ -897,7 +898,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
       title: menu.actionTitle,
       menuWebApp: true,
     );
-    if (!opened && mounted) showToast(context, 'Mini App 暂时无法启动');
+    if (!opened && mounted) {
+      showToast(context, AppStrings.t(AppStringKeys.miniAppCannotStart));
+    }
   }
 
   Widget _botMenuRow({
@@ -1029,7 +1032,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
     final botUserId = await vm.webAppBotUserId(keyboard.message);
     if (!mounted) return;
     if (botUserId == null) {
-      showToast(context, 'Mini App 暂时无法启动');
+      showToast(context, AppStrings.t(AppStringKeys.miniAppCannotStart));
       return;
     }
     final opened = await openTelegramMiniApp(
@@ -1040,7 +1043,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
       title: button.text,
       keyboardButtonText: button.text,
     );
-    if (!opened && mounted) showToast(context, 'Mini App 暂时无法启动');
+    if (!opened && mounted) {
+      showToast(context, AppStrings.t(AppStringKeys.miniAppCannotStart));
+    }
   }
 
   void _pressReplyKeyboardButton(
@@ -2024,9 +2029,6 @@ class _ChatInputBarState extends State<ChatInputBar> {
     if (entry?.mounted ?? false) entry!.remove();
   }
 
-  String get _richTextPremiumRequiredMessage =>
-      AppStringKeys.richTextRelayPremiumOrBotRequired.l10n(context);
-
   Future<_RichTextSendMode?> _richTextSendMode() async {
     try {
       if (await widget.vm.currentUserIsPremium()) {
@@ -2035,7 +2037,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
       if (await RichMessageRelayConfig.isConfigured()) {
         return _RichTextSendMode.botRelay;
       }
-      if (mounted) showToast(context, _richTextPremiumRequiredMessage);
+      if (mounted && await _configureRichMessageRelay()) {
+        return _RichTextSendMode.botRelay;
+      }
     } catch (error) {
       if (mounted) {
         final message = switch (error) {
@@ -2046,6 +2050,20 @@ class _ChatInputBarState extends State<ChatInputBar> {
       }
     }
     return null;
+  }
+
+  Future<bool> _configureRichMessageRelay() async {
+    final configure = await confirmDialog(
+      context,
+      title: AppStringKeys.richTextRelayBotSetupTitle.l10n(context),
+      message: AppStringKeys.richTextRelayBotSetupDescription.l10n(context),
+      confirmText: AppStringKeys.richTextRelayBotConfigure.l10n(context),
+    );
+    if (!mounted || !configure) return false;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(builder: (_) => const RichMessageRelayView()),
+    );
+    return mounted && await RichMessageRelayConfig.isConfigured();
   }
 
   String _extensionForMime(String mimeType) {
@@ -2594,10 +2612,18 @@ class _ChatInputBarState extends State<ChatInputBar> {
         final item = stickers[i];
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: () {
-            widget.vm.sendSticker(item);
-            widget.onMessageSent();
-            setState(() => _panel = _Panel.none);
+          onTap: () async {
+            final sent = await widget.vm.sendSticker(item);
+            if (!mounted) return;
+            if (sent) {
+              widget.onMessageSent();
+              setState(() => _panel = _Panel.none);
+            } else {
+              showToast(
+                this.context,
+                AppStrings.t(AppStringKeys.stickerSetDetailActionFailed),
+              );
+            }
           },
           child: StickerPreview(item: item),
         );

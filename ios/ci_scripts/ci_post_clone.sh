@@ -37,7 +37,7 @@
 set -e
 
 FLUTTER_VERSION="3.44.2"
-TDJSON_RELEASE_TAG="mithka-session-string-keyfix-783d04e"
+TDJSON_RELEASE_TAG="tdlib-1.8.66-1b08c83bc078"
 TDJSON_URL="${TDJSON_XCFRAMEWORK_URL:-https://github.com/iebb/mithka-tdjson/releases/download/${TDJSON_RELEASE_TAG}/tdjson-ios.xcframework.zip}"
 TGVOIP_RELEASE_TAG="tgvoip-telegram-ios-6e370e06d147"
 TGVOIP_URL="${TGVOIP_WEBRTC_XCFRAMEWORK_URL:-https://github.com/iebb/mithka-tdjson/releases/download/${TGVOIP_RELEASE_TAG}/tgvoip-ios.xcframework.zip}"
@@ -149,9 +149,9 @@ GIT_COMMIT="$(git rev-parse --short HEAD)"
 echo "▸ git commit: $GIT_COMMIT"
 
 # Xcode Cloud runs xcodebuild after this script and can otherwise keep using
-# stale Flutter values from the checked-in project. Keep both archive version
-# fields sourced directly from pubspec.yaml, matching local iOS and Android
-# builds without a release-specific override.
+# stale Flutter values from the checked-in project. Keep the major/minor version
+# from pubspec.yaml but force the iOS patch component to zero. Android nightlies
+# can therefore advance independently (for example 0.8.2 becomes 0.8.0 on iOS).
 RAW_VERSION="$(awk '/^version:/ { print $2; exit }' pubspec.yaml)"
 test -n "$RAW_VERSION"
 APP_BUILD_NAME="${RAW_VERSION%%+*}"
@@ -159,8 +159,15 @@ APP_BUILD_NUMBER="${RAW_VERSION#*+}"
 if [ "$APP_BUILD_NUMBER" = "$RAW_VERSION" ] || [ -z "$APP_BUILD_NUMBER" ]; then
   APP_BUILD_NUMBER=1
 fi
-XCODE_BUILD_NAME="$APP_BUILD_NAME"
-echo "▸ app version: $APP_BUILD_NAME+$APP_BUILD_NUMBER"
+XCODE_BUILD_NAME="$(
+  printf '%s\n' "$APP_BUILD_NAME" |
+    awk -F. 'NF == 3 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ { print $1 "." $2 ".0" }'
+)"
+if [ -z "$XCODE_BUILD_NAME" ]; then
+  echo "error: expected a numeric X.Y.Z version in pubspec.yaml, got $APP_BUILD_NAME" >&2
+  exit 1
+fi
+echo "▸ iOS app version: $XCODE_BUILD_NAME+$APP_BUILD_NUMBER (source: $APP_BUILD_NAME)"
 python3 - <<PY
 from pathlib import Path
 path = Path("ios/Runner.xcodeproj/project.pbxproj")

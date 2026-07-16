@@ -5,7 +5,6 @@
 //  of the Swift `GeneralSettingsView` / `GeneralSettingsViewModel`.
 //
 
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -19,8 +18,7 @@ import '../tdlib/td_client.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import 'auto_download_media_controller.dart';
-import 'rich_message_relay_config.dart';
-import 'rich_message_relay_view.dart';
+import 'video_playback_settings_view.dart';
 
 class GeneralSettingsView extends StatefulWidget {
   const GeneralSettingsView({super.key});
@@ -34,7 +32,6 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
   bool _loadingCache = true;
   bool _clearing = false;
   bool _enterToSend = false;
-  bool _richMessageRelayConfigured = false;
   SharedPreferences? _prefs;
 
   @override
@@ -46,11 +43,9 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
 
   Future<void> _loadPrefs() async {
     _prefs = await SharedPreferences.getInstance();
-    final relayConfigured = await RichMessageRelayConfig.isConfigured();
     if (!mounted) return;
     setState(() {
       _enterToSend = _prefs!.getBool('enterToSend') ?? false;
-      _richMessageRelayConfigured = relayConfigured;
     });
   }
 
@@ -115,73 +110,12 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
                 const SizedBox(height: 14),
                 _autoDownloadCard(),
                 const SizedBox(height: 14),
-                _richMessageCard(),
-                const SizedBox(height: 14),
                 _chatCard(),
               ],
             ),
           ),
         ],
       ),
-    );
-  }
-
-  Widget _richMessageCard() {
-    final c = context.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _sectionHeader(AppStringKeys.richTextRelayBotTitle),
-        _card([
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () async {
-              await Navigator.of(context).push<void>(
-                PageRouteBuilder<void>(
-                  pageBuilder: (_, _, _) => const RichMessageRelayView(),
-                  transitionsBuilder: (_, animation, _, child) =>
-                      FadeTransition(opacity: animation, child: child),
-                ),
-              );
-              final configured = await RichMessageRelayConfig.isConfigured();
-              if (mounted) {
-                setState(() => _richMessageRelayConfigured = configured);
-              }
-            },
-            child: SizedBox(
-              height: 56,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    _iconBadge(HeroAppIcons.key.data, const Color(0xFF8E7BFF)),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        AppStringKeys.richTextRelayBotTitle.l10n(context),
-                        style: TextStyle(fontSize: 16, color: c.textPrimary),
-                      ),
-                    ),
-                    Text(
-                      (_richMessageRelayConfigured
-                              ? AppStringKeys.richTextRelayBotConfigured
-                              : AppStringKeys.richTextRelayBotNotConfigured)
-                          .l10n(context),
-                      style: TextStyle(fontSize: 14, color: c.textSecondary),
-                    ),
-                    const SizedBox(width: 8),
-                    AppIcon(
-                      HeroAppIcons.chevronRight,
-                      size: AppIconSize.chevron,
-                      color: c.textTertiary,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ]),
-      ],
     );
   }
 
@@ -204,7 +138,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
         _sectionHeader(AppStrings.t(AppStringKeys.generalAutoDownloadMedia)),
         _card([
           _toggleRowWithSubtitle(
-            HeroAppIcons.mobileScreenButton.data,
+            HeroAppIcons.mobileScreenButton,
             const Color(0xFF34C759),
             AppStrings.t(AppStringKeys.generalAutoDownloadMobileData),
             auto.mobileHighResImages
@@ -217,7 +151,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
           ),
           const InsetDivider(leadingInset: 56),
           _toggleRowWithSubtitle(
-            HeroAppIcons.image.data,
+            HeroAppIcons.image,
             const Color(0xFF1D9BF0),
             AppStrings.t(AppStringKeys.generalAutoDownloadWifi),
             auto.wifiHighResImages
@@ -245,15 +179,8 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
     }
   }
 
-  Widget _iconBadge(IconData icon, Color color) => Container(
-    width: 28,
-    height: 28,
-    decoration: BoxDecoration(
-      color: color,
-      borderRadius: BorderRadius.circular(7),
-    ),
-    child: Icon(icon, size: 15, color: Colors.white),
-  );
+  Widget _iconBadge(AppIconData icon, Color color) =>
+      SettingsIconTile(icon: icon, backgroundColor: color);
 
   Widget _card(List<Widget> children) {
     return Container(
@@ -279,16 +206,17 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
                 children: [
-                  _iconBadge(
-                    HeroAppIcons.solidFolder.data,
-                    const Color(0xFF16B0A0),
+                  _iconBadge(HeroAppIcons.solidFolder, const Color(0xFF16B0A0)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      AppStrings.t(AppStringKeys.generalCacheSize),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 16, color: c.textPrimary),
+                    ),
                   ),
                   const SizedBox(width: 12),
-                  Text(
-                    AppStrings.t(AppStringKeys.generalCacheSize),
-                    style: TextStyle(fontSize: 16, color: c.textPrimary),
-                  ),
-                  const Spacer(),
                   if (_loadingCache)
                     const SizedBox(
                       width: 16,
@@ -314,13 +242,17 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
                   children: [
-                    Text(
-                      _clearing
-                          ? AppStrings.t(AppStringKeys.generalClearingCache)
-                          : AppStrings.t(AppStringKeys.generalClearCache),
-                      style: TextStyle(fontSize: 16, color: AppTheme.tagRed),
+                    Expanded(
+                      child: Text(
+                        _clearing
+                            ? AppStrings.t(AppStringKeys.generalClearingCache)
+                            : AppStrings.t(AppStringKeys.generalClearCache),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 16, color: AppTheme.tagRed),
+                      ),
                     ),
-                    const Spacer(),
+                    const SizedBox(width: 12),
                     if (_clearing)
                       const SizedBox(
                         width: 16,
@@ -345,7 +277,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
         _sectionHeader(AppStrings.t(AppStringKeys.audioSearchChatTab)),
         _card([
           _toggleRow(
-            HeroAppIcons.reply.data,
+            HeroAppIcons.reply,
             const Color(0xFF3C8CF0),
             AppStrings.t(AppStringKeys.generalSendMessageWithEnter),
             _enterToSend,
@@ -356,7 +288,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
           ),
           const InsetDivider(leadingInset: 56),
           _toggleRow(
-            HeroAppIcons.download.data,
+            HeroAppIcons.download,
             const Color(0xFF3C8CF0),
             AppStrings.t(AppStringKeys.generalOpenChatAtLatestMessage),
             theme.openChatsAtLatest,
@@ -364,19 +296,69 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
           ),
           const InsetDivider(leadingInset: 56),
           _toggleRow(
-            HeroAppIcons.arrowsRotate.data,
+            HeroAppIcons.arrowsRotate,
             const Color(0xFF16B0A0),
             AppStrings.t(AppStringKeys.generalRepeatPreserveSender),
             theme.preserveSenderWhenRepeating,
             (v) => theme.preserveSenderWhenRepeating = v,
+          ),
+          const InsetDivider(leadingInset: 56),
+          _navigationRow(
+            HeroAppIcons.video,
+            const Color(0xFFAF52DE),
+            AppStringKeys.videoPlaybackSettingsTitle,
+            () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const VideoPlaybackSettingsView(),
+              ),
+            ),
           ),
         ]),
       ],
     );
   }
 
+  Widget _navigationRow(
+    AppIconData icon,
+    Color color,
+    String title,
+    VoidCallback onTap,
+  ) {
+    final c = context.colors;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: SizedBox(
+        height: 52,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              _iconBadge(icon, color),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  title.l10n(context),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 16, color: c.textPrimary),
+                ),
+              ),
+              const SizedBox(width: 8),
+              AppIcon(
+                HeroAppIcons.chevronRight,
+                size: 17,
+                color: c.textTertiary,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _toggleRow(
-    IconData icon,
+    AppIconData icon,
     Color color,
     String title,
     bool value,
@@ -391,16 +373,16 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
           children: [
             _iconBadge(icon, color),
             const SizedBox(width: 12),
-            Text(
-              title.l10n(context),
-              style: TextStyle(fontSize: 16, color: c.textPrimary),
+            Expanded(
+              child: Text(
+                title.l10n(context),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 16, color: c.textPrimary),
+              ),
             ),
-            const Spacer(),
-            CupertinoSwitch(
-              value: value,
-              activeTrackColor: AppTheme.brand,
-              onChanged: onChanged,
-            ),
+            const SizedBox(width: 12),
+            AppSwitch(value: value, onChanged: onChanged),
           ],
         ),
       ),
@@ -408,7 +390,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
   }
 
   Widget _toggleRowWithSubtitle(
-    IconData icon,
+    AppIconData icon,
     Color color,
     String title,
     String subtitle,
@@ -447,11 +429,7 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
               ),
             ),
             const SizedBox(width: 12),
-            CupertinoSwitch(
-              value: value,
-              activeTrackColor: AppTheme.brand,
-              onChanged: disabled ? null : onChanged,
-            ),
+            AppSwitch(value: value, enabled: !disabled, onChanged: onChanged),
           ],
         ),
       ),

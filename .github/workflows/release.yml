@@ -6,8 +6,8 @@ name: 🚀 Android Releases
 # final job creates the version tag from pubspec.yaml and publishes all the APKs:
 # nightly creates a dated pre-release, release creates a dated stable release.
 #
-# master never builds APKs. The daily sync workflow fast-forwards nightly from
-# master at noon UTC and dispatches this workflow only when the branch changed.
+# master never builds APKs. The daily sync workflow merges new master commits
+# into nightly, increments the patch version once, and dispatches this workflow.
 #
 # Required repository secrets:
 #   TELEGRAM_API_ID, TELEGRAM_API_HASH   — baked into lib/config/secrets.dart
@@ -30,6 +30,10 @@ concurrency:
 
 permissions:
   contents: write
+
+env:
+  # Keep each Mithka release reproducible by pinning an immutable TDLib build.
+  TDJSON_RELEASE_TAG: tdlib-1.8.66-1b08c83bc078
 
 jobs:
   prepare:
@@ -74,7 +78,7 @@ jobs:
           case "$branch_name" in
             nightly)
               release_tag="v${app_version}-nightly.${release_date}.${short_sha}"
-              release_name="Mithka Nightly ${release_date} (${short_sha})"
+              release_name="v${app_version} Nightly ${release_date} (${short_sha})"
               release_channel="nightly pre-release"
               artifact_label="${app_version}-nightly-${release_date}-${short_sha}"
               prerelease="true"
@@ -256,7 +260,9 @@ jobs:
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: |
-          flutter build apk --release --split-per-abi \
+          # Each matrix job already targets one ABI. Flutter's split mode adds
+          # ABI * 1000 to versionCode (arm64 adds 2000), so keep it disabled.
+          flutter build apk --release \
             --target-platform ${{ matrix.target }} \
             --build-name="${{ needs.prepare.outputs.app_version }}" \
             --build-number="${{ needs.prepare.outputs.build_stamp }}" \
@@ -264,10 +270,25 @@ jobs:
             --dart-define="CI_BUILD_STAMP=${{ needs.prepare.outputs.build_stamp }}" \
             --dart-define="SENTRY_DSN=$SENTRY_DSN"
 
+      - name: Verify APK version code
+        run: |
+          apk="build/app/outputs/flutter-apk/app-release.apk"
+          analyzer="$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer"
+          if [ ! -x "$analyzer" ]; then
+            analyzer="$(command -v apkanalyzer)"
+          fi
+          actual_version_code="$("$analyzer" manifest version-code "$apk")"
+          expected_version_code="${{ needs.prepare.outputs.build_stamp }}"
+          if [ "$actual_version_code" != "$expected_version_code" ]; then
+            echo "Expected APK version code $expected_version_code, got $actual_version_code" >&2
+            exit 1
+          fi
+          echo "APK version code: $actual_version_code"
+
       - name: Rename APK
         run: |
           mkdir -p dist
-          cp "build/app/outputs/flutter-apk/app-${{ matrix.abi }}-release.apk" \
+          cp "build/app/outputs/flutter-apk/app-release.apk" \
             "dist/mithka-${{ needs.prepare.outputs.artifact_label }}-${{ matrix.abi }}-release.apk"
 
       - name: Upload APK artifact

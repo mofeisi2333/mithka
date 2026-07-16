@@ -13,7 +13,7 @@
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="$REPO_ROOT/ios/tdjson"
-TDJSON_RELEASE_TAG="mithka-session-string-keyfix-783d04e"
+TDJSON_RELEASE_TAG="tdlib-1.8.66-1b08c83bc078"
 TDJSON_URL="${TDJSON_XCFRAMEWORK_URL:-https://github.com/iebb/mithka-tdjson/releases/download/${TDJSON_RELEASE_TAG}/tdjson-ios.xcframework.zip}"
 
 download_tdjson() {

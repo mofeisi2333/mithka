@@ -13,6 +13,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../auth/account_store.dart';
+import '../auth/auth_manager.dart';
 import '../call/call_manager.dart';
 import '../call/call_screen.dart';
 import '../call/group_call_screen.dart';
@@ -22,6 +24,7 @@ import '../chat/chat_view.dart';
 import '../chat/music_player_controller.dart';
 import '../chat/video_player_view.dart';
 import '../chats/chat_list_view.dart';
+import '../communities/community_view.dart';
 import '../components/app_icons.dart';
 import '../components/drawer_controller.dart' as dc;
 import '../components/ui_components.dart';
@@ -35,6 +38,7 @@ import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
+import '../theme/telegram_cloud_theme.dart';
 import '../theme/theme_controller.dart';
 import '../update/update_checker.dart';
 import 'chat_deep_link_controller.dart';
@@ -113,6 +117,7 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
   late final ChatListController _chatListController = ChatListController();
   final VideoSplitController _videoSplit = VideoSplitController.instance;
   ChatListSelection? _selectedMessageChat;
+  CommunityListSelection? _selectedMessageCommunity;
   Widget? _selectedChannelDetail;
   Widget? _selectedContactDetail;
   Widget? _selectedMomentDetail;
@@ -129,6 +134,18 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
         if (mounted) UpdateChecker.maybePrompt(context);
       });
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_synchronizeInstalledCloudThemes());
+    });
+  }
+
+  Future<void> _synchronizeInstalledCloudThemes() async {
+    final controller = context.read<ThemeController>();
+    final themes = await TelegramCloudThemeService().loadInstalled(
+      fallback: controller.installedCloudThemes,
+    );
+    if (!mounted) return;
+    controller.synchronizeInstalledCloudThemes(themes);
   }
 
   @override
@@ -189,6 +206,10 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
             setState(() => _selectedMessageChat = null);
             return false;
           }
+          if (_selectedMessageCommunity != null) {
+            setState(() => _selectedMessageCommunity = null);
+            return false;
+          }
         case 1:
           if (_selectedChannelDetail != null) {
             setState(() => _selectedChannelDetail = null);
@@ -245,9 +266,29 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
   }
 
   void _openMessageDeepLink(ChatDeepLinkRequest request) {
+    final accounts = context.read<AccountStore>();
+    final requestedSlot =
+        request.accountSlot ??
+        accounts.summaries
+            .where((account) => account.userId == request.accountUserId)
+            .map((account) => account.slot)
+            .firstOrNull;
+    if (requestedSlot != null && requestedSlot != accounts.activeSlot) {
+      accounts.switchTo(requestedSlot, context.read<AuthManager>());
+      final controller = _chatDeepLinks;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        controller?.openChat(
+          chatId: request.chatId,
+          title: request.title,
+          messageId: request.messageId,
+        );
+      });
+      return;
+    }
     if (_usesTabletSplit(context)) {
       setState(() {
         _selection = 0;
+        _selectedMessageCommunity = null;
         _selectedMessageChat = ChatListSelection(
           chatId: request.chatId,
           title: request.title,
@@ -285,8 +326,11 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
   void _clearTabletDetail(int tabIndex) {
     switch (tabIndex) {
       case 0:
-        if (_selectedMessageChat != null) {
-          setState(() => _selectedMessageChat = null);
+        if (_selectedMessageChat != null || _selectedMessageCommunity != null) {
+          setState(() {
+            _selectedMessageChat = null;
+            _selectedMessageCommunity = null;
+          });
         }
       case 1:
         if (_selectedChannelDetail != null) {
@@ -483,7 +527,7 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
     return ColoredBox(
       color: Colors.black,
       child: VideoPlayerView(
-        key: ValueKey(session.video.id),
+        key: ValueKey('${session.video.id}:${session.messageId ?? 0}'),
         video: session.video,
         thumb: session.thumb,
         width: session.width,
@@ -492,6 +536,12 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
         onClose: _videoSplit.close,
         sourceChatId: session.chatId,
         messageId: session.messageId,
+        previousVideo: session.queue.previous,
+        nextVideo: session.queue.next,
+        onNavigate: (delta) {
+          final nextSession = session.moveBy(delta);
+          if (nextSession != null) _videoSplit.play(nextSession);
+        },
         currentMode: VideoDisplayMode.split,
         onSwitchMode: (mode) => _switchSiblingVideoMode(session, mode),
       ),
@@ -537,14 +587,7 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
         Navigator.of(context).push(
           MaterialPageRoute(
             fullscreenDialog: true,
-            builder: (_) => VideoPlayerView(
-              video: session.video,
-              thumb: session.thumb,
-              width: session.width,
-              height: session.height,
-              sourceChatId: session.chatId,
-              messageId: session.messageId,
-            ),
+            builder: (_) => VideoPlaylistPlayerView(queue: session.queue),
           ),
         );
     }
@@ -597,23 +640,19 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
           Navigator.of(context, rootNavigator: true).push(
             MaterialPageRoute(
               fullscreenDialog: true,
-              builder: (routeContext) => VideoPlayerView(
-                video: modeSession.video,
-                thumb: modeSession.thumb,
-                width: modeSession.width,
-                height: modeSession.height,
-                sourceChatId: modeSession.chatId,
-                messageId: modeSession.messageId,
-                onSwitchMode: (nextMode) {
+              builder: (routeContext) => VideoPlaylistPlayerView(
+                queue: modeSession.queue,
+                onSwitchMode: (queue, nextMode) {
+                  final currentSession = VideoSplitSession.fromQueue(queue);
                   switch (nextMode) {
                     case VideoDisplayMode.fullscreen:
                       break;
                     case VideoDisplayMode.pictureInPicture:
                       Navigator.of(routeContext).maybePop();
-                      _showSplitVideoPictureInPicture(modeSession);
+                      _showSplitVideoPictureInPicture(currentSession);
                     case VideoDisplayMode.split:
                       Navigator.of(routeContext).maybePop();
-                      _videoSplit.play(modeSession);
+                      _videoSplit.play(currentSession);
                   }
                 },
               ),
@@ -736,7 +775,9 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(14),
                             child: VideoPlayerView(
-                              key: ValueKey(currentSession.video.id),
+                              key: ValueKey(
+                                '${currentSession.video.id}:${currentSession.messageId ?? 0}',
+                              ),
                               video: currentSession.video,
                               thumb: currentSession.thumb,
                               width: currentSession.width,
@@ -747,6 +788,14 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
                               onClose: close,
                               sourceChatId: currentSession.chatId,
                               messageId: currentSession.messageId,
+                              previousVideo: currentSession.queue.previous,
+                              nextVideo: currentSession.queue.next,
+                              onNavigate: (delta) {
+                                final nextSession = currentSession.moveBy(
+                                  delta,
+                                );
+                                if (nextSession != null) pip.play(nextSession);
+                              },
                               currentMode: VideoDisplayMode.pictureInPicture,
                               onSwitchMode: (mode) =>
                                   switchMode(mode, currentSession),
@@ -975,8 +1024,18 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
     0 => ChatListView(
       controller: _chatListController,
       selectedChatId: _selectedMessageChat?.chatId,
+      selectedCommunityId: _selectedMessageCommunity?.community.id,
       onChatSelected: (chat) {
-        setState(() => _selectedMessageChat = chat);
+        setState(() {
+          _selectedMessageCommunity = null;
+          _selectedMessageChat = chat;
+        });
+      },
+      onCommunitySelected: (community) {
+        setState(() {
+          _selectedMessageChat = null;
+          _selectedMessageCommunity = community;
+        });
       },
     ),
     1 => TopicChannelsView(
@@ -1022,6 +1081,24 @@ abstract class _MainRootViewState<T extends StatefulWidget> extends State<T> {
   };
 
   Widget _messageDetailPane() {
+    final selectedCommunity = _selectedMessageCommunity;
+    if (selectedCommunity != null) {
+      return KeyedSubtree(
+        key: ValueKey('message-community-${selectedCommunity.community.id}'),
+        child: CommunityView(
+          community: selectedCommunity.community,
+          chats: selectedCommunity.chats,
+          onCollapsedChanged: selectedCommunity.onCollapsedChanged,
+          showBackButton: false,
+          onChatSelected: (chat) {
+            setState(() {
+              _selectedMessageCommunity = null;
+              _selectedMessageChat = ChatListSelection.fromChat(chat);
+            });
+          },
+        ),
+      );
+    }
     final selected = _selectedMessageChat;
     if (selected == null) return const _MessageEmptyPane();
     final chat = selected.chat;

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
+import 'notification_preferences.dart';
 
 class PushDeviceRegistrar {
   PushDeviceRegistrar._();
@@ -14,7 +15,9 @@ class PushDeviceRegistrar {
   static const _channel = MethodChannel('mithka/push');
 
   final TdClient _client = TdClient.shared;
+  final NotificationPreferences _preferences = NotificationPreferences.shared;
   StreamSubscription? _sub;
+  StreamSubscription<int>? _accountSub;
   String? _deviceToken;
   String? _lastRegistrationSignature;
   bool _running = false;
@@ -23,8 +26,14 @@ class PushDeviceRegistrar {
   Future<void> start() async {
     if (_running || !Platform.isIOS) return;
     _running = true;
+    _preferences.addListener(_preferencesChanged);
     _channel.setMethodCallHandler(_handleNativeMethod);
     _sub = _client.subscribe().listen(_handleTdUpdate);
+    _accountSub = _client.subscribeActiveSlotChanges().listen((_) {
+      if (_preferences.allAccounts) return;
+      _lastRegistrationSignature = null;
+      unawaited(_registerIfPossible());
+    });
     try {
       final token = await _channel.invokeMethod<String>(
         'registerForRemoteNotifications',
@@ -33,6 +42,11 @@ class PushDeviceRegistrar {
     } catch (error) {
       debugPrint('APNs registration request failed: $error');
     }
+    unawaited(_registerIfPossible());
+  }
+
+  void _preferencesChanged() {
+    _lastRegistrationSignature = null;
     unawaited(_registerIfPossible());
   }
 
@@ -100,7 +114,10 @@ class PushDeviceRegistrar {
 
   Future<Map<int, int>> _readyUsersByClient() async {
     final usersByClient = <int, int>{};
-    for (final slot in _client.configuredSlots) {
+    final slots = _preferences.allAccounts
+        ? _client.configuredSlots
+        : [_client.activeSlot];
+    for (final slot in slots) {
       final clientId = _client.clientId(slot);
       if (clientId == null) continue;
       try {
@@ -121,8 +138,11 @@ class PushDeviceRegistrar {
   }
 
   Future<void> stop() async {
+    _preferences.removeListener(_preferencesChanged);
     await _sub?.cancel();
     _sub = null;
+    await _accountSub?.cancel();
+    _accountSub = null;
     _running = false;
   }
 }

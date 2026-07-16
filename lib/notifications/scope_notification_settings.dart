@@ -15,6 +15,7 @@ class ScopeNotificationSettings {
 
   final Map<String, int> _muteFor = {};
   final Map<String, bool> _showPreview = {};
+  final Map<String, int> _soundId = {};
 
   /// Loads mute_for values for all three scopes from TDLib.
   Future<void> load() async {
@@ -27,9 +28,11 @@ class ScopeNotificationSettings {
         });
         _muteFor[scope] = s.integer('mute_for') ?? 0;
         _showPreview[scope] = s.boolean('show_preview') ?? true;
+        _soundId[scope] = s.int64('sound_id') ?? -1;
       } catch (_) {
         _muteFor[scope] = _muteFor[scope] ?? 0;
         _showPreview[scope] = _showPreview[scope] ?? true;
+        _soundId[scope] = _soundId[scope] ?? -1;
       }
     }
   }
@@ -41,6 +44,10 @@ class ScopeNotificationSettings {
 
   void updateShowPreview(String scope, bool showPreview) {
     _showPreview[scope] = showPreview;
+  }
+
+  void updateSoundId(String scope, int soundId) {
+    _soundId[scope] = soundId;
   }
 
   /// Returns cached mute_for for a stored scope identifier.
@@ -79,6 +86,8 @@ class ScopeNotificationSettings {
     }
   }
 
+  String scopeTagForChat(Map<String, dynamic> chat) => _scopeForChat(chat);
+
   /// Returns true if the chat is effectively muted (considering use_default_mute_for).
   bool isMuted(Map<String, dynamic> chat) {
     final settings = chat.obj('notification_settings');
@@ -95,5 +104,14 @@ class ScopeNotificationSettings {
     return useDefault
         ? (_showPreview[_scopeForChat(chat)] ?? true)
         : (settings?.boolean('show_preview') ?? true);
+  }
+
+  bool soundEnabled(Map<String, dynamic> chat) {
+    final settings = chat.obj('notification_settings');
+    final useDefault = settings?.boolean('use_default_sound') ?? true;
+    final soundId = useDefault
+        ? (_soundId[_scopeForChat(chat)] ?? -1)
+        : (settings?.int64('sound_id') ?? -1);
+    return soundId != 0;
   }
 }

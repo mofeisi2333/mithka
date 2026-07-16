@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 
+import '../chat/custom_emoji.dart';
 import '../chat/image_edit_view.dart';
 import '../components/app_icons.dart';
 import '../components/photo_avatar.dart';
@@ -22,6 +23,8 @@ import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../media/app_asset_picker.dart';
 import '../platform/animated_avatar_preparer.dart';
+import '../profile/profile_icon_picker_view.dart';
+import '../profile/profile_photo_policy.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
@@ -53,8 +56,11 @@ class _EditProfileViewState extends State<EditProfileView> {
   String _phone = '';
   int _accentColorId = 0;
   int _profileAccentColorId = -1;
+  int _backgroundCustomEmojiId = 0;
+  int _profileBackgroundCustomEmojiId = 0;
   int? _bDay, _bMonth, _bYear;
   TdFileRef? _photo;
+  bool _isPremium = false;
   bool _loading = true;
   bool _openedAvatarPicker = false;
 
@@ -74,6 +80,10 @@ class _EditProfileViewState extends State<EditProfileView> {
       _phone = me.str('phone_number') ?? '';
       _accentColorId = me.integer('accent_color_id') ?? 0;
       _profileAccentColorId = me.integer('profile_accent_color_id') ?? -1;
+      _backgroundCustomEmojiId = me.int64('background_custom_emoji_id') ?? 0;
+      _profileBackgroundCustomEmojiId =
+          me.int64('profile_background_custom_emoji_id') ?? 0;
+      _isPremium = me.boolean('is_premium') ?? false;
       _photo = TDParse.smallPhoto(me.obj('profile_photo'));
       if (uid != null) {
         final full = await _client.query({
@@ -270,7 +280,7 @@ class _EditProfileViewState extends State<EditProfileView> {
       await _client.query({
         '@type': 'setAccentColor',
         'accent_color_id': id,
-        'background_custom_emoji_id': 0,
+        'background_custom_emoji_id': _backgroundCustomEmojiId,
       });
       setState(() => _accentColorId = id);
     } catch (_) {
@@ -296,7 +306,7 @@ class _EditProfileViewState extends State<EditProfileView> {
       await _client.query({
         '@type': 'setProfileAccentColor',
         'profile_accent_color_id': id,
-        'profile_background_custom_emoji_id': 0,
+        'profile_background_custom_emoji_id': _profileBackgroundCustomEmojiId,
       });
       setState(() => _profileAccentColorId = id);
     } catch (_) {
@@ -304,7 +314,38 @@ class _EditProfileViewState extends State<EditProfileView> {
     }
   }
 
+  Future<void> _editProfileIcon() async {
+    final id = await Navigator.of(context).push<int>(
+      PageRouteBuilder<int>(
+        pageBuilder: (_, _, _) =>
+            ProfileIconPickerView(selectedId: _profileBackgroundCustomEmojiId),
+        transitionsBuilder: (_, animation, _, child) =>
+            FadeTransition(opacity: animation, child: child),
+      ),
+    );
+    if (id == null || id == _profileBackgroundCustomEmojiId) return;
+    final colorId = _profileAccentColorId < 0 ? 0 : _profileAccentColorId;
+    try {
+      await _client.query({
+        '@type': 'setProfileAccentColor',
+        'profile_accent_color_id': colorId,
+        'profile_background_custom_emoji_id': id,
+      });
+      if (!mounted) return;
+      setState(() {
+        _profileAccentColorId = colorId;
+        _profileBackgroundCustomEmojiId = id;
+      });
+    } catch (_) {
+      _toast(AppStrings.t(AppStringKeys.editProfileSaveFailed));
+    }
+  }
+
   Future<void> _changeAvatar() async {
+    if (!_isPremium) {
+      await _changeStaticAvatar();
+      return;
+    }
     final kind = await _chooseAvatarKind();
     if (kind == null) return;
     switch (kind) {
@@ -467,6 +508,7 @@ class _EditProfileViewState extends State<EditProfileView> {
   }
 
   Future<void> _changeAnimatedAvatar() async {
+    if (!_canSetAnimatedAvatar()) return;
     try {
       final selection = await AppAssetPicker.pickDetailed(
         context,
@@ -487,6 +529,7 @@ class _EditProfileViewState extends State<EditProfileView> {
   }
 
   Future<void> _setAnimatedAvatar(XFile animation) async {
+    if (!_canSetAnimatedAvatar()) return;
     try {
       if (!mounted) return;
       final crop = await Navigator.of(context).push<AnimatedAvatarCrop>(
@@ -505,15 +548,17 @@ class _EditProfileViewState extends State<EditProfileView> {
         _toast(AppStrings.t(AppStringKeys.editProfileInvalidAvatarFile));
         return;
       }
-      await _client.query({
-        '@type': 'setProfilePhoto',
-        'photo': {
-          '@type': 'inputChatPhotoAnimation',
-          'animation': {'@type': 'inputFileLocal', 'path': prepared.path},
-          'main_frame_timestamp': 0.0,
-        },
-        'is_public': false,
-      });
+      final request = animatedProfilePhotoRequest(
+        isPremium: _isPremium,
+        path: prepared.path,
+      );
+      if (request == null) {
+        _toast(
+          AppStrings.t(AppStringKeys.editProfileAnimatedAvatarPremiumRequired),
+        );
+        return;
+      }
+      await _client.query(request);
       await _finishAvatarUpdate();
     } catch (e) {
       _toast(
@@ -522,6 +567,14 @@ class _EditProfileViewState extends State<EditProfileView> {
         }),
       );
     }
+  }
+
+  bool _canSetAnimatedAvatar() {
+    if (_isPremium) return true;
+    _toast(
+      AppStrings.t(AppStringKeys.editProfileAnimatedAvatarPremiumRequired),
+    );
+    return false;
   }
 
   Future<void> _finishAvatarUpdate() async {
@@ -656,6 +709,7 @@ class _EditProfileViewState extends State<EditProfileView> {
                         _profileAccentColorId,
                         _editProfileColor,
                       ),
+                      _profileIconField(),
                     ],
                   ),
           ),
@@ -784,6 +838,44 @@ class _EditProfileViewState extends State<EditProfileView> {
                 margin: const EdgeInsets.only(right: 8),
                 decoration: BoxDecoration(color: color, shape: BoxShape.circle),
               ),
+            AppIcon(HeroAppIcons.chevronRight, size: 14, color: c.textTertiary),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _profileIconField() {
+    final c = context.colors;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _editProfileIcon,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: c.card,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: _fieldLabelWidth,
+              child: Text(
+                AppStringKeys.editProfileProfileIcon.l10n(context),
+                style: TextStyle(fontSize: 15, color: c.textSecondary),
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Spacer(),
+            if (_profileBackgroundCustomEmojiId != 0) ...[
+              CustomEmojiView(
+                id: _profileBackgroundCustomEmojiId,
+                size: 25,
+                color: c.textPrimary,
+              ),
+              const SizedBox(width: 8),
+            ],
             AppIcon(HeroAppIcons.chevronRight, size: 14, color: c.textTertiary),
           ],
         ),

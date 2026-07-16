@@ -32,6 +32,7 @@ class HeroAppIcons {
     HeroiconsOutline.arrowTopRightOnSquare,
   );
   static const arrowsRotate = AppIconData(HeroiconsOutline.arrowPath);
+  static const arrowsRightLeft = AppIconData(HeroiconsOutline.arrowsRightLeft);
   static const arrowsUpDown = AppIconData(HeroiconsOutline.arrowsUpDown);
   static const at = AppIconData(HeroiconsOutline.atSymbol);
   static const ban = AppIconData(HeroiconsOutline.noSymbol);
@@ -122,6 +123,7 @@ class HeroAppIcons {
     HeroiconsOutline.chatBubbleBottomCenterText,
   );
   static const reply = AppIconData(HeroiconsOutline.arrowUturnLeft);
+  static const restore = AppIconData(HeroiconsOutline.arrowPathRoundedSquare);
   static const rightFromBracket = AppIconData(
     HeroiconsOutline.arrowRightStartOnRectangle,
   );

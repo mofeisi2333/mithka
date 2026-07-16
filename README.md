@@ -43,8 +43,8 @@ penguin on the scale.
 Mithka connects to **real Telegram** (your account, your chats) through TDLib and
 presents it with a custom interface: chat list, conversations with live state,
 reactions and stickers (including animated `.tgs`/`.webm`), voice notes, polls
-and checklists, location sharing, contacts, profiles, moments-style stories,
-settings, and a 1:1 call UI.
+and checklists, Telegram Communities, location sharing, contacts, profiles,
+moments-style stories, settings, and a 1:1 call UI.
 
 ## Architecture
 
@@ -102,11 +102,14 @@ debug signature is used. Neither the keystore nor `key.properties` is committed.
 
 ## CI
 
-`master` does not build Android packages. At 12:00 UTC each day, GitHub Actions
-fast-forwards `nightly` when `master` has new commits; `nightly` publishes dated
-GitHub prereleases. Pushes to `release` publish dated stable GitHub releases and
-submit the production AAB to Google Play. `secrets.dart` is generated on the
-runner from the `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` repository secrets.
+`master` does not build Android packages. At 00:00 and 12:00 UTC each day,
+GitHub Actions merges new `master` commits into `nightly` and increments the
+app's patch version once; `nightly` publishes dated GitHub prereleases. Xcode
+Cloud keeps the same major/minor version but forces the iOS patch to `0`. Pushes
+to `release` publish dated stable GitHub releases and submit the production AAB
+to Google Play.
+`secrets.dart` is generated on the runner from the `TELEGRAM_API_ID` /
+`TELEGRAM_API_HASH` repository secrets.
 
 ## License & credits
 

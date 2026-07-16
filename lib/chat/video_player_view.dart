@@ -28,6 +28,8 @@ import '../tdlib/td_image_loader.dart';
 import '../tdlib/td_models.dart';
 import 'chat_picker_view.dart';
 import 'forward_options.dart';
+import 'video_playback_preferences.dart';
+import 'video_playback_queue.dart';
 
 class _TdVideoStreamServer {
   _TdVideoStreamServer(this.fileId);
@@ -343,7 +345,7 @@ enum VideoPlayerPresentation { fullscreen, embedded, pictureInPicture }
 
 enum VideoDisplayMode { fullscreen, pictureInPicture, split }
 
-enum _PlayerGesture { brightness, volume, seek }
+enum _PlayerGesture { brightness, volume, seek, changeVideo, skipTenSeconds }
 
 class _VideoControlsLayout {
   const _VideoControlsLayout({
@@ -390,6 +392,9 @@ class VideoPlayerView extends StatefulWidget {
     this.currentMode = VideoDisplayMode.fullscreen,
     this.onSwitchMode,
     this.initialMuted = false,
+    this.previousVideo,
+    this.nextVideo,
+    this.onNavigate,
   });
 
   final TdFileRef video;
@@ -404,9 +409,87 @@ class VideoPlayerView extends StatefulWidget {
   final VideoDisplayMode currentMode;
   final ValueChanged<VideoDisplayMode>? onSwitchMode;
   final bool initialMuted;
+  final VideoPlaybackItem? previousVideo;
+  final VideoPlaybackItem? nextVideo;
+  final ValueChanged<int>? onNavigate;
 
   @override
   State<VideoPlayerView> createState() => _VideoPlayerViewState();
+}
+
+typedef VideoPlaylistModeCallback =
+    void Function(VideoPlaybackQueue queue, VideoDisplayMode mode);
+
+class VideoPlaylistPlayerView extends StatefulWidget {
+  const VideoPlaylistPlayerView({
+    super.key,
+    required this.queue,
+    this.presentation = VideoPlayerPresentation.fullscreen,
+    this.onClose,
+    this.compactControls = false,
+    this.currentMode = VideoDisplayMode.fullscreen,
+    this.onSwitchMode,
+    this.onQueueChanged,
+    this.initialMuted = false,
+  });
+
+  final VideoPlaybackQueue queue;
+  final VideoPlayerPresentation presentation;
+  final VoidCallback? onClose;
+  final bool compactControls;
+  final VideoDisplayMode currentMode;
+  final VideoPlaylistModeCallback? onSwitchMode;
+  final ValueChanged<VideoPlaybackQueue>? onQueueChanged;
+  final bool initialMuted;
+
+  @override
+  State<VideoPlaylistPlayerView> createState() =>
+      _VideoPlaylistPlayerViewState();
+}
+
+class _VideoPlaylistPlayerViewState extends State<VideoPlaylistPlayerView> {
+  late VideoPlaybackQueue _queue = widget.queue;
+
+  @override
+  void didUpdateWidget(covariant VideoPlaylistPlayerView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.queue.current.video.id != _queue.current.video.id ||
+        widget.queue.items.length != _queue.items.length) {
+      _queue = widget.queue;
+    }
+  }
+
+  void _navigate(int delta) {
+    final next = _queue.moveBy(delta);
+    if (next == null) return;
+    setState(() => _queue = next);
+    widget.onQueueChanged?.call(next);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final item = _queue.current;
+    return VideoPlayerView(
+      key: ValueKey('${item.video.id}:${item.messageId ?? 0}'),
+      video: item.video,
+      thumb: item.thumb,
+      width: item.width,
+      height: item.height,
+      presentation: widget.presentation,
+      onClose: widget.onClose,
+      compactControls: widget.compactControls,
+      sourceChatId: item.sourceChatId,
+      messageId: item.messageId,
+      currentMode: widget.currentMode,
+      onSwitchMode: widget.onSwitchMode == null
+          ? null
+          : (mode) => widget.onSwitchMode!(_queue, mode),
+      initialMuted: widget.initialMuted,
+      previousVideo: _queue.previous,
+      nextVideo: _queue.next,
+      onNavigate: _navigate,
+    );
+  }
 }
 
 class _VideoPlayerViewState extends State<VideoPlayerView> {
@@ -439,6 +522,12 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   bool _gestureBrightnessReady = false;
   Duration _gestureStartPosition = Duration.zero;
   Duration _gestureSeekPosition = Duration.zero;
+  int _gestureNavigationDelta = 0;
+  VideoHorizontalSwipeAction _horizontalSwipeAction =
+      VideoHorizontalSwipeAction.adjustProgress;
+  VideoCompletionAction _completionAction = VideoCompletionAction.prompt;
+  bool _completionHandled = false;
+  bool _showCompletionPrompt = false;
 
   static const _speeds = <double>[0.5, 0.75, 1, 1.25, 1.5, 2];
   static const _resumePrefix = 'mithka.video.resume.';
@@ -450,7 +539,17 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   void initState() {
     super.initState();
     if (widget.initialMuted) _volume = 0;
+    unawaited(_loadPlaybackPreferences());
     _load();
+  }
+
+  Future<void> _loadPlaybackPreferences() async {
+    final preferences = await VideoPlaybackPreferences.load();
+    if (!mounted) return;
+    setState(() {
+      _horizontalSwipeAction = preferences.horizontalSwipeAction;
+      _completionAction = preferences.completionAction;
+    });
   }
 
   Future<void> _load() async {
@@ -610,6 +709,13 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
 
   // Rebuild for play/pause + scrubber position changes.
   void _onTick() {
+    final value = _controller?.value;
+    if (value?.isCompleted == true && !_completionHandled) {
+      _completionHandled = true;
+      unawaited(_handlePlaybackCompleted());
+    } else if (value != null && !value.isCompleted && _completionHandled) {
+      _completionHandled = false;
+    }
     _storePlaybackPositionIfNeeded();
     _syncSystemPictureInPictureIfNeeded();
     _updateWakelock();
@@ -678,12 +784,60 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       _hideTimer?.cancel();
     } else {
       // Restart from the beginning if it finished.
-      if (c.value.position >= c.value.duration) await c.seekTo(Duration.zero);
+      if (c.value.position >= c.value.duration || c.value.isCompleted) {
+        await c.seekTo(Duration.zero);
+        _completionHandled = false;
+      }
       await c.play();
       if (!mounted) return;
-      setState(() => _controlsVisible = true);
+      setState(() {
+        _controlsVisible = true;
+        _showCompletionPrompt = false;
+      });
       _scheduleHide();
     }
+  }
+
+  Future<void> _handlePlaybackCompleted() async {
+    await _storePlaybackPosition(force: true);
+    if (!mounted) return;
+    switch (_completionAction) {
+      case VideoCompletionAction.prompt:
+        _hideTimer?.cancel();
+        setState(() {
+          _controlsVisible = false;
+          _showCompletionPrompt = true;
+        });
+      case VideoCompletionAction.autoplayNext:
+        if (widget.nextVideo != null && widget.onNavigate != null) {
+          widget.onNavigate!(1);
+        } else {
+          _close();
+        }
+      case VideoCompletionAction.replay:
+        await _replayFromBeginning();
+      case VideoCompletionAction.returnToChat:
+        _close();
+    }
+  }
+
+  Future<void> _replayFromBeginning() async {
+    final c = _controller;
+    if (c == null) return;
+    await c.seekTo(Duration.zero);
+    _completionHandled = false;
+    await c.play();
+    if (!mounted) return;
+    setState(() {
+      _showCompletionPrompt = false;
+      _controlsVisible = true;
+    });
+    _scheduleHide();
+  }
+
+  void _playNextVideo() {
+    if (widget.nextVideo == null || widget.onNavigate == null) return;
+    widget.onNavigate!(1);
   }
 
   Future<void> _setSpeed(double speed) async {
@@ -985,6 +1139,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
             _topTechnicalInfo(_debugText(c)),
           if (ready && _controlsVisible) ..._controls(c),
           if (ready && _activeGesture != null) _gestureIndicator(c),
+          if (ready && _showCompletionPrompt) _completionPrompt(),
           if (!ready || _controlsVisible)
             widget.presentation == VideoPlayerPresentation.pictureInPicture &&
                     ready
@@ -1016,6 +1171,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     _gestureBrightnessReady = false;
     _gestureStartPosition = controller.value.position;
     _gestureSeekPosition = _gestureStartPosition;
+    if (!_controlsVisible) setState(() => _controlsVisible = true);
   }
 
   void _updatePlaybackGesture(
@@ -1029,11 +1185,20 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     var gesture = _activeGesture;
     if (gesture == null) {
       if (math.max(delta.dx.abs(), delta.dy.abs()) < 12) return;
-      gesture = delta.dx.abs() > delta.dy.abs()
-          ? _PlayerGesture.seek
-          : origin.dx < size.width / 2
-          ? _PlayerGesture.brightness
-          : _PlayerGesture.volume;
+      if (delta.dx.abs() > delta.dy.abs()) {
+        gesture = switch (_horizontalSwipeAction) {
+          VideoHorizontalSwipeAction.disabled => null,
+          VideoHorizontalSwipeAction.adjustProgress => _PlayerGesture.seek,
+          VideoHorizontalSwipeAction.changeVideo => _PlayerGesture.changeVideo,
+          VideoHorizontalSwipeAction.skipTenSeconds =>
+            _PlayerGesture.skipTenSeconds,
+        };
+        if (gesture == null) return;
+      } else {
+        gesture = origin.dx < size.width / 2
+            ? _PlayerGesture.brightness
+            : _PlayerGesture.volume;
+      }
       if (gesture == _PlayerGesture.brightness) {
         unawaited(_beginBrightnessGesture());
       }
@@ -1061,6 +1226,27 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
           1.0,
         );
         unawaited(PlayerBrightness.set(_gestureValue));
+      case _PlayerGesture.changeVideo:
+        final threshold = (size.width * 0.14).clamp(56.0, 120.0);
+        _gestureNavigationDelta = delta.dx.abs() < threshold
+            ? 0
+            : delta.dx < 0
+            ? 1
+            : -1;
+      case _PlayerGesture.skipTenSeconds:
+        final direction = delta.dx.abs() < 24
+            ? 0
+            : delta.dx < 0
+            ? -1
+            : 1;
+        final target = _gestureStartPosition.inMilliseconds + direction * 10000;
+        _gestureNavigationDelta = direction;
+        _gestureSeekPosition = Duration(
+          milliseconds: target.clamp(
+            0,
+            controller.value.duration.inMilliseconds,
+          ),
+        );
     }
     setState(() => _activeGesture = gesture);
   }
@@ -1083,6 +1269,13 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     final gesture = _activeGesture;
     if (gesture == _PlayerGesture.seek) {
       unawaited(controller.seekTo(_gestureSeekPosition));
+    } else if (gesture == _PlayerGesture.skipTenSeconds &&
+        _gestureNavigationDelta != 0) {
+      unawaited(controller.seekTo(_gestureSeekPosition));
+    } else if (gesture == _PlayerGesture.changeVideo &&
+        _gestureNavigationDelta != 0 &&
+        _canNavigate(_gestureNavigationDelta)) {
+      widget.onNavigate?.call(_gestureNavigationDelta);
     } else if (gesture == _PlayerGesture.volume) {
       _volume = _gestureValue;
     }
@@ -1095,12 +1288,18 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     setState(() {
       _activeGesture = null;
       _gestureOrigin = null;
+      _gestureNavigationDelta = 0;
     });
   }
 
+  bool _canNavigate(int delta) => delta > 0
+      ? widget.nextVideo != null
+      : delta < 0
+      ? widget.previousVideo != null
+      : false;
+
   Widget _gestureIndicator(VideoPlayerController controller) {
     final gesture = _activeGesture!;
-    final seek = gesture == _PlayerGesture.seek;
     final icon = switch (gesture) {
       _PlayerGesture.brightness => HeroAppIcons.sun,
       _PlayerGesture.volume =>
@@ -1108,10 +1307,28 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
             ? HeroAppIcons.volumeXmark
             : HeroAppIcons.volumeHigh,
       _PlayerGesture.seek => HeroAppIcons.arrowsRotate,
+      _PlayerGesture.changeVideo =>
+        _gestureNavigationDelta >= 0
+            ? HeroAppIcons.arrowRight
+            : HeroAppIcons.arrowLeft,
+      _PlayerGesture.skipTenSeconds =>
+        _gestureNavigationDelta >= 0
+            ? HeroAppIcons.arrowRight
+            : HeroAppIcons.arrowLeft,
     };
-    final label = seek
-        ? '${_fmt(_gestureSeekPosition)} / ${_fmt(controller.value.duration)}'
-        : '${(_gestureValue * 100).round()}%';
+    final label = switch (gesture) {
+      _PlayerGesture.seek =>
+        '${_fmt(_gestureSeekPosition)} / ${_fmt(controller.value.duration)}',
+      _PlayerGesture.skipTenSeconds =>
+        '${_gestureNavigationDelta > 0
+            ? '+'
+            : _gestureNavigationDelta < 0
+            ? '−'
+            : ''}${_gestureNavigationDelta == 0 ? '' : '10s · '}${_fmt(_gestureSeekPosition)} / ${_fmt(controller.value.duration)}',
+      _PlayerGesture.changeVideo => _navigationGestureLabel(),
+      _PlayerGesture.brightness ||
+      _PlayerGesture.volume => '${(_gestureValue * 100).round()}%',
+    };
     return Center(
       child: IgnorePointer(
         child: Container(
@@ -1135,6 +1352,202 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  String _navigationGestureLabel() {
+    final delta = _gestureNavigationDelta;
+    if (delta == 0) {
+      return AppStringKeys.videoPlayerSwipeFurther.l10n(context);
+    }
+    if (!_canNavigate(delta)) {
+      return (delta > 0
+              ? AppStringKeys.videoPlayerNoNextVideo
+              : AppStringKeys.videoPlayerNoPreviousVideo)
+          .l10n(context);
+    }
+    return (delta > 0
+            ? AppStringKeys.videoPlayerNextVideo
+            : AppStringKeys.videoPlayerPreviousVideo)
+        .l10n(context);
+  }
+
+  Widget _completionPrompt() {
+    final next = widget.nextVideo;
+    final compact =
+        _usesCompactChrome(context) ||
+        widget.compactControls ||
+        widget.presentation == VideoPlayerPresentation.pictureInPicture;
+    return Positioned.fill(
+      child: ColoredBox(
+        color: Colors.black.withValues(alpha: 0.92),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.symmetric(
+                horizontal: compact ? 12 : 48,
+                vertical: compact ? 12 : 20,
+              ),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 640),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      (next == null
+                              ? AppStringKeys.videoPlayerFinished
+                              : AppStringKeys.videoPlayerUpNext)
+                          .l10n(context),
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: compact ? 20 : 26,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (next != null) ...[
+                      const SizedBox(height: 16),
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _playNextVideo,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: AspectRatio(
+                            aspectRatio: _itemAspectRatio(next),
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                ColoredBox(
+                                  color: const Color(0xFF18181B),
+                                  child: next.thumb == null
+                                      ? const SizedBox.shrink()
+                                      : TDImage(photo: next.thumb),
+                                ),
+                                ColoredBox(
+                                  color: Colors.black.withValues(alpha: 0.22),
+                                ),
+                                Center(
+                                  child: Container(
+                                    width: compact ? 58 : 72,
+                                    height: compact ? 58 : 72,
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withValues(
+                                        alpha: 0.68,
+                                      ),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    alignment: Alignment.center,
+                                    child: AppIcon(
+                                      HeroAppIcons.play,
+                                      color: Colors.white,
+                                      size: compact ? 30 : 38,
+                                    ),
+                                  ),
+                                ),
+                                Positioned(
+                                  left: 16,
+                                  right: 16,
+                                  bottom: 14,
+                                  child: Text(
+                                    next.title.trim().isEmpty
+                                        ? AppStringKeys.videoPlayerNextVideo
+                                              .l10n(context)
+                                        : next.title,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
+                                      shadows: [Shadow(blurRadius: 8)],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 18),
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 12,
+                      runSpacing: 10,
+                      children: [
+                        if (next != null)
+                          _completionActionButton(
+                            icon: HeroAppIcons.play,
+                            label: AppStringKeys.videoPlayerPlayNext,
+                            primary: true,
+                            onTap: _playNextVideo,
+                          ),
+                        _completionActionButton(
+                          icon: HeroAppIcons.arrowsRotate,
+                          label: AppStringKeys.videoPlayerReplay,
+                          onTap: () => unawaited(_replayFromBeginning()),
+                        ),
+                        _completionActionButton(
+                          icon: HeroAppIcons.comments,
+                          label: AppStringKeys.videoPlayerReturnToChat,
+                          onTap: _close,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  double _itemAspectRatio(VideoPlaybackItem item) {
+    final width = item.width;
+    final height = item.height;
+    if (width == null || height == null || width <= 0 || height <= 0) {
+      return 16 / 9;
+    }
+    return width / height;
+  }
+
+  Widget _completionActionButton({
+    required AppIconData icon,
+    required String label,
+    required VoidCallback onTap,
+    bool primary = false,
+  }) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 18),
+        decoration: BoxDecoration(
+          color: primary ? Colors.white : const Color(0xFF2C2C2E),
+          borderRadius: BorderRadius.circular(22),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AppIcon(
+              icon,
+              size: 18,
+              color: primary ? Colors.black : Colors.white,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              label.l10n(context),
+              style: TextStyle(
+                color: primary ? Colors.black : Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1682,7 +2095,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
           ),
         ),
         SizedBox(width: layout.playGap),
-        Text(_fmt(value.position), style: layout.timeStyle),
+        Text(_fmt(_displayPosition(c)), style: layout.timeStyle),
         SizedBox(width: layout.timeGap),
         Expanded(child: _scrubber(c, compact: layout.timelineCompact)),
         SizedBox(width: layout.timeGap),
@@ -1775,7 +2188,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
                   const SizedBox(width: 8),
                 ],
                 Text(
-                  _fmt(value.position),
+                  _fmt(_displayPosition(c)),
                   style: const TextStyle(color: Colors.white70, fontSize: 11),
                 ),
                 const SizedBox(width: 8),
@@ -1810,7 +2223,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   Widget _scrubber(VideoPlayerController c, {bool compact = false}) {
     final value = c.value;
     final duration = value.duration.inMilliseconds;
-    final position = value.position.inMilliseconds.clamp(0, duration);
+    final position = _displayPosition(c).inMilliseconds.clamp(0, duration);
     final loaded = _loadedFraction(value);
     return SizedBox(
       height: compact ? 28 : 34,
@@ -1869,6 +2282,14 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         ],
       ),
     );
+  }
+
+  Duration _displayPosition(VideoPlayerController controller) {
+    return switch (_activeGesture) {
+      _PlayerGesture.seek ||
+      _PlayerGesture.skipTenSeconds => _gestureSeekPosition,
+      _ => controller.value.position,
+    };
   }
 
   double _loadedFraction(VideoPlayerValue value) {

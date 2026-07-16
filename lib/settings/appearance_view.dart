@@ -3,6 +3,7 @@
 //
 
 import 'dart:io';
+import 'dart:math' as math;
 
 //  外观: theme mode (跟随系统 / 浅色 / 深色) + tab-bar style (经典 / 系统), driving
 //  ThemeController live. Mapped from the reference app's 外观/装扮 entry.
@@ -19,15 +20,17 @@ import 'package:mithka/l10n/telegram_language_controller.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
+import '../chat/chat_wallpaper_view.dart';
 import '../components/app_icons.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
 import '../theme/emoji_font_catalog.dart';
+import '../theme/global_theme_view.dart';
 import '../theme/system_font_catalog.dart';
 import '../theme/theme_controller.dart';
 import 'app_icon_controller.dart';
-import 'blocked_user_service.dart';
+import 'quick_reaction_settings_view.dart';
 
 class AppearanceView extends StatelessWidget {
   const AppearanceView({super.key});
@@ -54,6 +57,57 @@ class AppearanceView extends StatelessWidget {
                 AppSpacing.section,
               ),
               children: [
+                _label(context, AppStrings.t(AppStringKeys.appearanceChatView)),
+                _card(context, [
+                  _toggleRow(
+                    context,
+                    HeroAppIcons.wandMagicSparkles.data,
+                    AppStrings.t(AppStringKeys.appearanceEnableTheming),
+                    theme.themingEnabled,
+                    (value) => theme.themingEnabled = value,
+                  ),
+                  if (theme.themingEnabled) ...[
+                    _navigationRow(
+                      context,
+                      AppStrings.t(AppStringKeys.appearanceTheme),
+                      theme.cloudTheme?.displayTitle ??
+                          AppStrings.t(AppStringKeys.globalThemeDefault),
+                      () => Navigator.of(context).push(
+                        PageRouteBuilder<void>(
+                          pageBuilder: (_, _, _) => const GlobalThemeView(),
+                        ),
+                      ),
+                      icon: HeroAppIcons.palette.data,
+                    ),
+                    _navigationRow(
+                      context,
+                      AppStrings.t(AppStringKeys.groupAppearanceWallpaper),
+                      null,
+                      () => Navigator.of(context).push(
+                        PageRouteBuilder<void>(
+                          pageBuilder: (_, _, _) => ChatWallpaperView.global(
+                            chatTitle: AppStrings.t(
+                              AppStringKeys.chatWallpaperGlobalPreview,
+                            ),
+                            forDarkTheme:
+                                Theme.of(context).brightness == Brightness.dark,
+                          ),
+                        ),
+                      ),
+                      icon: HeroAppIcons.image.data,
+                    ),
+                    _toggleRow(
+                      context,
+                      HeroAppIcons.mobileScreenButton.data,
+                      AppStrings.t(AppStringKeys.appearanceUseChatThemeForUi),
+                      theme.useTelegramThemeForUi,
+                      theme.hasCloudTheme
+                          ? (value) => theme.useTelegramThemeForUi = value
+                          : null,
+                    ),
+                  ],
+                ]),
+                const SizedBox(height: AppSpacing.xl),
                 _label(context, AppStrings.t(AppStringKeys.appearanceMode)),
                 _card(context, [
                   for (final m in AppearanceMode.values)
@@ -66,6 +120,32 @@ class AppearanceView extends StatelessWidget {
                     ),
                 ]),
                 const SizedBox(height: AppSpacing.xl),
+                _label(context, AppStrings.t(AppStringKeys.appearanceSize)),
+                _card(context, [
+                  _navigationRow(
+                    context,
+                    AppStrings.t(AppStringKeys.appearanceFontSize),
+                    '${(theme.fontScale * 100).round()}%',
+                    () => Navigator.of(context).push(
+                      PageRouteBuilder<void>(
+                        pageBuilder: (_, _, _) => const _TextSizeSettingsView(),
+                      ),
+                    ),
+                    icon: HeroAppIcons.expand.data,
+                  ),
+                  _navigationRow(
+                    context,
+                    AppStrings.t(AppStringKeys.appearanceDisplay),
+                    null,
+                    () => Navigator.of(context).push(
+                      PageRouteBuilder<void>(
+                        pageBuilder: (_, _, _) => const DisplaySettingsView(),
+                      ),
+                    ),
+                    icon: HeroAppIcons.eye.data,
+                  ),
+                ]),
+                const SizedBox(height: AppSpacing.xl),
                 _label(context, AppStrings.t(AppStringKeys.appIconTitle)),
                 _card(context, [
                   _navigationRow(
@@ -73,8 +153,8 @@ class AppearanceView extends StatelessWidget {
                     AppStrings.t(AppStringKeys.appIconTitle),
                     null,
                     () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const AppIconSettingsView(),
+                      PageRouteBuilder<void>(
+                        pageBuilder: (_, _, _) => const AppIconSettingsView(),
                       ),
                     ),
                     preview: Image.asset(
@@ -92,20 +172,41 @@ class AppearanceView extends StatelessWidget {
                     AppStrings.t(AppStringKeys.appearanceFont),
                     theme.effectiveFontChainLabel,
                     () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const FontSettingsView(),
+                      PageRouteBuilder<void>(
+                        pageBuilder: (_, _, _) => const FontSettingsView(),
                       ),
                     ),
                     icon: HeroAppIcons.font.data,
                   ),
                 ]),
-                const SizedBox(height: AppSpacing.xl),
-                _label(context, AppStrings.t(AppStringKeys.appearanceColor)),
-                _colorCard(context, theme),
-                const SizedBox(height: AppSpacing.xl),
-                _label(context, AppStrings.t(AppStringKeys.appearanceSize)),
-                _fontSizeCard(context, theme),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TextSizeSettingsView extends StatelessWidget {
+  const _TextSizeSettingsView();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final theme = context.watch<ThemeController>();
+    return ColoredBox(
+      color: c.groupedBackground,
+      child: Column(
+        children: [
+          NavHeader(
+            title: AppStringKeys.appearanceFontSize,
+            onBack: () => Navigator.of(context).pop(),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              children: [const AppearanceView()._fontSizeCard(context, theme)],
             ),
           ),
         ],
@@ -314,7 +415,7 @@ class DisplaySettingsView extends StatelessWidget {
                 _card(context, [
                   _toggleRow(
                     context,
-                    HeroAppIcons.idBadge.data,
+                    HeroAppIcons.listCheck.data,
                     AppStrings.t(AppStringKeys.appearanceShowGroupMemberTitles),
                     theme.showMemberTags,
                     (v) => theme.showMemberTags = v,
@@ -360,17 +461,19 @@ class DisplaySettingsView extends StatelessWidget {
                     theme.alwaysShowMessageTime,
                     (v) => theme.alwaysShowMessageTime = v,
                   ),
-                  _toggleRow(
+                  _navigationRow(
                     context,
-                    HeroAppIcons.eyeSlash.data,
-                    AppStrings.t(
-                      AppStringKeys.appearanceHideBlockedUserMessages,
+                    AppStrings.t(AppStringKeys.quickReactionsTitle),
+                    AppStrings.t(AppStringKeys.quickReactionsCount, {
+                      'value1': theme.quickReactions.length,
+                    }),
+                    () => Navigator.of(context).push(
+                      PageRouteBuilder<void>(
+                        pageBuilder: (_, _, _) =>
+                            const QuickReactionSettingsView(),
+                      ),
                     ),
-                    theme.hideBlockedUserMessages,
-                    (v) {
-                      theme.hideBlockedUserMessages = v;
-                      if (v) BlockedUserService.shared.loadBlockedUsers();
-                    },
+                    icon: HeroAppIcons.thumbsUp.data,
                   ),
                 ]),
                 const SizedBox(height: AppSpacing.xl),
@@ -398,6 +501,17 @@ class DisplaySettingsView extends StatelessWidget {
                     ),
                     icon: HeroAppIcons.inbox.data,
                   ),
+                  _navigationRow(
+                    context,
+                    AppStrings.t(AppStringKeys.appearanceGestures),
+                    '',
+                    () => Navigator.of(context).push(
+                      PageRouteBuilder<void>(
+                        pageBuilder: (_, _, _) => const GestureSettingsView(),
+                      ),
+                    ),
+                    icon: HeroAppIcons.arrowsRightLeft.data,
+                  ),
                   _toggleRow(
                     context,
                     HeroAppIcons.magnifyingGlass.data,
@@ -414,41 +528,16 @@ class DisplaySettingsView extends StatelessWidget {
                     theme.displayOwnChatAsFavorites,
                     (v) => theme.displayOwnChatAsFavorites = v,
                   ),
-                  if (theme.chatFolderDisplayMode ==
-                      ChatFolderDisplayMode.tabs) ...[
-                    _toggleRow(
-                      context,
-                      HeroAppIcons.pictureInPicture.data,
-                      AppStrings.t(
-                        AppStringKeys.appearanceDisableChatListSwipeActions,
-                      ),
-                      theme.disableChatListSwipeActions,
-                      (v) => theme.disableChatListSwipeActions = v,
-                    ),
-                    _toggleRow(
-                      context,
-                      HeroAppIcons.arrowsUpDown.data,
-                      AppStrings.t(
-                        AppStringKeys.appearanceChatListFolderSwipeSwitching,
-                      ),
-                      theme.chatListFolderSwipeSwitching,
-                      (theme.disableChatListSwipeActions &&
-                              theme.chatFolderDisplayMode ==
-                                  ChatFolderDisplayMode.tabs)
-                          ? (v) => theme.chatListFolderSwipeSwitching = v
-                          : null,
-                    ),
-                  ],
                   _toggleRow(
                     context,
-                    HeroAppIcons.palette.data,
+                    HeroAppIcons.wandMagicSparkles.data,
                     AppStrings.t(AppStringKeys.appearanceShowPremiumNameColor),
                     theme.showPremiumNameColors,
                     (v) => theme.showPremiumNameColors = v,
                   ),
                   _toggleRow(
                     context,
-                    HeroAppIcons.solidFaceSmile.data,
+                    HeroAppIcons.star.data,
                     AppStrings.t(
                       AppStringKeys.appearanceShowPremiumStatusEmoji,
                     ),
@@ -601,84 +690,79 @@ class ArchivedChatsSettingsView extends StatelessWidget {
   }
 }
 
-extension _DisplayAppearanceHelpers on AppearanceView {
-  static const _colorSwatchSize = (AppMetric.hitTarget - AppSpacing.xxs) * 0.9;
-  static const _colorSwatchGap = AppSpacing.xxl * 0.9;
+class GestureSettingsView extends StatelessWidget {
+  const GestureSettingsView({super.key});
 
-  static const _palette = [
-    Color(0xFF0099FF), // 蔚蓝 (default)
-    Color(0xFF2DC100), // 绿
-    Color(0xFF00C4B3), // 青
-    Color(0xFF4A6CF7), // 靛蓝
-    Color(0xFF8E7BFF), // 紫
-    Color(0xFFFF5E7D), // 粉
-    Color(0xFFFA5151), // 红
-    Color(0xFFFF9500), // 橙
-    Color(0xFFFFCC00), // 黄
-    Color(0xFF9ACD32), // 青柠
-    Color(0xFF00A884), // 翠绿
-    Color(0xFF32ADE6), // 天蓝
-    Color(0xFF5E5CE6), // 蓝紫
-    Color(0xFFAF52DE), // 洋紫
-    Color(0xFFFF2D55), // 玫红
-    Color(0xFF8E8E93), // 灰
-  ];
-
-  Widget _colorCard(BuildContext context, ThemeController theme) {
+  @override
+  Widget build(BuildContext context) {
     final c = context.colors;
-    final selected = theme.brandColor.toARGB32();
-    return Container(
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.xxl,
-        vertical: AppSpacing.xxl,
-      ),
-      child: Wrap(
-        spacing: _colorSwatchGap,
-        runSpacing: AppSpacing.xl * 0.9,
+    final theme = context.watch<ThemeController>();
+    const appearance = AppearanceView();
+    return Scaffold(
+      backgroundColor: c.groupedBackground,
+      body: Column(
         children: [
-          for (final color in _palette)
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => theme.brandColor = color,
-              child: Container(
-                width: _colorSwatchSize,
-                height: _colorSwatchSize,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: color,
-                  shape: BoxShape.circle,
-                  border: color.toARGB32() == selected
-                      ? Border.all(
-                          color: c.textPrimary,
-                          width: AppMetric.selectedBorder,
-                        )
-                      : null,
-                  boxShadow: [
-                    BoxShadow(
-                      color: color.withValues(alpha: 0.4),
-                      blurRadius: 4,
-                      offset: const Offset(0, 1),
-                    ),
-                  ],
-                ),
-                child: color.toARGB32() == selected
-                    ? const AppIcon(
-                        HeroAppIcons.check,
-                        size: 18,
-                        color: Colors.white,
-                      )
-                    : null,
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.appearanceGestures),
+            onBack: () => Navigator.of(context).pop(),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.xl,
+                AppSpacing.lg,
+                AppSpacing.section,
               ),
+              children: [
+                appearance._label(
+                  context,
+                  AppStrings.t(AppStringKeys.gesturesChatListSwipe),
+                ),
+                appearance._card(context, [
+                  for (final behavior in ChatListSwipeBehavior.values)
+                    appearance._choiceRow(
+                      context,
+                      behavior.icon,
+                      behavior.label,
+                      theme.chatListSwipeBehavior == behavior,
+                      () => theme.chatListSwipeBehavior = behavior,
+                    ),
+                  if (theme.chatListSwipeBehavior ==
+                      ChatListSwipeBehavior.switchFolders)
+                    appearance._toggleRow(
+                      context,
+                      HeroAppIcons.message.data,
+                      AppStrings.t(AppStringKeys.gesturesHoldSwipeActions),
+                      theme.chatListHoldSwipeActions,
+                      (value) => theme.chatListHoldSwipeActions = value,
+                    ),
+                ]),
+                const SizedBox(height: AppSpacing.xl),
+                appearance._label(
+                  context,
+                  AppStrings.t(AppStringKeys.gesturesThreeFingerSwipe),
+                ),
+                appearance._card(context, [
+                  for (final behavior in ThreeFingerSwipeBehavior.values)
+                    appearance._choiceRow(
+                      context,
+                      behavior.icon,
+                      behavior.label,
+                      theme.threeFingerSwipeBehavior == behavior,
+                      () => theme.threeFingerSwipeBehavior = behavior,
+                    ),
+                ]),
+              ],
             ),
+          ),
         ],
       ),
     );
   }
+}
 
+extension _DisplayAppearanceHelpers on AppearanceView {
   Widget _fontSizeCard(BuildContext context, ThemeController theme) {
     final c = context.colors;
     return Container(
@@ -790,12 +874,12 @@ extension _DisplayAppearanceHelpers on AppearanceView {
                 child: Center(child: leading),
               ),
               Expanded(
-                child: CupertinoSlider(
+                child: _nativeSlider(
+                  context,
                   value: value,
                   min: min,
                   max: max,
                   divisions: divisions,
-                  activeColor: AppTheme.brand,
                   onChanged: onChanged,
                 ),
               ),
@@ -807,6 +891,73 @@ extension _DisplayAppearanceHelpers on AppearanceView {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _nativeSlider(
+    BuildContext context, {
+    required double value,
+    required double min,
+    required double max,
+    required int divisions,
+    required ValueChanged<double> onChanged,
+  }) {
+    final c = context.colors;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        void update(Offset position) {
+          final fraction = (position.dx / constraints.maxWidth).clamp(0.0, 1.0);
+          final step = (fraction * divisions).round() / divisions;
+          onChanged(min + (max - min) * step);
+        }
+
+        final fraction = ((value - min) / (max - min)).clamp(0.0, 1.0);
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: (details) => update(details.localPosition),
+          onHorizontalDragUpdate: (details) => update(details.localPosition),
+          child: SizedBox(
+            height: AppMetric.hitTarget,
+            child: Stack(
+              alignment: Alignment.centerLeft,
+              children: [
+                Container(
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: c.divider,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                FractionallySizedBox(
+                  widthFactor: fraction,
+                  child: Container(
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: c.linkBlue,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: fraction * (constraints.maxWidth - 22),
+                  child: Container(
+                    width: 22,
+                    height: 22,
+                    decoration: BoxDecoration(
+                      color: c.card,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: c.linkBlue, width: 2),
+                      boxShadow: const [
+                        BoxShadow(color: Color(0x26000000), blurRadius: 4),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -859,14 +1010,18 @@ extension _DisplayAppearanceHelpers on AppearanceView {
             children: [
               Icon(icon, size: AppIconSize.xl, color: AppTheme.brand),
               const SizedBox(width: AppSpacing.xl),
-              Text(
-                label.l10n(context),
-                style: TextStyle(
-                  fontSize: AppTextSize.bodyLarge,
-                  color: c.textPrimary,
+              Expanded(
+                child: Text(
+                  label.l10n(context),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppTextSize.bodyLarge,
+                    color: c.textPrimary,
+                  ),
                 ),
               ),
-              const Spacer(),
+              const SizedBox(width: AppSpacing.md),
               if (selected)
                 AppIcon(
                   HeroAppIcons.check,
@@ -901,18 +1056,22 @@ extension _DisplayAppearanceHelpers on AppearanceView {
               color: enabled ? AppTheme.brand : c.textTertiary,
             ),
             const SizedBox(width: AppSpacing.xl),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: AppTextSize.bodyLarge,
-                color: enabled ? c.textPrimary : c.textTertiary,
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: AppTextSize.bodyLarge,
+                  color: enabled ? c.textPrimary : c.textTertiary,
+                ),
               ),
             ),
-            const Spacer(),
-            CupertinoSwitch(
+            const SizedBox(width: AppSpacing.md),
+            AppSwitch(
               value: value,
-              activeTrackColor: AppTheme.brand,
-              onChanged: onChanged,
+              enabled: enabled,
+              onChanged: onChanged ?? (_) {},
             ),
           ],
         ),
@@ -948,16 +1107,26 @@ extension _DisplayAppearanceHelpers on AppearanceView {
                 ),
                 const SizedBox(width: AppSpacing.xl),
               ],
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: AppTextSize.bodyLarge,
-                  color: c.textPrimary,
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: value == null ? 2 : 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppTextSize.bodyLarge,
+                    color: c.textPrimary,
+                  ),
                 ),
               ),
               if (value != null) ...[
                 const SizedBox(width: AppSpacing.lg),
-                Expanded(
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: math.min(
+                      MediaQuery.sizeOf(context).width * 0.42,
+                      190,
+                    ),
+                  ),
                   child: Text(
                     value,
                     maxLines: 1,
@@ -969,8 +1138,7 @@ extension _DisplayAppearanceHelpers on AppearanceView {
                     ),
                   ),
                 ),
-              ] else
-                const Spacer(),
+              ],
               const SizedBox(width: AppSpacing.sm),
               AppIcon(
                 HeroAppIcons.chevronRight,

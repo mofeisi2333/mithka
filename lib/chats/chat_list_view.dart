@@ -15,15 +15,19 @@ import 'package:flutter/material.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
+import '../auth/account_store.dart';
+import '../auth/auth_manager.dart';
 import '../channels/forum_topic_browser_view.dart';
 import '../chat/chat_view.dart';
 import '../chat/custom_emoji.dart';
 import '../chat/link_handler.dart';
+import '../communities/community_models.dart';
+import '../communities/community_view.dart';
 import '../components/app_icons.dart';
-import '../components/confirm_dialog.dart';
 import '../components/drawer_controller.dart' as dc;
 import '../components/photo_avatar.dart';
 import '../components/toast.dart';
+import '../components/ui_components.dart';
 import '../contacts/add_people_view.dart';
 import '../contacts/create_group_view.dart';
 import '../profile/emoji_status_picker.dart';
@@ -35,6 +39,7 @@ import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import 'archived_chats_view.dart';
+import 'chat_delete_dialog.dart';
 import 'chat_list_view_model.dart';
 import 'chat_row_view.dart';
 import 'filtered_chats_view.dart';
@@ -87,26 +92,60 @@ class ChatListSelection {
   bool get isForum => chat?.isForum ?? false;
 }
 
+/// Returns the exact leading offset for a chat-list item.
+///
+/// Chat rows do not include a separator in their layout, so even a fractional
+/// per-row adjustment accumulates into a visible error for targets farther
+/// down the list.
+double chatListItemScrollOffset({
+  required int itemIndex,
+  required double rowHeight,
+  required double maxScrollExtent,
+}) => math.min(itemIndex * rowHeight, maxScrollExtent);
+
+class CommunityListSelection {
+  const CommunityListSelection({
+    required this.community,
+    required this.chats,
+    required this.onCollapsedChanged,
+  });
+
+  final CommunitySummary community;
+  final List<ChatSummary> chats;
+  final ValueChanged<bool> onCollapsedChanged;
+}
+
 class ChatListView extends StatefulWidget {
   const ChatListView({
     super.key,
     this.controller,
     this.onChatSelected,
+    this.onCommunitySelected,
     this.selectedChatId,
+    this.selectedCommunityId,
   });
 
   final ChatListController? controller;
   final ValueChanged<ChatListSelection>? onChatSelected;
+  final ValueChanged<CommunityListSelection>? onCommunitySelected;
   final int? selectedChatId;
+  final int? selectedCommunityId;
 
   @override
   State<ChatListView> createState() => _ChatListViewState();
 }
 
-class _ChatListViewState extends State<ChatListView> {
+class _ChatListViewState extends State<ChatListView>
+    with SingleTickerProviderStateMixin {
+  static const _folderTransitionDuration = Duration(milliseconds: 210);
+  static const _folderTransitionDistance = 22.0;
+
   final ChatListViewModel _model = ChatListViewModel();
   late final ScrollController _scrollController = _newScrollController();
-  String _meName = AppStringKeys.chatMeLabel;
+  late final AnimationController _folderTransitionController;
+  late final CurvedAnimation _folderTransition;
+  double _folderTransitionDirection = 1;
+  String _meName = AppStrings.t(AppStringKeys.chatMeLabel);
   TdFileRef? _mePhoto;
   int _meStatusId = 0; // current emoji status, shown after the name
   bool _meIsPremium = false;
@@ -129,6 +168,9 @@ class _ChatListViewState extends State<ChatListView> {
   double _refreshPullDistance = 0;
   bool _isRefreshing = false;
   int _lastVisibleRows = 1;
+  final Map<int, Offset> _gesturePointers = <int, Offset>{};
+  Offset? _threeFingerSwipeOrigin;
+  bool _threeFingerSwipeHandled = false;
 
   static const double _refreshPullThreshold = 72;
 
@@ -140,6 +182,15 @@ class _ChatListViewState extends State<ChatListView> {
   @override
   void initState() {
     super.initState();
+    _folderTransitionController = AnimationController(
+      vsync: this,
+      duration: _folderTransitionDuration,
+      value: 1,
+    );
+    _folderTransition = CurvedAnimation(
+      parent: _folderTransitionController,
+      curve: Curves.easeOutCubic,
+    );
     _model.onAppear();
     _model.addListener(_onModel);
     widget.controller?.addListener(_onControllerRequest);
@@ -187,6 +238,8 @@ class _ChatListViewState extends State<ChatListView> {
   void dispose() {
     _userSub?.cancel();
     widget.controller?.removeListener(_onControllerRequest);
+    _folderTransition.dispose();
+    _folderTransitionController.dispose();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _model.removeListener(_onModel);
@@ -202,10 +255,9 @@ class _ChatListViewState extends State<ChatListView> {
         setState(() {
           if (name.isNotEmpty) _meName = name;
           _mePhoto = TDParse.smallPhoto(me.obj('profile_photo'));
-          _meStatusId =
-              me.obj('emoji_status')?.obj('type')?.int64('custom_emoji_id') ??
-              me.obj('emoji_status')?.int64('custom_emoji_id') ??
-              0;
+          _meStatusId = TDParse.emojiStatusCustomEmojiId(
+            me.obj('emoji_status'),
+          );
           _meIsPremium = me.boolean('is_premium') ?? false;
           _meId = me.int64('id');
           _model.meId = _meId;
@@ -261,6 +313,29 @@ class _ChatListViewState extends State<ChatListView> {
             title: chat.title,
             seedMessage: chat.lastChatMessage,
           ),
+        ),
+      ),
+    );
+  }
+
+  void _openCommunity(CommunityGroupEntry entry) {
+    final selection = CommunityListSelection(
+      community: entry.community,
+      chats: _model.chatsInCommunity(entry.community.id),
+      onCollapsedChanged: (value) =>
+          _model.setCommunityCollapsed(entry.community.id, value),
+    );
+    final onCommunitySelected = widget.onCommunitySelected;
+    if (onCommunitySelected != null) {
+      onCommunitySelected(selection);
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CommunityView(
+          community: selection.community,
+          chats: selection.chats,
+          onCollapsedChanged: selection.onCollapsedChanged,
         ),
       ),
     );
@@ -326,7 +401,30 @@ class _ChatListViewState extends State<ChatListView> {
         _createChannel();
       case AppStringKeys.chatListAddFriendOrGroup:
         _showAddMenu();
+      case AppStringKeys.communityTitle:
+        _openCommunityDirectory();
     }
+  }
+
+  void _openCommunityDirectory() {
+    final entries = [
+      for (final community in _model.availableCommunities)
+        CommunityGroupEntry(
+          community: community,
+          chats: _model.chatsInCommunity(community.id),
+        ),
+    ];
+    if (entries.isEmpty) return;
+    if (entries.length == 1) {
+      _openCommunity(entries.single);
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            _CommunityDirectoryView(entries: entries, onOpen: _openCommunity),
+      ),
+    );
   }
 
   Future<void> _openQrScanner() async {
@@ -339,7 +437,41 @@ class _ChatListViewState extends State<ChatListView> {
 
   void _selectFilter(ChatFilterOption filter) {
     setState(() => _showFilterMenu = false);
+    _switchToFilter(filter);
+  }
+
+  void _switchToFilter(ChatFilterOption filter) {
+    final currentFolderId = _model.selectedFilter.folderId;
+    if (filter.folderId == currentFolderId) return;
+
+    final filters = _model.filters;
+    final currentIndex = filters.indexWhere(
+      (candidate) => candidate.folderId == currentFolderId,
+    );
+    final targetIndex = filters.indexWhere(
+      (candidate) => candidate.folderId == filter.folderId,
+    );
+    final direction = currentIndex >= 0 && targetIndex >= 0
+        ? (targetIndex > currentIndex ? 1.0 : -1.0)
+        : 1.0;
+
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
+    setState(() {
+      _folderTransitionDirection = direction;
+      _openSwipeChat = null;
+      _archiveRevealed = false;
+      _archivePullDistance = 0;
+      _archiveDragOffset = 0;
+      _refreshPullDistance = 0;
+    });
     _model.selectFilter(filter);
+    if (MediaQuery.maybeOf(context)?.disableAnimations ?? false) {
+      _folderTransitionController.value = 1;
+    } else {
+      _folderTransitionController.forward(from: 0);
+    }
   }
 
   void _onControllerRequest() {
@@ -441,11 +573,13 @@ class _ChatListViewState extends State<ChatListView> {
   }
 
   double? _firstUnreadScrollOffset() {
-    final chats = _model.chats;
-    final chatIndex = chats.indexWhere((chat) => chat.showsRedUnreadIndicator);
-    if (chatIndex < 0) return null;
+    final entries = _model.chatListEntries;
+    final entryIndex = entries.indexWhere(
+      (entry) => entry.showsUnreadIndicator,
+    );
+    if (entryIndex < 0) return null;
 
-    var itemIndex = chatIndex;
+    var itemIndex = entryIndex;
     if (_model.isAllFilter && _model.filtered.isNotEmpty) itemIndex++;
     final archiveMode = context
         .read<ThemeController>()
@@ -454,15 +588,15 @@ class _ChatListViewState extends State<ChatListView> {
         _model.archived.isNotEmpty &&
         archiveMode.isInline) {
       final archiveIndex = archiveMode.insertionIndex(
-        chatCount: chats.length,
+        chatCount: entries.length,
         visibleRows: _lastVisibleRows,
       );
-      if (archiveIndex <= chatIndex) itemIndex++;
+      if (archiveIndex <= entryIndex) itemIndex++;
     }
-    final rowH = context.read<ThemeController>().rowHeight + 0.5;
-    return math.min(
-      itemIndex * rowH,
-      _scrollController.position.maxScrollExtent,
+    return chatListItemScrollOffset(
+      itemIndex: itemIndex,
+      rowHeight: context.read<ThemeController>().rowHeight,
+      maxScrollExtent: _scrollController.position.maxScrollExtent,
     );
   }
 
@@ -493,26 +627,102 @@ class _ChatListViewState extends State<ChatListView> {
         }
       });
     }
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Container(
-          color: c.background,
-          child: Column(
-            children: [
-              _header(),
-              if (folderMode == ChatFolderDisplayMode.tabs &&
-                  _model.filters.length > 1)
-                _chatFolderTabs(),
-              Expanded(child: _chatList()),
-            ],
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: _handleGesturePointerDown,
+      onPointerMove: _handleGesturePointerMove,
+      onPointerUp: _handleGesturePointerEnd,
+      onPointerCancel: _handleGesturePointerEnd,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            color: c.background,
+            child: Column(
+              children: [
+                _header(),
+                if (folderMode == ChatFolderDisplayMode.tabs &&
+                    _model.filters.length > 1)
+                  _chatFolderTabs(),
+                Expanded(child: _chatList()),
+              ],
+            ),
           ),
-        ),
-        if (_showPlusMenu) _plusMenuOverlay(),
-        if (folderMode == ChatFolderDisplayMode.menu && _showFilterMenu)
-          _filterMenuOverlay(),
-      ],
+          if (_showPlusMenu) _plusMenuOverlay(),
+          if (folderMode == ChatFolderDisplayMode.menu && _showFilterMenu)
+            _filterMenuOverlay(),
+        ],
+      ),
     );
+  }
+
+  Offset _gestureCentroid() {
+    var dx = 0.0;
+    var dy = 0.0;
+    for (final position in _gesturePointers.values) {
+      dx += position.dx;
+      dy += position.dy;
+    }
+    return Offset(dx / _gesturePointers.length, dy / _gesturePointers.length);
+  }
+
+  void _handleGesturePointerDown(PointerDownEvent event) {
+    _gesturePointers[event.pointer] = event.position;
+    if (_gesturePointers.length == 3) {
+      _threeFingerSwipeOrigin = _gestureCentroid();
+      _threeFingerSwipeHandled = false;
+    } else if (_gesturePointers.length > 3) {
+      _threeFingerSwipeOrigin = null;
+    }
+  }
+
+  void _handleGesturePointerMove(PointerMoveEvent event) {
+    if (!_gesturePointers.containsKey(event.pointer)) return;
+    _gesturePointers[event.pointer] = event.position;
+    final origin = _threeFingerSwipeOrigin;
+    if (_gesturePointers.length != 3 ||
+        origin == null ||
+        _threeFingerSwipeHandled) {
+      return;
+    }
+    final delta = _gestureCentroid() - origin;
+    if (delta.dx.abs() < 64 || delta.dx.abs() < delta.dy.abs() * 1.25) return;
+    _threeFingerSwipeHandled = true;
+    _performThreeFingerSwipe(delta.dx);
+  }
+
+  void _handleGesturePointerEnd(PointerEvent event) {
+    _gesturePointers.remove(event.pointer);
+    if (_gesturePointers.length < 3) {
+      _threeFingerSwipeOrigin = null;
+      _threeFingerSwipeHandled = false;
+    }
+  }
+
+  void _performThreeFingerSwipe(double horizontalDelta) {
+    switch (context.read<ThemeController>().threeFingerSwipeBehavior) {
+      case ThreeFingerSwipeBehavior.switchFolders:
+        _switchFolderBySwipe(horizontalDelta < 0 ? -1000 : 1000);
+        return;
+      case ThreeFingerSwipeBehavior.switchAccounts:
+        _switchAccountBySwipe(horizontalDelta);
+        return;
+      case ThreeFingerSwipeBehavior.disabled:
+        return;
+    }
+  }
+
+  void _switchAccountBySwipe(double horizontalDelta) {
+    final accounts = context.read<AccountStore>();
+    final summaries = accounts.summaries;
+    if (summaries.length < 2) return;
+    final current = summaries.indexWhere(
+      (account) => account.slot == accounts.activeSlot,
+    );
+    if (current < 0) return;
+    final step = horizontalDelta < 0 ? 1 : -1;
+    final next = (current + step) % summaries.length;
+    accounts.switchTo(summaries[next].slot, context.read<AuthManager>());
   }
 
   // MARK: - Header
@@ -670,6 +880,10 @@ class _ChatListViewState extends State<ChatListView> {
   Widget _chatFolderTabs() {
     final c = context.colors;
     final selectedFolderId = _model.selectedFilter.folderId;
+    final transitionDuration =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false
+        ? Duration.zero
+        : _folderTransitionDuration;
     return Container(
       height: 44,
       decoration: BoxDecoration(
@@ -719,7 +933,9 @@ class _ChatListViewState extends State<ChatListView> {
                     ],
                   ),
                   const SizedBox(height: 7),
-                  Container(
+                  AnimatedContainer(
+                    duration: transitionDuration,
+                    curve: Curves.easeOutCubic,
                     width: 38,
                     height: 4,
                     decoration: BoxDecoration(
@@ -802,7 +1018,7 @@ class _ChatListViewState extends State<ChatListView> {
             ((geo.maxHeight - searchHeight) / rowH).ceil(),
           );
           _lastVisibleRows = visibleRows;
-          final chats = _model.chats;
+          final entries = _model.chatListEntries;
           final hasFiltered = _model.isAllFilter && _model.filtered.isNotEmpty;
           final hasArchive = _model.isAllFilter && _model.archived.isNotEmpty;
           final showPulledDownArchive =
@@ -810,13 +1026,13 @@ class _ChatListViewState extends State<ChatListView> {
               archiveMode == ArchivedChatsDisplayMode.pullDown &&
               _archiveRevealed;
           final archiveIndex = archiveMode.insertionIndex(
-            chatCount: chats.length,
+            chatCount: entries.length,
             visibleRows: visibleRows,
           );
           final showInlineArchive = hasArchive && archiveMode.isInline;
 
           Widget list;
-          if (chats.isEmpty &&
+          if (entries.isEmpty &&
               _model.isInitialLoading &&
               !showInlineArchive &&
               !hasFiltered) {
@@ -829,7 +1045,7 @@ class _ChatListViewState extends State<ChatListView> {
               itemCount: visibleRows,
               itemBuilder: (context, i) => const _ChatRowPlaceholder(),
             );
-          } else if (chats.isEmpty && !showInlineArchive && !hasFiltered) {
+          } else if (entries.isEmpty && !showInlineArchive && !hasFiltered) {
             list = ListView(
               controller: _scrollController,
               physics: const AlwaysScrollableScrollPhysics(
@@ -851,7 +1067,7 @@ class _ChatListViewState extends State<ChatListView> {
               ),
               padding: EdgeInsets.zero,
               itemCount:
-                  chats.length +
+                  entries.length +
                   (showInlineArchive ? 1 : 0) +
                   (hasFiltered ? 1 : 0),
               itemBuilder: (context, index) {
@@ -862,10 +1078,14 @@ class _ChatListViewState extends State<ChatListView> {
                 if (showInlineArchive && listIndex == archiveIndex) {
                   return _assistantRow();
                 }
-                final chatIndex = showInlineArchive && listIndex > archiveIndex
+                final entryIndex = showInlineArchive && listIndex > archiveIndex
                     ? listIndex - 1
                     : listIndex;
-                return _swipeRow(chats[chatIndex]);
+                final entry = entries[entryIndex];
+                return switch (entry) {
+                  CommunityChatEntry(:final chat) => _swipeRow(chat),
+                  CommunityGroupEntry() => _communityRow(entry),
+                };
               },
             );
           }
@@ -891,6 +1111,7 @@ class _ChatListViewState extends State<ChatListView> {
               child: list,
             );
           }
+          list = _folderSwitchTransition(list);
 
           return Column(
             children: [
@@ -1038,17 +1259,60 @@ class _ChatListViewState extends State<ChatListView> {
     if (current < 0) return;
     final next = velocity < 0 ? current + 1 : current - 1;
     if (next < 0 || next >= filters.length) return;
-    _model.selectFilter(filters[next]);
-    _scrollController.animateTo(
-      0,
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOutCubic,
+    _switchToFilter(filters[next]);
+  }
+
+  Widget _folderSwitchTransition(Widget child) {
+    // Keep one ListView mounted: retaining outgoing and incoming children would
+    // attach the shared scroll controller to both during the transition.
+    return ClipRect(
+      child: AnimatedBuilder(
+        animation: _folderTransition,
+        child: child,
+        builder: (context, child) {
+          final progress = _folderTransition.value;
+          return Opacity(
+            opacity: 0.78 + 0.22 * progress,
+            child: Transform.translate(
+              offset: Offset(
+                _folderTransitionDirection *
+                    _folderTransitionDistance *
+                    (1 - progress),
+                0,
+              ),
+              child: child,
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _communityRow(CommunityGroupEntry entry) {
+    return GestureDetector(
+      key: ValueKey('community-${entry.community.id}'),
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _openCommunity(entry),
+      child: CommunityChatListRow(
+        entry: entry,
+        selected: widget.selectedCommunityId == entry.community.id,
+        onClearUnread: () {
+          for (final chat in entry.chats) {
+            _model.markRead(chat);
+          }
+        },
+      ),
     );
   }
 
   Widget _swipeRow(ChatSummary chat) {
-    if (context.watch<ThemeController>().disableChatListSwipeActions) {
+    final theme = context.watch<ThemeController>();
+    final holdForActions =
+        theme.chatListSwipeBehavior == ChatListSwipeBehavior.switchFolders &&
+        theme.chatListHoldSwipeActions;
+    if (theme.disableChatListSwipeActions && !holdForActions) {
       return GestureDetector(
+        key: ValueKey(chat.id),
         behavior: HitTestBehavior.opaque,
         onTap: () => _openChat(chat),
         child: ChatRowView(
@@ -1094,11 +1358,13 @@ class _ChatListViewState extends State<ChatListView> {
             ),
           ];
     return ChatSwipeRow(
+      key: ValueKey(chat.id),
       rowId: chat.id,
       openRowId: _openSwipeChat,
       onOpenChanged: (id) => setState(() => _openSwipeChat = id),
       onTap: () => _openChat(chat),
       actions: actions,
+      requiresLongPressDrag: holdForActions,
       child: ChatRowView(
         chat: chat,
         selected: widget.selectedChatId == chat.id,
@@ -1108,31 +1374,29 @@ class _ChatListViewState extends State<ChatListView> {
   }
 
   Future<void> _confirmDeleteChat(ChatSummary chat) async {
-    final isChannel = chat.kind == ChatKind.channel;
-    final isGroupOrChannel = chat.kind == ChatKind.group || isChannel;
-    final confirmed = await confirmDialog(
+    final isGroupOrChannel =
+        chat.kind == ChatKind.group || chat.kind == ChatKind.channel;
+    final capabilities = await _model.deleteCapabilities(chat);
+    if (!mounted) return;
+    if (!capabilities.canDelete) {
+      showToast(context, AppStringKeys.chatDeleteUnavailable);
+      return;
+    }
+    final scope = await showChatDeleteScopeDialog(
       context,
-      title: isGroupOrChannel
-          ? _leaveTitle(chat)
-          : AppStringKeys.chatListDeleteChatQuestion,
-      message: isGroupOrChannel
+      title: AppStringKeys.chatListDeleteChatQuestion,
+      selfOnlyDescription: isGroupOrChannel
           ? AppStrings.t(
               AppStringKeys.chatListLeaveAndDeleteGroupConfirmation,
               {'value1': chat.title},
             )
           : AppStrings.t(AppStringKeys.chatInfoClearHistoryDescription),
-      confirmText: isGroupOrChannel
-          ? _leaveTitle(chat)
-          : AppStringKeys.chatDelete,
-      destructive: true,
+      capabilities: capabilities,
+      isGroupOrChannel: isGroupOrChannel,
     );
-    if (!mounted || !confirmed) return;
+    if (!mounted || scope == null) return;
     try {
-      if (isGroupOrChannel) {
-        await _model.leaveAndDeleteChat(chat);
-      } else {
-        await _model.deleteChat(chat);
-      }
+      await _model.deleteChat(chat, scope: scope);
     } catch (error) {
       if (!mounted) return;
       final message = error is TdError ? error.message : error.toString();
@@ -1151,12 +1415,6 @@ class _ChatListViewState extends State<ChatListView> {
     return AppStringKeys.chatDelete;
   }
 
-  String _leaveTitle(ChatSummary chat) {
-    return chat.kind == ChatKind.channel
-        ? AppStringKeys.topicChatLeaveChannel
-        : AppStringKeys.chatInfoLeaveGroup;
-  }
-
   PageRoute<T> _chatEntryRoute<T>(Widget child) {
     return MaterialPageRoute<T>(builder: (_) => child);
   }
@@ -1173,7 +1431,7 @@ class _ChatListViewState extends State<ChatListView> {
       ),
       child: ArchivedChatsRow(
         archived: _model.archived,
-        onClearUnread: _model.markAllRead,
+        onClearUnread: () => _model.markChatsRead(_model.archived),
       ),
     );
   }
@@ -1190,7 +1448,7 @@ class _ChatListViewState extends State<ChatListView> {
       ),
       child: FilteredChatsRow(
         chats: _model.filtered,
-        onClearUnread: _model.markAllRead,
+        onClearUnread: () => _model.markChatsRead(_model.filtered),
       ),
     );
   }
@@ -1210,7 +1468,10 @@ class _ChatListViewState extends State<ChatListView> {
           alignment: Alignment.topRight,
           child: GestureDetector(
             onTap: () {},
-            child: PlusMenu(onSelect: _selectPlusMenuItem),
+            child: PlusMenu(
+              onSelect: _selectPlusMenuItem,
+              showCommunities: _model.availableCommunities.isNotEmpty,
+            ),
           ),
         ),
       ),
@@ -1315,6 +1576,48 @@ class _ChatRowPlaceholder extends StatelessWidget {
   }
 }
 
+class _CommunityDirectoryView extends StatelessWidget {
+  const _CommunityDirectoryView({required this.entries, required this.onOpen});
+
+  final List<CommunityGroupEntry> entries;
+  final ValueChanged<CommunityGroupEntry> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Scaffold(
+      backgroundColor: c.background,
+      body: Column(
+        children: [
+          NavHeader(
+            title: AppStringKeys.communityTitle,
+            onBack: () => Navigator.of(context).pop(),
+          ),
+          Expanded(
+            child: ListView.builder(
+              padding: EdgeInsets.zero,
+              itemCount: entries.length,
+              itemBuilder: (context, index) {
+                final entry = entries[index];
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      onOpen(entry);
+                    });
+                  },
+                  child: CommunityChatListRow(entry: entry),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PlaceholderBar extends StatelessWidget {
   const _PlaceholderBar({
     required this.height,
@@ -1341,14 +1644,25 @@ class _PlaceholderBar extends StatelessWidget {
 
 /// Reference-style "+" dropdown of create actions.
 class PlusMenu extends StatelessWidget {
-  const PlusMenu({super.key, required this.onSelect});
+  const PlusMenu({
+    super.key,
+    required this.onSelect,
+    this.showCommunities = false,
+  });
   final ValueChanged<String> onSelect;
+  final bool showCommunities;
 
-  static const _items = [
+  static const _baseItems = [
     (HeroAppIcons.qrcode, AppStringKeys.chatListScanQrCode),
     (HeroAppIcons.circlePlus, AppStringKeys.chatListCreateGroup),
     (HeroAppIcons.grip, AppStringKeys.chatListCreateChannel),
     (HeroAppIcons.userPlus, AppStringKeys.chatListAddFriendOrGroup),
+  ];
+
+  List<(AppIconData, String)> get _items => [
+    if (showCommunities)
+      (HeroAppIcons.objectGroup, AppStringKeys.communityTitle),
+    ..._baseItems,
   ];
 
   @override
@@ -1524,6 +1838,7 @@ class ChatSwipeRow extends StatefulWidget {
     required this.actions,
     required this.onTap,
     required this.child,
+    this.requiresLongPressDrag = false,
   });
 
   final int rowId;
@@ -1532,6 +1847,7 @@ class ChatSwipeRow extends StatefulWidget {
   final List<SwipeActionItem> actions;
   final VoidCallback onTap;
   final Widget child;
+  final bool requiresLongPressDrag;
 
   @override
   State<ChatSwipeRow> createState() => _ChatSwipeRowState();
@@ -1548,6 +1864,7 @@ class _ChatSwipeRowState extends State<ChatSwipeRow>
   VoidCallback? _animationListener;
   double _offset = 0;
   bool _longPressHighlighted = false;
+  double _longPressStartOffset = 0;
 
   double get _totalWidth => widget.actions.length * _buttonWidth;
 
@@ -1622,6 +1939,16 @@ class _ChatSwipeRowState extends State<ChatSwipeRow>
     if (widget.openRowId == widget.rowId) widget.onOpenChanged(null);
   }
 
+  void _settle(double velocity) {
+    if (velocity < -520 || (velocity <= 360 && _offset < -_totalWidth * 0.38)) {
+      _animateTo(-_totalWidth);
+      widget.onOpenChanged(widget.rowId);
+    } else {
+      _animateTo(0);
+      if (widget.openRowId == widget.rowId) widget.onOpenChanged(null);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return ClipRect(
@@ -1650,6 +1977,7 @@ class _ChatSwipeRowState extends State<ChatSwipeRow>
                           alignment: Alignment.center,
                           child: Text(
                             item.title.l10n(context),
+                            textAlign: TextAlign.center,
                             style: const TextStyle(
                               fontSize: AppTextSize.body,
                               color: Colors.white,
@@ -1668,30 +1996,44 @@ class _ChatSwipeRowState extends State<ChatSwipeRow>
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: () => _offset != 0 ? _close() : widget.onTap(),
-              onLongPressStart: (_) =>
-                  setState(() => _longPressHighlighted = true),
-              onLongPressEnd: (_) =>
-                  setState(() => _longPressHighlighted = false),
-              onLongPressCancel: () =>
-                  setState(() => _longPressHighlighted = false),
-              onHorizontalDragStart: (_) => _stopAnimation(),
-              onHorizontalDragUpdate: (d) {
-                setState(
-                  () => _offset = _rubberBandOffset(_offset + d.delta.dx),
-                );
+              onLongPressStart: (_) {
+                _stopAnimation();
+                _longPressStartOffset = _offset;
+                setState(() => _longPressHighlighted = true);
               },
-              onHorizontalDragEnd: (d) {
-                final vx = d.primaryVelocity ?? 0;
-                if (vx < -520 || (vx <= 360 && _offset < -_totalWidth * 0.38)) {
-                  _animateTo(-_totalWidth);
-                  widget.onOpenChanged(widget.rowId);
-                } else {
-                  _animateTo(0);
-                  if (widget.openRowId == widget.rowId) {
-                    widget.onOpenChanged(null);
-                  }
+              onLongPressMoveUpdate: widget.requiresLongPressDrag
+                  ? (details) {
+                      setState(() {
+                        _offset = _rubberBandOffset(
+                          _longPressStartOffset +
+                              details.localOffsetFromOrigin.dx,
+                        );
+                      });
+                    }
+                  : null,
+              onLongPressEnd: (details) {
+                setState(() => _longPressHighlighted = false);
+                if (widget.requiresLongPressDrag) {
+                  _settle(details.velocity.pixelsPerSecond.dx);
                 }
               },
+              onLongPressCancel: () =>
+                  setState(() => _longPressHighlighted = false),
+              onHorizontalDragStart: widget.requiresLongPressDrag
+                  ? null
+                  : (_) => _stopAnimation(),
+              onHorizontalDragUpdate: widget.requiresLongPressDrag
+                  ? null
+                  : (details) {
+                      setState(
+                        () => _offset = _rubberBandOffset(
+                          _offset + details.delta.dx,
+                        ),
+                      );
+                    },
+              onHorizontalDragEnd: widget.requiresLongPressDrag
+                  ? null
+                  : (details) => _settle(details.primaryVelocity ?? 0),
               child: Stack(
                 children: [
                   widget.child,

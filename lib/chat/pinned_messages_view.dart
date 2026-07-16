@@ -18,6 +18,7 @@ import '../theme/app_theme.dart';
 import '../theme/date_text.dart';
 import 'chat_view.dart';
 import 'full_image_viewer.dart';
+import 'video_playback_queue.dart';
 import 'video_player_view.dart';
 
 class PinnedMessagesView extends StatefulWidget {
@@ -344,14 +345,7 @@ class _PinnedMessagesViewState extends State<PinnedMessagesView> {
       Navigator.of(context).push(
         MaterialPageRoute(
           fullscreenDialog: true,
-          builder: (_) => VideoPlayerView(
-            video: message.video!,
-            thumb: message.image,
-            width: message.imageWidth,
-            height: message.imageHeight,
-            sourceChatId: widget.chatId,
-            messageId: message.id,
-          ),
+          builder: (_) => VideoPlaylistPlayerView(queue: _videoQueue(message)),
         ),
       );
       return;
@@ -362,6 +356,27 @@ class _PinnedMessagesViewState extends State<PinnedMessagesView> {
         fullscreenDialog: true,
         builder: (_) => FullImageViewer(items: [message.image!]),
       ),
+    );
+  }
+
+  VideoPlaybackQueue _videoQueue(ChatMessage current) {
+    final videos = _items.where((message) => message.video != null).toList();
+    if (!videos.any((message) => message.id == current.id)) videos.add(current);
+    final index = videos.indexWhere((message) => message.id == current.id);
+    return VideoPlaybackQueue(
+      items: [
+        for (final message in videos)
+          VideoPlaybackItem(
+            video: message.video!,
+            thumb: message.image,
+            width: message.imageWidth,
+            height: message.imageHeight,
+            sourceChatId: widget.chatId,
+            messageId: message.id,
+            title: _caption(message) ?? widget.title,
+          ),
+      ],
+      index: index < 0 ? 0 : index,
     );
   }
 }

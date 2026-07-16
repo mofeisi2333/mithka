@@ -32,6 +32,7 @@ import '../theme/theme_controller.dart';
 import 'add_members_view.dart';
 import 'chat_members_view.dart';
 import 'chat_search_view.dart';
+import 'chat_theme_view.dart';
 import 'chat_wallpaper_view.dart';
 import 'group_management_view.dart';
 import 'pinned_messages_view.dart';
@@ -105,6 +106,15 @@ class _ChatInfoViewState extends State<ChatInfoView> {
       PageRouteBuilder<void>(
         pageBuilder: (_, _, _) =>
             ChatWallpaperView(chatId: widget.chatId, chatTitle: _vm.title),
+      ),
+    );
+  }
+
+  void _openTheme() {
+    Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        pageBuilder: (_, _, _) =>
+            ChatThemeView(chatId: widget.chatId, chatTitle: _vm.title),
       ),
     );
   }
@@ -439,6 +449,8 @@ class _ChatInfoViewState extends State<ChatInfoView> {
               ),
             ),
           ),
+          const InsetDivider(leadingInset: 14),
+          _infoRow(AppStrings.t(AppStringKeys.chatThemeTitle), _openTheme),
           const InsetDivider(leadingInset: 14),
           _infoRow(
             AppStrings.t(AppStringKeys.chatWallpaperTitle),
