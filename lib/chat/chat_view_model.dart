@@ -861,9 +861,13 @@ class ChatViewModel extends ChangeNotifier {
   Future<void> sendRichMessageHtml(
     String html, {
     List<RichMessageSendFile> files = const [],
+    List<Map<String, dynamic>> blocks = const [],
   }) async {
-    if (html.trim().isEmpty) return;
+    if (blocks.isEmpty) {
+      throw StateError('Rich message blocks are required for user accounts');
+    }
     for (final file in files) {
+      if ((file.attachment.fileId ?? 0) > 0) continue;
       final localFile = File(file.attachment.path);
       if (!await localFile.exists() || await localFile.length() <= 0) {
         throw StateError('Unable to read rich message media');
@@ -873,18 +877,7 @@ class ChatViewModel extends ChangeNotifier {
     final request = <String, dynamic>{
       '@type': 'sendMessage',
       'chat_id': chatId,
-      'input_message_content': {
-        '@type': 'inputMessageRichMessage',
-        'message': {
-          '@type': 'inputRichMessage',
-          'source': {'@type': 'richMessageSourceHtml', 'text': html},
-          'is_rtl': false,
-          'detect_automatic_blocks': true,
-          if (files.isNotEmpty)
-            'files': files.map(richMessageFilePayload).toList(),
-        },
-        'clear_draft': true,
-      },
+      'input_message_content': richMessageInputContent(blocks),
     };
     if (replyTo != null) {
       request['reply_to'] = {

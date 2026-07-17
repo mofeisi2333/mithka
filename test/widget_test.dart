@@ -90,6 +90,23 @@ Future<MusicPlayerController> _pumpMusicPlayerBar(WidgetTester tester) async {
   return player;
 }
 
+class _FocusTestChatViewModel extends ChatViewModel {
+  _FocusTestChatViewModel()
+    : super(chatId: 1, title: 'Test', markReadOnOpen: false);
+
+  @override
+  void sendTyping() {}
+
+  @override
+  void setDraft(
+    String value, {
+    String? formattedText,
+    List<Map<String, dynamic>> entities = const [],
+  }) {
+    draft = value;
+  }
+}
+
 void main() {
   group('AppKeyboardDismissOnTap', () {
     testWidgets('lets system text actions run before dismissing focus', (
@@ -983,6 +1000,85 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       vm.dispose();
       vmDisposed = true;
+    });
+
+    testWidgets('format menu keeps input focused until tapping outside', (
+      tester,
+    ) async {
+      final vm = _FocusTestChatViewModel();
+      addTearDown(vm.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('en'),
+          localizationsDelegates: const [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: AppLocalizations.supportedLocales,
+          builder: (context, child) =>
+              AppKeyboardDismissOnTap(child: child ?? const SizedBox.shrink()),
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.bottomCenter,
+              child: ChatInputBar(
+                vm: vm,
+                onStartCall: (_) {},
+                onMessageSent: () {},
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final textFieldFinder = find.byType(TextField).first;
+      final textField = tester.widget<TextField>(textFieldFinder);
+      final controller = textField.controller!;
+      final focusNode = textField.focusNode!;
+      await tester.tap(textFieldFinder);
+      await tester.enterText(textFieldFinder, 'format me');
+      controller.selection = const TextSelection(
+        baseOffset: 0,
+        extentOffset: 6,
+      );
+      await tester.pump();
+
+      void openFormatMenu() {
+        final editableTextState = tester.state<EditableTextState>(
+          find.descendant(
+            of: textFieldFinder,
+            matching: find.byType(EditableText),
+          ),
+        );
+        final toolbar = textField.contextMenuBuilder!(
+          tester.element(textFieldFinder),
+          editableTextState,
+        );
+        final items = (toolbar as AdaptiveTextSelectionToolbar).buttonItems!;
+        items.singleWhere((item) => item.label == 'Format').onPressed!();
+      }
+
+      expect(focusNode.hasFocus, isTrue);
+      openFormatMenu();
+      await tester.pumpAndSettle();
+      expect(find.text('Bold'), findsOneWidget);
+      expect(focusNode.hasFocus, isTrue);
+
+      await tester.tap(find.text('Bold'));
+      await tester.pumpAndSettle();
+      expect(focusNode.hasFocus, isTrue);
+
+      controller.selection = const TextSelection(
+        baseOffset: 0,
+        extentOffset: 6,
+      );
+      openFormatMenu();
+      await tester.pumpAndSettle();
+      await tester.tapAt(const Offset(4, 4));
+      await tester.pumpAndSettle();
+      expect(find.text('Bold'), findsNothing);
+      expect(focusNode.hasFocus, isFalse);
     });
 
     testWidgets(
@@ -2484,7 +2580,7 @@ void main() {
           {
             '@type': 'RichTextTextMention',
             'text': plain('Alice'),
-            'user_id': 42,
+            'user': {'@type': 'User', 'id': 42},
           },
           plain(' '),
           wrap('RichTextSubscript', 'sub'),
@@ -2509,36 +2605,65 @@ void main() {
             'url': 'https://example.com',
           },
           plain(' '),
-          {'@type': 'RichTextEmailAddress', 'email_address': 'a@example.com'},
+          {
+            '@type': 'RichTextEmailAddress',
+            'text': plain('a@example.com'),
+            'email_address': 'a@example.com',
+          },
           plain(' '),
-          {'@type': 'RichTextPhoneNumber', 'phone_number': '+123456789'},
+          {
+            '@type': 'RichTextPhoneNumber',
+            'text': plain('+123456789'),
+            'phone_number': '+123456789',
+          },
           plain(' '),
           {
             '@type': 'RichTextBankCardNumber',
+            'text': plain('4242 4242 4242 4242'),
             'bank_card_number': '4242 4242 4242 4242',
           },
           plain(' '),
-          {'@type': 'RichTextMention', 'username': 'telegram'},
+          {
+            '@type': 'RichTextMention',
+            'text': plain('@telegram'),
+            'username': 'telegram',
+          },
           plain(' '),
-          {'@type': 'RichTextHashtag', 'hashtag': 'topic'},
+          {
+            '@type': 'RichTextHashtag',
+            'text': plain('#topic'),
+            'hashtag': 'topic',
+          },
           plain(' '),
-          {'@type': 'RichTextCashtag', 'cashtag': 'USD'},
+          {
+            '@type': 'RichTextCashtag',
+            'text': plain(r'$USD'),
+            'cashtag': 'USD',
+          },
           plain(' '),
-          {'@type': 'RichTextBotCommand', 'command': 'start'},
+          {
+            '@type': 'RichTextBotCommand',
+            'text': plain('/start'),
+            'bot_command': 'start',
+          },
           plain(' '),
           {'@type': 'RichTextAnchor', 'name': 'chapter-1'},
           {
             '@type': 'RichTextAnchorLink',
             'text': plain('chapter'),
-            'name': 'chapter-1',
+            'anchor_name': 'chapter-1',
           },
           plain(' '),
-          {'@type': 'RichTextReference', 'name': 'note-1'},
+          {
+            '@type': 'RichTextReference',
+            'name': 'note-1',
+            'text': plain('reference'),
+          },
           plain(' '),
           {
             '@type': 'RichTextReferenceLink',
             'text': plain('note'),
-            'name': 'note-1',
+            'reference_name': 'note-1',
           },
         ],
       };
@@ -2548,7 +2673,7 @@ void main() {
         contains(
           'bold italic underline strike spoiler tomorrow Alice sub super marked '
           'code 🙂 x^2 site a@example.com +123456789 '
-          '4242 4242 4242 4242 @telegram #topic \$USD /start chapter note-1 note',
+          '4242 4242 4242 4242 @telegram #topic \$USD /start chapter reference note',
         ),
       );
       final entities = TDParse.richTextEntities(rich);
@@ -2680,16 +2805,22 @@ void main() {
 
       expect(message, isNotNull);
       expect(message!.richMessageIsFull, isTrue);
-      expect(message.text, 'Hello bold and link\n\nfinal x = 1;');
-      expect(message.textEntities.map((e) => e.type), [
+      expect(message.text, isEmpty);
+      expect(message.textEntities, isEmpty);
+      expect(message.richBlocks, hasLength(4));
+      final paragraph = message.richBlocks[0];
+      expect(paragraph.kind, RichMessageBlockKind.paragraph);
+      expect(paragraph.text, 'Hello bold and link');
+      expect(paragraph.textEntities.map((e) => e.type), [
         'textEntityTypeBold',
         'textEntityTypeTextUrl',
-        'textEntityTypePreCode',
       ]);
-      expect(message.textEntities[1].url, 'https://example.com');
-      expect(message.textEntities[2].language, 'dart');
-      expect(message.richBlocks, hasLength(2));
-      expect(message.richBlocks.first.mathExpression, r'x^2');
+      expect(paragraph.textEntities[1].url, 'https://example.com');
+      final preformatted = message.richBlocks[1];
+      expect(preformatted.kind, RichMessageBlockKind.preformatted);
+      expect(preformatted.text, 'final x = 1;');
+      expect(preformatted.language, 'dart');
+      expect(message.richBlocks[2].mathExpression, r'x^2');
       final table = message.richBlocks.last;
       expect(table.caption, 'Metrics');
       expect(table.isBordered, isTrue);

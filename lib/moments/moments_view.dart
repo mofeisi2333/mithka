@@ -3111,6 +3111,7 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
         OutgoingAttachmentKind.animation => HeroAppIcons.video,
         OutgoingAttachmentKind.document => HeroAppIcons.file,
         OutgoingAttachmentKind.audio => HeroAppIcons.music,
+        OutgoingAttachmentKind.voiceNote => HeroAppIcons.microphone,
       }, color: c.textTertiary),
     );
   }
