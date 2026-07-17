@@ -982,6 +982,7 @@ class ThemeController extends ChangeNotifier {
         _prefs.getBool(_hideBlockedUserMessagesKey) ?? false;
     _showChannelsTab = _prefs.getBool(_showChannelsTabKey) ?? false;
     _showMomentsTab = _prefs.getBool(_showMomentsTabKey) ?? true;
+    _showShortVideos = _prefs.getBool(_showShortVideosKey) ?? true;
     final storedArchivedChatsMode = _prefs.getString(
       _archivedChatsDisplayModeKey,
     );
@@ -1058,6 +1059,7 @@ class ThemeController extends ChangeNotifier {
   static const _hideBlockedUserMessagesKey = 'hideBlockedUserMessages';
   static const _showChannelsTabKey = 'showChannelsTab';
   static const _showMomentsTabKey = 'showMomentsTab';
+  static const _showShortVideosKey = 'showShortVideos';
   static const _archivedChatsDisplayModeKey = 'archivedChatsDisplayMode';
   static const _unreadBadgeModeKey = 'unreadBadgeMode';
   static const _unreadBadgeOverflowModeKey = 'unreadBadgeOverflowMode';
@@ -1112,6 +1114,7 @@ class ThemeController extends ChangeNotifier {
   bool _hideBlockedUserMessages = false;
   bool _showChannelsTab = false;
   bool _showMomentsTab = true;
+  bool _showShortVideos = true;
   late ArchivedChatsDisplayMode _archivedChatsDisplayMode;
   late UnreadBadgeMode _unreadBadgeMode;
   late UnreadBadgeOverflowMode _unreadBadgeOverflowMode;
@@ -1280,6 +1283,7 @@ class ThemeController extends ChangeNotifier {
   bool get hideBlockedUserMessages => _hideBlockedUserMessages;
   bool get showChannelsTab => _showChannelsTab;
   bool get showMomentsTab => _showMomentsTab;
+  bool get showShortVideos => _showShortVideos;
   ArchivedChatsDisplayMode get archivedChatsDisplayMode =>
       _archivedChatsDisplayMode;
   UnreadBadgeMode get unreadBadgeMode => _unreadBadgeMode;
@@ -1872,6 +1876,12 @@ class ThemeController extends ChangeNotifier {
   set showMomentsTab(bool value) {
     _showMomentsTab = value;
     _prefs.setBool(_showMomentsTabKey, value);
+    notifyListeners();
+  }
+
+  set showShortVideos(bool value) {
+    _showShortVideos = value;
+    _prefs.setBool(_showShortVideosKey, value);
     notifyListeners();
   }
 

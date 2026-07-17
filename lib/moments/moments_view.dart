@@ -12,6 +12,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../app/app_navigator.dart';
 import '../chat/chat_picker_view.dart';
@@ -42,6 +43,8 @@ import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import '../theme/date_text.dart';
+import '../theme/theme_controller.dart';
+import 'short_video_view.dart';
 import 'story_authoring_view.dart';
 import 'story_management_view.dart';
 import 'story_service.dart';
@@ -222,6 +225,7 @@ class _MomentsViewState extends State<MomentsView> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final theme = context.watch<ThemeController>();
     return Material(
       color: c.groupedBackground,
       child: Column(
@@ -303,6 +307,18 @@ class _MomentsViewState extends State<MomentsView> {
                     ],
                   ),
                 ),
+                if (theme.showShortVideos) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  Container(
+                    color: c.background,
+                    child: _menuRow(
+                      icon: HeroAppIcons.solidFileVideo.data,
+                      iconColor: const Color(0xFFFF4D67),
+                      title: '短视频',
+                      onTap: () => ShortVideoLauncher.open(context),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
