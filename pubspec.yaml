@@ -62,6 +62,7 @@ dependencies:
   # video_player that decodes VP8/VP9 transparent WebM (Telegram video stickers) —
   # replaces the old ffmpeg_kit→WebP transcode.
   video_player: ^2.9.2
+  video_thumbnail_gen: ^0.6.3
   fvp: ^0.37.2
   flutter_local_notifications: ^22.0.1
   google_fonts: ^8.1.0
