@@ -17,6 +17,7 @@ import 'package:mithka/l10n/messages/ko.dart';
 import 'package:mithka/l10n/messages/zh_hans.dart';
 import 'package:mithka/l10n/messages/zh_hant.dart';
 import 'package:mithka/settings/advanced_settings_view.dart';
+import 'package:mithka/settings/rich_message_relay_config.dart';
 import 'package:mithka/settings/rich_message_relay_view.dart';
 import 'package:mithka/theme/theme_controller.dart';
 import 'package:provider/provider.dart';
@@ -77,6 +78,19 @@ void main() {
       }
     }
   });
+
+  test(
+    'relay token storage is optional when secure storage is unavailable',
+    () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(secureStorage, null);
+
+      expect(await RichMessageRelayConfig.readToken(), isNull);
+      expect(await RichMessageRelayConfig.isConfigured(), isFalse);
+      await RichMessageRelayConfig.saveToken('123:abc');
+      await RichMessageRelayConfig.clear();
+    },
+  );
 
   testWidgets('Advanced settings owns the rich message relay entry', (
     tester,
