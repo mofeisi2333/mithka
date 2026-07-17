@@ -4,6 +4,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mithka/auth/telegram_passkey_service.dart';
 
 void main() {
+  test('passkeys are exposed only on Android', () {
+    expect(
+      telegramPasskeyPlatformSupported(isAndroid: true, isIOS: false),
+      isTrue,
+    );
+    expect(
+      telegramPasskeyPlatformSupported(isAndroid: false, isIOS: true),
+      isFalse,
+    );
+    expect(
+      telegramPasskeyPlatformSupported(isAndroid: false, isIOS: false),
+      isFalse,
+    );
+  });
+
   test('extracts the WebAuthn publicKey object from TDLib text', () {
     final result = telegramPublicKeyJson(
       jsonEncode({

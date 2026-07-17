@@ -1005,7 +1005,7 @@ const frMessages = <String, String>{
   'loginCodeSentToTelegramDevices':
       "Saisissez le code envoyé à vos autres appareils Telegram.",
   'loginCodeWillBeSentToNumber':
-      "Nous enverrons un code de connexion à usage unique à ce numéro",
+      "Nous enverrons un code de vérification à votre compte Telegram. Si vous n’en avez pas, créez-en d’abord un dans un client Telegram officiel.",
   'loginCompleteRegistration': "Terminer l’inscription",
   'loginConfigureCustomApi': "Configurer une API personnalisée",
   'loginFirstName': "Prénom",

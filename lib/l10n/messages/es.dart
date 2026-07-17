@@ -997,7 +997,7 @@ const esMessages = <String, String>{
   'loginCodeSentToTelegramDevices':
       "Introduce el código enviado a tus otros dispositivos de Telegram.",
   'loginCodeWillBeSentToNumber':
-      "Enviaremos un código de inicio de sesión de un solo uso a este número",
+      "Enviaremos un código de verificación a tu cuenta de Telegram. Si aún no tienes una, créala primero en un cliente oficial de Telegram.",
   'loginCompleteRegistration': "Completar registro",
   'loginConfigureCustomApi': "Configurar API personalizada",
   'loginFirstName': "Nombre",

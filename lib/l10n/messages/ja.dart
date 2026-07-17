@@ -919,7 +919,8 @@ const jaMessages = <String, String>{
   'loginCodeSentBySms': "{value1} に送信されたSMS認証コードを入力してください。",
   'loginCodeSentFallback': "認証コードを入力してください。",
   'loginCodeSentToTelegramDevices': "他の Telegram 端末に送信された認証コードを入力してください。",
-  'loginCodeWillBeSentToNumber': "この番号に使い捨てのログインコードを送信します",
+  'loginCodeWillBeSentToNumber':
+      "Telegramアカウントに確認コードを送信します。アカウントをお持ちでない場合は、先にTelegram公式クライアントで作成してください。",
   'loginCompleteRegistration': "登録を完了",
   'loginConfigureCustomApi': "カスタムAPIを設定",
   'loginFirstName': "名",

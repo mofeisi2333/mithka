@@ -586,6 +586,10 @@ class _LoginViewState extends State<LoginView> {
           _phoneDigits.length >= 7,
           () => unawaited(_submitPhone(auth)),
         ),
+        if (Platform.isAndroid && auth.canUseLoginPasskey) ...[
+          const SizedBox(height: 12),
+          _loginPasskeyButton(auth),
+        ],
         const SizedBox(height: 20),
         Text(
           AppStrings.t(AppStringKeys.loginCodeWillBeSentToNumber),
@@ -838,15 +842,6 @@ class _LoginViewState extends State<LoginView> {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (showingPhone &&
-            (Platform.isAndroid || Platform.isIOS) &&
-            auth.canUseLoginPasskey)
-          _loginIconButton(
-            icon: HeroAppIcons.key,
-            tooltip: AppStrings.t(AppStringKeys.loginWithPasskey),
-            enabled: !auth.isWorking,
-            onTap: () => unawaited(auth.loginWithPasskey()),
-          ),
         if (showingPhone)
           _loginIconButton(
             icon: HeroAppIcons.qrcode,
@@ -864,6 +859,60 @@ class _LoginViewState extends State<LoginView> {
           ),
         _proxyIconButton(),
       ],
+    );
+  }
+
+  Widget _loginPasskeyButton(AuthManager auth) {
+    final c = context.colors;
+    final enabled = !auth.isWorking;
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: AppStrings.t(AppStringKeys.loginWithPasskey),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: enabled ? () => unawaited(auth.loginWithPasskey()) : null,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 160),
+          opacity: enabled ? 1 : 0.46,
+          child: Container(
+            key: const ValueKey('android-login-passkey'),
+            height: 50,
+            padding: const EdgeInsets.symmetric(horizontal: 18),
+            decoration: BoxDecoration(
+              color: c.card,
+              borderRadius: BorderRadius.circular(25),
+              border: Border.all(color: c.divider, width: 0.8),
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: AppIcon(
+                    HeroAppIcons.key,
+                    size: 21,
+                    color: AppTheme.brand,
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 30),
+                  child: Text(
+                    AppStrings.t(AppStringKeys.loginWithPasskey),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: c.textPrimary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 

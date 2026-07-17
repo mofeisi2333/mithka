@@ -30,7 +30,6 @@ import 'app/global_video_split_host.dart';
 import 'app/telemetry_config.dart';
 import 'auth/account_store.dart';
 import 'auth/auth_manager.dart';
-import 'auth/terms_sheet.dart';
 import 'call/call_manager.dart';
 import 'call/call_overlay_host.dart';
 import 'chat/music_player_controller.dart';
@@ -466,72 +465,15 @@ class _MithkaAppState extends State<MithkaApp> with WidgetsBindingObserver {
               );
             },
             // Rebuild the whole tree when the active account changes.
-            home: FirstLaunchTermsGate(
-              prefs: widget.prefs,
-              child: KeyedSubtree(
-                key: ValueKey(accounts.activeSlot),
-                child: const ContentView(),
-              ),
+            home: KeyedSubtree(
+              key: ValueKey(accounts.activeSlot),
+              child: const ContentView(),
             ),
           );
         },
       ),
     );
   }
-}
-
-class FirstLaunchTermsGate extends StatefulWidget {
-  const FirstLaunchTermsGate({
-    super.key,
-    required this.prefs,
-    required this.child,
-  });
-
-  static const acceptedKey = 'mithka.terms.accepted.v1';
-
-  final SharedPreferences prefs;
-  final Widget child;
-
-  @override
-  State<FirstLaunchTermsGate> createState() => _FirstLaunchTermsGateState();
-}
-
-class _FirstLaunchTermsGateState extends State<FirstLaunchTermsGate> {
-  bool _shown = false;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _showIfNeeded());
-  }
-
-  @override
-  void didUpdateWidget(covariant FirstLaunchTermsGate oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.prefs != widget.prefs) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _showIfNeeded());
-    }
-  }
-
-  Future<void> _showIfNeeded() async {
-    if (!mounted || _shown) return;
-    if (widget.prefs.getBool(FirstLaunchTermsGate.acceptedKey) ?? false) {
-      return;
-    }
-    _shown = true;
-    await showTelegramTermsSheet(
-      context,
-      isDismissible: false,
-      enableDrag: false,
-      onAccept: () async {
-        await widget.prefs.setBool(FirstLaunchTermsGate.acceptedKey, true);
-      },
-    );
-    _shown = false;
-  }
-
-  @override
-  Widget build(BuildContext context) => widget.child;
 }
 
 NavigatorObserver? _buildSentryNavigatorObserver() => sentryEnabled

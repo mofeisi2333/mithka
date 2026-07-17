@@ -900,7 +900,8 @@ const zhHansMessages = <String, String>{
   'loginCodeSentBySms': "请输入发送到 {value1} 的短信验证码。",
   'loginCodeSentFallback': "请输入验证码。",
   'loginCodeSentToTelegramDevices': "请输入发送到其他 Telegram 设备的验证码。",
-  'loginCodeWillBeSentToNumber': "我们会向该号码发送一次性登录验证码",
+  'loginCodeWillBeSentToNumber':
+      "我们会向你的 Telegram 账号发送验证码。如果你还没有账号，请先在 Telegram 官方客户端中创建。",
   'loginCompleteRegistration': "完成注册",
   'loginConfigureCustomApi': "配置自定义 API",
   'loginFirstName': "名字",

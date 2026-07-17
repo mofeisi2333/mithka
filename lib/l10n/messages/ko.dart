@@ -922,7 +922,8 @@ const koMessages = <String, String>{
   'loginCodeSentBySms': "{value1}(으)로 전송된 SMS 인증 코드를 입력하세요.",
   'loginCodeSentFallback': "인증 코드를 입력하세요.",
   'loginCodeSentToTelegramDevices': "다른 Telegram 기기로 전송된 인증 코드를 입력하세요.",
-  'loginCodeWillBeSentToNumber': "이 번호로 일회용 로그인 인증 코드를 보내드립니다",
+  'loginCodeWillBeSentToNumber':
+      "Telegram 계정으로 인증 코드를 보내드립니다. 계정이 없다면 먼저 Telegram 공식 클라이언트에서 만들어 주세요.",
   'loginCompleteRegistration': "가입 완료",
   'loginConfigureCustomApi': "사용자 지정 API 설정",
   'loginFirstName': "이름",

@@ -901,7 +901,8 @@ const zhHantMessages = <String, String>{
   'loginCodeSentBySms': "請輸入傳送到 {value1} 的簡訊驗證碼。",
   'loginCodeSentFallback': "請輸入驗證碼。",
   'loginCodeSentToTelegramDevices': "請輸入傳送到其他 Telegram 裝置的驗證碼。",
-  'loginCodeWillBeSentToNumber': "我們會向該號碼傳送一次性登入驗證碼",
+  'loginCodeWillBeSentToNumber':
+      "我們會向你的 Telegram 帳號傳送驗證碼。如果你還沒有帳號，請先在 Telegram 官方用戶端中建立。",
   'loginCompleteRegistration': "完成註冊",
   'loginConfigureCustomApi': "設定自訂 API",
   'loginFirstName': "名字",

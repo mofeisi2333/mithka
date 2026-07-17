@@ -1004,7 +1004,7 @@ const deMessages = <String, String>{
   'loginCodeSentToTelegramDevices':
       "Gib den Code ein, der an deine anderen Telegram-Geräte gesendet wurde.",
   'loginCodeWillBeSentToNumber':
-      "Wir senden einen einmaligen Anmeldecode an diese Nummer",
+      "Wir senden einen Bestätigungscode an dein Telegram-Konto. Falls du noch keines hast, erstelle es zuerst in einem offiziellen Telegram-Client.",
   'loginCompleteRegistration': "Registrierung abschließen",
   'loginConfigureCustomApi': "Eigene API konfigurieren",
   'loginFirstName': "Vorname",

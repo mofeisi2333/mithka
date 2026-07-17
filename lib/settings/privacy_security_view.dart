@@ -180,7 +180,7 @@ class _PrivacySecurityViewState extends State<PrivacySecurityView> {
   }
 
   Future<void> _loadPasskeys() async {
-    if (!Platform.isAndroid && !Platform.isIOS) return;
+    if (!Platform.isAndroid) return;
     final clientId = _client.activeClientId;
     final revision = ++_passkeyRevision;
     try {

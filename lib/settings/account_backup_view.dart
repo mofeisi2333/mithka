@@ -436,10 +436,7 @@ class _AccountBackupViewState extends State<AccountBackupView> {
             bottom: false,
             child: Column(
               children: [
-                NavHeader(
-                  title: AppStrings.t(AppStringKeys.accountBackupTitle),
-                  onBack: _close,
-                ),
+                _backupHeader(),
                 Expanded(
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(12, 14, 12, 24),
@@ -475,6 +472,52 @@ class _AccountBackupViewState extends State<AccountBackupView> {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _backupHeader() {
+    final c = context.colors;
+    return SizedBox(
+      key: const ValueKey('account-backup-header'),
+      height: 56,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        child: Row(
+          children: [
+            Semantics(
+              button: true,
+              label: AppStrings.t(AppStringKeys.loginBackToAccount, {
+                'value1': AppStrings.t(AppStringKeys.accountBackupTitle),
+              }),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _close,
+                child: const SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: Center(
+                    child: AppIcon(HeroAppIcons.chevronLeft, size: 24),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                AppStrings.t(AppStringKeys.accountBackupTitle),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 21,
+                  fontWeight: FontWeight.w600,
+                  color: c.textPrimary,
+                ),
+              ),
+            ),
+            const SizedBox(width: 40),
+          ],
         ),
       ),
     );

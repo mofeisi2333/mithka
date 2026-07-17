@@ -1031,7 +1031,7 @@ const enMessages = <String, String>{
   'loginCodeSentToTelegramDevices':
       "Enter the code sent to your other Telegram devices.",
   'loginCodeWillBeSentToNumber':
-      "We will send a one-time login code to this number",
+      "We will send a verification code to your Telegram account. If you don't have one, create it in an official Telegram client first.",
   'loginCompleteRegistration': "Complete registration",
   'loginConfigureCustomApi': "Configure custom API",
   'loginFirstName': "First name",
