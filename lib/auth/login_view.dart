@@ -1042,8 +1042,7 @@ class _LoginViewState extends State<LoginView> {
         height: 50,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          gradient: enabled ? AppTheme.brandGradient : null,
-          color: enabled ? null : context.colors.textTertiary,
+          color: enabled ? AppTheme.brand : context.colors.textTertiary,
           borderRadius: BorderRadius.circular(25),
         ),
         child: auth.isWorking
@@ -1052,7 +1051,9 @@ class _LoginViewState extends State<LoginView> {
                 height: 22,
                 child: CircularProgressIndicator(
                   strokeWidth: 2.4,
-                  valueColor: AlwaysStoppedAnimation(Colors.white),
+                  valueColor: AlwaysStoppedAnimation(
+                    Color(0xFFFFFFFF),
+                  ),
                 ),
               )
             : Text(
@@ -1060,7 +1061,7 @@ class _LoginViewState extends State<LoginView> {
                 style: const TextStyle(
                   fontSize: 17,
                   fontWeight: FontWeight.w600,
-                  color: Colors.white,
+                  color: Color(0xFFFFFFFF),
                 ),
               ),
       ),

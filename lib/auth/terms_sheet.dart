@@ -200,7 +200,7 @@ class _TermsAcceptButtonState extends State<_TermsAcceptButton> {
       height: 54,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          gradient: AppTheme.brandGradient,
+          color: AppTheme.brand,
           borderRadius: BorderRadius.circular(18),
         ),
         child: GestureDetector(
@@ -213,13 +213,19 @@ class _TermsAcceptButtonState extends State<_TermsAcceptButton> {
                     height: 20,
                     child: CircularProgressIndicator(
                       strokeWidth: 2.2,
-                      valueColor: AlwaysStoppedAnimation(Colors.white),
+                      valueColor: AlwaysStoppedAnimation(
+                        Color(0xFFFFFFFF),
+                      ),
                     ),
                   )
                 : Text(
-                    AppStrings.t(AppStringKeys.loginTermsAccept),
+                    // Telegram's BotWebAppDisclaimerCheck string contains
+                    // Markdown emphasis markers in several language packs.
+                    // This app-owned action uses our plain localized label so
+                    // those markers are never rendered literally.
+                    AppStrings.tLocal(AppStringKeys.loginTermsAccept),
                     style: const TextStyle(
-                      color: Colors.white,
+                      color: Color(0xFFFFFFFF),
                       fontSize: 16,
                       fontWeight: FontWeight.w700,
                     ),
