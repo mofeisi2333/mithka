@@ -63,14 +63,22 @@ import 'theme/app_theme.dart';
 import 'theme/theme_controller.dart';
 
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  configureAppImageCache();
   if (!sentryEnabled) {
+    WidgetsFlutterBinding.ensureInitialized();
+    configureAppImageCache();
     await _bootstrapAndRunApp();
     return;
   }
 
-  await SentryFlutter.init(_configureSentry, appRunner: _bootstrapAndRunApp);
+  // Let Sentry install its frame-aware WidgetsBinding before app code creates
+  // the ordinary binding. This is required for slow/frozen-frame measurements.
+  await SentryFlutter.init(
+    _configureSentry,
+    appRunner: () async {
+      configureAppImageCache();
+      await _bootstrapAndRunApp();
+    },
+  );
 }
 
 Future<void> _bootstrapAndRunApp() async {
@@ -165,7 +173,7 @@ void _configureSentry(SentryFlutterOptions options) {
   // same release as native iOS crash reports. The git SHA remains a tag.
   options.navigatorKey = appNavigatorKey;
   options.sendDefaultPii = false;
-  options.tracesSampleRate = 0;
+  options.tracesSampleRate = sentryTracesSampleRate;
   options.maxBreadcrumbs = 200;
   options.beforeSend = (event, hint) =>
       _isGoogleFontLoadFailure(event) ? null : event;
@@ -475,9 +483,8 @@ class _MithkaAppState extends State<MithkaApp> with WidgetsBindingObserver {
   }
 }
 
-NavigatorObserver? _buildSentryNavigatorObserver() => sentryEnabled
-    ? SentryNavigatorObserver(enableAutoTransactions: false)
-    : null;
+NavigatorObserver? _buildSentryNavigatorObserver() =>
+    sentryEnabled ? SentryNavigatorObserver() : null;
 
 final NavigatorObserver? _sentryNavigatorObserver =
     _buildSentryNavigatorObserver();
