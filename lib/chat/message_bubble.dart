@@ -420,7 +420,7 @@ class _MessageBubbleState extends State<MessageBubble>
         ],
       ),
     );
-    final content = ConstrainedBox(
+    final contentWidget = ConstrainedBox(
       constraints: BoxConstraints(maxWidth: _bubbleMaxWidth()),
       child: message.reactions.isEmpty
           ? body
@@ -436,6 +436,19 @@ class _MessageBubbleState extends State<MessageBubble>
               ],
             ),
     );
+    final content = message.buttonRows.isNotEmpty
+        ? Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: outgoing
+                ? CrossAxisAlignment.end
+                : CrossAxisAlignment.start,
+            children: [
+              contentWidget,
+              const SizedBox(height: 6),
+              _buttonRows(outgoing),
+            ],
+          )
+        : contentWidget;
     final ownPhotoRepeat = outgoing && message.isPhoto && widget.showRepeat;
 
     return Padding(
@@ -633,11 +646,11 @@ class _MessageBubbleState extends State<MessageBubble>
     late final Widget body;
     if (message.isContentRestricted && !_showRestrictedContent) {
       body = _textBubble(message.text, outgoing);
-      return _withButtonRows(_withFloatingMeta(body, outgoing), outgoing);
+      return _withCommentsOnly(_withFloatingMeta(body, outgoing), outgoing);
     }
     if (message.isCall) {
       body = _callBubble(outgoing);
-      return _withButtonRows(_withFloatingMeta(body, outgoing), outgoing);
+      return _withCommentsOnly(_withFloatingMeta(body, outgoing), outgoing);
     }
     final specialBackground = outgoing
         ? _outgoingBubbleColor
@@ -654,7 +667,7 @@ class _MessageBubbleState extends State<MessageBubble>
         secondary: specialSecondary,
         onOpen: () => widget.onOpenContact?.call(message),
       );
-      return _withButtonRows(_withFloatingMeta(body, outgoing), outgoing);
+      return _withCommentsOnly(_withFloatingMeta(body, outgoing), outgoing);
     }
     if (message.poll != null) {
       body = MessagePollContent(
@@ -675,7 +688,7 @@ class _MessageBubbleState extends State<MessageBubble>
             ? () => widget.onShowPollResults?.call(message)
             : null,
       );
-      return _withButtonRows(_withFloatingMeta(body, outgoing), outgoing);
+      return _withCommentsOnly(_withFloatingMeta(body, outgoing), outgoing);
     }
     if (message.checklist != null) {
       body = MessageChecklistContent(
@@ -690,7 +703,7 @@ class _MessageBubbleState extends State<MessageBubble>
             ? () => widget.onAddChecklistTask?.call(message)
             : null,
       );
-      return _withButtonRows(_withFloatingMeta(body, outgoing), outgoing);
+      return _withCommentsOnly(_withFloatingMeta(body, outgoing), outgoing);
     }
     if (message.story != null) {
       body = MessageStoryContent(
@@ -700,7 +713,7 @@ class _MessageBubbleState extends State<MessageBubble>
         secondary: specialSecondary,
         onOpen: () => widget.onOpenStory?.call(message),
       );
-      return _withButtonRows(_withFloatingMeta(body, outgoing), outgoing);
+      return _withCommentsOnly(_withFloatingMeta(body, outgoing), outgoing);
     }
     if (message.summaryCard != null) {
       body = MessageSummaryCardContent(
@@ -709,7 +722,7 @@ class _MessageBubbleState extends State<MessageBubble>
         foreground: specialForeground,
         secondary: specialSecondary,
       );
-      return _withButtonRows(_withFloatingMeta(body, outgoing), outgoing);
+      return _withCommentsOnly(_withFloatingMeta(body, outgoing), outgoing);
     }
     if (message.animatedSticker != null) {
       final s = _stickerSize();
@@ -732,7 +745,7 @@ class _MessageBubbleState extends State<MessageBubble>
           ],
         ),
       );
-      return _withButtonRows(
+      return _withCommentsOnly(
         _withFloatingMeta(_stickerTap(body), outgoing),
         outgoing,
       );
@@ -760,7 +773,7 @@ class _MessageBubbleState extends State<MessageBubble>
           ],
         ),
       );
-      return _withButtonRows(
+      return _withCommentsOnly(
         _withFloatingMeta(_stickerTap(body), outgoing),
         outgoing,
       );
@@ -786,7 +799,7 @@ class _MessageBubbleState extends State<MessageBubble>
     } else {
       body = _textBubble(_activeMessageText, outgoing);
     }
-    return _withButtonRows(_withFloatingMeta(body, outgoing), outgoing);
+    return _withCommentsOnly(_withFloatingMeta(body, outgoing), outgoing);
   }
 
   Widget _videoNoteContent() {
@@ -996,12 +1009,12 @@ class _MessageBubbleState extends State<MessageBubble>
     child: child,
   );
 
-  Widget _withButtonRows(Widget body, bool outgoing) {
+  Widget _withCommentsOnly(Widget body, bool outgoing) {
     if (message.isContentRestricted) return body;
     final showComments =
         widget.showCommentAttachment && message.commentCount > 0;
     final showSuggestedPost = message.suggestedPostInfo != null;
-    if (message.buttonRows.isEmpty && !showComments && !showSuggestedPost) {
+    if (!showComments && !showSuggestedPost) {
       return body;
     }
     final foreground = outgoing ? _outgoingTextColor : _incomingTextColor;
@@ -1014,7 +1027,6 @@ class _MessageBubbleState extends State<MessageBubble>
           secondary: foreground.withValues(alpha: 0.68),
         ),
       if (showComments) _commentThreadRow(outgoing),
-      if (message.buttonRows.isNotEmpty) _buttonRows(outgoing),
     ];
     return Column(
       mainAxisSize: MainAxisSize.min,
