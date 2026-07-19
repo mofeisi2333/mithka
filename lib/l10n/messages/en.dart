@@ -589,6 +589,7 @@ const enMessages = <String, String>{
   'chatMessagesSavedCount': "Saved {value1} messages",
   'chatMoreActionsUnsupported': "More actions aren’t supported yet",
   'chatNewMessagesCount': "{value1} new messages",
+  'chatUnreadMessagesCount': "{value1} unread messages",
   'chatNewMessagesDivider': "New messages below",
   'chatNoTopics': "No topics yet",
   'chatPeopleDoingAction': "{value1} people active…",

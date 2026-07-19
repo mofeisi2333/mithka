@@ -728,6 +728,7 @@ abstract final class AppStringKeys {
   static const chatMoreActionsUnsupported = 'chatMoreActionsUnsupported';
   static const chatNewMessagesCount = 'chatNewMessagesCount';
   static const chatNewMessagesDivider = 'chatNewMessagesDivider';
+  static const chatUnreadMessagesCount = 'chatUnreadMessagesCount';
   static const chatNoTopics = 'chatNoTopics';
   static const chatPeopleDoingAction = 'chatPeopleDoingAction';
   static const chatPeopleTyping = 'chatPeopleTyping';

@@ -593,6 +593,7 @@ const esMessages = <String, String>{
   'chatMessagesSavedCount': "{value1} mensajes guardados",
   'chatMoreActionsUnsupported': "Aún no hay más acciones disponibles",
   'chatNewMessagesCount': "{value1} mensajes nuevos",
+  'chatUnreadMessagesCount': "{value1} mensajes sin leer",
   'chatNewMessagesDivider': "Mensajes nuevos a continuación",
   'chatNoTopics': "No hay temas",
   'chatPeopleDoingAction': "{value1} personas activas…",

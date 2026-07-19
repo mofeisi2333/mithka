@@ -17,6 +17,20 @@ void main() {
     );
   });
 
+  test(
+    'entry unread control remains visible while opened at the newest message',
+    () {
+      expect(
+        chatBottomIndicator(
+          isScrolledUp: false,
+          hasNewMessages: true,
+          showNewMessagesAtBottom: true,
+        ),
+        ChatBottomIndicator.newMessages,
+      );
+    },
+  );
+
   test('live message buffer reports each TDLib arrival only once', () {
     final buffer = ChatLiveMessageBuffer();
 

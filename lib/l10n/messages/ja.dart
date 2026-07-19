@@ -548,6 +548,7 @@ const jaMessages = <String, String>{
   'chatMessagesSavedCount': "{value1}件のメッセージを保存しました",
   'chatMoreActionsUnsupported': "その他の操作はまだ対応していません",
   'chatNewMessagesCount': "{value1}件の新着メッセージ",
+  'chatUnreadMessagesCount': "{value1}件の未読メッセージ",
   'chatNewMessagesDivider': "ここから新着メッセージ",
   'chatNoTopics': "トピックはありません",
   'chatPeopleDoingAction': "{value1}人が操作中…",

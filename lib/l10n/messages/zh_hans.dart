@@ -530,6 +530,7 @@ const zhHansMessages = <String, String>{
   'chatMessagesSavedCount': "已保存 {value1} 条消息",
   'chatMoreActionsUnsupported': "暂未支持更多操作",
   'chatNewMessagesCount': "{value1}条新消息",
+  'chatUnreadMessagesCount': "{value1}条未读消息",
   'chatNewMessagesDivider': "以下为新消息",
   'chatNoTopics': "暂无话题",
   'chatPeopleDoingAction': "{value1} 人正在操作…",

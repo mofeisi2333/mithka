@@ -4512,6 +4512,7 @@ class _ChatViewState extends State<ChatView> {
     final bottomIndicator = chatBottomIndicator(
       isScrolledUp: _showJumpDown,
       hasNewMessages: _shouldShowNewMessagesBanner,
+      showNewMessagesAtBottom: _showEntryUnreadBanner,
     );
     final showPinnedTodo =
         transcriptReady &&
@@ -4575,7 +4576,13 @@ class _ChatViewState extends State<ChatView> {
           Positioned(
             right: 16,
             bottom: 12,
-            child: _newMessagesControl(aiSettings, pointsDown: true),
+            child: _newMessagesControl(
+              aiSettings,
+              pointsDown: !_showEntryUnreadBanner,
+              showsUnreadCount:
+                  _showEntryUnreadBanner ||
+                  (_liveNewMessageCount == 0 && _vm.unreadCount > 0),
+            ),
           ),
         if (transcriptReady && _vm.unreadMentionCount > 0)
           Positioned(
@@ -4709,9 +4716,12 @@ class _ChatViewState extends State<ChatView> {
     );
   }
 
-  /// "N条新消息" pill. In latest-on-open mode it points up to the unread
-  /// boundary; in unread-boundary mode it points down to the newest message.
-  Widget _newMessagesBanner({required bool pointsDown}) {
+  /// Unread/new-message pill. In latest-on-open mode it points up to the
+  /// unread boundary; in unread-boundary mode it points down to the newest.
+  Widget _newMessagesBanner({
+    required bool pointsDown,
+    required bool showsUnreadCount,
+  }) {
     final c = context.colors;
     final count = _remainingUnreadCount;
     return GestureDetector(
@@ -4741,9 +4751,12 @@ class _ChatViewState extends State<ChatView> {
             ),
             const SizedBox(width: 5),
             Text(
-              AppStrings.t(AppStringKeys.chatNewMessagesCount, {
-                'value1': count,
-              }),
+              AppStrings.t(
+                showsUnreadCount
+                    ? AppStringKeys.chatUnreadMessagesCount
+                    : AppStringKeys.chatNewMessagesCount,
+                {'value1': count},
+              ),
               style: TextStyle(
                 fontSize: 13,
                 color: c.textPrimary,
@@ -4759,16 +4772,16 @@ class _ChatViewState extends State<ChatView> {
   Widget _newMessagesControl(
     AiSettingsController? settings, {
     required bool pointsDown,
+    required bool showsUnreadCount,
   }) {
-    final banner = _newMessagesBanner(pointsDown: pointsDown);
+    final banner = _newMessagesBanner(
+      pointsDown: pointsDown,
+      showsUnreadCount: showsUnreadCount,
+    );
     if (!_canOfferUnreadSummary(settings)) return banner;
     return Row(
       mainAxisSize: MainAxisSize.min,
-      children: [
-        _unreadSummaryButton(),
-        const SizedBox(width: 6),
-        banner,
-      ],
+      children: [_unreadSummaryButton(), const SizedBox(width: 6), banner],
     );
   }
 

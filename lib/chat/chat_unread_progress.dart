@@ -3,7 +3,11 @@ enum ChatBottomIndicator { none, newMessages, jumpToBottom }
 ChatBottomIndicator chatBottomIndicator({
   required bool isScrolledUp,
   required bool hasNewMessages,
+  bool showNewMessagesAtBottom = false,
 }) {
+  if (hasNewMessages && showNewMessagesAtBottom) {
+    return ChatBottomIndicator.newMessages;
+  }
   if (!isScrolledUp) return ChatBottomIndicator.none;
   return hasNewMessages
       ? ChatBottomIndicator.newMessages

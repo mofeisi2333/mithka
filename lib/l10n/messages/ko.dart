@@ -550,6 +550,7 @@ const koMessages = <String, String>{
   'chatMessagesSavedCount': "메시지 {value1}개 저장됨",
   'chatMoreActionsUnsupported': "더 많은 작업은 아직 지원되지 않습니다",
   'chatNewMessagesCount': "새 메시지 {value1}개",
+  'chatUnreadMessagesCount': "읽지 않은 메시지 {value1}개",
   'chatNewMessagesDivider': "아래는 새 메시지입니다",
   'chatNoTopics': "주제가 없습니다",
   'chatPeopleDoingAction': "{value1}명이 활동 중…",

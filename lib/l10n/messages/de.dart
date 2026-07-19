@@ -599,6 +599,7 @@ const deMessages = <String, String>{
   'chatMoreActionsUnsupported':
       "Weitere Aktionen werden noch nicht unterstützt",
   'chatNewMessagesCount': "{value1} neue Nachrichten",
+  'chatUnreadMessagesCount': "{value1} ungelesene Nachrichten",
   'chatNewMessagesDivider': "Neue Nachrichten",
   'chatNoTopics': "Keine Themen",
   'chatPeopleDoingAction': "{value1} Personen aktiv…",

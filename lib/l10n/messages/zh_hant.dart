@@ -531,6 +531,7 @@ const zhHantMessages = <String, String>{
   'chatMessagesSavedCount': "已儲存 {value1} 則訊息",
   'chatMoreActionsUnsupported': "暫不支援更多操作",
   'chatNewMessagesCount': "{value1} 則新訊息",
+  'chatUnreadMessagesCount': "{value1} 則未讀訊息",
   'chatNewMessagesDivider': "以下為新訊息",
   'chatNoTopics': "暫無話題",
   'chatPeopleDoingAction': "{value1} 人正在操作…",

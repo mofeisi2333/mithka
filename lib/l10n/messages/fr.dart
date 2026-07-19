@@ -599,6 +599,7 @@ const frMessages = <String, String>{
   'chatMessagesSavedCount': "{value1} messages enregistrés",
   'chatMoreActionsUnsupported': "Plus d’actions non encore prises en charge",
   'chatNewMessagesCount': "{value1} nouveaux messages",
+  'chatUnreadMessagesCount': "{value1} messages non lus",
   'chatNewMessagesDivider': "Nouveaux messages ci-dessous",
   'chatNoTopics': "Aucun sujet",
   'chatPeopleDoingAction': "{value1} personnes actives…",
