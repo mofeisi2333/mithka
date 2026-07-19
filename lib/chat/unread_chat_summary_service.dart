@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_models.dart';
@@ -87,6 +88,11 @@ LANGUAGE
 - Do not translate merely because the app, server, or system prompt uses another language.
 - If the chat switches languages, preserve that distinction in the relevant items.
 
+SELECTION
+- A row may inline a short same-sender burst and therefore contain multiple evidence_ids.
+- When selection.strategy is frequency_recency_signal_sample, the input is a representative sample, not the complete range.
+- Do not claim the sampled input is exhaustive. Prefer recent messages, active periods, replies, questions, links, and non-text events that are actually present.
+
 GROUNDING
 - Every non-empty statement must include one or more evidence_ids supplied in INPUT_DATA.
 - Never invent an evidence ID.
@@ -130,7 +136,7 @@ class UnreadChatHistoryLoader {
   const UnreadChatHistoryLoader({
     required this.query,
     this.pageSize = 100,
-    this.maxMessages = 2000,
+    this.maxMessages = 6000,
     this.maxRequests = 256,
   }) : assert(pageSize > 0 && pageSize <= 100),
        assert(maxMessages > 0),
@@ -260,16 +266,24 @@ class UnreadChatSummaryService {
   UnreadChatSummaryService({
     required this.historyLoader,
     required this.provider,
-    this.maxChunkMessages = 600,
+    this.maxChunkMessages = 720,
     this.maxChunkTokenEstimate = 8000,
-    this.maxChunks = 16,
+    this.maxChunks = 6,
     this.maxMergeSummaries = 8,
     this.maxMergeTokenEstimate,
+    this.maxConcurrentRequests = 2,
+    this.maxInlineBurstMessages = 8,
+    this.maxInlineTextCharacters = 48,
+    this.maxInlineGapSeconds = 120,
   }) : assert(maxChunkMessages > 0),
        assert(maxChunkTokenEstimate > 0),
        assert(maxChunks > 0),
        assert(maxMergeSummaries >= 2),
-       assert(maxMergeTokenEstimate == null || maxMergeTokenEstimate > 0);
+       assert(maxMergeTokenEstimate == null || maxMergeTokenEstimate > 0),
+       assert(maxConcurrentRequests > 0),
+       assert(maxInlineBurstMessages > 0),
+       assert(maxInlineTextCharacters > 0),
+       assert(maxInlineGapSeconds >= 0);
 
   final UnreadChatHistoryLoader historyLoader;
   final UnreadChatSummaryProvider provider;
@@ -278,6 +292,10 @@ class UnreadChatSummaryService {
   final int maxChunks;
   final int maxMergeSummaries;
   final int? maxMergeTokenEstimate;
+  final int maxConcurrentRequests;
+  final int maxInlineBurstMessages;
+  final int maxInlineTextCharacters;
+  final int maxInlineGapSeconds;
   String? _transcriptKey;
   Future<UnreadChatTranscript>? _transcriptFuture;
   final Map<String, _GroundedSummary> _completionCache = {};
@@ -317,51 +335,57 @@ class UnreadChatSummaryService {
       );
     }
 
-    final allChunks = _chunks(transcript.messages);
-    final processingCapped = allChunks.length > maxChunks;
-    final selectedChunks = processingCapped
-        ? allChunks.sublist(allChunks.length - maxChunks)
-        : allChunks;
+    final promptUnits = _promptUnits(transcript.messages);
+    final selection = _selectPromptUnits(promptUnits);
+    final processingCapped = selection.sampled;
+    final selectedChunks = _chunks(selection.units);
     final summaryScope = jsonEncode(transcript.snapshot.toJson());
     final summarizedMessages = selectedChunks
         .expand((chunk) => chunk)
+        .expand((unit) => unit.messages)
         .toList(growable: false);
-    final chunkContents = <_GroundedSummary>[];
-
-    for (var index = 0; index < selectedChunks.length; index++) {
-      final chunk = selectedChunks[index];
+    final chunkContents = await _parallelMapOrdered(selectedChunks, (
+      chunk,
+      index,
+    ) async {
       final allowedEvidenceIds = {
-        for (final message in chunk) message.evidenceId,
+        for (final unit in chunk) ...unit.evidenceIds,
       };
-      chunkContents.add(
-        await _completeGrounded(
-          UnreadChatSummaryProviderRequest(
-            stage: UnreadChatSummaryStage.chunk,
-            trustedInstructions: unreadChatSummaryTrustedInstructions,
-            allowedEvidenceIds: allowedEvidenceIds,
-            payload: {
-              'stage': 'summarize_chunk',
-              'output_language': 'same_as_chat',
-              'chunk_index': index + 1,
-              'chunk_count': selectedChunks.length,
-              'range': transcript.snapshot.toJson(),
-              'message_schema': const [
-                'evidence_id',
-                'date_unix',
-                'sender_key',
-                'direction',
-                'is_service',
-                'content_type',
-                'reply_to_evidence_id',
-                'text',
-              ],
-              'messages': chunk.map(_messagePromptRow).toList(),
+      return _completeGrounded(
+        UnreadChatSummaryProviderRequest(
+          stage: UnreadChatSummaryStage.chunk,
+          trustedInstructions: unreadChatSummaryTrustedInstructions,
+          allowedEvidenceIds: allowedEvidenceIds,
+          payload: {
+            'stage': 'summarize_chunk',
+            'output_language': 'same_as_chat',
+            'chunk_index': index + 1,
+            'chunk_count': selectedChunks.length,
+            'range': transcript.snapshot.toJson(),
+            'selection': {
+              'strategy': processingCapped
+                  ? 'frequency_recency_signal_sample'
+                  : 'complete',
+              'source_message_count': transcript.messages.length,
+              'selected_message_count': summarizedMessages.length,
             },
-          ),
-          scopeKey: summaryScope,
+            'message_schema': const [
+              'evidence_ids',
+              'first_date_unix',
+              'last_date_unix',
+              'sender_key',
+              'direction',
+              'is_service',
+              'content_types',
+              'reply_to_evidence_ids',
+              'text',
+            ],
+            'messages': chunk.map(_promptUnitRow).toList(),
+          },
         ),
+        scopeKey: summaryScope,
       );
-    }
+    });
 
     final UnreadChatSummaryContent content;
     if (chunkContents.length == 1) {
@@ -388,29 +412,198 @@ class UnreadChatSummaryService {
     );
   }
 
-  List<List<UnreadChatMessage>> _chunks(List<UnreadChatMessage> messages) {
-    final chunks = <List<UnreadChatMessage>>[];
+  List<_PromptUnit> _promptUnits(List<UnreadChatMessage> messages) {
+    final result = <_PromptUnit>[];
     var current = <UnreadChatMessage>[];
-    var currentTokens = 0;
     for (final message in messages) {
-      final messageTokens = estimateUnreadSummaryPromptTokens(
-        _messagePromptRow(message),
-      );
+      final canInline =
+          current.isNotEmpty &&
+          current.length < maxInlineBurstMessages &&
+          _canInline(current.last, message);
+      if (!canInline && current.isNotEmpty) {
+        result.add(_PromptUnit(current));
+        current = <UnreadChatMessage>[];
+      }
+      current.add(message);
+    }
+    if (current.isNotEmpty) result.add(_PromptUnit(current));
+    return result;
+  }
+
+  bool _canInline(UnreadChatMessage previous, UnreadChatMessage next) {
+    if (maxInlineBurstMessages <= 1 ||
+        previous.contentType != 'messageText' ||
+        next.contentType != 'messageText' ||
+        previous.isService ||
+        next.isService ||
+        previous.replyToMessageId != null ||
+        next.replyToMessageId != null ||
+        previous.senderKey != next.senderKey ||
+        previous.isOutgoing != next.isOutgoing ||
+        previous.text.isEmpty ||
+        next.text.isEmpty ||
+        previous.text.length > maxInlineTextCharacters ||
+        next.text.length > maxInlineTextCharacters) {
+      return false;
+    }
+    final gap = next.date - previous.date;
+    return gap >= 0 && gap <= maxInlineGapSeconds;
+  }
+
+  _PromptSelection _selectPromptUnits(List<_PromptUnit> units) {
+    if (_chunks(units).length <= maxChunks) {
+      return _PromptSelection(units: units, sampled: false);
+    }
+
+    final buckets = _selectionBuckets(units);
+    final bucketByUnit = <int, int>{};
+    for (var bucketIndex = 0; bucketIndex < buckets.length; bucketIndex++) {
+      for (final unitIndex in buckets[bucketIndex]) {
+        bucketByUnit[unitIndex] = bucketIndex;
+      }
+    }
+    final scores = <int, double>{};
+    for (var index = 0; index < units.length; index++) {
+      final bucketIndex = bucketByUnit[index] ?? 0;
+      final bucket = buckets[bucketIndex];
+      final recency = units.length <= 1 ? 1.0 : index / (units.length - 1);
+      final isBucketEdge = index == bucket.first || index == bucket.last;
+      scores[index] =
+          recency * 4.0 +
+          math.log(bucket.length + 1) * 0.9 +
+          _signalScore(units[index]) * 2.5 +
+          (isBucketEdge ? 2.25 : 0) +
+          (index == 0 || index == units.length - 1 ? 100 : 0);
+    }
+
+    final tokenBudget = math
+        .max(1, (maxChunkTokenEstimate * maxChunks * 0.82).floor())
+        .toInt();
+    final unitBudget = math
+        .max(2, (maxChunkMessages * maxChunks * 0.86).floor())
+        .toInt();
+    final selected = <int>{};
+    var selectedTokens = 0;
+
+    bool add(int index, {bool force = false}) {
+      if (selected.contains(index)) return true;
+      final tokens = _promptUnitTokens(units[index]);
+      if (!force &&
+          (selected.length >= unitBudget ||
+              selectedTokens + tokens > tokenBudget)) {
+        return false;
+      }
+      selected.add(index);
+      selectedTokens += tokens;
+      return true;
+    }
+
+    add(0, force: true);
+    add(units.length - 1, force: true);
+    for (final bucket in buckets) {
+      add(bucket.first);
+      add(bucket.last);
+      final strongest = List<int>.of(bucket)
+        ..sort((left, right) => scores[right]!.compareTo(scores[left]!));
+      add(strongest.first);
+    }
+
+    final ranked = List<int>.generate(units.length, (index) => index)
+      ..sort((left, right) {
+        final scoreOrder = scores[right]!.compareTo(scores[left]!);
+        return scoreOrder != 0 ? scoreOrder : right.compareTo(left);
+      });
+    for (final index in ranked) {
+      add(index);
+    }
+
+    List<_PromptUnit> selectedUnits() {
+      final indexes = selected.toList()..sort();
+      return [for (final index in indexes) units[index]];
+    }
+
+    var result = selectedUnits();
+    while (_chunks(result).length > maxChunks && selected.length > 2) {
+      final chunkCount = _chunks(result).length;
+      final targetCount = math
+          .max(2, (selected.length * maxChunks / chunkCount * 0.88).floor())
+          .toInt();
+      final keep = <int>{0, units.length - 1};
+      for (final index in ranked) {
+        if (keep.length >= targetCount) break;
+        if (selected.contains(index)) keep.add(index);
+      }
+      selected
+        ..clear()
+        ..addAll(keep);
+      result = selectedUnits();
+    }
+    return _PromptSelection(units: result, sampled: true);
+  }
+
+  List<List<int>> _selectionBuckets(List<_PromptUnit> units) {
+    final bucketCount = math
+        .min(24, math.max(1, math.sqrt(units.length).round()))
+        .toInt();
+    final buckets = List.generate(bucketCount, (_) => <int>[]);
+    final firstDate = units.first.firstDate;
+    final dateSpan = units.last.lastDate - firstDate;
+    for (var index = 0; index < units.length; index++) {
+      final int bucketIndex;
+      if (dateSpan >= bucketCount) {
+        bucketIndex =
+            ((units[index].lastDate - firstDate) *
+                    bucketCount ~/
+                    (dateSpan + 1))
+                .clamp(0, bucketCount - 1)
+                .toInt();
+      } else {
+        bucketIndex = (index * bucketCount ~/ units.length)
+            .clamp(0, bucketCount - 1)
+            .toInt();
+      }
+      buckets[bucketIndex].add(index);
+    }
+    return buckets.where((bucket) => bucket.isNotEmpty).toList();
+  }
+
+  double _signalScore(_PromptUnit unit) {
+    var score = math.min(unit.messages.length, 8) * 0.05;
+    for (final message in unit.messages) {
+      if (message.replyToMessageId != null) score += 3;
+      if (message.contentType != 'messageText') score += 1.5;
+      if (RegExp(r'[?？!！]|https?://|@\w').hasMatch(message.text)) {
+        score += 1.5;
+      }
+      if (message.text.length >= 96) score += 0.75;
+    }
+    return score;
+  }
+
+  List<List<_PromptUnit>> _chunks(List<_PromptUnit> units) {
+    final chunks = <List<_PromptUnit>>[];
+    var current = <_PromptUnit>[];
+    var currentTokens = 0;
+    for (final unit in units) {
+      final messageTokens = _promptUnitTokens(unit);
       final exceedsMessageLimit = current.length >= maxChunkMessages;
       final exceedsTokenLimit =
           current.isNotEmpty &&
           currentTokens + messageTokens > maxChunkTokenEstimate;
       if (exceedsMessageLimit || exceedsTokenLimit) {
         chunks.add(current);
-        current = <UnreadChatMessage>[];
+        current = <_PromptUnit>[];
         currentTokens = 0;
       }
-      current.add(message);
+      current.add(unit);
       currentTokens += messageTokens;
     }
     if (current.isNotEmpty) chunks.add(current);
     return chunks;
   }
+
+  int _promptUnitTokens(_PromptUnit unit) =>
+      estimateUnreadSummaryPromptTokens(_promptUnitRow(unit));
 
   Future<UnreadChatSummaryContent> _mergeChunkContents(
     List<_GroundedSummary> summaries, {
@@ -421,38 +614,36 @@ class UnreadChatSummaryService {
     var mergeLevel = 1;
     while (level.length > 1) {
       final batches = _mergeBatches(level);
-      final nextLevel = <_GroundedSummary>[];
-      for (var index = 0; index < batches.length; index++) {
-        final batch = batches[index];
+      final nextLevel = await _parallelMapOrdered(batches, (
+        batch,
+        index,
+      ) async {
         if (batch.length == 1) {
-          nextLevel.add(batch.single);
-          continue;
+          return batch.single;
         }
         final allowedEvidenceIds = {
           for (final summary in batch) ...summary.allowedEvidenceIds,
         };
-        nextLevel.add(
-          await _completeGrounded(
-            UnreadChatSummaryProviderRequest(
-              stage: UnreadChatSummaryStage.merge,
-              trustedInstructions: unreadChatSummaryTrustedInstructions,
-              allowedEvidenceIds: allowedEvidenceIds,
-              payload: {
-                'stage': 'merge_chunk_summaries',
-                'output_language': 'same_as_chat',
-                'merge_level': mergeLevel,
-                'merge_batch_index': index + 1,
-                'merge_batch_count': batches.length,
-                'chunk_summaries': batch
-                    .map((summary) => summary.content.toJson())
-                    .toList(),
-                'coverage_is_incomplete': coverageIsIncomplete,
-              },
-            ),
-            scopeKey: scopeKey,
+        return _completeGrounded(
+          UnreadChatSummaryProviderRequest(
+            stage: UnreadChatSummaryStage.merge,
+            trustedInstructions: unreadChatSummaryTrustedInstructions,
+            allowedEvidenceIds: allowedEvidenceIds,
+            payload: {
+              'stage': 'merge_chunk_summaries',
+              'output_language': 'same_as_chat',
+              'merge_level': mergeLevel,
+              'merge_batch_index': index + 1,
+              'merge_batch_count': batches.length,
+              'chunk_summaries': batch
+                  .map((summary) => summary.content.toJson())
+                  .toList(),
+              'coverage_is_incomplete': coverageIsIncomplete,
+            },
           ),
+          scopeKey: scopeKey,
         );
-      }
+      });
       level = nextLevel;
       mergeLevel++;
     }
@@ -528,16 +719,46 @@ class UnreadChatSummaryService {
     return batches;
   }
 
-  List<Object?> _messagePromptRow(UnreadChatMessage message) => [
-    message.evidenceId,
-    message.date,
-    message.senderKey,
-    message.isOutgoing ? 'out' : 'in',
-    message.isService,
-    message.contentType,
-    message.replyToMessageId == null ? null : 'm${message.replyToMessageId}',
-    message.text,
+  List<Object?> _promptUnitRow(_PromptUnit unit) => [
+    unit.evidenceIds,
+    unit.firstDate,
+    unit.lastDate,
+    unit.messages.first.senderKey,
+    unit.messages.first.isOutgoing ? 'out' : 'in',
+    unit.messages.any((message) => message.isService),
+    {for (final message in unit.messages) message.contentType}.toList(),
+    [
+      for (final message in unit.messages)
+        if (message.replyToMessageId case final replyId?) 'm$replyId',
+    ],
+    unit.messages.length == 1
+        ? unit.messages.single.text
+        : unit.messages
+              .map((message) => '${message.evidenceId}: ${message.text}')
+              .join('\n'),
   ];
+
+  Future<List<R>> _parallelMapOrdered<T, R>(
+    List<T> values,
+    Future<R> Function(T value, int index) operation,
+  ) async {
+    if (values.isEmpty) return <R>[];
+    final results = List<R?>.filled(values.length, null);
+    var cursor = 0;
+
+    Future<void> worker() async {
+      while (cursor < values.length) {
+        final index = cursor++;
+        results[index] = await operation(values[index], index);
+      }
+    }
+
+    final workerCount = math.min(maxConcurrentRequests, values.length);
+    await Future.wait([
+      for (var index = 0; index < workerCount; index++) worker(),
+    ]);
+    return [for (final result in results) result as R];
+  }
 
   UnreadChatSummaryCoverage _coverage(
     UnreadChatTranscript transcript, {
@@ -566,4 +787,27 @@ class _GroundedSummary {
 
   final UnreadChatSummaryContent content;
   final Set<String> allowedEvidenceIds;
+}
+
+class _PromptSelection {
+  _PromptSelection({
+    required Iterable<_PromptUnit> units,
+    required this.sampled,
+  }) : units = List.unmodifiable(units);
+
+  final List<_PromptUnit> units;
+  final bool sampled;
+}
+
+class _PromptUnit {
+  _PromptUnit(Iterable<UnreadChatMessage> messages)
+    : messages = List.unmodifiable(messages);
+
+  final List<UnreadChatMessage> messages;
+
+  int get firstDate => messages.first.date;
+  int get lastDate => messages.last.date;
+  List<String> get evidenceIds => [
+    for (final message in messages) message.evidenceId,
+  ];
 }

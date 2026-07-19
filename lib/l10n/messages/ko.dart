@@ -144,7 +144,8 @@ const koMessages = <String, String>{
   'aiSummaryFailed': "메시지를 요약하지 못했습니다.",
   'aiSummaryFoundCount': "읽지 않은 메시지 {value1}개를 찾았습니다",
   'aiSummaryHighlights': "주요 내용",
-  'aiSummaryIncomplete': "최근 읽지 않은 메시지 {value1}개만 포함했습니다.",
+  'aiSummaryIncomplete':
+      "대표적인 읽지 않은 메시지 {value1}개를 요약했습니다. 일부 메시지는 제외될 수 있습니다.",
   'aiSummaryNeedsReply': "답장이 필요함",
   'aiSummaryNoContent': "요약 내용이 반환되지 않았습니다.",
   'aiSummaryNoUnread': "이 채팅을 열었을 때 캡처된 읽지 않은 메시지가 없습니다.",
@@ -156,7 +157,7 @@ const koMessages = <String, String>{
   'aiSummaryRunningCount': "읽지 않은 메시지 {value1}개 요약 중",
   'aiSummaryThinking': "생각하는 중…",
   'aiSummaryTitle': "AI 요약",
-  'aiSummaryUnavailable': "선택한 AI 모드를 사용할 수 없습니다. AI 설정을 확인하세요.",
+  'aiSummaryUnavailable': "AI 요청에 실패했습니다. 다시 시도하고 문제가 계속되면 AI 설정을 확인하세요.",
   'aiSummaryUncertainties': "불확실한 내용",
   'aiUnreadSummary': "읽지 않은 채팅 요약",
   'aiUnreadSummaryDescription': "읽지 않은 메시지 수 옆에 연결된 원형 AI 버튼을 표시합니다.",

@@ -150,7 +150,7 @@ const enMessages = <String, String>{
   'aiSummaryFoundCount': "Found {value1} unread messages",
   'aiSummaryHighlights': "Highlights",
   'aiSummaryIncomplete':
-      "Only the newest {value1} unread messages were included.",
+      "Summarized {value1} representative unread messages; some messages may be omitted.",
   'aiSummaryNeedsReply': "Needs Your Reply",
   'aiSummaryNoContent': "No summary content was returned.",
   'aiSummaryNoUnread':
@@ -164,7 +164,7 @@ const enMessages = <String, String>{
   'aiSummaryThinking': "Thinking…",
   'aiSummaryTitle': "AI Summary",
   'aiSummaryUnavailable':
-      "The selected AI mode is not available. Check AI Settings.",
+      "The AI request failed. Try again, or check AI Settings if it keeps happening.",
   'aiSummaryUncertainties': "Uncertainties",
   'aiUnreadSummary': "Unread Chat Summary",
   'aiUnreadSummaryDescription':

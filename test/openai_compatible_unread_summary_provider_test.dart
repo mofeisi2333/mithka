@@ -138,6 +138,7 @@ void main() {
       serverBaseUri: Uri.parse('https://example.test'),
       model: 'missing-model',
       httpClient: client,
+      transientRetryDelays: const [],
     );
 
     expect(
@@ -152,5 +153,43 @@ void main() {
             ),
       ),
     );
+  });
+
+  test('retries a rate-limited server response', () async {
+    var attempts = 0;
+    final client = MockClient((_) async {
+      attempts++;
+      if (attempts == 1) {
+        return http.Response(
+          jsonEncode({
+            'error': {'message': 'slow down'},
+          }),
+          429,
+          headers: {'retry-after': '0'},
+        );
+      }
+      return http.Response(
+        jsonEncode({
+          'choices': [
+            {
+              'message': {'content': jsonEncode(_summaryJson())},
+            },
+          ],
+        }),
+        200,
+        headers: {'content-type': 'application/json; charset=utf-8'},
+      );
+    });
+    final provider = OpenAiCompatibleUnreadSummaryProvider(
+      serverBaseUri: Uri.parse('https://example.test'),
+      model: 'test-model',
+      httpClient: client,
+      transientRetryDelays: const [Duration.zero],
+    );
+
+    final result = await provider.complete(_request());
+
+    expect(attempts, 2);
+    expect(result['overview'], '要点');
   });
 }

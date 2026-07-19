@@ -154,7 +154,7 @@ const esMessages = <String, String>{
   'aiSummaryFoundCount': "Se encontraron {value1} mensajes no leídos",
   'aiSummaryHighlights': "Puntos destacados",
   'aiSummaryIncomplete':
-      "Solo se incluyeron los {value1} mensajes no leídos más recientes.",
+      "Se resumieron {value1} mensajes no leídos representativos; es posible que se omitan algunos mensajes.",
   'aiSummaryNeedsReply': "Requiere tu respuesta",
   'aiSummaryNoContent': "No se devolvió contenido de resumen.",
   'aiSummaryNoUnread':
@@ -168,7 +168,7 @@ const esMessages = <String, String>{
   'aiSummaryThinking': "Pensando…",
   'aiSummaryTitle': "Resumen de IA",
   'aiSummaryUnavailable':
-      "El modo de IA seleccionado no está disponible. Revisa los ajustes de IA.",
+      "La solicitud de IA falló. Inténtalo de nuevo o revisa los ajustes de IA si el problema continúa.",
   'aiSummaryUncertainties': "Incertidumbres",
   'aiUnreadSummary': "Resumen de chats no leídos",
   'aiUnreadSummaryDescription':

@@ -14,6 +14,10 @@ class OpenAiCompatibleUnreadSummaryProvider
     this.apiKey,
     this.requestTimeout = const Duration(seconds: 90),
     this.useJsonResponseFormat = false,
+    this.transientRetryDelays = const [
+      Duration(milliseconds: 500),
+      Duration(milliseconds: 1500),
+    ],
   }) : _httpClient = httpClient ?? http.Client(),
        _ownsHttpClient = httpClient == null;
 
@@ -22,6 +26,7 @@ class OpenAiCompatibleUnreadSummaryProvider
   final String? apiKey;
   final Duration requestTimeout;
   final bool useJsonResponseFormat;
+  final List<Duration> transientRetryDelays;
   final http.Client _httpClient;
   final bool _ownsHttpClient;
 
@@ -63,21 +68,40 @@ class OpenAiCompatibleUnreadSummaryProvider
       if (useJsonResponseFormat) 'response_format': {'type': 'json_object'},
     };
 
-    final http.Response response;
-    try {
-      response = await _httpClient
-          .post(chatCompletionsUri, headers: headers, body: jsonEncode(body))
-          .timeout(requestTimeout);
-    } on TimeoutException catch (error) {
-      throw UnreadChatSummaryProviderException(
-        'The summary request timed out: $error',
-      );
-    }
+    late http.Response response;
+    for (var attempt = 0; ; attempt++) {
+      try {
+        response = await _httpClient
+            .post(chatCompletionsUri, headers: headers, body: jsonEncode(body))
+            .timeout(requestTimeout);
+      } on TimeoutException catch (error) {
+        if (attempt >= transientRetryDelays.length) {
+          throw UnreadChatSummaryProviderException(
+            'The summary request timed out: $error',
+          );
+        }
+        await Future<void>.delayed(transientRetryDelays[attempt]);
+        continue;
+      } on http.ClientException catch (error) {
+        if (attempt >= transientRetryDelays.length) {
+          throw UnreadChatSummaryProviderException(
+            'The summary request failed: $error',
+          );
+        }
+        await Future<void>.delayed(transientRetryDelays[attempt]);
+        continue;
+      }
 
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw UnreadChatSummaryProviderException(
-        _errorMessage(response.body),
-        statusCode: response.statusCode,
+      if (response.statusCode >= 200 && response.statusCode < 300) break;
+      if (!_isTransientStatus(response.statusCode) ||
+          attempt >= transientRetryDelays.length) {
+        throw UnreadChatSummaryProviderException(
+          _errorMessage(response.body),
+          statusCode: response.statusCode,
+        );
+      }
+      await Future<void>.delayed(
+        _retryDelay(response, transientRetryDelays[attempt]),
       );
     }
 
@@ -103,6 +127,22 @@ class OpenAiCompatibleUnreadSummaryProvider
 
   void close() {
     if (_ownsHttpClient) _httpClient.close();
+  }
+
+  bool _isTransientStatus(int statusCode) =>
+      statusCode == 408 ||
+      statusCode == 429 ||
+      statusCode == 500 ||
+      statusCode == 502 ||
+      statusCode == 503 ||
+      statusCode == 504;
+
+  Duration _retryDelay(http.Response response, Duration fallback) {
+    final retryAfterSeconds = int.tryParse(
+      response.headers['retry-after']?.trim() ?? '',
+    );
+    if (retryAfterSeconds == null || retryAfterSeconds < 0) return fallback;
+    return Duration(seconds: retryAfterSeconds.clamp(0, 5).toInt());
   }
 
   String _messageContent(Map<String, dynamic> envelope) {

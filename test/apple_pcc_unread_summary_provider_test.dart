@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mithka/chat/apple_pcc_unread_summary_provider.dart';
 import 'package:mithka/chat/unread_chat_summary_service.dart';
@@ -110,4 +111,56 @@ void main() {
       expect(capturedLimits, [700, 1300]);
     },
   );
+
+  test('retries transient PCC service failures', () async {
+    var attempts = 0;
+    final provider = ApplePccUnreadSummaryProvider(
+      api: ApplePccApi(
+        invokeMethod: (_, _) async {
+          attempts++;
+          if (attempts == 1) {
+            throw PlatformException(
+              code: 'pcc_service_unavailable',
+              message: 'Try again',
+            );
+          }
+          return {'text': jsonEncode(_summaryJson()), 'provider': 'apple_pcc'};
+        },
+      ),
+      transientRetryDelays: const [Duration.zero],
+    );
+
+    final result = await provider.complete(_request());
+
+    expect(attempts, 2);
+    expect(result['overview'], '同じ言語の要約');
+  });
+
+  test('does not retry a PCC quota failure', () async {
+    var attempts = 0;
+    final provider = ApplePccUnreadSummaryProvider(
+      api: ApplePccApi(
+        invokeMethod: (_, _) async {
+          attempts++;
+          throw PlatformException(
+            code: 'pcc_quota_reached',
+            message: 'Quota reached',
+          );
+        },
+      ),
+      transientRetryDelays: const [Duration.zero, Duration.zero],
+    );
+
+    await expectLater(
+      provider.complete(_request()),
+      throwsA(
+        isA<PlatformException>().having(
+          (error) => error.code,
+          'code',
+          'pcc_quota_reached',
+        ),
+      ),
+    );
+    expect(attempts, 1);
+  });
 }

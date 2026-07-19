@@ -155,7 +155,7 @@ const frMessages = <String, String>{
   'aiSummaryFoundCount': "{value1} messages non lus trouvés",
   'aiSummaryHighlights': "Points importants",
   'aiSummaryIncomplete':
-      "Seuls les {value1} messages non lus les plus récents ont été inclus.",
+      "{value1} messages non lus représentatifs ont été résumés ; certains messages peuvent être omis.",
   'aiSummaryNeedsReply': "Réponse nécessaire",
   'aiSummaryNoContent': "Aucun contenu de résumé n’a été renvoyé.",
   'aiSummaryNoUnread':
@@ -169,7 +169,7 @@ const frMessages = <String, String>{
   'aiSummaryThinking': "Réflexion en cours…",
   'aiSummaryTitle': "Résumé IA",
   'aiSummaryUnavailable':
-      "Le mode IA sélectionné n’est pas disponible. Vérifiez les réglages IA.",
+      "La requête IA a échoué. Réessayez ou vérifiez les réglages IA si le problème persiste.",
   'aiSummaryUncertainties': "Incertitudes",
   'aiUnreadSummary': "Résumé des discussions non lues",
   'aiUnreadSummaryDescription':

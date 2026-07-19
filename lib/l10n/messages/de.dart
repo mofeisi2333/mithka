@@ -153,9 +153,10 @@ const deMessages = <String, String>{
   'aiSummaryFoundCount': "{value1} ungelesene Nachrichten gefunden",
   'aiSummaryHighlights': "Wichtigste Punkte",
   'aiSummaryIncomplete':
-      "Nur die neuesten {value1} ungelesenen Nachrichten wurden einbezogen.",
+      "{value1} repräsentative ungelesene Nachrichten wurden zusammengefasst; einige Nachrichten können fehlen.",
   'aiSummaryNeedsReply': "Antwort erforderlich",
-  'aiSummaryNoContent': "Es wurde kein Inhalt für die Zusammenfassung zurückgegeben.",
+  'aiSummaryNoContent':
+      "Es wurde kein Inhalt für die Zusammenfassung zurückgegeben.",
   'aiSummaryNoUnread':
       "Beim Öffnen dieses Chats wurden keine ungelesenen Nachrichten erfasst.",
   'aiSummaryOpenSettings': "KI-Einstellungen",
@@ -163,11 +164,12 @@ const deMessages = <String, String>{
   'aiSummaryPrivate': "Nur für dich sichtbar",
   'aiSummaryQuestions': "Offene Fragen",
   'aiSummaryRetry': "Erneut versuchen",
-  'aiSummaryRunningCount': "{value1} ungelesene Nachrichten werden zusammengefasst",
+  'aiSummaryRunningCount':
+      "{value1} ungelesene Nachrichten werden zusammengefasst",
   'aiSummaryThinking': "Wird erstellt…",
   'aiSummaryTitle': "KI-Zusammenfassung",
   'aiSummaryUnavailable':
-      "Der ausgewählte KI-Modus ist nicht verfügbar. Prüfe die KI-Einstellungen.",
+      "Die KI-Anfrage ist fehlgeschlagen. Versuche es erneut oder prüfe bei wiederholten Fehlern die KI-Einstellungen.",
   'aiSummaryUncertainties': "Unsicherheiten",
   'aiUnreadSummary': "Zusammenfassung ungelesener Chats",
   'aiUnreadSummaryDescription':

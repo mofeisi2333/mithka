@@ -4927,6 +4927,7 @@ class _ChatViewState extends State<ChatView> {
         return _UnreadSummarySession(
           UnreadChatSummaryService(
             historyLoader: loader,
+            maxChunks: 3,
             maxChunkTokenEstimate: unreadSummaryChunkTokenBudget(
               pccContextSize,
             ),
@@ -4946,7 +4947,11 @@ class _ChatViewState extends State<ChatView> {
           apiKey: apiKey,
         );
         return _UnreadSummarySession(
-          UnreadChatSummaryService(historyLoader: loader, provider: provider),
+          UnreadChatSummaryService(
+            historyLoader: loader,
+            provider: provider,
+            maxConcurrentRequests: 3,
+          ),
           onDispose: provider.close,
         );
     }

@@ -15,7 +15,8 @@ final class ApplePCCBridge {
     """
 
   private let channel: FlutterMethodChannel
-  private var activeRequest: Task<Void, Never>?
+  private static let maximumConcurrentRequests = 2
+  private var activeRequests: [UUID: Task<Void, Never>] = [:]
 
   init(messenger: FlutterBinaryMessenger) {
     channel = FlutterMethodChannel(
@@ -37,7 +38,9 @@ final class ApplePCCBridge {
   }
 
   deinit {
-    activeRequest?.cancel()
+    for request in activeRequests.values {
+      request.cancel()
+    }
   }
 
   private func handle(call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -56,7 +59,7 @@ final class ApplePCCBridge {
         result(await self.capabilities())
       }
     case "summarize":
-      guard activeRequest == nil else {
+      guard activeRequests.count < Self.maximumConcurrentRequests else {
         result(
           Self.flutterError(
             code: "pcc_busy",
@@ -81,7 +84,8 @@ final class ApplePCCBridge {
 
       #if compiler(>=6.4) && canImport(FoundationModels)
         if #available(iOS 27.0, *) {
-          activeRequest = Task { @MainActor [weak self] in
+          let requestID = UUID()
+          activeRequests[requestID] = Task { @MainActor [weak self] in
             guard let self else {
               result(
                 Self.flutterError(
@@ -91,7 +95,7 @@ final class ApplePCCBridge {
                 ))
               return
             }
-            defer { self.activeRequest = nil }
+            defer { self.activeRequests.removeValue(forKey: requestID) }
             await self.summarize(arguments: arguments, result: result)
           }
           return
