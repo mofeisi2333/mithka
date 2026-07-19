@@ -16,7 +16,7 @@ final class ApplePCCBridge {
 
   private let channel: FlutterMethodChannel
   private static let maximumConcurrentRequests = 2
-  private var activeRequests: [UUID: Task<Void, Never>] = [:]
+  private var activeRequests: [String: Task<Void, Never>] = [:]
 
   init(messenger: FlutterBinaryMessenger) {
     channel = FlutterMethodChannel(
@@ -84,7 +84,18 @@ final class ApplePCCBridge {
 
       #if compiler(>=6.4) && canImport(FoundationModels)
         if #available(iOS 27.0, *) {
-          let requestID = UUID()
+          let requestID =
+            (arguments["requestId"] as? String)?
+              .trimmingCharacters(in: .whitespacesAndNewlines) ?? UUID().uuidString
+          guard !requestID.isEmpty, activeRequests[requestID] == nil else {
+            result(
+              Self.flutterError(
+                code: "pcc_invalid_arguments",
+                message: "A unique summary request ID is required.",
+                reason: "invalid_request_id"
+              ))
+            return
+          }
           activeRequests[requestID] = Task { @MainActor [weak self] in
             guard let self else {
               result(
@@ -112,6 +123,21 @@ final class ApplePCCBridge {
             reason: "requires_xcode_27"
           ))
       #endif
+    case "cancelSummary":
+      guard
+        let arguments = call.arguments as? [String: Any],
+        let requestID = arguments["requestId"] as? String
+      else {
+        result(
+          Self.flutterError(
+            code: "pcc_invalid_arguments",
+            message: "A summary request ID is required.",
+            reason: "missing_request_id"
+          ))
+        return
+      }
+      activeRequests.removeValue(forKey: requestID)?.cancel()
+      result(nil)
     default:
       result(FlutterMethodNotImplemented)
     }

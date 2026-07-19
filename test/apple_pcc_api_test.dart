@@ -80,7 +80,10 @@ void main() {
     final api = ApplePccApi(
       invokeMethod: (method, arguments) async {
         expect(method, 'summarize');
-        expect(arguments, {
+        expect(arguments, isA<Map<String, Object>>());
+        final values = Map<String, Object>.from(arguments! as Map);
+        expect(values.remove('requestId'), isA<String>());
+        expect(values, {
           'prompt': 'Summarize these messages',
           'instructions': 'Reply in the same language',
           'reasoningLevel': 'deep',
@@ -115,5 +118,29 @@ void main() {
         ),
       ),
     );
+  });
+
+  test('summarize cancels the native request after a timeout', () async {
+    final methods = <String>[];
+    final api = ApplePccApi(
+      summaryTimeout: Duration.zero,
+      invokeMethod: (method, _) {
+        methods.add(method);
+        if (method == 'summarize') return Completer<Object?>().future;
+        return Future<Object?>.value();
+      },
+    );
+
+    await expectLater(
+      api.summarize(prompt: 'valid'),
+      throwsA(
+        isA<PlatformException>().having(
+          (error) => error.code,
+          'code',
+          'pcc_timeout',
+        ),
+      ),
+    );
+    expect(methods, ['summarize', 'cancelSummary']);
   });
 }

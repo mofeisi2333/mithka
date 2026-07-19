@@ -105,7 +105,11 @@ void main() {
           },
         );
 
-        final transcript = await loader.load(_snapshot());
+        final progress = <int>[];
+        final transcript = await loader.load(
+          _snapshot(),
+          onProgress: progress.add,
+        );
 
         expect(transcript.messages.map((message) => message.id), [
           350,
@@ -128,6 +132,7 @@ void main() {
         expect(requests.first.$2['limit'], 100);
         expect(requests.first.$2['offset'], 0);
         expect(requests.first.$2['only_local'], isFalse);
+        expect(progress, [0, 3, 4]);
       },
     );
 
@@ -484,6 +489,73 @@ void main() {
     );
 
     test(
+      'locally assembles parallel chunks without another model call',
+      () async {
+        final provider = _ConcurrentRecordingProvider();
+        final service = UnreadChatSummaryService(
+          historyLoader: UnreadChatHistoryLoader(
+            query: (_, _) async => const {'@type': 'messages', 'messages': []},
+          ),
+          provider: provider,
+          maxChunkMessages: 2,
+          maxChunkTokenEstimate: 100000,
+          maxChunks: 2,
+          maxInlineBurstMessages: 1,
+          mergeChunkSummariesLocally: true,
+        );
+        final transcript = UnreadChatTranscript(
+          snapshot: _snapshot(lastReadInboxId: 0, upperMessageId: 4),
+          messages: [
+            for (var id = 1; id <= 4; id++)
+              UnreadChatMessage(
+                id: id,
+                date: id,
+                senderKey: 'user:$id',
+                isOutgoing: false,
+                isService: false,
+                contentType: 'messageText',
+                text: 'message $id',
+              ),
+          ],
+          historyRequestCount: 1,
+          reachedReadBoundary: true,
+          historyCapped: false,
+          historyStalled: false,
+        );
+        final progress = <UnreadChatSummaryProgress>[];
+
+        final result = await service.summarizeTranscript(
+          transcript,
+          onProgress: progress.add,
+        );
+
+        expect(provider.requests, hasLength(2));
+        expect(
+          provider.requests,
+          everyElement(
+            isA<UnreadChatSummaryProviderRequest>().having(
+              (request) => request.stage,
+              'stage',
+              UnreadChatSummaryStage.chunk,
+            ),
+          ),
+        );
+        expect(provider.maximumActiveRequests, 2);
+        expect(result.overview, 'Chunk m3');
+        expect(
+          result.highlights.map((item) => item.text),
+          containsAll(['Chunk m1', 'Chunk m3']),
+        );
+        expect(progress.first.completed, 0);
+        expect(progress.first.total, 2);
+        expect(
+          progress.last.stage,
+          UnreadChatSummaryProgressStage.assemblingSummary,
+        );
+      },
+    );
+
+    test(
       'reuses successful chunk checkpoints when a merge is retried',
       () async {
         final provider = _FailFirstMergeProvider();
@@ -618,7 +690,9 @@ class _ConcurrentRecordingProvider extends _RecordingProvider {
     activeRequests--;
     return _summaryJson(
       request.allowedEvidenceIds.first,
-      text: request.stage == UnreadChatSummaryStage.merge ? 'Merged' : 'Chunk',
+      text: request.stage == UnreadChatSummaryStage.merge
+          ? 'Merged'
+          : 'Chunk ${request.allowedEvidenceIds.first}',
     );
   }
 }

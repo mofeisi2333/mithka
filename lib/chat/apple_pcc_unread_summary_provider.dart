@@ -61,7 +61,6 @@ class ApplePccUnreadSummaryProvider implements UnreadChatSummaryProvider {
       'pcc_busy',
       'pcc_network_failure',
       'pcc_service_unavailable',
-      'pcc_timeout',
     }.contains(error.code)) {
       return true;
     }

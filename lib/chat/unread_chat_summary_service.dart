@@ -12,6 +12,29 @@ typedef UnreadChatHistoryQuery =
       Map<String, dynamic> request,
     );
 
+enum UnreadChatSummaryProgressStage {
+  loadingMessages,
+  summarizingChunks,
+  assemblingSummary,
+}
+
+class UnreadChatSummaryProgress {
+  const UnreadChatSummaryProgress({
+    required this.stage,
+    this.completed = 0,
+    this.total = 0,
+    this.messageCount = 0,
+  });
+
+  final UnreadChatSummaryProgressStage stage;
+  final int completed;
+  final int total;
+  final int messageCount;
+}
+
+typedef UnreadChatSummaryProgressCallback =
+    void Function(UnreadChatSummaryProgress progress);
+
 class UnreadChatSummaryProviderException implements Exception {
   const UnreadChatSummaryProviderException(this.message, {this.statusCode});
 
@@ -147,7 +170,11 @@ class UnreadChatHistoryLoader {
   final int maxMessages;
   final int maxRequests;
 
-  Future<UnreadChatTranscript> load(UnreadChatRangeSnapshot snapshot) async {
+  Future<UnreadChatTranscript> load(
+    UnreadChatRangeSnapshot snapshot, {
+    void Function(int fetchedMessageCount)? onProgress,
+  }) async {
+    onProgress?.call(0);
     if (!snapshot.hasUnreadRange) {
       return UnreadChatTranscript(
         snapshot: snapshot,
@@ -201,6 +228,7 @@ class UnreadChatHistoryLoader {
         }
         byId[id] = message;
       }
+      onProgress?.call(byId.length);
 
       final oldestId = pageOldestId;
       if (oldestId == null) {
@@ -275,6 +303,7 @@ class UnreadChatSummaryService {
     this.maxInlineBurstMessages = 8,
     this.maxInlineTextCharacters = 48,
     this.maxInlineGapSeconds = 120,
+    this.mergeChunkSummariesLocally = false,
   }) : assert(maxChunkMessages > 0),
        assert(maxChunkTokenEstimate > 0),
        assert(maxChunks > 0),
@@ -296,16 +325,33 @@ class UnreadChatSummaryService {
   final int maxInlineBurstMessages;
   final int maxInlineTextCharacters;
   final int maxInlineGapSeconds;
+  final bool mergeChunkSummariesLocally;
   String? _transcriptKey;
   Future<UnreadChatTranscript>? _transcriptFuture;
   final Map<String, _GroundedSummary> _completionCache = {};
   final Map<String, Future<_GroundedSummary>> _inFlightCompletions = {};
 
-  Future<UnreadChatSummary> summarize(UnreadChatRangeSnapshot snapshot) async {
+  Future<UnreadChatSummary> summarize(
+    UnreadChatRangeSnapshot snapshot, {
+    UnreadChatSummaryProgressCallback? onProgress,
+  }) async {
+    onProgress?.call(
+      const UnreadChatSummaryProgress(
+        stage: UnreadChatSummaryProgressStage.loadingMessages,
+      ),
+    );
     final key = jsonEncode(snapshot.toJson());
     if (_transcriptKey != key || _transcriptFuture == null) {
       _transcriptKey = key;
-      _transcriptFuture = historyLoader.load(snapshot);
+      _transcriptFuture = historyLoader.load(
+        snapshot,
+        onProgress: (messageCount) => onProgress?.call(
+          UnreadChatSummaryProgress(
+            stage: UnreadChatSummaryProgressStage.loadingMessages,
+            messageCount: messageCount,
+          ),
+        ),
+      );
       _completionCache.clear();
       _inFlightCompletions.clear();
     }
@@ -318,12 +364,13 @@ class UnreadChatSummaryService {
       }
       rethrow;
     }
-    return summarizeTranscript(transcript);
+    return summarizeTranscript(transcript, onProgress: onProgress);
   }
 
   Future<UnreadChatSummary> summarizeTranscript(
-    UnreadChatTranscript transcript,
-  ) async {
+    UnreadChatTranscript transcript, {
+    UnreadChatSummaryProgressCallback? onProgress,
+  }) async {
     if (transcript.messages.isEmpty) {
       return UnreadChatSummary(
         content: UnreadChatSummaryContent.empty(),
@@ -344,6 +391,17 @@ class UnreadChatSummaryService {
         .expand((chunk) => chunk)
         .expand((unit) => unit.messages)
         .toList(growable: false);
+    var completedChunks = 0;
+    void reportChunkProgress() => onProgress?.call(
+      UnreadChatSummaryProgress(
+        stage: UnreadChatSummaryProgressStage.summarizingChunks,
+        completed: completedChunks,
+        total: selectedChunks.length,
+        messageCount: summarizedMessages.length,
+      ),
+    );
+
+    reportChunkProgress();
     final chunkContents = await _parallelMapOrdered(selectedChunks, (
       chunk,
       index,
@@ -351,7 +409,7 @@ class UnreadChatSummaryService {
       final allowedEvidenceIds = {
         for (final unit in chunk) ...unit.evidenceIds,
       };
-      return _completeGrounded(
+      final content = await _completeGrounded(
         UnreadChatSummaryProviderRequest(
           stage: UnreadChatSummaryStage.chunk,
           trustedInstructions: unreadChatSummaryTrustedInstructions,
@@ -385,21 +443,34 @@ class UnreadChatSummaryService {
         ),
         scopeKey: summaryScope,
       );
+      completedChunks++;
+      reportChunkProgress();
+      return content;
     });
 
     final UnreadChatSummaryContent content;
     if (chunkContents.length == 1) {
       content = chunkContents.single.content;
     } else {
-      content = await _mergeChunkContents(
-        chunkContents,
-        scopeKey: summaryScope,
-        coverageIsIncomplete:
-            transcript.historyCapped ||
-            transcript.historyStalled ||
-            !transcript.reachedReadBoundary ||
-            processingCapped,
+      onProgress?.call(
+        UnreadChatSummaryProgress(
+          stage: UnreadChatSummaryProgressStage.assemblingSummary,
+          completed: completedChunks,
+          total: selectedChunks.length,
+          messageCount: summarizedMessages.length,
+        ),
       );
+      content = mergeChunkSummariesLocally
+          ? _mergeChunkContentsLocally(chunkContents)
+          : await _mergeChunkContents(
+              chunkContents,
+              scopeKey: summaryScope,
+              coverageIsIncomplete:
+                  transcript.historyCapped ||
+                  transcript.historyStalled ||
+                  !transcript.reachedReadBoundary ||
+                  processingCapped,
+            );
     }
 
     return UnreadChatSummary(
@@ -648,6 +719,86 @@ class UnreadChatSummaryService {
       mergeLevel++;
     }
     return level.single.content;
+  }
+
+  UnreadChatSummaryContent _mergeChunkContentsLocally(
+    List<_GroundedSummary> summaries,
+  ) {
+    final newestFirst = summaries.reversed.toList(growable: false);
+    final overviewSource = newestFirst.firstWhere(
+      (summary) => summary.content.overview.trim().isNotEmpty,
+      orElse: () => newestFirst.first,
+    );
+
+    final highlightGroups = [
+      for (final summary in newestFirst)
+        [
+          if (!identical(summary, overviewSource) &&
+              summary.content.overview.trim().isNotEmpty)
+            UnreadChatSummaryItem(
+              text: summary.content.overview,
+              evidenceIds: summary.content.overviewEvidenceIds,
+            ),
+          ...summary.content.highlights,
+        ],
+    ];
+
+    return UnreadChatSummaryContent(
+      overview: overviewSource.content.overview,
+      overviewEvidenceIds: overviewSource.content.overviewEvidenceIds,
+      highlights: _mergeLocalItems(highlightGroups, limit: 6),
+      needsReply: _mergeLocalItems(
+        newestFirst.map((summary) => summary.content.needsReply),
+        limit: 5,
+      ),
+      decisions: _mergeLocalItems(
+        newestFirst.map((summary) => summary.content.decisions),
+        limit: 5,
+      ),
+      actions: _mergeLocalItems(
+        newestFirst.map((summary) => summary.content.actions),
+        limit: 5,
+      ),
+      questions: _mergeLocalItems(
+        newestFirst.map((summary) => summary.content.questions),
+        limit: 5,
+      ),
+      uncertainties: _mergeLocalItems(
+        newestFirst.map((summary) => summary.content.uncertainties),
+        limit: 5,
+      ),
+    );
+  }
+
+  List<UnreadChatSummaryItem> _mergeLocalItems(
+    Iterable<List<UnreadChatSummaryItem>> groups, {
+    required int limit,
+  }) {
+    final sources = groups.where((group) => group.isNotEmpty).toList();
+    final result = <UnreadChatSummaryItem>[];
+    final seen = <String>{};
+
+    void add(UnreadChatSummaryItem item) {
+      if (result.length >= limit) return;
+      final key = item.text.trim().toLowerCase().replaceAll(
+        RegExp(r'\s+'),
+        ' ',
+      );
+      if (key.isEmpty || !seen.add(key)) return;
+      result.add(item);
+    }
+
+    // Preserve broad time coverage before filling the remaining slots with
+    // the newest chunk details.
+    for (final group in sources) {
+      add(group.first);
+    }
+    for (final group in sources) {
+      for (final item in group.skip(1)) {
+        add(item);
+      }
+    }
+    return result;
   }
 
   Future<_GroundedSummary> _completeGrounded(

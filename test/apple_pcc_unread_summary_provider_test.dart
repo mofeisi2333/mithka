@@ -163,4 +163,29 @@ void main() {
     );
     expect(attempts, 1);
   });
+
+  test('does not duplicate a timed-out native PCC request', () async {
+    var attempts = 0;
+    final provider = ApplePccUnreadSummaryProvider(
+      api: ApplePccApi(
+        invokeMethod: (_, _) async {
+          attempts++;
+          throw PlatformException(code: 'pcc_timeout', message: 'Timed out');
+        },
+      ),
+      transientRetryDelays: const [Duration.zero, Duration.zero],
+    );
+
+    await expectLater(
+      provider.complete(_request()),
+      throwsA(
+        isA<PlatformException>().having(
+          (error) => error.code,
+          'code',
+          'pcc_timeout',
+        ),
+      ),
+    );
+    expect(attempts, 1);
+  });
 }

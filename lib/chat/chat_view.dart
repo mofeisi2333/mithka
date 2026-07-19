@@ -124,8 +124,10 @@ class _UnreadSummarySession {
   final UnreadChatSummaryService service;
   final VoidCallback? onDispose;
 
-  Future<UnreadChatSummary> summarize(UnreadChatRangeSnapshot snapshot) =>
-      service.summarize(snapshot);
+  Future<UnreadChatSummary> summarize(
+    UnreadChatRangeSnapshot snapshot, {
+    UnreadChatSummaryProgressCallback? onProgress,
+  }) => service.summarize(snapshot, onProgress: onProgress);
 
   void dispose() => onDispose?.call();
 }
@@ -4893,7 +4895,8 @@ class _ChatViewState extends State<ChatView> {
         MaterialPageRoute<int>(
           builder: (_) => UnreadChatSummaryView(
             snapshot: snapshot,
-            summarize: () => session.summarize(snapshot),
+            summarize: (onProgress) =>
+                session.summarize(snapshot, onProgress: onProgress),
           ),
         ),
       );
@@ -4927,12 +4930,14 @@ class _ChatViewState extends State<ChatView> {
         return _UnreadSummarySession(
           UnreadChatSummaryService(
             historyLoader: loader,
-            maxChunks: 3,
+            maxChunkMessages: 520,
+            maxChunks: 2,
             maxChunkTokenEstimate: unreadSummaryChunkTokenBudget(
               pccContextSize,
             ),
+            mergeChunkSummariesLocally: true,
             provider: ApplePccUnreadSummaryProvider(
-              api: ApplePccApi(),
+              api: ApplePccApi(summaryTimeout: const Duration(seconds: 75)),
               reasoningLevel: ApplePccReasoningLevel.light,
             ),
           ),
@@ -4950,7 +4955,9 @@ class _ChatViewState extends State<ChatView> {
           UnreadChatSummaryService(
             historyLoader: loader,
             provider: provider,
+            maxChunks: 3,
             maxConcurrentRequests: 3,
+            mergeChunkSummariesLocally: true,
           ),
           onDispose: provider.close,
         );

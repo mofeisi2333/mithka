@@ -131,6 +131,7 @@ class ApplePccApi {
   final ApplePccMethodInvoker _invokeMethod;
   final Duration timeout;
   final Duration summaryTimeout;
+  static var _requestSerial = 0;
 
   Future<ApplePccCapabilities> capabilities() async {
     try {
@@ -169,7 +170,10 @@ class ApplePccApi {
       );
     }
 
+    final requestId =
+        '${DateTime.now().microsecondsSinceEpoch}-${_requestSerial++}';
     final arguments = <String, Object>{
+      'requestId': requestId,
       'prompt': normalizedPrompt,
       if (instructions.trim().isNotEmpty) 'instructions': instructions.trim(),
       'reasoningLevel': reasoningLevel.name,
@@ -177,10 +181,13 @@ class ApplePccApi {
     };
     final value = await _invokeMethod('summarize', arguments).timeout(
       summaryTimeout,
-      onTimeout: () => throw PlatformException(
-        code: 'pcc_timeout',
-        message: 'Private Cloud Compute summarization timed out.',
-      ),
+      onTimeout: () {
+        unawaited(_cancelSummary(requestId));
+        throw PlatformException(
+          code: 'pcc_timeout',
+          message: 'Private Cloud Compute summarization timed out.',
+        );
+      },
     );
     if (value is! Map) {
       throw PlatformException(
@@ -208,4 +215,12 @@ class ApplePccApi {
     String method,
     Object? arguments,
   ) => _channel.invokeMethod<Object?>(method, arguments);
+
+  Future<void> _cancelSummary(String requestId) async {
+    try {
+      await _invokeMethod('cancelSummary', {'requestId': requestId});
+    } catch (_) {
+      // The timeout remains the useful error if cancellation is unavailable.
+    }
+  }
 }

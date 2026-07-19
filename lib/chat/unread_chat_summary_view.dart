@@ -8,8 +8,12 @@ import '../l10n/app_localizations.dart';
 import '../settings/ai_settings_view.dart';
 import '../theme/app_theme.dart';
 import 'unread_chat_summary_models.dart';
+import 'unread_chat_summary_service.dart';
 
-typedef UnreadChatSummaryOperation = Future<UnreadChatSummary> Function();
+typedef UnreadChatSummaryOperation =
+    Future<UnreadChatSummary> Function(
+      UnreadChatSummaryProgressCallback onProgress,
+    );
 
 class UnreadChatSummaryView extends StatefulWidget {
   const UnreadChatSummaryView({
@@ -29,6 +33,9 @@ class _UnreadChatSummaryViewState extends State<UnreadChatSummaryView> {
   UnreadChatSummary? _summary;
   Object? _error;
   bool _loading = true;
+  UnreadChatSummaryProgress _progress = const UnreadChatSummaryProgress(
+    stage: UnreadChatSummaryProgressStage.loadingMessages,
+  );
 
   @override
   void initState() {
@@ -41,10 +48,13 @@ class _UnreadChatSummaryViewState extends State<UnreadChatSummaryView> {
       setState(() {
         _loading = true;
         _error = null;
+        _progress = const UnreadChatSummaryProgress(
+          stage: UnreadChatSummaryProgressStage.loadingMessages,
+        );
       });
     }
     try {
-      final summary = await widget.summarize();
+      final summary = await widget.summarize(_reportProgress);
       if (!mounted) return;
       setState(() {
         _summary = summary;
@@ -57,6 +67,11 @@ class _UnreadChatSummaryViewState extends State<UnreadChatSummaryView> {
         _loading = false;
       });
     }
+  }
+
+  void _reportProgress(UnreadChatSummaryProgress progress) {
+    if (!mounted || !_loading) return;
+    setState(() => _progress = progress);
   }
 
   @override
@@ -116,7 +131,7 @@ class _UnreadChatSummaryViewState extends State<UnreadChatSummaryView> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              AppStringKeys.aiSummaryThinking.l10n(context),
+              _progressLabel(context),
               style: TextStyle(
                 color: c.textPrimary,
                 fontSize: 18,
@@ -144,6 +159,25 @@ class _UnreadChatSummaryViewState extends State<UnreadChatSummaryView> {
         ),
       ],
     );
+  }
+
+  String _progressLabel(BuildContext context) {
+    switch (_progress.stage) {
+      case UnreadChatSummaryProgressStage.loadingMessages:
+        if (_progress.messageCount <= 0) {
+          return AppStringKeys.aiSummaryReading.l10n(context);
+        }
+        return AppStrings.t(AppStringKeys.aiSummaryReadingCount, {
+          'value1': _progress.messageCount,
+        });
+      case UnreadChatSummaryProgressStage.summarizingChunks:
+        return AppStrings.t(AppStringKeys.aiSummaryChunkProgress, {
+          'value1': _progress.completed,
+          'value2': _progress.total,
+        });
+      case UnreadChatSummaryProgressStage.assemblingSummary:
+        return AppStringKeys.aiSummaryAssembling.l10n(context);
+    }
   }
 
   Widget _errorContent(BuildContext context) {

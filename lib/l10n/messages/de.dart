@@ -147,7 +147,10 @@ const deMessages = <String, String>{
       "Der Text ungelesener Nachrichten wird an diesen Endpunkt gesendet. Dein API-Schlüssel bleibt im sicheren Speicher dieses Geräts.",
   'aiSettingsTitle': "KI-Einstellungen",
   'aiSummaryActions': "Aufgaben",
+  'aiSummaryAssembling': "Zusammenfassung wird zusammengestellt…",
   'aiSummaryButton': "Ungelesene Nachrichten zusammenfassen",
+  'aiSummaryChunkProgress':
+      "Abschnitte werden parallel zusammengefasst · {value1}/{value2}",
   'aiSummaryDecisions': "Entscheidungen",
   'aiSummaryFailed': "Diese Nachrichten konnten nicht zusammengefasst werden.",
   'aiSummaryFoundCount': "{value1} ungelesene Nachrichten gefunden",
@@ -163,6 +166,9 @@ const deMessages = <String, String>{
   'aiSummaryOverview': "Übersicht",
   'aiSummaryPrivate': "Nur für dich sichtbar",
   'aiSummaryQuestions': "Offene Fragen",
+  'aiSummaryReading': "Ungelesene Nachrichten werden geladen…",
+  'aiSummaryReadingCount':
+      "Ungelesene Nachrichten werden geladen… {value1} gefunden",
   'aiSummaryRetry': "Erneut versuchen",
   'aiSummaryRunningCount':
       "{value1} ungelesene Nachrichten werden zusammengefasst",

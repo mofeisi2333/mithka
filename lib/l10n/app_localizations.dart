@@ -268,7 +268,9 @@ abstract final class AppStringKeys {
   static const aiServerPrivacy = 'aiServerPrivacy';
   static const aiSettingsTitle = 'aiSettingsTitle';
   static const aiSummaryActions = 'aiSummaryActions';
+  static const aiSummaryAssembling = 'aiSummaryAssembling';
   static const aiSummaryButton = 'aiSummaryButton';
+  static const aiSummaryChunkProgress = 'aiSummaryChunkProgress';
   static const aiSummaryDecisions = 'aiSummaryDecisions';
   static const aiSummaryFailed = 'aiSummaryFailed';
   static const aiSummaryFoundCount = 'aiSummaryFoundCount';
@@ -281,6 +283,8 @@ abstract final class AppStringKeys {
   static const aiSummaryOverview = 'aiSummaryOverview';
   static const aiSummaryPrivate = 'aiSummaryPrivate';
   static const aiSummaryQuestions = 'aiSummaryQuestions';
+  static const aiSummaryReading = 'aiSummaryReading';
+  static const aiSummaryReadingCount = 'aiSummaryReadingCount';
   static const aiSummaryRetry = 'aiSummaryRetry';
   static const aiSummaryRunningCount = 'aiSummaryRunningCount';
   static const aiSummaryThinking = 'aiSummaryThinking';

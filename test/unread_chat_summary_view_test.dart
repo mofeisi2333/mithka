@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mithka/chat/unread_chat_summary_models.dart';
+import 'package:mithka/chat/unread_chat_summary_service.dart';
 import 'package:mithka/chat/unread_chat_summary_view.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:mithka/theme/theme_controller.dart';
@@ -18,6 +19,7 @@ void main() {
     final theme = ThemeController(await SharedPreferences.getInstance());
     addTearDown(theme.dispose);
     final completion = Completer<UnreadChatSummary>();
+    late UnreadChatSummaryProgressCallback reportProgress;
     final snapshot = UnreadChatRangeSnapshot(
       chatId: 1,
       accountSlot: 0,
@@ -40,7 +42,10 @@ void main() {
           supportedLocales: AppLocalizations.supportedLocales,
           home: UnreadChatSummaryView(
             snapshot: snapshot,
-            summarize: () => completion.future,
+            summarize: (onProgress) {
+              reportProgress = onProgress;
+              return completion.future;
+            },
           ),
         ),
       ),
@@ -48,8 +53,39 @@ void main() {
     await tester.pump();
 
     expect(find.text('Summarizing 1972 unread messages'), findsOneWidget);
-    expect(find.text('Thinking…'), findsOneWidget);
+    expect(find.text('Reading unread messages…'), findsOneWidget);
     expect(find.text('Found 1972 unread messages'), findsOneWidget);
+
+    reportProgress(
+      const UnreadChatSummaryProgress(
+        stage: UnreadChatSummaryProgressStage.loadingMessages,
+        messageCount: 300,
+      ),
+    );
+    await tester.pump();
+    expect(find.text('Reading unread messages… 300 found'), findsOneWidget);
+
+    reportProgress(
+      const UnreadChatSummaryProgress(
+        stage: UnreadChatSummaryProgressStage.summarizingChunks,
+        completed: 1,
+        total: 2,
+        messageCount: 900,
+      ),
+    );
+    await tester.pump();
+    expect(find.text('Summarizing chunks in parallel · 1/2'), findsOneWidget);
+
+    reportProgress(
+      const UnreadChatSummaryProgress(
+        stage: UnreadChatSummaryProgressStage.assemblingSummary,
+        completed: 2,
+        total: 2,
+        messageCount: 900,
+      ),
+    );
+    await tester.pump();
+    expect(find.text('Assembling the summary…'), findsOneWidget);
 
     completion.complete(
       UnreadChatSummary(
@@ -85,6 +121,6 @@ void main() {
 
     expect(find.text('这是未读消息的中文总结。'), findsOneWidget);
     expect(find.text('需要确认发布时间。'), findsOneWidget);
-    expect(find.text('Thinking…'), findsNothing);
+    expect(find.text('Assembling the summary…'), findsNothing);
   });
 }
