@@ -3040,9 +3040,16 @@ class ChatViewModel extends ChangeNotifier {
   // MARK: - History
 
   Future<void> _loadInitialHistory({required bool openAtLatest}) async {
-    if (!openAtLatest && lastReadInboxId > 0) {
+    if (shouldLoadInitialHistoryAroundLastRead(
+      openAtLatest: openAtLatest,
+      lastReadInboxId: lastReadInboxId,
+      unreadCount: unreadCount,
+    )) {
       final loaded = await _loadInitialAroundLastRead();
-      if (loaded) return;
+      // A chat-list preview hit can satisfy around-last-read with one local
+      // bubble. Fall through to latest hydration so the open path does not
+      // settle until the user scrolls.
+      if (loaded && !isThinInitialHistoryWindow(messages.length)) return;
     }
     await _loadInitialLatestHistory();
   }
@@ -3053,6 +3060,13 @@ class ChatViewModel extends ChangeNotifier {
       onlyLocal: true,
     );
     if (loadedLocal) {
+      if (isThinInitialHistoryWindow(messages.length)) {
+        return loadAroundMessage(
+          lastReadInboxId,
+          scrollToTarget: false,
+          replaceCurrentWindow: false,
+        );
+      }
       unawaited(
         loadAroundMessage(
           lastReadInboxId,
@@ -3066,8 +3080,13 @@ class ChatViewModel extends ChangeNotifier {
   }
 
   Future<void> _loadInitialLatestHistory() async {
+    anchoredHistory = false;
     final localLoaded = await _fetchHistory(0, 0, 40, onlyLocal: true);
     if (!localLoaded) {
+      await _fetchHistory(0, 0, 40);
+    } else if (isThinInitialHistoryWindow(messages.length)) {
+      // Await the remote page for preview-sized local caches. Fire-and-forget
+      // left the UI on a single bubble until a scroll triggered loadOlder.
       await _fetchHistory(0, 0, 40);
     } else {
       unawaited(_fetchHistory(0, 0, 40));
@@ -3076,8 +3095,8 @@ class ChatViewModel extends ChangeNotifier {
     // Render the first page immediately. Older unread-boundary paging used to
     // happen here and could block a large media channel for seconds on cold
     // cache before any UI appeared.
-    if (messages.length < 12) {
-      unawaited(_fetchHistory(_allMessages.first.id, 0, 40));
+    if (isThinInitialHistoryWindow(messages.length)) {
+      await _fetchHistory(_allMessages.first.id, 0, 40);
     }
   }
 

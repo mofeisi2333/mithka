@@ -827,6 +827,7 @@ class _ChatViewState extends State<ChatView> {
   bool _revealLoadedOlderPage = false;
   bool _loadedOlderRevealPending = false;
   bool _loadedOlderRevealScheduled = false;
+  bool _parkedShortTranscriptRepairScheduled = false;
   bool _wasLoadingOlder = false;
   bool _maintainSessionScrollAnchor = false;
   ChatThemeStyle? _resolvedChatThemeStyle;
@@ -890,15 +891,49 @@ class _ChatViewState extends State<ChatView> {
     _sessionScrollSnapshot = widget.initialMessageId == null
         ? _sessionScrollSnapshots[widget.chatId]
         : null;
+    final hasCachedLatestTranscript =
+        _sessionRenderState != null &&
+        !_sessionRenderState!.anchoredHistory &&
+        _sessionRenderState!.messages.isNotEmpty;
+    final openAtBottom = shouldOpenChatAtBottom(
+      hasExplicitTarget: widget.initialMessageId != null,
+      openAtLatest: _openAtLatest,
+      hasSnapshot: _sessionScrollSnapshot != null,
+      snapshotWasAtBottom: _sessionScrollSnapshot?.wasAtLoadedBottom ?? false,
+      hasCachedLatestTranscript: hasCachedLatestTranscript,
+    );
     final savedPivotMessageId = _sessionScrollSnapshot?.pivotMessageId;
-    if (savedPivotMessageId != null) {
-      _transcriptPivot = TranscriptPivot(savedPivotMessageId);
+    final hasSessionTranscript =
+        _sessionRenderState?.messages.isNotEmpty ?? false;
+    if (shouldRestoreTranscriptPivot(
+      pivotMessageId: savedPivotMessageId,
+      hasSessionTranscript: hasSessionTranscript,
+      newestMessageId: _latestServerMessage(
+        _sessionRenderState?.messages ?? const [],
+      )?.id,
+      openAtBottom: openAtBottom,
+    )) {
+      _transcriptPivot = TranscriptPivot(savedPivotMessageId!);
       _transcriptPivotFrozen = savedPivotMessageId != _pendingTranscriptOrderId;
+    } else if (savedPivotMessageId != null && !hasSessionTranscript) {
+      // Drop the orphan pivot from the in-memory snapshot so a later reopen
+      // with a fresh transcript cache does not reintroduce the thin after-arm.
+      final snapshot = _sessionScrollSnapshots[widget.chatId];
+      if (snapshot != null && snapshot.pivotMessageId != null) {
+        _sessionScrollSnapshots[widget.chatId] = _ChatScrollSnapshot(
+          pixels: snapshot.pixels,
+          wasAtLoadedBottom: snapshot.wasAtLoadedBottom,
+          pivotMessageId: null,
+          anchorMessageId: snapshot.anchorMessageId,
+          anchorViewportOffset: snapshot.anchorViewportOffset,
+        );
+      }
     }
     final initialScrollPlan = chatInitialScrollPlan(
       hasCachedTranscript: _sessionRenderState?.messages.isNotEmpty ?? false,
       savedPixels: _sessionScrollSnapshot?.pixels,
       savedAtBottom: _sessionScrollSnapshot?.wasAtLoadedBottom ?? false,
+      openAtBottom: openAtBottom,
     );
     _maintainRestoredBottom = initialScrollPlan.correctToBottomAfterLayout;
     final sessionScrollSnapshot = _sessionScrollSnapshot;
@@ -945,6 +980,12 @@ class _ChatViewState extends State<ChatView> {
       if (initialScrollPlan.correctToBottomAfterLayout) {
         _scheduleRestoredBottomCorrection();
       }
+      _scheduleShortTranscriptFill();
+      _scheduleParkedShortTranscriptRepair();
+    } else if (widget.seedMessage != null) {
+      _lastCount = _vm.messages.length;
+      _lastNewestMessageId = _latestServerMessage(_vm.messages)?.id;
+      _lastOldestMessageId = _oldestServerMessage(_vm.messages)?.id;
     }
     _vm.addListener(_onModel);
     _setScrollTarget(widget.initialMessageId);
@@ -1125,6 +1166,7 @@ class _ChatViewState extends State<ChatView> {
     _transcriptPointersDown.remove(event.pointer);
     _scheduleLoadedOlderReveal();
     _scheduleShortFirstContactReveal();
+    _scheduleShortTranscriptFill();
     _scheduleSessionScrollAnchorMaintenance();
     _scheduleRestoredBottomCorrection();
   }
@@ -1136,7 +1178,14 @@ class _ChatViewState extends State<ChatView> {
     _showingFullyVisibleFirstContactHistory = false;
     _maintainSessionScrollAnchor = false;
     _maintainRestoredBottom = false;
-    _transcriptPivotFrozen = true;
+    // Do not freeze a thin after-center arm: that parks older history above the
+    // center while the open animation / first touch is still settling.
+    if (shouldFreezeTranscriptPivot(
+      latestArmIsShort: _isTranscriptShort(),
+      canLoadOlder: _vm.canLoadOlder,
+    )) {
+      _transcriptPivotFrozen = true;
+    }
   }
 
   void _stopActiveTranscriptScroll() {
@@ -1626,6 +1675,25 @@ class _ChatViewState extends State<ChatView> {
       historyFillInFlight: _isFillingShortTranscript || _loadingOlderFromScroll,
       revealRequested: _revealLoadedOlderPage,
     );
+    final followingLatest =
+        !_autoScrollPolicy.preservesViewport && !_maintainSessionScrollAnchor;
+    final hasMessageOlderThanPivot = _transcriptPivot != null &&
+        _vm.messages.any(
+          (message) =>
+              _transcriptOrderId(message) < _transcriptPivot!.cutoffMessageId,
+        );
+    final expandedInitialWindow = shouldRebaseForExpandedInitialWindow(
+      transcriptChanged: !identical(_transcriptCacheMessages, _vm.messages),
+      latestArmIsShort: _isTranscriptShort(),
+      hasMessageOlderThanPivot: hasMessageOlderThanPivot,
+      followingLatest: followingLatest,
+    );
+    final parkedShortArm = shouldRebaseParkedShortTranscriptPivot(
+      pivotCutoffMessageId: _transcriptPivot?.cutoffMessageId,
+      latestArmIsShort: _isTranscriptShort(),
+      hasMessageOlderThanPivot: hasMessageOlderThanPivot,
+      followingLatest: followingLatest,
+    );
     final wasPinnedToLoadedBottom =
         _didInitialScroll &&
         !_hasTranscriptPointerDown &&
@@ -1671,15 +1739,21 @@ class _ChatViewState extends State<ChatView> {
     )) {
       _resetTranscriptPivot();
     }
-    if (hydratedShortTranscript ||
+    final shouldResetParkedPivot =
+        parkedShortArm ||
+        expandedInitialWindow ||
+        hydratedShortTranscript ||
         (!_transcriptPivotFrozen &&
             _vm.initialLoaded &&
-            !identical(_transcriptCacheMessages, _vm.messages))) {
+            !identical(_transcriptCacheMessages, _vm.messages));
+    if (shouldResetParkedPivot) {
       // Cold local pages may be followed by a larger remote hydration. Until
       // the latest arm fills a viewport (or the user scrolls), let that fuller
-      // initial window establish the fixed cutoff.
+      // initial window establish the fixed cutoff. Also unpark a frozen newest
+      // pivot that already has older messages sitting in before-center.
       _resetTranscriptPivot();
     }
+    final rebasedParkedShortArm = parkedShortArm || expandedInitialWindow;
     final liveIncomingMessageIds = _vm.consumeLiveIncomingMessageIds();
     if (_vm.messages.length != _lastCount) {
       final wasNearBottom = _isNearBottom(72);
@@ -1768,13 +1842,15 @@ class _ChatViewState extends State<ChatView> {
         if (mounted) setState(() => _bannerDismissed = true);
       });
     }
-    if (wasPinnedToLoadedBottom && !_bottomScrollScheduled) {
+    if ((wasPinnedToLoadedBottom || rebasedParkedShortArm) &&
+        !_bottomScrollScheduled) {
       _scheduleScrollToBottom(animated: false);
     }
     setState(() {});
     _cacheCurrentTranscript();
     _scheduleSessionScrollAnchorMaintenance();
     _scheduleRestoredBottomCorrection();
+    _scheduleParkedShortTranscriptRepair();
   }
 
   void _setScrollTarget(int? messageId) {
@@ -1845,6 +1921,11 @@ class _ChatViewState extends State<ChatView> {
       await _restoreSessionScrollPosition();
     } else {
       await _positionInitialTranscript();
+    }
+    if (!mounted) return;
+    if (_repairParkedShortTranscriptPivot()) {
+      await WidgetsBinding.instance.endOfFrame;
+      if (mounted && _scroll.hasClients) _scrollToBottom();
     }
     if (!mounted) return;
     setState(() => _initialTranscriptReady = true);
@@ -2191,19 +2272,80 @@ class _ChatViewState extends State<ChatView> {
     });
   }
 
+  void _scheduleParkedShortTranscriptRepair() {
+    if (_parkedShortTranscriptRepairScheduled) return;
+    _parkedShortTranscriptRepairScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _parkedShortTranscriptRepairScheduled = false;
+      if (!mounted) return;
+      if (!_repairParkedShortTranscriptPivot()) return;
+      setState(() {});
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _scroll.hasClients) _scrollToBottom();
+      });
+    });
+  }
+
+  /// Unparks a frozen newest (or newest-like) pivot when older messages are
+  /// already in the model but only the after-center arm is visible.
+  bool _repairParkedShortTranscriptPivot() {
+    if (!mounted ||
+        (_vm.anchoredHistory && !_isTranscriptShort()) ||
+        _maintainSessionScrollAnchor ||
+        _autoScrollPolicy.preservesViewport ||
+        _scrollTargetId != null) {
+      return false;
+    }
+    final pivot = _transcriptPivot;
+    if (pivot == null) return false;
+    final hasOlder = _vm.messages.any(
+      (message) => _transcriptOrderId(message) < pivot.cutoffMessageId,
+    );
+    if (!shouldRebaseParkedShortTranscriptPivot(
+      pivotCutoffMessageId: pivot.cutoffMessageId,
+      latestArmIsShort: _isTranscriptShort(),
+      hasMessageOlderThanPivot: hasOlder,
+      followingLatest: true,
+    )) {
+      return false;
+    }
+    _resetTranscriptPivot();
+    _transcriptCache = null;
+    _transcriptCacheMessages = null;
+    return true;
+  }
+
   Future<void> _fillShortTranscript() async {
+    if (!mounted || !_scroll.hasClients || !_vm.initialLoaded) return;
+    // Repair does not need another network page: history may already sit in
+    // before-center under a frozen pivot.
+    if (_repairParkedShortTranscriptPivot()) {
+      setState(() {});
+      await WidgetsBinding.instance.endOfFrame;
+      if (mounted && _scroll.hasClients) _scrollToBottom();
+    }
     if (!mounted ||
         !_scroll.hasClients ||
-        !_vm.initialLoaded ||
-        _vm.anchoredHistory ||
+        (_vm.anchoredHistory && !_isTranscriptShort()) ||
         _maintainSessionScrollAnchor ||
-        _transcriptPivotFrozen ||
         _autoScrollPolicy.preservesViewport ||
         _scrollTargetId != null ||
         !_vm.canLoadOlder) {
       return;
     }
     if (!_isTranscriptShort()) return;
+    // A restored or touch-claimed freeze on a thin arm must not block fill;
+    // otherwise older pages stay in the before-center sliver forever.
+    if (_transcriptPivotFrozen) {
+      if (!shouldFreezeTranscriptPivot(
+        latestArmIsShort: true,
+        canLoadOlder: _vm.canLoadOlder,
+      )) {
+        _transcriptPivotFrozen = false;
+      } else {
+        return;
+      }
+    }
 
     final generation = ++_shortTranscriptFillGeneration;
     _isFillingShortTranscript = true;
@@ -2227,6 +2369,14 @@ class _ChatViewState extends State<ChatView> {
       _isFillingShortTranscript = false;
     }
     if (!_vm.hasOlderHistory) _olderHistoryExhaustedHint = true;
+    if (_repairParkedShortTranscriptPivot()) {
+      setState(() {});
+      await WidgetsBinding.instance.endOfFrame;
+      if (mounted && _scroll.hasClients) {
+        _scrollToBottom();
+        return;
+      }
+    }
     if (_canContinueShortTranscriptFill(generation)) {
       if (loadedAny) _positionAfterShortFill();
       // An empty older page flips canLoadOlder without a model notification.
@@ -2243,11 +2393,11 @@ class _ChatViewState extends State<ChatView> {
         generation == _shortTranscriptFillGeneration &&
         _scroll.hasClients &&
         !_hasTranscriptPointerDown &&
-        !_vm.anchoredHistory &&
+        !(_vm.anchoredHistory && !_isTranscriptShort()) &&
         !_maintainSessionScrollAnchor &&
-        !_transcriptPivotFrozen &&
         !_autoScrollPolicy.preservesViewport &&
-        _scrollTargetId == null;
+        _scrollTargetId == null &&
+        (!_transcriptPivotFrozen || _isTranscriptShort());
   }
 
   bool _isTranscriptShort() {
@@ -2255,7 +2405,27 @@ class _ChatViewState extends State<ChatView> {
     // With a center sliver, only the after-center arm defines the latest edge.
     // A large negative min extent says nothing about whether that arm fills
     // the viewport.
-    return _scroll.position.maxScrollExtent <= 24;
+    return isLatestTranscriptArmShort(
+      maxScrollExtent: _scroll.position.maxScrollExtent,
+      afterCenterEntryCount: _latestArmEntryCount(),
+    );
+  }
+
+  int _latestArmEntryCount() {
+    final entries = _transcriptCache;
+    if (entries == null || entries.isEmpty) {
+      return _vm.messages.isEmpty ? 0 : _vm.messages.length;
+    }
+    final pivot = _transcriptPivot;
+    if (pivot == null) return entries.length;
+    var count = 0;
+    for (final entry in entries) {
+      final belongsToLatestArm = entry.messages.any(
+        (message) => _transcriptOrderId(message) >= pivot.cutoffMessageId,
+      );
+      if (belongsToLatestArm) count++;
+    }
+    return count;
   }
 
   void _positionAfterShortFill() {
@@ -6090,7 +6260,10 @@ class _ChatViewState extends State<ChatView> {
         _scheduleTranscriptPivotFreeze();
         return;
       }
-      if (!_isTranscriptShort() || !_vm.canLoadOlder) {
+      if (shouldFreezeTranscriptPivot(
+        latestArmIsShort: _isTranscriptShort(),
+        canLoadOlder: _vm.canLoadOlder,
+      )) {
         _transcriptPivotFrozen = true;
       }
     });
