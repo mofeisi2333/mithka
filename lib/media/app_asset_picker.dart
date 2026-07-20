@@ -13,6 +13,7 @@ enum AppAssetPickerType { image, video, imageAndVideo }
 class AppPickedAsset {
   const AppPickedAsset({
     required this.file,
+    this.originalFile,
     this.thumbnailBytes,
     this.width,
     this.height,
@@ -21,6 +22,7 @@ class AppPickedAsset {
   });
 
   final XFile file;
+  final XFile? originalFile;
   final Uint8List? thumbnailBytes;
   final int? width;
   final int? height;
@@ -74,39 +76,92 @@ abstract final class AppAssetPicker {
     if (maxAssets <= 0) {
       return const AppAssetPickerSelection(assets: [], failedCount: 0);
     }
-    final assets = await AssetPicker.pickAssets(
-      context,
-      pickerConfig: buildConfig(
+    try {
+      final assets = await AssetPicker.pickAssets(
         context,
-        type: type,
-        maxAssets: maxAssets,
-        maxVideoDuration: maxVideoDuration,
-      ),
-    );
-    if (assets == null || assets.isEmpty) {
-      return const AppAssetPickerSelection(assets: [], failedCount: 0);
-    }
+        pickerConfig: buildConfig(
+          context,
+          type: type,
+          maxAssets: maxAssets,
+          maxVideoDuration: maxVideoDuration,
+        ),
+      );
+      if (assets == null || assets.isEmpty) {
+        return const AppAssetPickerSelection(assets: [], failedCount: 0);
+      }
 
-    final resolved = <AppPickedAsset>[];
-    var failedCount = 0;
-    for (final asset in assets) {
-      try {
-        resolved.add(
-          await _materialize(
-            asset,
-            preferLivePhotoVideo: preferLivePhotoVideo,
-            preserveOriginalFiles: preserveOriginalFiles,
-            photoMaxDimension: photoMaxDimension,
+      final resolved = <AppPickedAsset>[];
+      var failedCount = 0;
+      for (final asset in assets) {
+        try {
+          resolved.add(
+            await _materialize(
+              asset,
+              preferLivePhotoVideo: preferLivePhotoVideo,
+              preserveOriginalFiles: preserveOriginalFiles,
+              photoMaxDimension: photoMaxDimension,
+            ),
+          );
+        } catch (_) {
+          failedCount++;
+        }
+      }
+      return AppAssetPickerSelection(
+        assets: List.unmodifiable(resolved),
+        failedCount: failedCount,
+      );
+    } on StateError {
+      // Permission denied — request it and retry.
+      final requestType = switch (type) {
+        AppAssetPickerType.image => RequestType.image,
+        AppAssetPickerType.video => RequestType.video,
+        AppAssetPickerType.imageAndVideo => RequestType.common,
+      };
+      final state = await PhotoManager.requestPermissionExtend(
+        requestOption: PermissionRequestOption(
+          androidPermission: AndroidPermission(
+            type: requestType,
+            mediaLocation: false,
+          ),
+        ),
+      );
+      if (state == PermissionState.authorized ||
+          state == PermissionState.limited) {
+        final assets = await AssetPicker.pickAssets(
+          context,
+          pickerConfig: buildConfig(
+            context,
+            type: type,
+            maxAssets: maxAssets,
+            maxVideoDuration: maxVideoDuration,
           ),
         );
-      } catch (_) {
-        failedCount++;
+        if (assets == null || assets.isEmpty) {
+          return const AppAssetPickerSelection(assets: [], failedCount: 0);
+        }
+        final resolved = <AppPickedAsset>[];
+        var failedCount = 0;
+        for (final asset in assets) {
+          try {
+            resolved.add(
+              await _materialize(
+                asset,
+                preferLivePhotoVideo: preferLivePhotoVideo,
+                preserveOriginalFiles: preserveOriginalFiles,
+                photoMaxDimension: photoMaxDimension,
+              ),
+            );
+          } catch (_) {
+            failedCount++;
+          }
+        }
+        return AppAssetPickerSelection(
+          assets: List.unmodifiable(resolved),
+          failedCount: failedCount,
+        );
       }
+      return const AppAssetPickerSelection(assets: [], failedCount: 0);
     }
-    return AppAssetPickerSelection(
-      assets: List.unmodifiable(resolved),
-      failedCount: failedCount,
-    );
   }
 
   static AssetPickerConfig buildConfig(
@@ -212,12 +267,13 @@ abstract final class AppAssetPicker {
         lowerTitle.endsWith('.gif') ||
         lowerTitle.endsWith('.apng') ||
         lowerTitle.endsWith('.png');
+    final mediaFileUsesOriginal =
+        preserveOriginalFiles ||
+        asset.type == AssetType.video ||
+        livePhotoAsVideo ||
+        preserveOriginalAnimatedImage;
     final file = await asset.loadFile(
-      isOrigin:
-          preserveOriginalFiles ||
-          asset.type == AssetType.video ||
-          livePhotoAsVideo ||
-          preserveOriginalAnimatedImage,
+      isOrigin: mediaFileUsesOriginal,
       withSubtype: livePhotoAsVideo,
       darwinFileType: livePhotoAsVideo ? PMDarwinAVFileType.mp4 : null,
     );
@@ -257,12 +313,12 @@ abstract final class AppAssetPicker {
               : _fileExtension(file.path, mimeType, asset.type));
     final directory = await getTemporaryDirectory();
     final timestamp = DateTime.now().microsecondsSinceEpoch;
-    final targetDirectory = preserveOriginalFiles
+    final targetDirectory = mediaFileUsesOriginal
         ? await Directory(
             '${directory.path}/mithka-picker-$timestamp-${asset.id.hashCode}',
           ).create(recursive: true)
         : directory;
-    final durableName = preserveOriginalFiles
+    final durableName = mediaFileUsesOriginal
         ? pickedAssetDocumentFileName(
             title: asset.title,
             sourcePath: file.path,
@@ -275,6 +331,40 @@ abstract final class AppAssetPicker {
     } else {
       await durableFile.writeAsBytes(sendBytes, flush: true);
     }
+    XFile originalPickedFile;
+    if (mediaFileUsesOriginal) {
+      originalPickedFile = XFile(
+        durableFile.path,
+        mimeType: mimeType,
+        name: durableName,
+      );
+    } else {
+      final originalSource = await asset.loadFile(
+        withSubtype: livePhotoAsVideo,
+        darwinFileType: livePhotoAsVideo ? PMDarwinAVFileType.mp4 : null,
+      );
+      if (originalSource == null) {
+        throw StateError('Unable to read original selected asset ${asset.id}');
+      }
+      final originalExtension = livePhotoAsVideo
+          ? 'mp4'
+          : _fileExtension(originalSource.path, mimeType, asset.type);
+      final originalName = pickedAssetDocumentFileName(
+        title: asset.title,
+        sourcePath: originalSource.path,
+        fallbackExtension: originalExtension,
+      );
+      final originalDirectory = await Directory(
+        '${directory.path}/mithka-picker-original-$timestamp-${asset.id.hashCode}',
+      ).create(recursive: true);
+      final durableOriginal = File('${originalDirectory.path}/$originalName');
+      await originalSource.copy(durableOriginal.path);
+      originalPickedFile = XFile(
+        durableOriginal.path,
+        mimeType: mimeType,
+        name: originalName,
+      );
+    }
     final thumbnailBytes = await asset.thumbnailDataWithSize(
       const ThumbnailSize(512, 512),
       quality: 86,
@@ -285,6 +375,7 @@ abstract final class AppAssetPicker {
         mimeType: shouldCompressPhoto ? 'image/jpeg' : mimeType,
         name: durableName,
       ),
+      originalFile: originalPickedFile,
       thumbnailBytes: thumbnailBytes,
       width: asset.width > 0 ? asset.width : null,
       height: asset.height > 0 ? asset.height : null,

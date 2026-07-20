@@ -47,6 +47,7 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
   late final TextEditingController _captionController;
   late final List<OutgoingAttachment> _attachments;
   int _selectedIndex = 0;
+  bool _sendAsFile = false;
   MessageSendConfiguration _sendConfiguration =
       const MessageSendConfiguration();
 
@@ -65,9 +66,17 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
 
   void _submit() {
     if (_attachments.isEmpty) return;
+    final attachments = _sendAsFile
+        ? _attachments
+              .map(
+                (attachment) =>
+                    attachment.copyWith(kind: OutgoingAttachmentKind.document),
+              )
+              .toList(growable: false)
+        : List<OutgoingAttachment>.of(_attachments);
     Navigator.of(context).pop(
       MediaSendPreviewResult(
-        attachments: List.unmodifiable(_attachments),
+        attachments: List.unmodifiable(attachments),
         caption: _captionController.text,
         sendConfiguration: _sendConfiguration,
       ),
@@ -79,7 +88,7 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
       context,
       initial: _sendConfiguration,
       allowWhenOnline: widget.allowWhenOnline,
-      mediaOptions: true,
+      mediaOptions: !_sendAsFile,
       effects: widget.effects,
     );
     if (!mounted || value == null) return;
@@ -88,7 +97,7 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
   }
 
   Future<void> _editSelected() async {
-    if (_attachments.isEmpty) return;
+    if (_sendAsFile || _attachments.isEmpty) return;
     final attachment = _attachments[_selectedIndex];
     if (attachment.kind != OutgoingAttachmentKind.photo) return;
     final result = await Navigator.of(context).push<ImageEditResult>(
@@ -115,7 +124,7 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
   }
 
   Future<void> _editVideoMetadata() async {
-    if (_attachments.isEmpty) return;
+    if (_sendAsFile || _attachments.isEmpty) return;
     final attachment = _attachments[_selectedIndex];
     if (attachment.kind != OutgoingAttachmentKind.video) return;
     final startController = TextEditingController(
@@ -127,7 +136,12 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
       await video.initialize();
     } catch (_) {
       await video.dispose();
-      if (mounted) showToast(context, 'Unable to open this video.');
+      if (mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.mediaSendPreviewUnableToOpenThisVideo),
+        );
+      }
       return;
     }
     if (!mounted) {
@@ -158,7 +172,9 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Video presentation',
+                    AppStrings.t(
+                      AppStringKeys.mediaSendPreviewVideoPresentation,
+                    ),
                     style: TextStyle(
                       color: c.textPrimary,
                       fontSize: 18,
@@ -235,7 +251,9 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
                     decoration: InputDecoration(
                       filled: true,
                       fillColor: c.card,
-                      labelText: 'Start timestamp (seconds)',
+                      labelText: AppStrings.t(
+                        AppStringKeys.mediaSendPreviewStartTimestampSeconds,
+                      ),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: BorderSide.none,
@@ -247,7 +265,7 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
                     Row(
                       children: [
                         Text(
-                          'Trim video',
+                          AppStrings.t(AppStringKeys.mediaSendPreviewTrimVideo),
                           style: TextStyle(
                             color: c.textPrimary,
                             fontSize: 14,
@@ -289,9 +307,9 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
                         color: AppTheme.brand,
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: const Text(
-                        'Apply',
-                        style: TextStyle(
+                      child: Text(
+                        AppStrings.t(AppStringKeys.composerFormatApply),
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
@@ -380,6 +398,7 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
                     : _selectedMedia(c),
               ),
               if (_attachments.length > 1) _thumbnailStrip(c),
+              if (_canSendAsFile) _sendAsFileControl(c),
               _captionBar(c),
             ],
           ),
@@ -397,7 +416,9 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
           Positioned.fill(
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: attachment.kind == OutgoingAttachmentKind.photo
+              onTap:
+                  !_sendAsFile &&
+                      attachment.kind == OutgoingAttachmentKind.photo
                   ? _editSelected
                   : null,
               child: Center(
@@ -418,7 +439,7 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
               onTap: _removeSelected,
             ),
           ),
-          if (attachment.kind == OutgoingAttachmentKind.photo)
+          if (!_sendAsFile && attachment.kind == OutgoingAttachmentKind.photo)
             Positioned(
               right: 8,
               top: 8,
@@ -429,7 +450,7 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
                 onTap: _editSelected,
               ),
             ),
-          if (attachment.kind == OutgoingAttachmentKind.video)
+          if (!_sendAsFile && attachment.kind == OutgoingAttachmentKind.video)
             Positioned(
               right: 8,
               top: 8,
@@ -489,6 +510,7 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
             AppStringKeys.composerSend.l10n(context),
             AppTheme.brand,
             _submit,
+            key: const ValueKey('mediaPreviewSend'),
             onLongPress: _configureAndSubmit,
           ),
         ],
@@ -500,9 +522,11 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
     String label,
     Color color,
     VoidCallback onTap, {
+    Key? key,
     VoidCallback? onLongPress,
   }) {
     return GestureDetector(
+      key: key,
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       onLongPress: onLongPress,
@@ -570,6 +594,85 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
             ),
           );
         },
+      ),
+    );
+  }
+
+  bool get _canSendAsFile =>
+      _attachments.isNotEmpty &&
+      _attachments.every(
+        (attachment) =>
+            attachment.kind == OutgoingAttachmentKind.photo ||
+            attachment.kind == OutgoingAttachmentKind.video ||
+            attachment.kind == OutgoingAttachmentKind.animation,
+      );
+
+  Widget _sendAsFileControl(AppColors c) {
+    return GestureDetector(
+      key: const ValueKey('mediaPreviewSendAsFile'),
+      behavior: HitTestBehavior.opaque,
+      onTap: () => setState(() => _sendAsFile = !_sendAsFile),
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(12, 6, 12, 2),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: _sendAsFile
+              ? AppTheme.brand.withValues(alpha: 0.12)
+              : c.searchFill,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: _sendAsFile
+                ? AppTheme.brand.withValues(alpha: 0.42)
+                : c.divider,
+            width: 0.8,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: _sendAsFile
+                    ? AppTheme.brand
+                    : AppTheme.brand.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: AppIcon(
+                _sendAsFile ? HeroAppIcons.check : HeroAppIcons.solidFolder,
+                size: 18,
+                color: _sendAsFile ? Colors.white : AppTheme.brand,
+              ),
+            ),
+            const SizedBox(width: 11),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    AppStringKeys.composerSendAsFile.l10n(context),
+                    style: TextStyle(
+                      color: c.textPrimary,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    AppStringKeys.composerSendAsFileDescription.l10n(context),
+                    style: TextStyle(
+                      color: c.textSecondary,
+                      fontSize: 12,
+                      height: 1.2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -726,8 +829,11 @@ class _MediaRangeSelectorState extends State<_MediaRangeSelector> {
       final start = widget.values.start / widget.max;
       final end = widget.values.end / widget.max;
       return Semantics(
-        label: 'Video trim range',
-        value: '${(start * 100).round()}% to ${(end * 100).round()}%',
+        label: AppStrings.t(AppStringKeys.mediaSendPreviewVideoTrimRange),
+        value: AppStrings.t(AppStringKeys.mediaSendPreviewValue1ToValue2, {
+          'value1': (start * 100).round(),
+          'value2': (end * 100).round(),
+        }),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTapDown: (details) {

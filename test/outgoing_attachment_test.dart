@@ -69,6 +69,39 @@ void main() {
       ((document['document'] as Map)['document'] as Map)['path'],
       '/tmp/IMG_1234.HEIC',
     );
+
+    final originalDocument = attachmentInputMessageContent(
+      const OutgoingAttachment(
+        path: '/tmp/prepared.jpg',
+        originalPath: '/tmp/IMG_5678.HEIC',
+        kind: OutgoingAttachmentKind.document,
+      ),
+    );
+    expect(
+      ((originalDocument['document'] as Map)['document'] as Map)['path'],
+      '/tmp/IMG_5678.HEIC',
+    );
+
+    final animation = attachmentInputMessageContent(
+      attachment(
+        '/tmp/animation.gif',
+        OutgoingAttachmentKind.animation,
+        width: 320,
+        height: 240,
+      ),
+    );
+    expect(animation, {
+      '@type': 'inputMessageAnimation',
+      'animation': {
+        '@type': 'inputAnimation',
+        'animation': {'@type': 'inputFileLocal', 'path': '/tmp/animation.gif'},
+        'duration': 0,
+        'width': 320,
+        'height': 240,
+      },
+      'show_caption_above_media': false,
+      'has_spoiler': false,
+    });
   });
 
   test('groups compatible attachments without reordering', () {

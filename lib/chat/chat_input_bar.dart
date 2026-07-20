@@ -130,10 +130,17 @@ class ChatInputBar extends StatefulWidget {
     required this.vm,
     required this.onStartCall,
     required this.onMessageSent,
+    this.onPanelGeometryChanged,
+    this.onMediaSendTapped,
+    this.gifPreviewBuilder,
   });
   final ChatViewModel vm;
   final FutureOr<void> Function(bool isVideo) onStartCall;
   final VoidCallback onMessageSent;
+  final VoidCallback? onPanelGeometryChanged;
+  final VoidCallback? onMediaSendTapped;
+  @visibleForTesting
+  final Widget Function(GifItem item)? gifPreviewBuilder;
 
   @override
   State<ChatInputBar> createState() => _ChatInputBarState();
@@ -142,6 +149,8 @@ class ChatInputBar extends StatefulWidget {
 class _ChatInputBarState extends State<ChatInputBar> {
   static const _clipboardChannel = MethodChannel('mithka/clipboard');
   static const _gifTabId = -2;
+  static const _stickerSearchTabId = -3;
+  static const _emojiSearchTab = 'search';
   static const _imageMimeTypes = <String>[
     'image/png',
     'image/jpeg',
@@ -206,11 +215,16 @@ class _ChatInputBarState extends State<ChatInputBar> {
     _panelSearch.addListener(_queuePanelSearch);
     _focus.addListener(() {
       var needsRebuild = false;
+      var panelChanged = false;
       if (_focus.hasFocus && _panel != _Panel.none) {
         _panel = _Panel.none;
         needsRebuild = true;
+        panelChanged = true;
       }
-      if (needsRebuild && mounted) setState(() {});
+      if (needsRebuild && mounted) {
+        setState(() {});
+        if (panelChanged) widget.onPanelGeometryChanged?.call();
+      }
     });
     vm.addListener(_syncFromVm);
     EmojiStore.shared.addListener(_onStore);
@@ -455,6 +469,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
       }
       return;
     }
+    if (!_isPanelSearchSelected) return;
     _panelSearchTimer = Timer(
       const Duration(milliseconds: 320),
       () => unawaited(_runPanelSearch(query)),
@@ -462,6 +477,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   Future<void> _runPanelSearch(String query) async {
+    if (!_isPanelSearchSelected) return;
     final generation = ++_panelSearchGeneration;
     if (mounted) setState(() => _panelSearchLoading = true);
     final languageCodes = mounted
@@ -473,7 +489,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
     var gifs = const <GifItem>[];
     var gifNextOffset = '';
     try {
-      if (_panel == _Panel.emoji) {
+      if (_panel == _Panel.emoji && _emojiTab == _emojiSearchTab) {
         final results = await Future.wait([
           TdClient.shared.query({
             '@type': 'searchEmojis',
@@ -501,13 +517,10 @@ class _ChatInputBarState extends State<ChatInputBar> {
         }
         emoji = values;
         customEmoji = parseStickers(results.last.objects('stickers'));
-      } else if (_panel == _Panel.sticker) {
-        if (_stickerPack == _gifTabId) {
-          final page = await _searchGifs(query);
-          gifs = page.$1;
-          gifNextOffset = page.$2;
-        } else {
-          final result = await TdClient.shared.query({
+      } else if (_panel == _Panel.sticker &&
+          _stickerPack == _stickerSearchTabId) {
+        final results = await Future.wait<dynamic>([
+          TdClient.shared.query({
             '@type': 'searchStickers',
             'sticker_type': {'@type': 'stickerTypeRegular'},
             'emojis': '',
@@ -515,14 +528,20 @@ class _ChatInputBarState extends State<ChatInputBar> {
             'input_language_codes': languageCodes,
             'offset': 0,
             'limit': 100,
-          });
-          stickers = parseStickers(result.objects('stickers'));
-        }
+          }),
+          _searchGifs(query),
+        ]);
+        final result = results.first as Map<String, dynamic>;
+        final gifPage = results.last as (List<GifItem>, String);
+        stickers = parseStickers(result.objects('stickers'));
+        gifs = gifPage.$1;
+        gifNextOffset = gifPage.$2;
       }
     } catch (_) {}
     if (!mounted ||
         generation != _panelSearchGeneration ||
-        query != _panelSearch.text.trim()) {
+        query != _panelSearch.text.trim() ||
+        !_isPanelSearchSelected) {
       return;
     }
     setState(() {
@@ -559,28 +578,27 @@ class _ChatInputBarState extends State<ChatInputBar> {
       'query': query,
       'offset': offset,
     });
-    final items = <GifItem>[];
-    final seen = <int>{};
-    for (final result
-        in response.objects('results') ?? const <Map<String, dynamic>>[]) {
-      if (result.type != 'inlineQueryResultAnimation') continue;
-      final animation = result.obj('animation');
-      if (animation == null) continue;
-      final parsed = parseSavedAnimations([animation]);
-      if (parsed.isEmpty || !seen.add(parsed.first.id)) continue;
-      items.add(parsed.first);
-    }
-    return (items, response.str('next_offset') ?? '');
+    final page = parseInlineGifSearchPage(response);
+    return (page.items, page.nextOffset);
   }
 
   Future<void> _loadMoreGifSearch() async {
     final query = _panelSearch.text.trim();
     final offset = _gifSearchNextOffset;
-    if (query.isEmpty || offset.isEmpty || _gifSearchLoadingMore) return;
+    if (!_isPanelSearchSelected ||
+        query.isEmpty ||
+        offset.isEmpty ||
+        _gifSearchLoadingMore) {
+      return;
+    }
     setState(() => _gifSearchLoadingMore = true);
     try {
       final page = await _searchGifs(query, offset: offset);
-      if (!mounted || query != _panelSearch.text.trim()) return;
+      if (!mounted ||
+          query != _panelSearch.text.trim() ||
+          !_isPanelSearchSelected) {
+        return;
+      }
       final known = _gifSearchResults.map((item) => item.id).toSet();
       setState(() {
         _gifSearchResults = [
@@ -595,13 +613,50 @@ class _ChatInputBarState extends State<ChatInputBar> {
     }
   }
 
+  bool get _isPanelSearchSelected =>
+      (_panel == _Panel.emoji && _emojiTab == _emojiSearchTab) ||
+      (_panel == _Panel.sticker && _stickerPack == _stickerSearchTabId);
+
+  void _setPanel(_Panel next) {
+    if (_panel == next) return;
+    setState(() => _panel = next);
+    widget.onPanelGeometryChanged?.call();
+  }
+
+  void _selectEmojiTab(String tab) {
+    if (_emojiTab == tab) return;
+    setState(() => _emojiTab = tab);
+    if (tab == _emojiSearchTab && _panelSearch.text.trim().isNotEmpty) {
+      _queuePanelSearch();
+    }
+  }
+
+  void _selectStickerTab(int tab) {
+    if (_stickerPack == tab) return;
+    setState(() => _stickerPack = tab);
+    if (tab == _stickerSearchTabId && _panelSearch.text.trim().isNotEmpty) {
+      _queuePanelSearch();
+    } else if (tab == _gifTabId) {
+      GifStore.shared.loadIfNeeded();
+    } else if (tab == StickerStore.recentPackId) {
+      StickerStore.shared.loadIfNeeded();
+    } else {
+      StickerStore.shared.loadPack(tab);
+    }
+  }
+
+  void _finishPanelSend() {
+    _setPanel(_Panel.none);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onMessageSent();
+    });
+  }
+
   // MARK: - Voice recording
 
   void _toggleVoice() {
     _focus.unfocus();
-    setState(
-      () => _panel = _panel == _Panel.voice ? _Panel.none : _Panel.voice,
-    );
+    _setPanel(_panel == _Panel.voice ? _Panel.none : _Panel.voice);
     if (_panel == _Panel.voice) _prepareRecorder();
   }
 
@@ -746,8 +801,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
     );
     if (!mounted) return;
     if (sent) {
-      widget.onMessageSent();
-      setState(() => _panel = _Panel.none);
+      _finishPanelSend();
     } else {
       showToast(context, AppStringKeys.topicPostContentActionFailed);
     }
@@ -786,11 +840,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   void _toggle(_Panel panel) {
     _focus.unfocus();
-    setState(() => _panel = _panel == panel ? _Panel.none : panel);
+    _setPanel(_panel == panel ? _Panel.none : panel);
   }
 
   void _pickFailed(String what) {
-    setState(() => _panel = _Panel.none);
+    _setPanel(_Panel.none);
     showToast(
       context,
       AppStrings.t(AppStringKeys.composerOpenAttachmentFailed, {
@@ -1090,7 +1144,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
             AppActivityIndicator(size: 18, color: c.textSecondary),
             const SizedBox(width: 10),
             Text(
-              'Searching inline results…',
+              AppStrings.t(AppStringKeys.chatInputBarSearchingInlineResults),
               style: TextStyle(color: c.textSecondary, fontSize: 14),
             ),
           ],
@@ -1101,7 +1155,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
         height: 54,
         child: Center(
           child: Text(
-            'No inline results',
+            AppStrings.t(AppStringKeys.chatInputBarNoInlineResults),
             style: TextStyle(color: c.textSecondary, fontSize: 14),
           ),
         ),
@@ -1467,7 +1521,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                 if (showTools)
                   _botMenuRow(
                     icon: HeroAppIcons.gear,
-                    title: 'Bot tools',
+                    title: AppStrings.t(AppStringKeys.chatInputBarBotTools),
                     subtitle: _guestQueries.isEmpty
                         ? 'Inline mode, topics, and automation'
                         : '${_guestQueries.length} guest ${_guestQueries.length == 1 ? 'query' : 'queries'} waiting',
@@ -1598,7 +1652,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
             resolved!.username.trim().isNotEmpty) {
           entries.add((
             icon: HeroAppIcons.at,
-            title: 'Use inline mode',
+            title: AppStrings.t(AppStringKeys.chatInputBarUseInlineMode),
             subtitle: resolved.inlinePlaceholder.trim().isEmpty
                 ? '@${resolved.username}'
                 : resolved.inlinePlaceholder,
@@ -1612,7 +1666,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
             resolved?.allowsUsersToCreateTopics == true) {
           entries.add((
             icon: HeroAppIcons.comments,
-            title: 'Create bot topic',
+            title: AppStrings.t(AppStringKeys.chatInputBarCreateBotTopic),
             subtitle: 'Start a named topic in this bot chat',
             onTap: () {
               Navigator.of(sheetContext).pop();
@@ -1623,7 +1677,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
         if (resolved?.canManageBots == true) {
           entries.add((
             icon: HeroAppIcons.userPlus,
-            title: 'Create managed bot',
+            title: AppStrings.t(AppStringKeys.chatInputBarCreateManagedBot),
             subtitle: 'Create a bot managed by @${resolved!.username}',
             onTap: () {
               Navigator.of(sheetContext).pop();
@@ -1634,7 +1688,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
         if (_guestQueries.isNotEmpty) {
           entries.add((
             icon: HeroAppIcons.comments,
-            title: 'Guest queries',
+            title: AppStrings.t(AppStringKeys.chatInputBarGuestQueries),
             subtitle:
                 '${_guestQueries.length} ${_guestQueries.length == 1 ? 'query' : 'queries'} waiting',
             onTap: () {
@@ -1646,7 +1700,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
         if (currentAccountIsBot) {
           entries.add((
             icon: HeroAppIcons.gear,
-            title: 'Automation status',
+            title: AppStrings.t(AppStringKeys.chatInputBarAutomationStatus),
             subtitle: 'Report pending updates or a webhook error',
             onTap: () {
               Navigator.of(sheetContext).pop();
@@ -1667,7 +1721,10 @@ class _ChatInputBarState extends State<ChatInputBar> {
                 ? Padding(
                     padding: const EdgeInsets.all(20),
                     child: Text(
-                      'No additional tools are available for this bot.',
+                      AppStrings.t(
+                        AppStringKeys
+                            .chatInputBarNoAdditionalToolsAreAvailableForThisBot,
+                      ),
                       textAlign: TextAlign.center,
                       style: TextStyle(color: c.textSecondary, fontSize: 14),
                     ),
@@ -1708,14 +1765,19 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   Future<void> _createBotTopic() async {
     final name = await _promptBotText(
-      title: 'Create bot topic',
-      label: 'Topic name',
+      title: AppStrings.t(AppStringKeys.chatInputBarCreateBotTopic),
+      label: AppStrings.t(AppStringKeys.chatInputBarTopicName),
       actionLabel: 'Create',
     );
     if (name == null) return;
     try {
       await _botPlatform.createBotTopic(chatId: vm.chatId, name: name);
-      if (mounted) showToast(context, 'Bot topic created');
+      if (mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.chatInputBarBotTopicCreated),
+        );
+      }
     } catch (error) {
       _showBotPlatformFailure(error);
     }
@@ -1727,15 +1789,15 @@ class _ChatInputBarState extends State<ChatInputBar> {
     String suggestedUsername = '',
   }) async {
     final name = await _promptBotText(
-      title: 'Create managed bot',
-      label: 'Bot name',
+      title: AppStrings.t(AppStringKeys.chatInputBarCreateManagedBot),
+      label: AppStrings.t(AppStringKeys.chatInputBarBotName),
       initialValue: suggestedName,
       actionLabel: 'Next',
     );
     if (name == null) return;
     final username = await _promptBotText(
-      title: 'Create managed bot',
-      label: 'Username',
+      title: AppStrings.t(AppStringKeys.chatInputBarCreateManagedBot),
+      label: AppStrings.t(AppStringKeys.editProfileUsername),
       initialValue: suggestedUsername,
       actionLabel: 'Create',
     );
@@ -1746,7 +1808,12 @@ class _ChatInputBarState extends State<ChatInputBar> {
         name: name,
         username: username,
       );
-      if (mounted) showToast(context, 'Managed bot created');
+      if (mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.chatInputBarManagedBotCreated),
+        );
+      }
     } catch (error) {
       _showBotPlatformFailure(error);
     }
@@ -1805,8 +1872,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   Future<void> _replyToGuestQuery(BotGuestQuery query) async {
     final reply = await _promptBotText(
-      title: 'Answer guest query',
-      label: 'Reply',
+      title: AppStrings.t(AppStringKeys.chatInputBarAnswerGuestQuery),
+      label: AppStrings.t(AppStringKeys.chatInputBarReply),
       actionLabel: 'Send',
     );
     if (reply == null) return;
@@ -1837,7 +1904,10 @@ class _ChatInputBarState extends State<ChatInputBar> {
       );
       if (!mounted) return;
       setState(() => _guestQueries.removeWhere((item) => item.id == query.id));
-      showToast(context, 'Guest query answered');
+      showToast(
+        context,
+        AppStrings.t(AppStringKeys.chatInputBarGuestQueryAnswered),
+      );
     } catch (error) {
       _showBotPlatformFailure(error);
     }
@@ -1845,8 +1915,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   Future<void> _updateBotAutomationStatus() async {
     final pendingText = await _promptBotText(
-      title: 'Automation status',
-      label: 'Pending update count',
+      title: AppStrings.t(AppStringKeys.chatInputBarAutomationStatus),
+      label: AppStrings.t(AppStringKeys.chatInputBarPendingUpdateCount),
       initialValue: '0',
       actionLabel: 'Next',
       keyboardType: TextInputType.number,
@@ -1854,12 +1924,17 @@ class _ChatInputBarState extends State<ChatInputBar> {
     if (pendingText == null) return;
     final pendingCount = int.tryParse(pendingText);
     if (pendingCount == null || pendingCount < 0) {
-      if (mounted) showToast(context, 'Enter a non-negative update count');
+      if (mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.chatInputBarEnterANonNegativeUpdateCount),
+        );
+      }
       return;
     }
     final errorMessage = await _promptBotText(
-      title: 'Automation status',
-      label: 'Error message (optional)',
+      title: AppStrings.t(AppStringKeys.chatInputBarAutomationStatus),
+      label: AppStrings.t(AppStringKeys.chatInputBarErrorMessageOptional),
       actionLabel: 'Report',
       allowEmpty: true,
     );
@@ -1869,7 +1944,12 @@ class _ChatInputBarState extends State<ChatInputBar> {
         pendingUpdateCount: pendingCount,
         errorMessage: errorMessage,
       );
-      if (mounted) showToast(context, 'Automation status updated');
+      if (mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.chatInputBarAutomationStatusUpdated),
+        );
+      }
     } catch (error) {
       _showBotPlatformFailure(error);
     }
@@ -2022,6 +2102,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
       _replyKeyboardVisible = !_replyKeyboardVisible;
       if (_replyKeyboardVisible) _panel = _Panel.none;
     });
+    widget.onPanelGeometryChanged?.call();
     if (_replyKeyboardVisible) _focus.unfocus();
   }
 
@@ -2046,7 +2127,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
           ] else if (vm.peerIsBot || _guestQueries.isNotEmpty) ...[
             Semantics(
               button: true,
-              label: 'Open bot menu',
+              label: AppStrings.t(AppStringKeys.chatInputBarOpenBotMenu),
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: _showBotMenu,
@@ -2256,7 +2337,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                     ),
                   ),
                   child: Text(
-                    'Ai',
+                    'AI',
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
@@ -2488,14 +2569,20 @@ class _ChatInputBarState extends State<ChatInputBar> {
             if (_panel == _Panel.sticker) {
               StickerStore.shared.loadIfNeeded();
               GifStore.shared.loadIfNeeded();
-              if (_panelSearch.text.trim().isNotEmpty) _queuePanelSearch();
+              if (_isPanelSearchSelected &&
+                  _panelSearch.text.trim().isNotEmpty) {
+                _queuePanelSearch();
+              }
             }
           }),
           _icon(HeroAppIcons.solidFaceSmile.data, _panel == _Panel.emoji, () {
             _toggle(_Panel.emoji);
             if (_panel == _Panel.emoji) {
               EmojiStore.shared.loadIfNeeded();
-              if (_panelSearch.text.trim().isNotEmpty) _queuePanelSearch();
+              if (_isPanelSearchSelected &&
+                  _panelSearch.text.trim().isNotEmpty) {
+                _queuePanelSearch();
+              }
             }
           }),
           _icon(
@@ -2531,7 +2618,6 @@ class _ChatInputBarState extends State<ChatInputBar> {
     try {
       final sendMode = await showGallerySendModeSheet(context);
       if (!mounted || sendMode == null) return;
-      final sendAsFile = sendMode == GallerySendMode.file;
       final sendLivePhoto = sendMode == GallerySendMode.livePhoto;
       final maxDimension = switch (sendMode) {
         GallerySendMode.media => 1280,
@@ -2542,7 +2628,6 @@ class _ChatInputBarState extends State<ChatInputBar> {
         context,
         type: AppAssetPickerType.imageAndVideo,
         maxAssets: 10,
-        preserveOriginalFiles: sendAsFile,
         preferLivePhotoVideo: sendLivePhoto,
         photoMaxDimension: maxDimension,
       );
@@ -2559,14 +2644,15 @@ class _ChatInputBarState extends State<ChatInputBar> {
           .map((asset) {
             final file = asset.file;
             final kind = galleryAttachmentKind(
-              sendAsFile: sendAsFile,
+              sendAsFile: false,
               isVideo: isPickedAssetVideo(file),
               isAnimation: isPickedAssetGif(file),
             );
             return OutgoingAttachment(
               path: file.path,
               kind: kind,
-              fileName: file.name,
+              fileName: asset.originalFile?.name ?? file.name,
+              originalPath: asset.originalFile?.path,
               previewBytes: asset.thumbnailBytes,
               width: asset.width,
               height: asset.height,
@@ -2997,7 +3083,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
     } catch (error, stackTrace) {
       debugPrint('Failed to send rich message: $error\n$stackTrace');
       if (mounted) {
-        setState(() => _panel = _Panel.none);
+        _setPanel(_Panel.none);
         final message = switch (error) {
           RichMessageRelayException(:final code)
               when code == 'bot_not_started' =>
@@ -3502,7 +3588,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
             GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: () {
-                setState(() => _panel = _Panel.none);
+                _setPanel(_Panel.none);
                 item.$3();
               },
               child: Column(
@@ -3541,16 +3627,19 @@ class _ChatInputBarState extends State<ChatInputBar> {
       color: c.panelBackground,
       child: Column(
         children: [
-          _panelSearchField(),
-          Expanded(child: _emojiContent()),
           _emojiTabStrip(),
+          if (_emojiTab == _emojiSearchTab) _panelSearchField(),
+          Expanded(child: _emojiContent()),
         ],
       ),
     );
   }
 
   Widget _emojiContent() {
-    if (_panelSearch.text.trim().isNotEmpty) return _emojiSearchContent();
+    if (_emojiTab == _emojiSearchTab) {
+      if (_panelSearch.text.trim().isEmpty) return const SizedBox.shrink();
+      return _emojiSearchContent();
+    }
     final store = EmojiStore.shared;
     if (_emojiTab != 'standard') {
       final id = int.tryParse(_emojiTab);
@@ -3633,6 +3722,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   Widget _panelSearchField() {
     final c = context.colors;
     return Container(
+      key: const ValueKey('composerMediaSearch'),
       height: 42,
       margin: const EdgeInsets.fromLTRB(10, 8, 10, 2),
       padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -3740,9 +3830,10 @@ class _ChatInputBarState extends State<ChatInputBar> {
     final c = context.colors;
     final packs = EmojiStore.shared.customPacks;
     return Container(
+      key: const ValueKey('emojiPanelTabs'),
       decoration: BoxDecoration(
         color: c.inputBarBackground,
-        border: Border(top: BorderSide(color: c.divider, width: 0.5)),
+        border: Border(bottom: BorderSide(color: c.divider, width: 0.5)),
       ),
       child: SizedBox(
         height: 50,
@@ -3751,17 +3842,20 @@ class _ChatInputBarState extends State<ChatInputBar> {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           children: [
             _emojiTabButton(
-              selected: false,
-              onTap: _openStickerStudio,
+              key: const ValueKey('emojiSearchTab'),
+              selected: _emojiTab == _emojiSearchTab,
+              onTap: () => _selectEmojiTab(_emojiSearchTab),
               child: AppIcon(
-                HeroAppIcons.palette,
+                HeroAppIcons.magnifyingGlass,
                 size: 20,
-                color: c.textSecondary,
+                color: _emojiTab == _emojiSearchTab
+                    ? AppTheme.brand
+                    : c.textSecondary,
               ),
             ),
             _emojiTabButton(
               selected: _emojiTab == 'standard',
-              onTap: () => setState(() => _emojiTab = 'standard'),
+              onTap: () => _selectEmojiTab('standard'),
               child: AppIcon(
                 HeroAppIcons.solidFaceSmile,
                 size: 20,
@@ -3773,7 +3867,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
             for (final pack in packs)
               _emojiTabButton(
                 selected: _emojiTab == pack.id.toString(),
-                onTap: () => setState(() => _emojiTab = pack.id.toString()),
+                onTap: () => _selectEmojiTab(pack.id.toString()),
                 child:
                     pack.emoji.isNotEmpty && pack.emoji.first.customEmojiId != 0
                     ? CustomEmojiView(
@@ -3797,11 +3891,13 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   Widget _emojiTabButton({
+    Key? key,
     required bool selected,
     required VoidCallback onTap,
     required Widget child,
   }) {
     return GestureDetector(
+      key: key,
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: Container(
@@ -3999,9 +4095,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
       color: c.panelBackground,
       child: Column(
         children: [
-          _panelSearchField(),
-          Expanded(child: _stickerContent()),
           _stickerTabStrip(),
+          if (_stickerPack == _stickerSearchTabId) _panelSearchField(),
+          Expanded(child: _stickerContent()),
         ],
       ),
     );
@@ -4013,11 +4109,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
     final activeId =
         _stickerPack ??
         (packs.isNotEmpty ? packs.first.id : StickerStore.recentPackId);
+    if (activeId == _stickerSearchTabId) return _stickerSearchContent();
     if (activeId == _gifTabId) return _gifContent();
-    if (_panelSearch.text.trim().isNotEmpty) {
-      if (_stickerSearchResults.isEmpty) return _panelSearchState();
-      return _stickerGrid(_stickerSearchResults, search: true);
-    }
     if (packs.isEmpty) {
       return Center(
         child: Text(
@@ -4060,24 +4153,16 @@ class _ChatInputBarState extends State<ChatInputBar> {
         crossAxisSpacing: 8,
       ),
       itemCount: stickers.length,
-      itemBuilder: (context, i) {
-        final item = stickers[i];
-        return GestureDetector(
-          key: search ? ValueKey('stickerSearch-${item.id}') : null,
-          behavior: HitTestBehavior.opaque,
-          onTap: () => unawaited(_sendStickerItem(item)),
-          child: StickerPreview(item: item),
-        );
-      },
+      itemBuilder: (context, i) => _stickerTile(stickers[i], search: search),
     );
   }
 
   Future<void> _sendStickerItem(StickerItem item) async {
+    widget.onMediaSendTapped?.call();
     final sent = await widget.vm.sendSticker(item);
     if (!mounted) return;
     if (sent) {
-      widget.onMessageSent();
-      setState(() => _panel = _Panel.none);
+      _finishPanelSend();
     } else {
       showToast(
         context,
@@ -4088,10 +4173,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   Widget _gifContent() {
     final store = GifStore.shared;
-    final searching = _panelSearch.text.trim().isNotEmpty;
-    final items = searching ? _gifSearchResults : store.items;
+    final items = store.items;
     if (items.isEmpty) {
-      if (searching) return _panelSearchState();
       return Center(
         child: Text(
           store.loading
@@ -4109,61 +4192,118 @@ class _ChatInputBarState extends State<ChatInputBar> {
         mainAxisSpacing: 4,
         crossAxisSpacing: 4,
       ),
-      itemCount:
-          items.length + (searching && _gifSearchNextOffset.isNotEmpty ? 1 : 0),
-      itemBuilder: (_, index) {
-        if (index == items.length) {
-          return Semantics(
-            button: true,
-            label: 'Load more GIF results',
-            child: GestureDetector(
-              key: const ValueKey('gifSearchLoadMore'),
-              behavior: HitTestBehavior.opaque,
-              onTap: _gifSearchLoadingMore
-                  ? null
-                  : () => unawaited(_loadMoreGifSearch()),
-              child: Center(
-                child: _gifSearchLoadingMore
-                    ? const AppActivityIndicator(size: 22)
-                    : Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          AppIcon(
-                            HeroAppIcons.chevronDown,
-                            size: 22,
-                            color: context.colors.textSecondary,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'More',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: context.colors.textSecondary,
-                            ),
-                          ),
-                        ],
-                      ),
-              ),
-            ),
-          );
-        }
-        final item = items[index];
-        return GestureDetector(
-          key: searching ? ValueKey('gifSearch-${item.id}') : null,
-          behavior: HitTestBehavior.opaque,
-          onTap: () => unawaited(_sendGifItem(item)),
-          child: GifPreview(item: item),
-        );
-      },
+      itemCount: items.length,
+      itemBuilder: (_, index) => _gifTile(items[index]),
     );
   }
 
+  Widget _stickerSearchContent() {
+    if (_panelSearch.text.trim().isEmpty) return const SizedBox.shrink();
+    if (_stickerSearchResults.isEmpty && _gifSearchResults.isEmpty) {
+      return _panelSearchState();
+    }
+    return CustomScrollView(
+      slivers: [
+        if (_stickerSearchResults.isNotEmpty)
+          SliverPadding(
+            padding: const EdgeInsets.all(12),
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 4,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) =>
+                    _stickerTile(_stickerSearchResults[index], search: true),
+                childCount: _stickerSearchResults.length,
+              ),
+            ),
+          ),
+        if (_gifSearchResults.isNotEmpty || _gifSearchNextOffset.isNotEmpty)
+          SliverPadding(
+            padding: const EdgeInsets.all(8),
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                childAspectRatio: 1.2,
+                mainAxisSpacing: 4,
+                crossAxisSpacing: 4,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  if (index == _gifSearchResults.length) {
+                    return _gifSearchLoadMoreTile();
+                  }
+                  return _gifTile(_gifSearchResults[index], search: true);
+                },
+                childCount:
+                    _gifSearchResults.length +
+                    (_gifSearchNextOffset.isNotEmpty ? 1 : 0),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _stickerTile(StickerItem item, {bool search = false}) =>
+      GestureDetector(
+        key: ValueKey(
+          search ? 'stickerSearch-${item.id}' : 'sticker-${item.id}',
+        ),
+        behavior: HitTestBehavior.opaque,
+        onTap: () => unawaited(_sendStickerItem(item)),
+        child: StickerPreview(item: item),
+      );
+
+  Widget _gifTile(GifItem item, {bool search = false}) => GestureDetector(
+    key: ValueKey(search ? 'gifSearch-${item.id}' : 'gif-${item.id}'),
+    behavior: HitTestBehavior.opaque,
+    onTap: () => unawaited(_sendGifItem(item)),
+    child: widget.gifPreviewBuilder?.call(item) ?? GifPreview(item: item),
+  );
+
+  Widget _gifSearchLoadMoreTile() => Semantics(
+    button: true,
+    label: AppStrings.t(AppStringKeys.chatInputBarLoadMoreGIFResults),
+    child: GestureDetector(
+      key: const ValueKey('gifSearchLoadMore'),
+      behavior: HitTestBehavior.opaque,
+      onTap: _gifSearchLoadingMore
+          ? null
+          : () => unawaited(_loadMoreGifSearch()),
+      child: Center(
+        child: _gifSearchLoadingMore
+            ? const AppActivityIndicator(size: 22)
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AppIcon(
+                    HeroAppIcons.chevronDown,
+                    size: 22,
+                    color: context.colors.textSecondary,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    AppStrings.t(AppStringKeys.momentsMore),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.colors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+      ),
+    ),
+  );
+
   Future<void> _sendGifItem(GifItem item) async {
+    widget.onMediaSendTapped?.call();
     final sent = await widget.vm.sendGif(item);
     if (!mounted) return;
     if (sent) {
-      widget.onMessageSent();
-      setState(() => _panel = _Panel.none);
+      _finishPanelSend();
     } else {
       showToast(context, AppStrings.t(AppStringKeys.composerGifSendFailed));
     }
@@ -4177,9 +4317,10 @@ class _ChatInputBarState extends State<ChatInputBar> {
         (packs.isNotEmpty ? packs.first.id : StickerStore.recentPackId);
     final installed = packs.where((p) => p.id != StickerStore.recentPackId);
     return Container(
+      key: const ValueKey('stickerPanelTabs'),
       decoration: BoxDecoration(
         color: c.inputBarBackground,
-        border: Border(top: BorderSide(color: c.divider, width: 0.5)),
+        border: Border(bottom: BorderSide(color: c.divider, width: 0.5)),
       ),
       child: SizedBox(
         height: 50,
@@ -4188,21 +4329,20 @@ class _ChatInputBarState extends State<ChatInputBar> {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           children: [
             _emojiTabButton(
-              selected: false,
-              onTap: _openStickerStudio,
+              key: const ValueKey('stickerSearchTab'),
+              selected: activeId == _stickerSearchTabId,
+              onTap: () => _selectStickerTab(_stickerSearchTabId),
               child: AppIcon(
-                HeroAppIcons.palette,
+                HeroAppIcons.magnifyingGlass,
                 size: 20,
-                color: c.textSecondary,
+                color: activeId == _stickerSearchTabId
+                    ? AppTheme.brand
+                    : c.textSecondary,
               ),
             ),
             _emojiTabButton(
               selected: activeId == StickerStore.recentPackId,
-              onTap: () {
-                setState(() => _stickerPack = StickerStore.recentPackId);
-                StickerStore.shared.loadIfNeeded();
-                if (_panelSearch.text.trim().isNotEmpty) _queuePanelSearch();
-              },
+              onTap: () => _selectStickerTab(StickerStore.recentPackId),
               child: AppIcon(
                 HeroAppIcons.clock,
                 size: 20,
@@ -4213,11 +4353,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
             ),
             _emojiTabButton(
               selected: activeId == _gifTabId,
-              onTap: () {
-                setState(() => _stickerPack = _gifTabId);
-                GifStore.shared.loadIfNeeded();
-                if (_panelSearch.text.trim().isNotEmpty) _queuePanelSearch();
-              },
+              onTap: () => _selectStickerTab(_gifTabId),
               child: AppIcon(
                 HeroAppIcons.gif,
                 size: 22,
@@ -4227,11 +4363,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
             for (final pack in installed)
               _emojiTabButton(
                 selected: pack.id == activeId,
-                onTap: () {
-                  setState(() => _stickerPack = pack.id);
-                  StickerStore.shared.loadPack(pack.id);
-                  if (_panelSearch.text.trim().isNotEmpty) _queuePanelSearch();
-                },
+                onTap: () => _selectStickerTab(pack.id),
                 child: pack.cover != null
                     ? StickerTabPreview(item: pack.cover!)
                     : Text(
@@ -4245,6 +4377,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
     );
   }
 
+  // Kept for re-exposing the studio from a more appropriate surface later.
+  // ignore: unused_element
   Future<void> _openStickerStudio() async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute(builder: (_) => const StickerSetStudioView()),
