@@ -49,9 +49,11 @@ import 'platform/system_ui.dart';
 import 'pro/mithka_pro_service.dart';
 import 'security/local_app_lock_controller.dart';
 import 'security/local_app_lock_views.dart';
+import 'settings/ai_settings_controller.dart';
 import 'settings/app_icon_controller.dart';
 import 'settings/auto_download_media_controller.dart';
 import 'settings/blocked_user_service.dart';
+import 'settings/business_service.dart';
 import 'settings/country_message_filter.dart';
 import 'settings/developer_mode_controller.dart';
 import 'settings/keyword_blocker.dart';
@@ -248,6 +250,7 @@ class _MithkaAppState extends State<MithkaApp> with WidgetsBindingObserver {
   late final TranslationController _translation = TranslationController(
     widget.prefs,
   );
+  late final AiSettingsController _ai = AiSettingsController(widget.prefs);
   late final AppLocaleController _locale = AppLocaleController(widget.prefs);
   late final TelegramLanguageController _telegramLanguage =
       TelegramLanguageController.shared;
@@ -278,9 +281,14 @@ class _MithkaAppState extends State<MithkaApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _performance.start();
     _accounts.addListener(_handleActiveAccountChange);
+    _theme.addListener(_handleThemePreferencesChange);
+    BusinessQuickReplyService.shared.startPreloading(
+      enabled: _theme.quickRepliesEnabled,
+    );
     _theme.loadSelectedEmojiFontIfAvailable();
     _autoDownload.initialize(widget.prefs);
     _auth.start();
+    unawaited(_ai.initialize());
     unawaited(_mithkaPro.initialize());
     unawaited(_telegramLanguage.initialize(widget.prefs));
     unawaited(_appIcons.initialize());
@@ -294,12 +302,19 @@ class _MithkaAppState extends State<MithkaApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _performance.dispose();
     _accounts.removeListener(_handleActiveAccountChange);
+    _theme.removeListener(_handleThemePreferencesChange);
     _calls.dispose();
     super.dispose();
   }
 
   void _handleActiveAccountChange() {
     _theme.setActiveAccountSlot(_accounts.activeSlot);
+  }
+
+  void _handleThemePreferencesChange() {
+    BusinessQuickReplyService.shared.setPreloadingEnabled(
+      _theme.quickRepliesEnabled,
+    );
   }
 
   @override
@@ -356,6 +371,7 @@ class _MithkaAppState extends State<MithkaApp> with WidgetsBindingObserver {
         ChangeNotifierProvider.value(value: _auth),
         ChangeNotifierProvider.value(value: _theme),
         ChangeNotifierProvider.value(value: _translation),
+        ChangeNotifierProvider.value(value: _ai),
         ChangeNotifierProvider.value(value: _locale),
         ChangeNotifierProxyProvider<
           AppLocaleController,

@@ -914,6 +914,7 @@ class ThemeController extends ChangeNotifier {
     _interfaceScale = _prefs.getDouble(_interfaceScaleKey) ?? 1.0;
     _circularGroupAvatars = _prefs.getBool(_groupAvatarCircleKey) ?? true;
     _animateAvatars = _prefs.getBool(_animateAvatarsKey) ?? true;
+    _animateStatusEmoji = _prefs.getBool(_animateStatusEmojiKey) ?? true;
     final storedChatFolderMode = _prefs.getString(_chatFolderDisplayModeKey);
     _chatFolderDisplayMode = ChatFolderDisplayMode.values.firstWhere(
       (mode) => mode.name == storedChatFolderMode,
@@ -977,6 +978,7 @@ class ThemeController extends ChangeNotifier {
     _openChatsAtLatest = _prefs.getBool(_openChatsAtLatestKey) ?? false;
     _preserveSenderWhenRepeating =
         _prefs.getBool(_preserveSenderWhenRepeatingKey) ?? true;
+    _quickRepliesEnabled = _prefs.getBool(_quickRepliesEnabledKey) ?? true;
     final storedQuickReactions = _prefs.getStringList(_quickReactionsKey);
     _quickReactions = storedQuickReactions == null
         ? [...defaultQuickReactions]
@@ -1040,6 +1042,7 @@ class ThemeController extends ChangeNotifier {
   static const _interfaceScaleKey = 'interfaceScale';
   static const _groupAvatarCircleKey = 'circularGroupAvatars';
   static const _animateAvatarsKey = 'animateAvatars';
+  static const _animateStatusEmojiKey = 'animateStatusEmoji';
   static const _chatFolderDisplayModeKey = 'chatFolderDisplayMode';
   // Retained only to migrate the former show/hide toggle.
   static const _chatFolderFilterKey = 'showChatFolderFilter';
@@ -1066,6 +1069,7 @@ class ThemeController extends ChangeNotifier {
   static const _alwaysShowMessageTimeKey = 'alwaysShowMessageTime';
   static const _openChatsAtLatestKey = 'openChatsAtLatest';
   static const _preserveSenderWhenRepeatingKey = 'preserveSenderWhenRepeating';
+  static const _quickRepliesEnabledKey = 'quickRepliesEnabled';
   static const _quickReactionsKey = 'quickReactions';
   static const _groupImageMessagesKey = 'groupImageMessages';
   static const _hideBlockedUserMessagesKey = 'hideBlockedUserMessages';
@@ -1104,6 +1108,7 @@ class ThemeController extends ChangeNotifier {
   late double _interfaceScale;
   late bool _circularGroupAvatars;
   late bool _animateAvatars;
+  late bool _animateStatusEmoji;
   late ChatFolderDisplayMode _chatFolderDisplayMode;
   bool _showChatListSearch = true;
   late ChatListSwipeBehavior _chatListSwipeBehavior;
@@ -1122,6 +1127,7 @@ class ThemeController extends ChangeNotifier {
   bool _alwaysShowMessageTime = false;
   bool _openChatsAtLatest = false;
   bool _preserveSenderWhenRepeating = true;
+  bool _quickRepliesEnabled = true;
   late List<QuickReactionChoice> _quickReactions;
   bool _groupImageMessages = true;
   bool _hideBlockedUserMessages = false;
@@ -1289,6 +1295,7 @@ class ThemeController extends ChangeNotifier {
 
   bool get circularGroupAvatars => _circularGroupAvatars;
   bool get animateAvatars => _animateAvatars;
+  bool get animateStatusEmoji => _animateStatusEmoji;
   ChatFolderDisplayMode get chatFolderDisplayMode => _chatFolderDisplayMode;
   bool get showChatListSearch => _showChatListSearch;
   ChatListSwipeBehavior get chatListSwipeBehavior => _chatListSwipeBehavior;
@@ -1312,6 +1319,7 @@ class ThemeController extends ChangeNotifier {
   bool get alwaysShowMessageTime => _alwaysShowMessageTime;
   bool get openChatsAtLatest => _openChatsAtLatest;
   bool get preserveSenderWhenRepeating => _preserveSenderWhenRepeating;
+  bool get quickRepliesEnabled => _quickRepliesEnabled;
   List<QuickReactionChoice> get quickReactions =>
       List.unmodifiable(_quickReactions);
   bool get groupImageMessages => _groupImageMessages;
@@ -1600,7 +1608,7 @@ class ThemeController extends ChangeNotifier {
   Future<void> loadSelectedEmojiFontIfAvailable() async {
     final key = _emojiFontChoice.key;
     if (key == EmojiFontChoice.system.key) return;
-    final family = await EmojiFontCatalog.shared.loadCached(key);
+    final family = await EmojiFontCatalog.shared.loadCachedOrDownload(key);
     if (family == null) return;
     _emojiFontChoice = EmojiFontChoice(
       key: key,
@@ -1739,6 +1747,13 @@ class ThemeController extends ChangeNotifier {
     notifyListeners();
   }
 
+  set animateStatusEmoji(bool value) {
+    if (_animateStatusEmoji == value) return;
+    _animateStatusEmoji = value;
+    _prefs.setBool(_animateStatusEmojiKey, value);
+    notifyListeners();
+  }
+
   set chatFolderDisplayMode(ChatFolderDisplayMode value) {
     if (_chatFolderDisplayMode == value) return;
     _chatFolderDisplayMode = value;
@@ -1865,6 +1880,13 @@ class ThemeController extends ChangeNotifier {
     if (_preserveSenderWhenRepeating == value) return;
     _preserveSenderWhenRepeating = value;
     _prefs.setBool(_preserveSenderWhenRepeatingKey, value);
+    notifyListeners();
+  }
+
+  set quickRepliesEnabled(bool value) {
+    if (_quickRepliesEnabled == value) return;
+    _quickRepliesEnabled = value;
+    _prefs.setBool(_quickRepliesEnabledKey, value);
     notifyListeners();
   }
 
