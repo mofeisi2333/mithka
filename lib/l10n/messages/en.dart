@@ -76,15 +76,10 @@ const enMessages = <String, String>{
   'accountBackupUserId': "User ID: {value1}",
   'mithkaProActive': "Mithka Pro is active",
   'mithkaProActiveUntil': "Mithka Pro active until {value1}",
-  'mithkaProBackupLimitReached':
-      "The free plan includes four cloud session syncs. Mithka Pro removes this limit.",
   'mithkaProBestValue': "BEST VALUE",
   'mithkaProBillingNotice':
       "Subscriptions renew automatically unless canceled through your store account. Prices and taxes are confirmed by the store before purchase.",
   'mithkaProContinue': "Continue",
-  'mithkaProFreePlan': "Free plan · 4 cloud session syncs",
-  'mithkaProLimitExempt':
-      "Cloud session sync limits are disabled for this build",
   'mithkaProManagePlan': "Manage subscription",
   'mithkaProMonthly': "Monthly",
   'mithkaProNothingToRestore': "No active Mithka Pro purchase was found.",
@@ -95,11 +90,12 @@ const enMessages = <String, String>{
   'mithkaProRestore': "Restore purchases",
   'mithkaProRestoreFailed': "Purchases could not be restored.",
   'mithkaProStoreUnavailable': "Store unavailable",
+  'mithkaProSupportDevelopment': "Support Mithka development",
+  'mithkaProSupportDevelopmentDescription':
+      "The warm feeling that you supported the development.",
+  'mithkaProSupportOnly': "All features are available without Pro.",
   'mithkaProTerms': "Terms of Service",
   'mithkaProTitle': "Mithka Pro",
-  'mithkaProUnlimitedCloudSessionSyncs': "Unlimited cloud session syncs",
-  'mithkaProUnlimitedCloudSessionSyncsDescription':
-      "Sync authorization sessions for any number of accounts; the free plan includes four.",
   'mithkaProYearly': "Yearly",
   'addMembersDone': "Done",
   'addMembersDoneWithCount': "Done ({value1})",

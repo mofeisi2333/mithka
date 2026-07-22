@@ -78,15 +78,10 @@ const deMessages = <String, String>{
       "Die Kontosicherung ist auf diesem Gerät oder in dieser Distribution nicht verfügbar.",
   'mithkaProActive': "Mithka Pro ist aktiv",
   'mithkaProActiveUntil': "Mithka Pro ist bis {value1} aktiv",
-  'mithkaProBackupLimitReached':
-      "Im kostenlosen Tarif können vier Cloud-Sitzungen synchronisiert werden. Mithka Pro hebt dieses Limit auf.",
   'mithkaProBestValue': "BESTER PREIS",
   'mithkaProBillingNotice':
       "Das Abonnement verlängert sich automatisch, sofern es nicht über das Store-Konto gekündigt wird. Preis und Steuern werden vor dem Kauf bestätigt.",
   'mithkaProContinue': "Weiter",
-  'mithkaProFreePlan': "Kostenloser Tarif · 4 Cloud-Sitzungen",
-  'mithkaProLimitExempt':
-      "Cloud-Sitzungssynchronisierungen sind für diesen Build unbegrenzt",
   'mithkaProManagePlan': "Abonnement verwalten",
   'mithkaProMonthly': "Monatlich",
   'mithkaProNothingToRestore': "Kein aktiver Mithka-Pro-Kauf gefunden.",
@@ -97,12 +92,12 @@ const deMessages = <String, String>{
   'mithkaProRestore': "Käufe wiederherstellen",
   'mithkaProRestoreFailed': "Käufe konnten nicht wiederhergestellt werden.",
   'mithkaProStoreUnavailable': "Store nicht verfügbar",
+  'mithkaProSupportDevelopment': "Mithka-Entwicklung unterstützen",
+  'mithkaProSupportDevelopmentDescription':
+      "Das warme Gefühl, die Entwicklung unterstützt zu haben.",
+  'mithkaProSupportOnly': "Alle Funktionen sind ohne Pro verfügbar.",
   'mithkaProTerms': "Nutzungsbedingungen",
   'mithkaProTitle': "Mithka Pro",
-  'mithkaProUnlimitedCloudSessionSyncs':
-      "Unbegrenzte Cloud-Sitzungssynchronisierung",
-  'mithkaProUnlimitedCloudSessionSyncsDescription':
-      "Autorisierungssitzungen für beliebig viele Konten synchronisieren; im kostenlosen Tarif sind vier enthalten.",
   'mithkaProYearly': "Jährlich",
   'addMembersDone': "Fertig",
   'addMembersDoneWithCount': "Fertig ({value1})",

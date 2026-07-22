@@ -79,15 +79,10 @@ const frMessages = <String, String>{
       "La sauvegarde des comptes n’est pas disponible sur cet appareil ou cette distribution.",
   'mithkaProActive': "Mithka Pro est actif",
   'mithkaProActiveUntil': "Mithka Pro actif jusqu’au {value1}",
-  'mithkaProBackupLimitReached':
-      "La formule gratuite inclut quatre synchronisations de session dans le cloud. Mithka Pro supprime cette limite.",
   'mithkaProBestValue': "MEILLEUR PRIX",
   'mithkaProBillingNotice':
       "L’abonnement se renouvelle automatiquement sauf annulation depuis votre compte de la boutique. Le prix et les taxes sont confirmés avant l’achat.",
   'mithkaProContinue': "Continuer",
-  'mithkaProFreePlan': "Formule gratuite · 4 sessions synchronisées",
-  'mithkaProLimitExempt':
-      "Les synchronisations de session cloud sont illimitées dans cette version",
   'mithkaProManagePlan': "Gérer l’abonnement",
   'mithkaProMonthly': "Mensuel",
   'mithkaProNothingToRestore': "Aucun achat Mithka Pro actif n’a été trouvé.",
@@ -98,12 +93,13 @@ const frMessages = <String, String>{
   'mithkaProRestore': "Restaurer les achats",
   'mithkaProRestoreFailed': "Les achats n’ont pas pu être restaurés.",
   'mithkaProStoreUnavailable': "Boutique indisponible",
+  'mithkaProSupportDevelopment': "Soutenir le développement de Mithka",
+  'mithkaProSupportDevelopmentDescription':
+      "Le sentiment chaleureux d’avoir soutenu le développement.",
+  'mithkaProSupportOnly':
+      "Toutes les fonctionnalités sont disponibles sans Pro.",
   'mithkaProTerms': "Conditions d’utilisation",
   'mithkaProTitle': "Mithka Pro",
-  'mithkaProUnlimitedCloudSessionSyncs':
-      "Synchronisations de session cloud illimitées",
-  'mithkaProUnlimitedCloudSessionSyncsDescription':
-      "Synchronisez les sessions d’autorisation de tous vos comptes ; la formule gratuite en inclut quatre.",
   'mithkaProYearly': "Annuel",
   'addMembersDone': "Terminé",
   'addMembersDoneWithCount': "Terminé ({value1})",
