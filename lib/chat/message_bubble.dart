@@ -32,6 +32,7 @@ import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import '../theme/date_text.dart';
+import '../theme/message_bubble_background.dart';
 import '../theme/message_name_colors.dart';
 import '../theme/theme_controller.dart';
 import 'animated_sticker_view.dart';
@@ -45,6 +46,7 @@ import 'looping_video_view.dart';
 import 'message_action_menu.dart';
 import 'message_special_content.dart';
 import 'music_player_controller.dart';
+import 'stretchable_message_bubble_background.dart';
 import 'video_sticker_view.dart';
 import 'voice_audio.dart';
 
@@ -52,6 +54,7 @@ class MessageBubble extends StatefulWidget {
   const MessageBubble({
     super.key,
     required this.message,
+    this.groupedMedia = const <ChatMessage>[],
     required this.peerTitle,
     this.peerPhoto,
     required this.isGroup,
@@ -68,6 +71,7 @@ class MessageBubble extends StatefulWidget {
     this.onAvatarLongPress,
     this.onOpenReply,
     this.onOpenImage,
+    this.onApplyMessageBubble,
     this.onOpenSticker,
     this.onPlayVideo,
     this.onPlayMusic,
@@ -76,6 +80,7 @@ class MessageBubble extends StatefulWidget {
     this.onHashtagTap,
     this.onOpenComments,
     this.showCommentAttachment = false,
+    this.channelHasLinkedDiscussion = false,
     this.onToggleReaction,
     this.onShowReactionUsers,
     this.onRedial,
@@ -97,6 +102,7 @@ class MessageBubble extends StatefulWidget {
   });
 
   final ChatMessage message;
+  final List<ChatMessage> groupedMedia;
   final String peerTitle;
   final TdFileRef? peerPhoto;
   final bool isGroup;
@@ -118,6 +124,7 @@ class MessageBubble extends StatefulWidget {
   final ValueChanged<ChatMessage>? onAvatarLongPress;
   final ValueChanged<int>? onOpenReply;
   final ValueChanged<ChatMessage>? onOpenImage;
+  final ValueChanged<ChatMessage>? onApplyMessageBubble;
   final ValueChanged<ChatMessage>? onOpenSticker;
   final ValueChanged<ChatMessage>? onPlayVideo;
   final ValueChanged<ChatMessage>? onPlayMusic;
@@ -126,6 +133,7 @@ class MessageBubble extends StatefulWidget {
   final ValueChanged<String>? onHashtagTap;
   final ValueChanged<ChatMessage>? onOpenComments;
   final bool showCommentAttachment;
+  final bool channelHasLinkedDiscussion;
   final ValueChanged<MessageReaction>? onToggleReaction;
   final void Function(ChatMessage message, MessageReaction reaction)?
   onShowReactionUsers;
@@ -260,20 +268,81 @@ class _MessageBubbleState extends State<MessageBubble>
 
   ChatMessage get message => widget.message;
 
+  MessageBubbleBackgroundSpec get _bubbleBackgroundStyle =>
+      context.watch<ThemeController>().effectiveMessageBubbleBackgroundSpec;
+
   Color get _outgoingBubbleColor =>
-      widget.outgoingBubbleColor ?? AppTheme.bubbleOutgoing;
+      _bubbleBackgroundStyle.backgroundColor ??
+      widget.outgoingBubbleColor ??
+      AppTheme.bubbleOutgoing;
 
-  Color get _outgoingTextColor =>
-      widget.outgoingBubbleTextColor ??
-      (_outgoingBubbleColor.computeLuminance() > 0.64
-          ? const Color(0xFF171717)
-          : AppTheme.bubbleOutgoingText);
+  Color get _outgoingTextColor {
+    if (!context.watch<ThemeController>().themingEnabled) {
+      return AppTheme.bubbleOutgoingText;
+    }
+    return _bubbleBackgroundStyle.foregroundColor ??
+        widget.outgoingBubbleTextColor ??
+        (_outgoingBubbleColor.computeLuminance() > 0.64
+            ? const Color(0xFF171717)
+            : AppTheme.bubbleOutgoingText);
+  }
 
-  Color get _incomingBubbleColor =>
+  Color get _incomingThemeBubbleColor =>
       widget.incomingBubbleColor ?? context.colors.bubbleIncoming;
 
+  Color get _incomingBubbleColor =>
+      _bubbleBackgroundStyle.backgroundColor ?? _incomingThemeBubbleColor;
+
   Color get _incomingTextColor =>
-      widget.incomingBubbleTextColor ?? context.colors.bubbleIncomingText;
+      _bubbleBackgroundStyle.foregroundColor ??
+      widget.incomingBubbleTextColor ??
+      context.colors.bubbleIncomingText;
+
+  bool get _showsAttachedComments =>
+      !message.isContentRestricted &&
+      widget.showCommentAttachment &&
+      (message.hasCommentThread ||
+          message.commentCount > 0 ||
+          (widget.channelHasLinkedDiscussion && !message.isService));
+
+  BorderRadius _messageBorderRadius(double radius) =>
+      BorderRadius.circular(radius);
+
+  Widget _bubbleBackground({
+    Key? key,
+    required bool outgoing,
+    required Widget child,
+    required EdgeInsetsGeometry padding,
+    required BorderRadius borderRadius,
+    BoxConstraints constraints = const BoxConstraints(),
+    bool containsAttachedComments = false,
+  }) {
+    // When a comment action is present, the outer wrapper owns the only
+    // rounded/background surface. Inner message content keeps its normal
+    // padding but does not paint a second sliced image or rounded rectangle.
+    if (_showsAttachedComments && !containsAttachedComments) {
+      return Container(
+        key: key,
+        constraints: constraints,
+        padding: _bubbleBackgroundStyle.isDecorative
+            ? _bubbleBackgroundStyle.contentPadding
+            : padding,
+        child: child,
+      );
+    }
+    return StretchableMessageBubbleBackground(
+      key: key,
+      background: _bubbleBackgroundStyle,
+      fallbackColor: outgoing ? _outgoingBubbleColor : _incomingBubbleColor,
+      fallbackBorderRadius: borderRadius,
+      fallbackPadding: padding,
+      fallbackBorder: outgoing
+          ? null
+          : Border.all(color: context.colors.divider, width: 0.5),
+      constraints: constraints,
+      child: child,
+    );
+  }
 
   double _bubbleMaxWidth() {
     final width = _layoutWidth ?? MediaQuery.sizeOf(context).width;
@@ -383,14 +452,13 @@ class _MessageBubbleState extends State<MessageBubble>
     final senderNameColor = messageNameColorForSender(
       theme: cloudTheme,
       accentColorId: message.senderAccentColorId,
-      isPremium: message.senderIsPremium,
-      showPremiumColors: theme.showChatPremiumNameColors,
-      premiumColorsDisabledFallback: cloudTheme?.senderNameColor ?? c.linkBlue,
+      showNameColors: theme.chatNameColorAudience.shows(
+        isPremium: message.senderIsPremium,
+      ),
+      nameColorsDisabledFallback: cloudTheme?.senderNameColor ?? c.linkBlue,
     );
-    final showPremiumStatus =
-        theme.showChatPremiumEmojiStatus &&
-        message.senderIsPremium &&
-        message.senderEmojiStatusId != 0;
+    final showStatus =
+        theme.chatStatusEmojiMode.visible && message.senderEmojiStatusId != 0;
     final senderTitle = message.senderTitle?.trim();
     final outgoingAvatarTitle = message.senderIsChat
         ? (message.senderName ?? widget.meName)
@@ -417,7 +485,7 @@ class _MessageBubbleState extends State<MessageBubble>
             : CrossAxisAlignment.start,
         children: [
           _contentBody(outgoing),
-          if (_showTappedTimestamp && !alwaysShowTime) ...[
+          if (_showTappedTimestamp || alwaysShowTime) ...[
             const SizedBox(height: 3),
             Text(
               DateText.messageDetailLabel(message.date),
@@ -530,15 +598,15 @@ class _MessageBubbleState extends State<MessageBubble>
                             children: [
                               Flexible(
                                 child: SenderIdentityPills(
-                                  enabled: theme.showSenderNameReadabilityPlate,
+                                  readabilityMode:
+                                      theme.senderNameReadabilityMode,
                                   bubbleColor: _incomingBubbleColor,
+                                  shadowColor: _incomingThemeBubbleColor,
                                   name: message.senderName!,
                                   nameStyle: TextStyle(
                                     fontSize: 12,
                                     color: senderNameColor,
-                                    fontWeight: message.senderIsPremium
-                                        ? FontWeight.w600
-                                        : FontWeight.w400,
+                                    fontWeight: FontWeight.w500,
                                   ),
                                   role: showSenderRole
                                       ? message.senderRole
@@ -548,12 +616,13 @@ class _MessageBubbleState extends State<MessageBubble>
                                       : null,
                                 ),
                               ),
-                              if (showPremiumStatus) ...[
+                              if (showStatus) ...[
                                 const SizedBox(width: 3),
                                 StatusEmojiView(
                                   id: message.senderEmojiStatusId,
                                   size: 14,
                                   color: senderNameColor,
+                                  animate: theme.chatStatusEmojiMode.animate,
                                 ),
                               ],
                             ],
@@ -673,6 +742,7 @@ class _MessageBubbleState extends State<MessageBubble>
         background: specialBackground,
         foreground: specialForeground,
         secondary: specialSecondary,
+        borderRadius: _messageBorderRadius(9),
         onOpen: () => widget.onOpenContact?.call(message),
       );
       return _withCommentsOnly(_withFloatingMeta(body, outgoing), outgoing);
@@ -683,6 +753,7 @@ class _MessageBubbleState extends State<MessageBubble>
         background: specialBackground,
         foreground: specialForeground,
         secondary: specialSecondary,
+        borderRadius: _messageBorderRadius(9),
         onVote: message.poll!.isClosed
             ? null
             : (index) => widget.onVotePoll?.call(message, index),
@@ -704,6 +775,7 @@ class _MessageBubbleState extends State<MessageBubble>
         background: specialBackground,
         foreground: specialForeground,
         secondary: specialSecondary,
+        borderRadius: _messageBorderRadius(9),
         onToggleTask: message.checklist!.canMarkTasksAsDone
             ? (task) => widget.onToggleChecklistTask?.call(message, task)
             : null,
@@ -719,6 +791,7 @@ class _MessageBubbleState extends State<MessageBubble>
         background: specialBackground,
         foreground: specialForeground,
         secondary: specialSecondary,
+        borderRadius: _messageBorderRadius(9),
         onOpen: () => widget.onOpenStory?.call(message),
       );
       return _withCommentsOnly(_withFloatingMeta(body, outgoing), outgoing);
@@ -729,6 +802,7 @@ class _MessageBubbleState extends State<MessageBubble>
         background: specialBackground,
         foreground: specialForeground,
         secondary: specialSecondary,
+        borderRadius: _messageBorderRadius(9),
       );
       return _withCommentsOnly(_withFloatingMeta(body, outgoing), outgoing);
     }
@@ -803,13 +877,31 @@ class _MessageBubbleState extends State<MessageBubble>
     } else if (message.location != null) {
       body = _locationBubble(message.location!);
     } else if (message.voice != null) {
-      body = _voiceBubble(message.voice!, outgoing);
+      body = _attachmentWithCaption(
+        _voiceBubble(message.voice!, outgoing),
+        outgoing,
+      );
+    } else if (_groupedDocumentMessages case final documents?) {
+      body = _fileAlbumCard(documents, outgoing);
     } else if (message.document != null) {
       body = _fileCard(message.document!, outgoing);
     } else {
       body = _textBubble(_activeMessageText, outgoing);
     }
     return _withCommentsOnly(_withFloatingMeta(body, outgoing), outgoing);
+  }
+
+  List<ChatMessage>? get _groupedDocumentMessages {
+    final grouped = widget.groupedMedia;
+    if (grouped.length < 2 ||
+        grouped.any(
+          (member) =>
+              member.contentType != 'messageDocument' ||
+              member.document == null,
+        )) {
+      return null;
+    }
+    return grouped;
   }
 
   Widget _videoNoteContent() {
@@ -958,10 +1050,7 @@ class _MessageBubbleState extends State<MessageBubble>
   }
 
   Widget _withFloatingMeta(Widget child, bool outgoing) {
-    final alwaysShowTime =
-        widget.forceShowTimestamp ||
-        context.watch<ThemeController>().alwaysShowMessageTime;
-    final show = message.isEdited || outgoing || alwaysShowTime;
+    final show = message.isEdited || outgoing;
     if (!show) return child;
     return Stack(
       clipBehavior: Clip.none,
@@ -974,9 +1063,6 @@ class _MessageBubbleState extends State<MessageBubble>
 
   Widget _floatingMeta(bool outgoing) {
     final c = context.colors;
-    final alwaysShowTime =
-        widget.forceShowTimestamp ||
-        context.watch<ThemeController>().alwaysShowMessageTime;
     final faint = outgoing
         ? _outgoingTextColor.withValues(alpha: 0.72)
         : c.textTertiary;
@@ -993,14 +1079,6 @@ class _MessageBubbleState extends State<MessageBubble>
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (alwaysShowTime)
-                Text(
-                  DateText.messageDetailLabel(message.date),
-                  key: const ValueKey('messageInlineTimestamp'),
-                  style: TextStyle(fontSize: 9, height: 1, color: faint),
-                ),
-              if (alwaysShowTime && (message.isEdited || outgoing))
-                const SizedBox(width: 4),
               if (message.isEdited)
                 AppIcon(HeroAppIcons.pen, size: 13, color: faint),
               if (message.isEdited && outgoing) const SizedBox(width: 3),
@@ -1021,86 +1099,106 @@ class _MessageBubbleState extends State<MessageBubble>
 
   Widget _withCommentsOnly(Widget body, bool outgoing) {
     if (message.isContentRestricted) return body;
-    final showComments =
-        widget.showCommentAttachment && message.commentCount > 0;
+    final showComments = _showsAttachedComments;
     final showSuggestedPost = message.suggestedPostInfo != null;
     if (!showComments && !showSuggestedPost) {
       return body;
     }
     final foreground = outgoing ? _outgoingTextColor : _incomingTextColor;
-    final extras = <Widget>[
-      if (showSuggestedPost)
-        MessageSuggestedPostStatusContent(
-          info: message.suggestedPostInfo!,
-          background: outgoing ? _outgoingBubbleColor : _incomingBubbleColor,
-          foreground: foreground,
-          secondary: foreground.withValues(alpha: 0.68),
+    final suggestedPost = showSuggestedPost
+        ? MessageSuggestedPostStatusContent(
+            info: message.suggestedPostInfo!,
+            background: outgoing ? _outgoingBubbleColor : _incomingBubbleColor,
+            foreground: foreground,
+            secondary: foreground.withValues(alpha: 0.68),
+            borderRadius: _messageBorderRadius(9),
+          )
+        : null;
+    if (!showComments) {
+      return IntrinsicWidth(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            body,
+            if (suggestedPost != null) ...[
+              const SizedBox(height: 6),
+              suggestedPost,
+            ],
+          ],
         ),
-      if (showComments) _commentThreadRow(outgoing),
-    ];
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: outgoing
-          ? CrossAxisAlignment.end
-          : CrossAxisAlignment.start,
-      children: [
-        body,
-        for (final extra in extras) ...[const SizedBox(height: 6), extra],
-      ],
+      );
+    }
+    return IntrinsicWidth(
+      child: _bubbleBackground(
+        key: ValueKey('messageCombinedBubble-${message.id}'),
+        outgoing: outgoing,
+        constraints: BoxConstraints(maxWidth: _bubbleMaxWidth()),
+        padding: EdgeInsets.zero,
+        borderRadius: BorderRadius.circular(12),
+        containsAttachedComments: true,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            body,
+            if (suggestedPost != null) ...[
+              const SizedBox(height: 6),
+              suggestedPost,
+            ],
+            _commentThreadRow(outgoing),
+          ],
+        ),
+      ),
     );
   }
 
   Widget _commentThreadRow(bool outgoing) {
     final c = context.colors;
     final count = message.commentCount;
-    final label = AppStrings.t(AppStringKeys.momentsCommentCount, {
-      'value1': count,
-    });
-    final bg = outgoing
-        ? _outgoingTextColor.withValues(alpha: 0.16)
-        : c.card.withValues(alpha: 0.92);
-    final fg = outgoing ? _outgoingTextColor : c.textPrimary;
+    final label = count == 0
+        ? AppStrings.t(AppStringKeys.messageLeaveAComment)
+        : AppStrings.t(AppStringKeys.momentsCommentCount, {'value1': count});
+    final fg = outgoing ? _outgoingTextColor : _incomingTextColor;
     final sub = outgoing
         ? _outgoingTextColor.withValues(alpha: 0.72)
         : c.linkBlue;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () => widget.onOpenComments?.call(message),
-      child: ConstrainedBox(
+      child: Container(
         constraints: BoxConstraints(maxWidth: _bubbleMaxWidth()),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
+        key: ValueKey('messageCommentsAttachment-${message.id}'),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+        decoration: BoxDecoration(
+          border: Border(
+            top: BorderSide(
               color: outgoing
-                  ? _outgoingTextColor.withValues(alpha: 0.12)
+                  ? _outgoingTextColor.withValues(alpha: 0.16)
                   : c.divider.withValues(alpha: 0.7),
               width: 0.5,
             ),
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              AppIcon(HeroAppIcons.comments, size: 18, color: sub),
-              const SizedBox(width: 7),
-              Flexible(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: fg,
-                    decoration: TextDecoration.none,
-                  ),
+        ),
+        child: Row(
+          children: [
+            AppIcon(HeroAppIcons.comments, size: 18, color: sub),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: fg,
+                  decoration: TextDecoration.none,
                 ),
               ),
-              AppIcon(HeroAppIcons.chevronRight, size: 17, color: sub),
-            ],
-          ),
+            ),
+            AppIcon(HeroAppIcons.chevronRight, size: 17, color: sub),
+          ],
         ),
       ),
     );
@@ -1175,14 +1273,11 @@ class _MessageBubbleState extends State<MessageBubble>
   Widget _diceBubble(bool outgoing) {
     final c = context.colors;
     final value = message.diceValue;
-    return Container(
+    return _bubbleBackground(
+      outgoing: outgoing,
       constraints: BoxConstraints(maxWidth: _bubbleMaxWidth()),
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 11),
-      decoration: BoxDecoration(
-        color: outgoing ? _outgoingBubbleColor : _incomingBubbleColor,
-        borderRadius: BorderRadius.circular(10),
-        border: outgoing ? null : Border.all(color: c.divider, width: 0.5),
-      ),
+      borderRadius: _messageBorderRadius(10),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1224,31 +1319,26 @@ class _MessageBubbleState extends State<MessageBubble>
 
   Widget _textBubble(String text, bool outgoing) {
     final c = context.colors;
-    final alwaysShowTime =
-        widget.forceShowTimestamp ||
-        context.watch<ThemeController>().alwaysShowMessageTime;
     final baseColor = outgoing ? _outgoingTextColor : _incomingTextColor;
-    final linkColor = outgoing ? _outgoingTextColor : c.linkBlue;
+    final linkColor = _bubbleBackgroundStyle.isDecorative
+        ? baseColor
+        : outgoing
+        ? _outgoingTextColor
+        : c.linkBlue;
     for (final r in _linkRecognizers) {
       r.dispose();
     }
     _linkRecognizers.clear();
     final emojiOnly = _isEmojiOnlyText(text);
-    final textFontSize = emojiOnly ? 34.0 : 16.0;
-    return Container(
+    final textFontSize = emojiOnly ? 34.0 : 15.0;
+    return _bubbleBackground(
+      key: ValueKey('messageTextBubble-${message.id}'),
+      outgoing: outgoing,
       constraints: BoxConstraints(maxWidth: _bubbleMaxWidth()),
-      padding: alwaysShowTime
-          ? (emojiOnly
-                ? const EdgeInsets.fromLTRB(10, 7, 10, 18)
-                : const EdgeInsets.fromLTRB(12, 9, 12, 20))
-          : (emojiOnly
-                ? const EdgeInsets.symmetric(horizontal: 10, vertical: 7)
-                : const EdgeInsets.symmetric(horizontal: 12, vertical: 9)),
-      decoration: BoxDecoration(
-        color: outgoing ? _outgoingBubbleColor : _incomingBubbleColor,
-        borderRadius: BorderRadius.circular(6),
-        border: outgoing ? null : Border.all(color: c.divider, width: 0.5),
-      ),
+      padding: emojiOnly
+          ? const EdgeInsets.symmetric(horizontal: 10, vertical: 7)
+          : const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      borderRadius: _messageBorderRadius(6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -2243,9 +2333,11 @@ class _MessageBubbleState extends State<MessageBubble>
     );
   }
 
-  bool get _showsTranslation =>
-      message.isTranslating ||
-      (message.translationText?.trim().isNotEmpty ?? false);
+  bool get _showsTranslation => _showsTranslationFor(message);
+
+  bool _showsTranslationFor(ChatMessage source) =>
+      source.isTranslating ||
+      (source.translationText?.trim().isNotEmpty ?? false);
 
   bool get _showsAiSummary =>
       message.aiSummaryLoading ||
@@ -2320,7 +2412,12 @@ class _MessageBubbleState extends State<MessageBubble>
     );
   }
 
-  Widget _translationBlock(bool outgoing, {double? width}) {
+  Widget _translationBlock(
+    bool outgoing, {
+    double? width,
+    ChatMessage? source,
+  }) {
+    source ??= message;
     final c = context.colors;
     final base = outgoing ? _outgoingTextColor : c.textPrimary;
     final secondary = outgoing
@@ -2338,7 +2435,7 @@ class _MessageBubbleState extends State<MessageBubble>
         border: Border(left: BorderSide(color: secondary, width: 2.5)),
       ),
       padding: const EdgeInsets.fromLTRB(10, 7, 10, 8),
-      child: message.isTranslating
+      child: source.isTranslating
           ? Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -2371,12 +2468,12 @@ class _MessageBubbleState extends State<MessageBubble>
                 ),
                 const SizedBox(height: 4),
                 ..._richTextWidgets(
-                  message.translationText ?? '',
+                  source.translationText ?? '',
                   base,
                   link,
                   outgoing,
                   false,
-                  message.translationEntities,
+                  source.translationEntities,
                 ),
               ],
             ),
@@ -2550,7 +2647,7 @@ class _MessageBubbleState extends State<MessageBubble>
           width: maxWidth,
           decoration: BoxDecoration(
             color: c.card,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: _messageBorderRadius(10),
             border: Border.all(color: c.divider, width: 0.5),
           ),
           clipBehavior: Clip.antiAlias,
@@ -2626,14 +2723,23 @@ class _MessageBubbleState extends State<MessageBubble>
         );
       },
     );
-    if (caption == null) return card;
+    return _attachmentWithCaption(card, outgoing, caption: caption);
+  }
+
+  Widget _attachmentWithCaption(
+    Widget attachment,
+    bool outgoing, {
+    String? caption,
+  }) {
+    caption ??= _caption();
+    if (caption == null) return attachment;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: outgoing
           ? CrossAxisAlignment.end
           : CrossAxisAlignment.start,
       children: [
-        card,
+        attachment,
         const SizedBox(height: 4),
         _textBubble(caption, outgoing),
       ],
@@ -2799,7 +2905,6 @@ class _MessageBubbleState extends State<MessageBubble>
   /// 未接听 / 已拒绝). Tapping the bubble places the same kind of call again
   /// (点击重拨). The glyph sits toward the bubble's outer edge like profile.
   Widget _callBubble(bool outgoing) {
-    final c = context.colors;
     final isVideo = message.callIsVideo;
     final connected = message.callDuration > 0;
     final baseColor = outgoing ? _outgoingTextColor : _incomingTextColor;
@@ -2835,19 +2940,16 @@ class _MessageBubbleState extends State<MessageBubble>
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () => widget.onRedial?.call(isVideo),
-      child: Container(
+      child: _bubbleBackground(
+        outgoing: outgoing,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: outgoing ? _outgoingBubbleColor : _incomingBubbleColor,
-          borderRadius: BorderRadius.circular(6),
-          border: outgoing ? null : Border.all(color: c.divider, width: 0.5),
-        ),
+        borderRadius: _messageBorderRadius(6),
         // Call glyph always on the left of the status, both directions.
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              isVideo ? HeroAppIcons.video.data : HeroAppIcons.phone.data,
+            AppIcon(
+              isVideo ? HeroAppIcons.video : HeroAppIcons.phone,
               size: 18,
               color: accent,
             ),
@@ -3571,7 +3673,6 @@ class _MessageBubbleState extends State<MessageBubble>
         case 'textEntityTypePhoneNumber':
         case 'textEntityTypeBankCardNumber':
           color = link;
-          decorations.add(TextDecoration.underline);
         case 'textEntityTypeMediaTimestamp':
           color = link;
           weight = FontWeight.w600;
@@ -3682,13 +3783,7 @@ class _MessageBubbleState extends State<MessageBubble>
       spans.add(
         TextSpan(
           text: matched,
-          style: baseStyle.copyWith(
-            color: link,
-            decoration: isMention || isHashtag
-                ? baseStyle.decoration
-                : TextDecoration.underline,
-            decorationColor: link,
-          ),
+          style: baseStyle.copyWith(color: link),
           recognizer: recognizer,
         ),
       );
@@ -3720,25 +3815,80 @@ class _MessageBubbleState extends State<MessageBubble>
         : imageSize;
     final grouped = _groupsMediaCaption(caption);
     final mediaRadius = grouped ? 0.0 : 10.0;
+    final mediaBorderRadius = _messageBorderRadius(mediaRadius);
     final media = GestureDetector(
       onTap: () => widget.onOpenImage?.call(message),
       child: SizedBox(
         width: frameSize.width,
         height: frameSize.height,
         child: usesBlurredFrame
-            ? _blurredImageFrame(image, imageSize, frameSize, mediaRadius)
-            : TDImage(
-                photo: image,
-                cornerRadius: mediaRadius,
-                fit: BoxFit.contain,
-                cacheWidth: _cachePx(imageSize.width),
-                cacheHeight: _cachePx(imageSize.height),
-                showProgress: true,
+            ? _blurredImageFrame(image, imageSize, frameSize, mediaBorderRadius)
+            : ClipRRect(
+                borderRadius: mediaBorderRadius,
+                child: TDImage(
+                  photo: image,
+                  cornerRadius: 0,
+                  fit: BoxFit.contain,
+                  cacheWidth: _cachePx(imageSize.width),
+                  cacheHeight: _cachePx(imageSize.height),
+                  showProgress: true,
+                ),
               ),
       ),
     );
+    final mediaWithApplyAction = widget.onApplyMessageBubble == null
+        ? media
+        : Stack(
+            children: [
+              media,
+              Positioned(
+                left: 8,
+                right: 8,
+                bottom: 8,
+                child: GestureDetector(
+                  key: const ValueKey('messageBubbleApplyAction'),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => widget.onApplyMessageBubble?.call(message),
+                  child: Container(
+                    height: 36,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: AppTheme.brand,
+                      borderRadius: BorderRadius.circular(10),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.18),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        AppIcon(
+                          HeroAppIcons.palette,
+                          size: 16,
+                          color: AppTheme.onBrand,
+                        ),
+                        const SizedBox(width: 7),
+                        Text(
+                          'Apply bubble',
+                          style: TextStyle(
+                            color: AppTheme.onBrand,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
     return _mediaWithCaption(
-      media: media,
+      media: mediaWithApplyAction,
       caption: caption,
       outgoing: outgoing,
     );
@@ -3748,12 +3898,12 @@ class _MessageBubbleState extends State<MessageBubble>
     TdFileRef image,
     Size imageSize,
     Size frameSize,
-    double radius,
+    BorderRadius borderRadius,
   ) {
     final frameCacheWidth = _cachePx(frameSize.width);
     final frameCacheHeight = _cachePx(frameSize.height);
     return ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
+      borderRadius: borderRadius,
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -3819,7 +3969,7 @@ class _MessageBubbleState extends State<MessageBubble>
     return Container(
       decoration: BoxDecoration(
         color: outgoing ? _outgoingBubbleColor : _incomingBubbleColor,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: _messageBorderRadius(8),
         border: outgoing ? null : Border.all(color: c.divider, width: 0.5),
       ),
       clipBehavior: Clip.antiAlias,
@@ -3887,11 +4037,11 @@ class _MessageBubbleState extends State<MessageBubble>
           fit: StackFit.expand,
           children: [
             ClipRRect(
-              borderRadius: BorderRadius.circular(mediaRadius),
+              borderRadius: _messageBorderRadius(mediaRadius),
               child: message.image != null
                   ? TDImage(
                       photo: message.image,
-                      cornerRadius: mediaRadius,
+                      cornerRadius: 0,
                       cacheWidth: _cachePx(size.width),
                       cacheHeight: _cachePx(size.height),
                       showProgress: true,
@@ -3957,7 +4107,7 @@ class _MessageBubbleState extends State<MessageBubble>
       onTap: () => widget.onPlayVideo?.call(message),
       onLongPress: () => _handleLongPress(MessageActionSource.video),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(mediaRadius),
+        borderRadius: _messageBorderRadius(mediaRadius),
         child: SizedBox(
           key: ValueKey('message-animation-${message.id}'),
           width: size.width,
@@ -3978,14 +4128,8 @@ class _MessageBubbleState extends State<MessageBubble>
   }
 
   String? _caption() {
-    final t = _activeMessageText;
-    if (t.isEmpty) return null;
-    if (message.contentType == 'messageAnimation' &&
-        t == telegramText(AppStringKeys.tdMessageGif)) {
-      return null;
-    }
-    if (t.startsWith('[') && t.endsWith(']')) return null;
-    return t;
+    final text = _activeMessageText;
+    return text.trim().isEmpty ? null : text;
   }
 
   Size _imageDisplaySize() {
@@ -4045,10 +4189,13 @@ class _MessageBubbleState extends State<MessageBubble>
 
   Widget _voiceBubble(MessageVoice voice, bool outgoing) {
     final c = context.colors;
-    final fg = outgoing ? _outgoingTextColor : AppTheme.brand;
-    final track = outgoing
-        ? _outgoingTextColor.withValues(alpha: 0.35)
-        : AppTheme.brand.withValues(alpha: 0.25);
+    final decorative = _bubbleBackgroundStyle.isDecorative;
+    final fg = outgoing
+        ? _outgoingTextColor
+        : decorative
+        ? _incomingTextColor
+        : AppTheme.brand;
+    final track = fg.withValues(alpha: outgoing ? 0.35 : 0.25);
     return AnimatedBuilder(
       animation: _voice,
       builder: (context, _) {
@@ -4065,14 +4212,11 @@ class _MessageBubbleState extends State<MessageBubble>
         final timeText = played
             ? _durationString(_voice.position.inSeconds)
             : _durationString(voice.duration);
-        return Container(
-          width: 210,
+        return _bubbleBackground(
+          outgoing: outgoing,
+          constraints: const BoxConstraints.tightFor(width: 210),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-          decoration: BoxDecoration(
-            color: outgoing ? _outgoingBubbleColor : _incomingBubbleColor,
-            borderRadius: BorderRadius.circular(6),
-            border: outgoing ? null : Border.all(color: c.divider, width: 0.5),
-          ),
+          borderRadius: _messageBorderRadius(6),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -4171,6 +4315,8 @@ class _MessageBubbleState extends State<MessageBubble>
                             : FontWeight.w700,
                         color: outgoing
                             ? _outgoingTextColor.withValues(alpha: 0.9)
+                            : decorative
+                            ? _incomingTextColor.withValues(alpha: 0.9)
                             : c.textSecondary,
                       ),
                     ),
@@ -4205,6 +4351,8 @@ class _MessageBubbleState extends State<MessageBubble>
                             height: 1.25,
                             color: outgoing
                                 ? _outgoingTextColor.withValues(alpha: 0.88)
+                                : decorative
+                                ? _incomingTextColor.withValues(alpha: 0.88)
                                 : c.textSecondary,
                           ),
                         ),
@@ -4238,7 +4386,7 @@ class _MessageBubbleState extends State<MessageBubble>
         width: 220,
         decoration: BoxDecoration(
           color: c.card,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: _messageBorderRadius(10),
           border: Border.all(color: c.divider, width: 0.5),
         ),
         clipBehavior: Clip.antiAlias,
@@ -4286,41 +4434,118 @@ class _MessageBubbleState extends State<MessageBubble>
 
   // MARK: - File card
 
-  Widget _fileCard(MessageDocument doc, bool outgoing) {
+  Widget _fileCard(MessageDocument _, bool outgoing) =>
+      _fileAlbumCard(<ChatMessage>[message], outgoing);
+
+  Widget _fileAlbumCard(List<ChatMessage> sources, bool outgoing) {
     final c = context.colors;
-    final caption = _fileCaptionText(doc);
-    final isGif =
-        doc.ext.toLowerCase() == 'gif' ||
-        doc.fileName.toLowerCase().endsWith('.gif');
+    ChatMessage? captionSource;
+    var caption = '';
+    for (final source in sources) {
+      if (source.document == null) continue;
+      final candidate = _fileCaptionText(source);
+      if (candidate.isEmpty) continue;
+      captionSource = source;
+      caption = candidate;
+      break;
+    }
+    ChatMessage? translationSource = captionSource;
+    if (translationSource == null) {
+      for (final source in sources) {
+        if (_showsTranslationFor(source)) {
+          translationSource = source;
+          break;
+        }
+      }
+    }
+    final singleGif =
+        sources.length == 1 && _isGifDocument(sources.single.document!);
+    return Container(
+      key: ValueKey('messageDocumentAlbumCard-${message.id}'),
+      width: _bubbleMaxWidth(),
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: c.card,
+        borderRadius: _messageBorderRadius(6),
+        border: Border.all(color: c.divider, width: 0.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var index = 0; index < sources.length; index++) ...[
+            if (index > 0)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Container(height: 0.5, color: c.divider),
+              ),
+            _fileAlbumItem(sources[index]),
+          ],
+          if (captionSource != null) ...[
+            SizedBox(height: sources.length == 1 ? 10 : 2),
+            if (!singleGif)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Container(height: 0.5, color: c.divider),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: _richTextWidgets(
+                  caption,
+                  c.textPrimary,
+                  c.linkBlue,
+                  outgoing,
+                  false,
+                  captionSource.textEntities,
+                ),
+              ),
+            ),
+          ],
+          if (translationSource != null &&
+              _showsTranslationFor(translationSource)) ...[
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+              child: _translationBlock(
+                outgoing,
+                width: double.infinity,
+                source: translationSource,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _fileAlbumItem(ChatMessage source) {
+    final doc = source.document!;
+    final isGif = _isGifDocument(doc);
+    final itemKey = GlobalKey();
     return GestureDetector(
+      key: ValueKey('messageDocumentAlbumFile-${source.id}'),
       behavior: HitTestBehavior.opaque,
       onTap: () => Navigator.of(
         context,
       ).push(MaterialPageRoute(builder: (_) => FileDetailView(doc: doc))),
-      child: Container(
-        width: 244,
-        padding: EdgeInsets.all(isGif ? 4 : 12),
-        decoration: BoxDecoration(
-          color: c.card,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: c.divider, width: 0.5),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (isGif && doc.file != null)
-              SizedBox(
-                width: 236,
-                height: 180,
-                child: TDImage(
-                  photo: doc.file,
-                  fit: BoxFit.contain,
-                  cornerRadius: 4,
-                  showProgress: true,
-                ),
-              )
-            else
-              Row(
+      onLongPress: () => _handleGroupedFileLongPress(source, itemKey),
+      child: isGif && doc.file != null
+          ? SizedBox(
+              key: itemKey,
+              width: 236,
+              height: 180,
+              child: TDImage(
+                photo: doc.file,
+                fit: BoxFit.contain,
+                cornerRadius: 4,
+                showProgress: true,
+              ),
+            )
+          : Padding(
+              key: itemKey,
+              padding: const EdgeInsets.all(8),
+              child: Row(
                 children: [
                   Expanded(
                     child: Column(
@@ -4350,54 +4575,26 @@ class _MessageBubbleState extends State<MessageBubble>
                   _fileGlyph(doc.ext),
                 ],
               ),
-            if (caption.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              if (!isGif) Container(height: 0.5, color: c.divider),
-              const SizedBox(height: 8),
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: isGif ? 8 : 0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ..._richTextWidgets(
-                      caption,
-                      c.textPrimary,
-                      c.linkBlue,
-                      outgoing,
-                      false,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            if (_showsTranslation) ...[
-              const SizedBox(height: 8),
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: isGif ? 8 : 0),
-                child: _translationBlock(outgoing, width: double.infinity),
-              ),
-            ],
-          ],
-        ),
-      ),
+            ),
     );
   }
 
-  String _fileCaptionText(MessageDocument document) {
-    final text = message.text.trim();
-    final generatedWithName = telegramText(
-      AppStringKeys.tdMessageFileWithName,
-      {'value1': document.fileName},
-    );
-    if (text.isEmpty ||
-        text == telegramText(AppStringKeys.channelsFileAttachment) ||
-        text == telegramText(AppStringKeys.composerImagePreview) ||
-        text == telegramText(AppStringKeys.chatVideoPlaceholder) ||
-        text == generatedWithName ||
-        (text.startsWith('[') && text.endsWith(']'))) {
-      return '';
-    }
-    return text;
+  void _handleGroupedFileLongPress(ChatMessage source, GlobalKey itemKey) {
+    _lastTapAt = null;
+    final box = itemKey.currentContext?.findRenderObject() as RenderBox?;
+    final bounds = box != null && box.hasSize
+        ? box.localToGlobal(Offset.zero) & box.size
+        : null;
+    widget.onLongPress?.call(source, bounds, MessageActionSource.normal);
+  }
+
+  bool _isGifDocument(MessageDocument document) =>
+      document.ext.toLowerCase() == 'gif' ||
+      document.fileName.toLowerCase().endsWith('.gif');
+
+  String _fileCaptionText(ChatMessage source) {
+    final text = source.text;
+    return text.trim().isEmpty ? '' : text;
   }
 
   Widget _fileGlyph(String ext) {

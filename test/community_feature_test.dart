@@ -3,11 +3,13 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mithka/communities/community_models.dart';
 import 'package:mithka/communities/community_view.dart';
+import 'package:mithka/components/photo_avatar.dart';
 import 'package:mithka/components/ui_components.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:mithka/settings/feature_settings_view.dart';
 import 'package:mithka/settings/safety_notice_controller.dart';
 import 'package:mithka/tdlib/td_models.dart';
+import 'package:mithka/theme/app_theme.dart';
 import 'package:mithka/theme/theme_controller.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -117,6 +119,79 @@ void main() {
       expect(entries, hasLength(2));
     });
 
+    testWidgets('collapsed community row stacks two plates behind its avatar', (
+      tester,
+    ) async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final theme = ThemeController(prefs);
+      addTearDown(theme.dispose);
+      final community = CommunitySummary(
+        id: 42,
+        name: 'Formula Paddock',
+        haveAccess: true,
+        isAdministrator: false,
+        canEditChatList: false,
+      );
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider<ThemeController>.value(
+          value: theme,
+          child: MaterialApp(
+            theme: ThemeData(
+              brightness: Brightness.light,
+              extensions: [AppColors.light],
+            ),
+            home: Scaffold(
+              body: CommunityChatListRow(
+                entry: CommunityGroupEntry(
+                  community: community,
+                  chats: [
+                    _chat(
+                      id: 1,
+                      title: 'Race Chat',
+                      order: 100,
+                      sender: 'Fexis',
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final front = find.byKey(const ValueKey('community-avatar-front'));
+      final nearBack = find.byKey(const ValueKey('community-avatar-back-1'));
+      final farBack = find.byKey(const ValueKey('community-avatar-back-2'));
+      expect(front, findsOneWidget);
+      expect(nearBack, findsOneWidget);
+      expect(farBack, findsOneWidget);
+      expect(tester.getSize(front), Size.square(theme.avatarSize));
+      expect(
+        tester.getTopLeft(nearBack).dx,
+        lessThan(tester.getTopLeft(front).dx),
+      );
+      expect(
+        tester.getTopLeft(farBack).dx,
+        lessThan(tester.getTopLeft(nearBack).dx),
+      );
+      expect(
+        tester.getTopLeft(nearBack).dy,
+        greaterThan(tester.getTopLeft(front).dy),
+      );
+      expect(
+        tester.getTopLeft(farBack).dy,
+        greaterThan(tester.getTopLeft(nearBack).dy),
+      );
+      expect(tester.widget<PhotoAvatar>(front).allowAnimation, isFalse);
+      final preview = tester.widget<ChatPreviewText>(
+        find.byType(ChatPreviewText),
+      );
+      expect(preview.sender, 'Fexis');
+      expect(preview.message, 'Latest message');
+    });
+
     test('requests the native community peer catalog', () {
       expect(communityFullInfoRequest(42), {
         '@type': 'getCommunityFullInfo',
@@ -204,6 +279,21 @@ void main() {
       expect(find.text('Public Announcements'), findsOneWidget);
       expect(find.text('Show as One Chat'), findsOneWidget);
 
+      final header = find.byKey(const ValueKey('community-header'));
+      final avatar = find.descendant(
+        of: header,
+        matching: find.byType(PhotoAvatar),
+      );
+      final title = find.text('Formula Paddock');
+      final count = find.text('2 chats');
+      expect(tester.getSize(header).height, 92);
+      expect(tester.getSize(avatar), const Size.square(64));
+      expect(tester.getTopLeft(title).dx, tester.getTopLeft(count).dx);
+      expect(
+        tester.getTopLeft(title).dx,
+        greaterThan(tester.getTopRight(avatar).dx),
+      );
+
       await tester.tap(find.byType(AppSwitch));
       await tester.pump();
 
@@ -255,6 +345,7 @@ ChatSummary _chat({
   required int order,
   int unread = 0,
   bool markedUnread = false,
+  String? sender,
 }) {
   return ChatSummary(
     id: id,
@@ -266,6 +357,7 @@ ChatSummary _chat({
     order: order,
     isMuted: false,
     isMarkedUnread: markedUnread,
+    lastSender: sender,
     kind: ChatKind.group,
   );
 }

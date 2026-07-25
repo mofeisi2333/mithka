@@ -5,6 +5,8 @@ import 'dart:developer' as developer;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import '../settings/ai_endpoint_style.dart';
+import '../settings/ai_stdout_logger.dart';
 import 'unread_chat_summary_service.dart';
 
 class OpenAiCompatibleUnreadSummaryProvider
@@ -12,7 +14,9 @@ class OpenAiCompatibleUnreadSummaryProvider
   OpenAiCompatibleUnreadSummaryProvider({
     required this.serverBaseUri,
     required this.model,
+    this.endpointStyle = AiEndpointStyle.openAiChatCompletions,
     http.Client? httpClient,
+    AiStdoutLogger? aiLogger,
     this.apiKey,
     this.requestTimeout = const Duration(seconds: 75),
     this.streamIdleTimeout = const Duration(seconds: 30),
@@ -25,10 +29,12 @@ class OpenAiCompatibleUnreadSummaryProvider
   }) : assert(requestTimeout > Duration.zero),
        assert(streamIdleTimeout > Duration.zero),
        _httpClient = httpClient ?? http.Client(),
+       _aiLogger = aiLogger ?? aiStdoutLogger,
        _ownsHttpClient = httpClient == null;
 
   final Uri serverBaseUri;
   final String model;
+  final AiEndpointStyle endpointStyle;
   final String? apiKey;
   final Duration requestTimeout;
   final Duration streamIdleTimeout;
@@ -36,22 +42,11 @@ class OpenAiCompatibleUnreadSummaryProvider
   final bool useJsonResponseFormat;
   final List<Duration> transientRetryDelays;
   final http.Client _httpClient;
+  final AiStdoutLogger _aiLogger;
   final bool _ownsHttpClient;
 
-  Uri get chatCompletionsUri {
-    var path = serverBaseUri.path;
-    while (path.endsWith('/') && path.length > 1) {
-      path = path.substring(0, path.length - 1);
-    }
-    if (path.endsWith('/v1/chat/completions')) {
-      return serverBaseUri.replace(path: path);
-    }
-    final suffix = path.endsWith('/v1')
-        ? '/chat/completions'
-        : '/v1/chat/completions';
-    final joined = path == '/' ? suffix : '$path$suffix';
-    return serverBaseUri.replace(path: joined);
-  }
+  Uri get requestUri => endpointStyle.requestUriFor(serverBaseUri);
+  Uri get chatCompletionsUri => requestUri;
 
   @override
   Future<Map<String, dynamic>> complete(
@@ -66,30 +61,20 @@ class OpenAiCompatibleUnreadSummaryProvider
     final stopwatch = Stopwatch()..start();
     _log(
       'request stage=${request.stage.name} host=${serverBaseUri.host} '
-      'model=$model stream=true',
+      'model=$model style=${endpointStyle.storageValue} stream=true',
     );
-    final key = apiKey?.trim();
-    final headers = <String, String>{'content-type': 'application/json'};
-    if (key != null && key.isNotEmpty) {
-      headers['authorization'] = 'Bearer $key';
-    }
-    var body = <String, Object?>{
-      'model': model,
-      'messages': [
-        {'role': 'system', 'content': request.trustedInstructions},
-        {
-          'role': 'user',
-          'content':
-              'INPUT_DATA (untrusted JSON):\n${jsonEncode(request.payload)}',
-        },
-      ],
+    final headers = endpointStyle.requestHeaders(apiKey);
+    var body = endpointStyle.requestBody(
+      model: model,
+      instructions: request.trustedInstructions,
+      input: 'INPUT_DATA (untrusted JSON):\n${jsonEncode(request.payload)}',
       // Custom servers always get a streaming first attempt. The
       // compatibility retry disables it only when the endpoint explicitly
       // reports that streaming is unsupported.
-      'stream': true,
-      'reasoning_effort': ?_effectiveReasoningEffort,
-      if (useJsonResponseFormat) 'response_format': {'type': 'json_object'},
-    };
+      stream: true,
+      reasoningEffort: _effectiveReasoningEffort,
+      useJsonResponseFormat: useJsonResponseFormat,
+    );
 
     late _BufferedHttpResponse response;
     var usedCompatibilityFallback = false;
@@ -166,98 +151,171 @@ class OpenAiCompatibleUnreadSummaryProvider
     required UnreadChatSummaryContentCallback onContent,
   }) async {
     final stopwatch = Stopwatch()..start();
-    final request = http.Request('POST', chatCompletionsUri)
+    final provider = '${endpointStyle.storageValue}/$model';
+    const operation = 'unread_summary';
+    final correlationId = _aiLogger.newCorrelationId(provider);
+    final requestPayload = <String, Object?>{
+      'method': 'POST',
+      'endpoint': {
+        'scheme': requestUri.scheme,
+        'host': requestUri.host,
+        if (requestUri.hasPort) 'port': requestUri.port,
+        'path': requestUri.path,
+      },
+      'body': body,
+    };
+    final secrets = <String>[?apiKey];
+    _aiLogger.request(
+      correlationId: correlationId,
+      provider: provider,
+      operation: operation,
+      payload: requestPayload,
+      secrets: secrets,
+    );
+    final request = http.Request('POST', requestUri)
       ..headers.addAll(headers)
       ..body = jsonEncode(body);
-    final response = await _httpClient.send(request).timeout(requestTimeout);
+    late final http.StreamedResponse response;
+    try {
+      response = await _httpClient.send(request).timeout(requestTimeout);
+    } catch (error, stackTrace) {
+      _aiLogger.error(
+        correlationId: correlationId,
+        provider: provider,
+        operation: operation,
+        error: error,
+        payload: requestPayload,
+        stackTrace: stackTrace,
+        secrets: secrets,
+      );
+      rethrow;
+    }
     _log(
       'connected status=${response.statusCode} '
       'elapsed_ms=${stopwatch.elapsedMilliseconds}',
     );
-    final isSuccessful =
-        response.statusCode >= 200 && response.statusCode < 300;
-    final isEventStream =
-        response.headers['content-type']?.toLowerCase().contains(
-          'text/event-stream',
-        ) ==
-        true;
-    late final String responseBody;
-    if (isEventStream) {
-      final raw = StringBuffer();
-      final streamedContent = StringBuffer();
-      var lastReportedLength = 0;
-      var receivedFirstEvent = false;
-      await for (final line
-          in response.stream
-              .timeout(streamIdleTimeout)
-              .transform(utf8.decoder)
-              .transform(const LineSplitter())) {
-        raw.writeln(line);
-        if (!receivedFirstEvent && line.trim().isNotEmpty) {
-          receivedFirstEvent = true;
-          _log(
-            'first stream event elapsed_ms=${stopwatch.elapsedMilliseconds}',
-          );
+    try {
+      final isSuccessful =
+          response.statusCode >= 200 && response.statusCode < 300;
+      final isEventStream =
+          response.headers['content-type']?.toLowerCase().contains(
+            'text/event-stream',
+          ) ==
+          true;
+      final contentType = response.headers['content-type']?.toLowerCase() ?? '';
+      final isJsonLineStream =
+          contentType.contains('application/x-ndjson') ||
+          contentType.contains('application/stream+json') ||
+          (endpointStyle == AiEndpointStyle.ollamaChat &&
+              body['stream'] == true);
+      late final String responseBody;
+      if (isEventStream || isJsonLineStream) {
+        final raw = StringBuffer();
+        final streamedContent = StringBuffer();
+        var lastReportedLength = 0;
+        var receivedFirstEvent = false;
+        await for (final line
+            in response.stream
+                .timeout(streamIdleTimeout)
+                .transform(utf8.decoder)
+                .transform(const LineSplitter())) {
+          raw.writeln(line);
+          if (line.trim().isNotEmpty) {
+            _aiLogger.response(
+              correlationId: correlationId,
+              provider: provider,
+              operation: '$operation.stream_event',
+              result: {'data': line},
+              secrets: secrets,
+            );
+          }
+          if (!receivedFirstEvent && line.trim().isNotEmpty) {
+            receivedFirstEvent = true;
+            _log(
+              'first stream event elapsed_ms=${stopwatch.elapsedMilliseconds}',
+            );
+          }
+          if (!isSuccessful) continue;
+          var delta = _streamContentDelta(line, isSse: isEventStream);
+          if (delta.isEmpty &&
+              endpointStyle == AiEndpointStyle.openAiResponses &&
+              streamedContent.isEmpty &&
+              (!isEventStream || line.trimLeft().startsWith('data:'))) {
+            final data = (isEventStream ? line.substring(5) : line).trim();
+            if (data.isNotEmpty && data != '[DONE]') {
+              final event = _decodeEnvelope(data);
+              if (event['type'] == 'response.output_text.done' &&
+                  event['text'] is String) {
+                delta = event['text'] as String;
+              }
+            }
+          }
+          if (delta.isEmpty) continue;
+          streamedContent.write(delta);
+          final accumulated = streamedContent.toString();
+          if (accumulated.length - lastReportedLength >= 8) {
+            lastReportedLength = accumulated.length;
+            onContent(accumulated);
+          }
         }
-        if (!isSuccessful) continue;
-        final delta = _sseContentDelta(line);
-        if (delta.isEmpty) continue;
-        streamedContent.write(delta);
         final accumulated = streamedContent.toString();
-        if (accumulated.length - lastReportedLength >= 8) {
-          lastReportedLength = accumulated.length;
+        if (isSuccessful &&
+            accumulated.isNotEmpty &&
+            accumulated.length != lastReportedLength) {
           onContent(accumulated);
         }
+        _log(
+          'stream closed content_chars=${accumulated.length} '
+          'elapsed_ms=${stopwatch.elapsedMilliseconds}',
+        );
+        responseBody = raw.toString();
+      } else {
+        responseBody = await response.stream
+            .timeout(streamIdleTimeout)
+            .transform(utf8.decoder)
+            .join();
+        _log(
+          'buffered response chars=${responseBody.length} '
+          'elapsed_ms=${stopwatch.elapsedMilliseconds}',
+        );
       }
-      final accumulated = streamedContent.toString();
-      if (isSuccessful &&
-          accumulated.isNotEmpty &&
-          accumulated.length != lastReportedLength) {
-        onContent(accumulated);
-      }
-      _log(
-        'stream closed content_chars=${accumulated.length} '
-        'elapsed_ms=${stopwatch.elapsedMilliseconds}',
+      _aiLogger.response(
+        correlationId: correlationId,
+        provider: provider,
+        operation: operation,
+        result: {
+          'status_code': response.statusCode,
+          'content_type': contentType,
+          'body': responseBody,
+        },
+        secrets: secrets,
       );
-      responseBody = raw.toString();
-    } else {
-      responseBody = await response.stream
-          .timeout(streamIdleTimeout)
-          .transform(utf8.decoder)
-          .join();
-      _log(
-        'buffered response chars=${responseBody.length} '
-        'elapsed_ms=${stopwatch.elapsedMilliseconds}',
+      return _BufferedHttpResponse(
+        statusCode: response.statusCode,
+        headers: response.headers,
+        body: responseBody,
       );
+    } catch (error, stackTrace) {
+      _aiLogger.error(
+        correlationId: correlationId,
+        provider: provider,
+        operation: operation,
+        error: error,
+        payload: requestPayload,
+        stackTrace: stackTrace,
+        secrets: secrets,
+      );
+      rethrow;
     }
-    return _BufferedHttpResponse(
-      statusCode: response.statusCode,
-      headers: response.headers,
-      body: responseBody,
-    );
   }
 
-  String _sseContentDelta(String rawLine) {
+  String _streamContentDelta(String rawLine, {required bool isSse}) {
     final line = rawLine.trimLeft();
-    if (!line.startsWith('data:')) return '';
-    final data = line.substring(5).trim();
+    if (isSse && !line.startsWith('data:')) return '';
+    final data = (isSse ? line.substring(5) : line).trim();
     if (data.isEmpty || data == '[DONE]') return '';
     final event = _decodeEnvelope(data);
-    final choices = event['choices'];
-    if (choices is! List || choices.isEmpty || choices.first is! Map) return '';
-    final choice = Map<String, dynamic>.from(choices.first as Map);
-    final delta = choice['delta'];
-    if (delta is Map && delta['content'] is String) {
-      return delta['content'] as String;
-    }
-    final message = choice['message'];
-    if (message is Map) {
-      return _messageContent({
-        'choices': [choice],
-      });
-    }
-    final text = choice['text'];
-    return text is String ? text : '';
+    return endpointStyle.streamDelta(event);
   }
 
   void _log(String message) {
@@ -294,21 +352,8 @@ class OpenAiCompatibleUnreadSummaryProvider
         message.contains('extra field');
     if (!unsupported) return null;
 
-    final compatible = Map<String, Object?>.of(body);
-    var changed = false;
-    if (message.contains('reasoning_effort') ||
-        message.contains('reasoning effort')) {
-      changed = compatible.remove('reasoning_effort') != null || changed;
-    }
-    if (message.contains('response_format') ||
-        message.contains('response format')) {
-      changed = compatible.remove('response_format') != null || changed;
-    }
-    if (message.contains('stream') && compatible['stream'] == true) {
-      compatible['stream'] = false;
-      changed = true;
-    }
-    return changed ? compatible : null;
+    final compatible = endpointStyle.withoutOptionalField(body, message);
+    return identical(compatible, body) ? null : compatible;
   }
 
   Duration _retryDelay(_BufferedHttpResponse response, Duration fallback) {
@@ -322,63 +367,71 @@ class OpenAiCompatibleUnreadSummaryProvider
   String? get _effectiveReasoningEffort {
     final configured = reasoningEffort?.trim();
     if (configured != null && configured.isNotEmpty) return configured;
-    final normalizedModel = model.toLowerCase();
-    if (RegExp(
-      r'(^|[/_.-])(deepseek|reasoner|reasoning|thinking|o1|o3|o4)([/_.-]|$)',
-    ).hasMatch(normalizedModel)) {
-      return 'low';
-    }
-    return null;
+    return inferredAiReasoningEffort(model);
   }
 
   String _completionContent(String body) {
     final normalized = body.trim();
-    if (!normalized
+    final isSse = normalized
         .split('\n')
-        .any((line) => line.trimLeft().startsWith('data:'))) {
+        .any((line) => line.trimLeft().startsWith('data:'));
+    final isJsonLines =
+        endpointStyle == AiEndpointStyle.ollamaChat &&
+        normalized.contains('\n');
+    if (!isSse && !isJsonLines) {
       final envelope = _decodeEnvelope(normalized);
-      return _messageContent(envelope);
+      final error = endpointStyle.errorMessage(envelope);
+      if (error != null) throw UnreadChatSummaryProviderException(error);
+      final content = endpointStyle.responseText(envelope);
+      if (content != null) return content;
+      final refusal = endpointStyle.refusalText(envelope);
+      if (refusal != null) {
+        throw UnreadChatSummaryProviderException(
+          'The model refused the summary request: ${refusal.trim()}',
+        );
+      }
+      throw const UnreadChatSummaryProviderException(
+        'The server response has no text content',
+      );
     }
 
     final content = StringBuffer();
     var reasoningCharacters = 0;
     for (final rawLine in const LineSplitter().convert(normalized)) {
       final line = rawLine.trimLeft();
-      if (!line.startsWith('data:')) continue;
-      final data = line.substring(5).trim();
+      if (isSse && !line.startsWith('data:')) continue;
+      final data = (isSse ? line.substring(5) : line).trim();
       if (data.isEmpty || data == '[DONE]') continue;
       final event = _decodeEnvelope(data);
-      final error = event['error'];
-      if (error is Map) {
-        final message = error['message'];
-        throw UnreadChatSummaryProviderException(
-          message is String && message.trim().isNotEmpty
-              ? message.trim()
-              : 'The summary server rejected the streamed request',
-        );
+      final error = endpointStyle.errorMessage(event);
+      if (error != null) throw UnreadChatSummaryProviderException(error);
+      final delta = endpointStyle.streamDelta(event);
+      if (delta.isNotEmpty) content.write(delta);
+      if (delta.isEmpty &&
+          endpointStyle == AiEndpointStyle.openAiResponses &&
+          content.isEmpty &&
+          event['type'] == 'response.output_text.done' &&
+          event['text'] is String) {
+        content.write(event['text'] as String);
       }
-      final choices = event['choices'];
-      if (choices is! List || choices.isEmpty || choices.first is! Map) {
-        continue;
+      if (endpointStyle == AiEndpointStyle.openAiChatCompletions) {
+        final choices = event['choices'];
+        if (choices is List && choices.isNotEmpty && choices.first is Map) {
+          final choice = choices.first as Map;
+          final choiceDelta = choice['delta'];
+          if (choiceDelta is Map &&
+              choiceDelta['reasoning_content'] is String) {
+            reasoningCharacters +=
+                (choiceDelta['reasoning_content'] as String).length;
+          }
+        }
       }
-      final choice = Map<String, dynamic>.from(choices.first as Map);
-      final delta = choice['delta'];
-      if (delta is Map) {
-        final value = delta['content'];
-        if (value is String) content.write(value);
-        final reasoning = delta['reasoning_content'];
-        if (reasoning is String) reasoningCharacters += reasoning.length;
+      if (delta.isEmpty &&
+          event['type'] == 'response.completed' &&
+          event['response'] is Map) {
+        final completed = endpointStyle.responseText(event['response'] as Map);
+        if (completed != null && content.isEmpty) content.write(completed);
       }
-      final message = choice['message'];
-      if (message is Map) {
-        content.write(
-          _messageContent({
-            'choices': [choice],
-          }),
-        );
-      }
-      final text = choice['text'];
-      if (text is String) content.write(text);
     }
     final result = content.toString();
     if (result.trim().isNotEmpty) return result;
@@ -405,63 +458,12 @@ class OpenAiCompatibleUnreadSummaryProvider
     }
   }
 
-  String _messageContent(Map<String, dynamic> envelope) {
-    final choices = envelope['choices'];
-    if (choices is! List || choices.isEmpty || choices.first is! Map) {
-      throw const UnreadChatSummaryProviderException(
-        'The server response has no completion choice',
-      );
-    }
-    final choice = Map<String, dynamic>.from(choices.first as Map);
-    final messageValue = choice['message'];
-    if (messageValue is! Map) {
-      throw const UnreadChatSummaryProviderException(
-        'The completion choice has no message',
-      );
-    }
-    final message = Map<String, dynamic>.from(messageValue);
-    final content = message['content'];
-    if (content is String && content.trim().isNotEmpty) return content;
-    if (content is List) {
-      final buffer = StringBuffer();
-      for (final part in content) {
-        if (part is String) {
-          buffer.write(part);
-          continue;
-        }
-        if (part is! Map) continue;
-        final value = part['text'];
-        if (value is String) {
-          buffer.write(value);
-        } else if (value is Map && value['value'] is String) {
-          buffer.write(value['value']);
-        }
-      }
-      final result = buffer.toString();
-      if (result.trim().isNotEmpty) return result;
-    }
-    final refusal = message['refusal'];
-    if (refusal is String && refusal.trim().isNotEmpty) {
-      throw UnreadChatSummaryProviderException(
-        'The model refused the summary request: ${refusal.trim()}',
-      );
-    }
-    throw const UnreadChatSummaryProviderException(
-      'The completion message has no text content',
-    );
-  }
-
   String _errorMessage(String body) {
     try {
       final decoded = jsonDecode(body);
       if (decoded is Map) {
-        final error = decoded['error'];
-        if (error is Map && error['message'] is String) {
-          return (error['message'] as String).trim();
-        }
-        if (decoded['message'] is String) {
-          return (decoded['message'] as String).trim();
-        }
+        final message = endpointStyle.errorMessage(decoded);
+        if (message != null) return message.trim();
       }
     } on FormatException {
       // Fall through to a bounded plain-text response.

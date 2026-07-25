@@ -150,7 +150,7 @@ windowShadowFg: #01020380;
       await android.writeAsString('''
 windowBackgroundWhite=#ff334455
 chat_inBubble=#ff445566
-chat_outBubble=#ff556677
+chat_outBubble=#ff95ec69
 avatar_nameInMessageRed=#ff112233
 ''');
       await macos.writeAsString('groupPeerNameOrange=cc7722');
@@ -158,7 +158,8 @@ avatar_nameInMessageRed=#ff112233
         ..addFile(
           ArchiveFile.string(
             'colors.tdesktop-theme',
-            'windowBg: #667788; msgInBg: #778899; msgOutBg: #8899aa;',
+            'windowBg: #667788; msgInBg: #778899; msgOutBg: #8899aa; '
+                'msgOutBgSelected: #112233;',
           ),
         );
       await desktop.writeAsBytes(ZipEncoder().encode(desktopArchive)!);
@@ -181,12 +182,12 @@ avatar_nameInMessageRed=#ff112233
 
       expect(theme.palette['list.plainBg'], 0x101820);
       expect(theme.incomingColor?.toARGB32(), 0xFF445566);
-      expect(theme.outgoingColor?.toARGB32(), 0xFF556677);
+      expect(theme.outgoingColor?.toARGB32(), 0xFF95EC69);
       expect(theme.incomingTextColor?.toARGB32(), 0xFFF2F5F7);
       expect(theme.outgoingTextColor?.toARGB32(), 0xFF101820);
       expect(
         theme.uiColors.pinnedRow.toARGB32(),
-        theme.uiColors.background.toARGB32(),
+        isNot(theme.uiColors.background.toARGB32()),
       );
       expect(theme.senderNameColors[0].toARGB32(), 0xFF112233);
       expect(theme.senderNameColors[1].toARGB32(), 0xFFCC7722);
@@ -425,88 +426,89 @@ msgOutBg: #f3b4bd;
     },
   );
 
-  test('Telegram UI palette is persisted but opt-in by default', () async {
-    SharedPreferences.setMockInitialValues({});
-    final prefs = await SharedPreferences.getInstance();
-    const theme = TelegramCloudTheme(
-      slug: 'MountainSolitude',
-      rawTitle: 'Mountain Solitude',
-      baseTheme: 'builtInThemeNight',
-      accentColorValue: 0xFF5F9EA0,
-      outgoingColors: [0xFFF3B4BD],
-      palette: {
-        'list.plainBg': 0x101820,
-        'list.primaryText': 0xF2F5F7,
-        'chat.message.incoming.bubble.withWp.bg': 0x22313B,
-        'chat.message.incoming.primaryText': 0xF2F5F7,
-        'chat.message.outgoing.primaryText': 0x101820,
-      },
-      wallpaper: ChatWallpaper.telegram(
-        backgroundId: 81,
-        remoteType: 'fill',
-        colors: [0x101820],
-      ),
-    );
+  test(
+    'Telegram UI palette always applies while its theme is selected',
+    () async {
+      SharedPreferences.setMockInitialValues({'useTelegramThemeForUi': false});
+      final prefs = await SharedPreferences.getInstance();
+      const theme = TelegramCloudTheme(
+        slug: 'MountainSolitude',
+        rawTitle: 'Mountain Solitude',
+        baseTheme: 'builtInThemeNight',
+        accentColorValue: 0xFF5F9EA0,
+        outgoingColors: [0xFFF3B4BD],
+        palette: {
+          'list.plainBg': 0x101820,
+          'list.primaryText': 0xF2F5F7,
+          'chat.message.incoming.bubble.withWp.bg': 0x22313B,
+          'chat.message.incoming.primaryText': 0xF2F5F7,
+          'chat.message.outgoing.primaryText': 0x101820,
+        },
+        wallpaper: ChatWallpaper.telegram(
+          backgroundId: 81,
+          remoteType: 'fill',
+          colors: [0x101820],
+        ),
+      );
 
-    final controller = ThemeController(prefs)..installCloudTheme(theme);
-    expect(controller.mode, AppearanceMode.system);
-    expect(controller.darkCloudTheme?.slug, 'MountainSolitude');
-    expect(controller.lightCloudTheme, isNull);
-    expect(controller.installedCloudThemes.single.slug, 'MountainSolitude');
-    expect(controller.useTelegramThemeForUi, isFalse);
-    expect(
-      controller.uiColorsFor(Brightness.dark).bubbleIncoming.toARGB32(),
-      AppColors.dark.bubbleIncoming.toARGB32(),
-    );
-    expect(controller.darkCloudTheme?.incomingColor?.toARGB32(), 0xFF22313B);
+      final controller = ThemeController(prefs)..installCloudTheme(theme);
+      expect(prefs.containsKey('useTelegramThemeForUi'), isFalse);
+      expect(controller.mode, AppearanceMode.system);
+      expect(controller.darkCloudTheme?.slug, 'MountainSolitude');
+      expect(controller.lightCloudTheme, isNull);
+      expect(controller.installedCloudThemes.single.slug, 'MountainSolitude');
+      expect(controller.usesCloudThemeForUi(Brightness.dark), isTrue);
+      expect(
+        controller.uiColorsFor(Brightness.dark).bubbleIncoming.toARGB32(),
+        0xFF22313B,
+      );
+      expect(controller.darkCloudTheme?.incomingColor?.toARGB32(), 0xFF22313B);
 
-    controller.useTelegramThemeForUi = true;
-    expect(controller.mode, AppearanceMode.system);
-    expect(controller.useTelegramThemeForUi, isTrue);
-    expect(
-      controller.uiColorsFor(Brightness.dark).bubbleIncoming.toARGB32(),
-      0xFF22313B,
-    );
-    expect(
-      controller.uiColorsFor(Brightness.light).background.toARGB32(),
-      AppColors.light.background.toARGB32(),
-    );
+      expect(controller.mode, AppearanceMode.system);
+      expect(
+        controller.uiColorsFor(Brightness.dark).bubbleIncoming.toARGB32(),
+        0xFF22313B,
+      );
+      expect(
+        controller.uiColorsFor(Brightness.light).background.toARGB32(),
+        AppColors.light.background.toARGB32(),
+      );
 
-    controller.themingEnabled = false;
-    expect(controller.useTelegramThemeForUi, isFalse);
-    expect(
-      controller.uiColorsFor(Brightness.dark).bubbleIncoming.toARGB32(),
-      AppColors.dark.bubbleIncoming.toARGB32(),
-    );
-    controller.themingEnabled = true;
-    expect(controller.useTelegramThemeForUi, isTrue);
-    expect(
-      controller.uiColorsFor(Brightness.dark).bubbleIncoming.toARGB32(),
-      0xFF22313B,
-    );
+      controller.themingEnabled = false;
+      expect(controller.usesCloudThemeForUi(Brightness.dark), isFalse);
+      expect(
+        controller.uiColorsFor(Brightness.dark).bubbleIncoming.toARGB32(),
+        AppColors.dark.bubbleIncoming.toARGB32(),
+      );
+      controller.themingEnabled = true;
+      expect(controller.usesCloudThemeForUi(Brightness.dark), isTrue);
+      expect(
+        controller.uiColorsFor(Brightness.dark).bubbleIncoming.toARGB32(),
+        0xFF22313B,
+      );
 
-    final restored = ThemeController(prefs);
-    expect(restored.darkCloudTheme?.slug, 'MountainSolitude');
-    expect(restored.useTelegramThemeForUi, isTrue);
-    expect(restored.darkCloudTheme?.outgoingColor?.toARGB32(), 0xFFF3B4BD);
-    expect(restored.darkCloudTheme?.incomingColor?.toARGB32(), 0xFF22313B);
-    expect(restored.darkCloudTheme?.wallpaper?.colors, [0x101820]);
+      final restored = ThemeController(prefs);
+      expect(restored.darkCloudTheme?.slug, 'MountainSolitude');
+      expect(restored.usesCloudThemeForUi(Brightness.dark), isTrue);
+      expect(restored.darkCloudTheme?.outgoingColor?.toARGB32(), 0xFFF3B4BD);
+      expect(restored.darkCloudTheme?.incomingColor?.toARGB32(), 0xFF22313B);
+      expect(restored.darkCloudTheme?.wallpaper?.colors, [0x101820]);
 
-    restored.useTelegramThemeForUi = false;
-    expect(restored.darkCloudTheme?.slug, 'MountainSolitude');
-    expect(restored.mode, AppearanceMode.system);
-    expect(restored.brandColor.toARGB32(), 0xFF0099FF);
-    expect(
-      restored.uiColorsFor(Brightness.dark).background.toARGB32(),
-      AppColors.dark.background.toARGB32(),
-    );
+      expect(restored.darkCloudTheme?.slug, 'MountainSolitude');
+      expect(restored.mode, AppearanceMode.system);
+      expect(restored.brandColor.toARGB32(), 0xFF0099FF);
+      expect(
+        restored.uiColorsFor(Brightness.dark).background.toARGB32(),
+        0xFF101820,
+      );
 
-    restored.clearCloudTheme();
-    expect(restored.hasCloudTheme, isFalse);
-    expect(restored.useTelegramThemeForUi, isFalse);
-    expect(restored.mode, AppearanceMode.system);
-    expect(restored.brandColor.toARGB32(), 0xFF0099FF);
-  });
+      restored.clearCloudTheme();
+      expect(restored.hasCloudTheme, isFalse);
+      expect(restored.usesCloudThemeForUi(Brightness.dark), isFalse);
+      expect(restored.mode, AppearanceMode.system);
+      expect(restored.brandColor.toARGB32(), 0xFF0099FF);
+    },
+  );
 
   test('light and dark cloud theme slots persist independently', () async {
     SharedPreferences.setMockInitialValues({});
@@ -531,8 +533,6 @@ msgOutBg: #f3b4bd;
     final controller = ThemeController(prefs)
       ..installCloudTheme(dayTheme, brightness: Brightness.light)
       ..installCloudTheme(nightTheme, brightness: Brightness.dark);
-    controller.useTelegramThemeForUi = true;
-
     expect(controller.lightCloudTheme?.slug, 'DayTheme');
     expect(controller.darkCloudTheme?.slug, 'NightTheme');
     expect(controller.installedCloudThemes.map((theme) => theme.slug), [
@@ -564,7 +564,8 @@ msgOutBg: #f3b4bd;
     expect(controller.installedCloudThemes.last.rawTitle, 'Updated Day Theme');
 
     final restored = ThemeController(prefs);
-    expect(restored.useTelegramThemeForUi, isTrue);
+    expect(restored.usesCloudThemeForUi(Brightness.light), isTrue);
+    expect(restored.usesCloudThemeForUi(Brightness.dark), isTrue);
     expect(restored.lightCloudTheme?.rawTitle, 'Updated Day Theme');
     expect(restored.darkCloudTheme?.slug, 'NightTheme');
     expect(restored.installedCloudThemes.length, 2);
@@ -572,7 +573,8 @@ msgOutBg: #f3b4bd;
     restored.clearCloudTheme(Brightness.light);
     expect(restored.lightCloudTheme, isNull);
     expect(restored.darkCloudTheme?.slug, 'NightTheme');
-    expect(restored.useTelegramThemeForUi, isTrue);
+    expect(restored.usesCloudThemeForUi(Brightness.light), isFalse);
+    expect(restored.usesCloudThemeForUi(Brightness.dark), isTrue);
   });
 
   test(
@@ -634,6 +636,33 @@ msgOutBg: #f3b4bd;
     },
   );
 
+  test(
+    'per-account theme follows the Telegram user instead of a reused slot',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'usePerAccountTheming': true,
+        'appearanceMode.account.3': AppearanceMode.dark.name,
+        'brandColor.account.3': 0xFF123456,
+      });
+      final prefs = await SharedPreferences.getInstance();
+
+      final controller = ThemeController(prefs, initialAccountSlot: 3);
+      controller.setActiveAccountSlot(3, userId: 7001);
+      expect(controller.mode, AppearanceMode.dark);
+      expect(controller.brandColor.toARGB32(), 0xFF123456);
+      expect(prefs.containsKey('appearanceMode.account.3'), isFalse);
+      expect(prefs.getString('appearanceMode.account.user.7001'), 'dark');
+
+      controller.setActiveAccountSlot(9, userId: 7001);
+      expect(controller.mode, AppearanceMode.dark);
+      expect(controller.brandColor.toARGB32(), 0xFF123456);
+
+      controller.setActiveAccountSlot(3, userId: 8002);
+      expect(controller.mode, AppearanceMode.system);
+      expect(controller.brandColor.toARGB32(), 0xFF0099FF);
+    },
+  );
+
   test('theme accent and pinned row always resolve semantic colors', () {
     const theme = TelegramCloudTheme(
       slug: 'ReadableTheme',
@@ -661,7 +690,6 @@ msgOutBg: #f3b4bd;
       );
 
       controller.installCloudTheme(tinted, brightness: Brightness.light);
-      controller.useTelegramThemeForUi = true;
       final restored = ThemeController(prefs);
 
       expect(restored.lightCloudTheme?.accentColor.toARGB32(), 0xFFFF9500);
@@ -669,7 +697,7 @@ msgOutBg: #f3b4bd;
         restored.uiColorsFor(Brightness.light).linkBlue.toARGB32(),
         0xFFFF9500,
       );
-      expect(restored.useTelegramThemeForUi, isTrue);
+      expect(restored.usesCloudThemeForUi(Brightness.light), isTrue);
     },
   );
 

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
@@ -17,12 +18,10 @@ abstract final class DiagnosticBreadcrumbs {
     'checkAuthenticationPasskey',
     'checkAuthenticationPassword',
     'deleteChatHistory',
-    'downloadFile',
     'forwardMessages',
     'getChatHistory',
     'getForumTopicHistory',
     'getForumTopics',
-    'getMessage',
     'getMessageThreadHistory',
     'getStory',
     'leaveChat',
@@ -54,7 +53,12 @@ abstract final class DiagnosticBreadcrumbs {
   }) {
     if (!sentryEnabled) return;
     final operation = _cleanType(requestType);
-    if (!failed && !_highValueTdlibOperations.contains(operation)) return;
+    // Successful getMessage and downloadFile calls can occur many times while
+    // loading one chat or media item. Recording each result displaces useful
+    // breadcrumbs and adds telemetry work to hot paths; failures are retained.
+    if (!shouldRecordTdlibRequest(requestType: operation, failed: failed)) {
+      return;
+    }
     final result = resultType == null ? null : _cleanType(resultType);
     unawaited(
       Sentry.addBreadcrumb(
@@ -73,6 +77,12 @@ abstract final class DiagnosticBreadcrumbs {
       ),
     );
   }
+
+  @visibleForTesting
+  static bool shouldRecordTdlibRequest({
+    required String requestType,
+    required bool failed,
+  }) => failed || _highValueTdlibOperations.contains(_cleanType(requestType));
 
   static String _cleanType(String value) => _safeType.hasMatch(value)
       ? value

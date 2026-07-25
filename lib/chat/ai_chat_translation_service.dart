@@ -3,7 +3,9 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../settings/ai_endpoint_style.dart';
 import '../settings/ai_settings_controller.dart';
+import '../settings/ai_stdout_logger.dart';
 import '../settings/ai_translation_prompt.dart';
 import '../settings/apple_pcc_api.dart';
 import '../settings/translation_api.dart';
@@ -12,36 +14,47 @@ class AiChatTranslationService {
   AiChatTranslationService({
     required this.providerMode,
     this.endpoint,
+    this.endpointStyle = AiEndpointStyle.openAiChatCompletions,
     this.model = '',
     this.apiKey = '',
     String instructions = defaultAiTranslationPrompt,
     ApplePccApi? appleApi,
     http.Client? httpClient,
+    AiStdoutLogger? aiLogger,
     this.requestTimeout = const Duration(seconds: 60),
   }) : instructions = buildAiTranslationInstructions(instructions),
        _appleApi = appleApi ?? ApplePccApi(),
        _httpClient = httpClient ?? http.Client(),
+       _aiLogger = aiLogger ?? aiStdoutLogger,
        _ownsHttpClient = httpClient == null;
 
   factory AiChatTranslationService.fromSettings(
     AiSettingsController settings, {
     String instructions = defaultAiTranslationPrompt,
-  }) => AiChatTranslationService(
-    providerMode: settings.provider,
-    endpoint: settings.openAiChatCompletionsUri,
-    model: settings.model,
-    apiKey: settings.apiKey,
-    instructions: instructions,
-  );
+  }) {
+    final configuration = settings.configurationForFeature(
+      AiFeature.translation,
+    );
+    return AiChatTranslationService(
+      providerMode: configuration.providerMode,
+      endpoint: configuration.endpoint,
+      endpointStyle: configuration.endpointStyle,
+      model: configuration.model,
+      apiKey: configuration.apiKey,
+      instructions: instructions,
+    );
+  }
 
   final AiProviderMode providerMode;
   final Uri? endpoint;
+  final AiEndpointStyle endpointStyle;
   final String model;
   final String apiKey;
   final String instructions;
   final Duration requestTimeout;
   final ApplePccApi _appleApi;
   final http.Client _httpClient;
+  final AiStdoutLogger _aiLogger;
   final bool _ownsHttpClient;
 
   Future<String> translate({
@@ -99,27 +112,34 @@ class AiChatTranslationService {
         'The selected AI provider is not configured.',
       );
     }
-    final headers = <String, String>{
-      'content-type': 'application/json',
-      if (apiKey.trim().isNotEmpty) 'authorization': 'Bearer ${apiKey.trim()}',
-    };
-    final baseBody = <String, Object>{
-      'model': model.trim(),
-      'messages': [
-        {'role': 'system', 'content': instructions},
-        {'role': 'user', 'content': prompt},
-      ],
-      'stream': false,
-    };
+    final headers = endpointStyle.requestHeaders(apiKey);
+    final baseBody = endpointStyle.requestBody(
+      model: model.trim(),
+      instructions: instructions,
+      input: prompt,
+      stream: false,
+    );
 
-    var response = await _post(uri, headers, {
-      ...baseBody,
-      'response_format': {'type': 'json_object'},
-    });
+    var requestBody = endpointStyle.requestBody(
+      model: model.trim(),
+      instructions: instructions,
+      input: prompt,
+      stream: false,
+      useJsonResponseFormat: true,
+    );
+    final requestUri = endpointStyle.requestUriFor(uri);
+    var response = await _post(requestUri, headers, requestBody);
     var responseBody = utf8.decode(response.bodyBytes, allowMalformed: true);
     if ((response.statusCode == 400 || response.statusCode == 422) &&
-        _reportsUnsupportedResponseFormat(responseBody)) {
-      response = await _post(uri, headers, baseBody);
+        _reportsUnsupportedOptionalField(responseBody)) {
+      final compatibleBody = endpointStyle.withoutOptionalField(
+        requestBody,
+        responseBody,
+      );
+      requestBody = identical(compatibleBody, requestBody)
+          ? baseBody
+          : compatibleBody;
+      response = await _post(requestUri, headers, requestBody);
       responseBody = utf8.decode(response.bodyBytes, allowMalformed: true);
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -127,16 +147,62 @@ class AiChatTranslationService {
         _providerError(responseBody, response.statusCode),
       );
     }
-    return _completionContent(responseBody);
+    return _completionContent(responseBody, endpointStyle);
   }
 
   Future<http.Response> _post(
     Uri uri,
     Map<String, String> headers,
-    Map<String, Object> body,
-  ) => _httpClient
-      .post(uri, headers: headers, body: jsonEncode(body))
-      .timeout(requestTimeout);
+    Map<String, Object?> body,
+  ) async {
+    final provider = '${endpointStyle.storageValue}/$model';
+    const operation = 'translation';
+    final correlationId = _aiLogger.newCorrelationId(provider);
+    final payload = <String, Object?>{
+      'method': 'POST',
+      'endpoint': {
+        'scheme': uri.scheme,
+        'host': uri.host,
+        if (uri.hasPort) 'port': uri.port,
+        'path': uri.path,
+      },
+      'body': body,
+    };
+    _aiLogger.request(
+      correlationId: correlationId,
+      provider: provider,
+      operation: operation,
+      payload: payload,
+      secrets: [apiKey],
+    );
+    try {
+      final response = await _httpClient
+          .post(uri, headers: headers, body: jsonEncode(body))
+          .timeout(requestTimeout);
+      _aiLogger.response(
+        correlationId: correlationId,
+        provider: provider,
+        operation: operation,
+        result: {
+          'status_code': response.statusCode,
+          'body': utf8.decode(response.bodyBytes, allowMalformed: true),
+        },
+        secrets: [apiKey],
+      );
+      return response;
+    } catch (error, stackTrace) {
+      _aiLogger.error(
+        correlationId: correlationId,
+        provider: provider,
+        operation: operation,
+        error: error,
+        payload: payload,
+        stackTrace: stackTrace,
+        secrets: [apiKey],
+      );
+      rethrow;
+    }
+  }
 
   void dispose() {
     if (_ownsHttpClient) _httpClient.close();
@@ -177,7 +243,7 @@ String decodeAiChatTranslation(String content) {
   );
 }
 
-String _completionContent(String body) {
+String _completionContent(String body, AiEndpointStyle endpointStyle) {
   Object? decoded;
   try {
     decoded = jsonDecode(body);
@@ -189,30 +255,27 @@ String _completionContent(String body) {
       'The AI provider returned an invalid response.',
     );
   }
-  final choices = decoded['choices'];
-  if (choices is! List || choices.isEmpty || choices.first is! Map) {
-    throw TranslationApiException('The AI provider returned no translation.');
-  }
-  final message = (choices.first as Map)['message'];
-  if (message is! Map) {
-    throw TranslationApiException('The AI provider returned no translation.');
-  }
-  final content = message['content'];
-  if (content is String && content.trim().isNotEmpty) return content;
-  if (content is List) {
-    final text = content
-        .whereType<Map>()
-        .map((part) => part['text'])
-        .whereType<String>()
-        .join();
-    if (text.trim().isNotEmpty) return text;
+  final content = endpointStyle.responseText(decoded);
+  if (content != null && content.trim().isNotEmpty) return content;
+  final refusal = endpointStyle.refusalText(decoded);
+  if (refusal != null) {
+    throw TranslationApiException(
+      'The AI provider refused the translation: ${refusal.trim()}',
+    );
   }
   throw TranslationApiException('The AI provider returned no translation.');
 }
 
-bool _reportsUnsupportedResponseFormat(String body) {
+bool _reportsUnsupportedOptionalField(String body) {
   final lower = body.toLowerCase();
-  return lower.contains('response_format') &&
+  return (lower.contains('response_format') ||
+          lower.contains('response format') ||
+          lower.contains('text.format') ||
+          lower.contains("'text'") ||
+          lower.contains('format') ||
+          lower.contains('store') ||
+          lower.contains('reasoning') ||
+          lower.contains('stream')) &&
       (lower.contains('unsupported') ||
           lower.contains('unknown') ||
           lower.contains('unrecognized') ||

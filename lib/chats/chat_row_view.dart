@@ -49,13 +49,14 @@ class ChatRowView extends StatelessWidget {
     final rowHeight = theme.rowHeight;
     final bookmarkView =
         chat.isSavedMessages && theme.savedMessagesBookmarkView;
-    final premiumNameColor =
-        theme.showPremiumNameColors && chat.peerIsPremium && !bookmarkView
+    final nameColor =
+        theme.chatListNameColorAudience.shows(isPremium: chat.peerIsPremium) &&
+            chat.peerAccentColorId >= 0 &&
+            !bookmarkView
         ? _accentColor(chat.peerAccentColorId)
         : c.textPrimary;
-    final showPremiumStatus =
-        theme.showPremiumEmojiStatus &&
-        chat.peerIsPremium &&
+    final showStatus =
+        theme.chatListStatusEmojiMode.visible &&
         chat.peerEmojiStatusId != 0 &&
         !bookmarkView;
     return Container(
@@ -95,16 +96,17 @@ class ChatRowView extends StatelessWidget {
                           fontWeight: chat.peerIsPremium && !bookmarkView
                               ? FontWeight.w600
                               : FontWeight.w500,
-                          color: premiumNameColor,
+                          color: nameColor,
                         ),
                       ),
                     ),
-                    if (showPremiumStatus) ...[
+                    if (showStatus) ...[
                       const SizedBox(width: AppSpacing.xs),
                       StatusEmojiView(
                         id: chat.peerEmojiStatusId,
                         size: 17,
-                        color: premiumNameColor,
+                        color: nameColor,
+                        animate: theme.chatListStatusEmojiMode.animate,
                       ),
                     ],
                   ],
@@ -164,6 +166,7 @@ class ChatRowView extends StatelessWidget {
                   photo: chat.photo,
                   size: avatarSize,
                   square: chat.usesSquareAvatar && !circleGroups,
+                  allowAnimation: false,
                 ),
           if (chat.unreadCount > 0)
             Positioned(

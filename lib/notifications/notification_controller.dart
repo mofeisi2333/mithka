@@ -119,6 +119,7 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
   Timer? _inAppBannerTimer;
   final Map<Object, _VisibleChatRegistration> _visibleChats = {};
   final Map<(int, int), Map<String, dynamic>> _chatNotificationSettings = {};
+  final Map<int, int> _accountUserIdsByClient = {};
 
   bool get inAppBannersEnabled => _inAppBannersEnabled;
   InAppNotificationBannerData? get inAppBanner => _inAppBanner;
@@ -247,13 +248,19 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
     final raw = update.obj('message');
     if (raw == null || (raw.boolean('is_outgoing') ?? false)) return;
 
+    if (!await _receivesNotificationsFrom(
+      clientId,
+      isActiveAccount: isActiveAccount,
+    )) {
+      return;
+    }
+
     if (await CountryChatBlocker.shared.handleIncomingMessage(
       raw,
       clientId: clientId,
     )) {
       return;
     }
-    if (!isActiveAccount && !_notificationPreferences.allAccounts) return;
 
     final chatId = raw.int64('chat_id');
     final messageId = raw.int64('id');
@@ -277,6 +284,19 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
 
     final messageText = _notificationText(content);
     if (KeywordBlocker.shared.matches(messageText)) return;
+    String? preparedIOSChatIconPath;
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      preparedIOSChatIconPath = await _notificationChatIconPath(chat, clientId);
+      final path = preparedIOSChatIconPath;
+      if (path != null) {
+        unawaited(
+          _iosCommunicationNotifications.cacheChatIcon(
+            chatId: chatId,
+            path: path,
+          ),
+        );
+      }
+    }
     final surface = notificationSurfaceFor(
       lifecycleState: _state,
       inAppBannersEnabled: _inAppBannersEnabled,
@@ -375,7 +395,9 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
       'title': chatTitle,
       'account_slot': _client.slotForClient(clientId),
     });
-    final chatIconPath = await _notificationChatIconPath(latestChat, clientId);
+    final chatIconPath =
+        preparedIOSChatIconPath ??
+        await _notificationChatIconPath(latestChat, clientId);
     final groupConversation = switch (TDParse.chatKind(latestChat)) {
       ChatKind.group || ChatKind.channel => true,
       _ => false,
@@ -397,6 +419,7 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
           payload: payload,
           groupConversation: groupConversation,
           playSound: latestEffective.soundEnabled,
+          chatId: chatId,
           chatIconPath: chatIconPath,
         );
         return;
@@ -538,6 +561,34 @@ class NotificationController with WidgetsBindingObserver, ChangeNotifier {
       return name.isEmpty ? null : name;
     } catch (_) {
       return null;
+    }
+  }
+
+  Future<bool> _receivesNotificationsFrom(
+    int clientId, {
+    required bool isActiveAccount,
+  }) async {
+    final mode = _notificationPreferences.accountMode;
+    if (mode == NotificationAccountMode.all) return true;
+    if (mode == NotificationAccountMode.current) return isActiveAccount;
+    final cachedUserId = _accountUserIdsByClient[clientId];
+    if (cachedUserId != null) {
+      return _notificationPreferences.receivesNotificationsFrom(
+        userId: cachedUserId,
+        isActiveAccount: isActiveAccount,
+      );
+    }
+    try {
+      final user = await _query({'@type': 'getMe'}, clientId);
+      final userId = user.int64('id');
+      if (userId == null) return false;
+      _accountUserIdsByClient[clientId] = userId;
+      return _notificationPreferences.receivesNotificationsFrom(
+        userId: userId,
+        isActiveAccount: isActiveAccount,
+      );
+    } catch (_) {
+      return false;
     }
   }
 

@@ -42,7 +42,6 @@ class CommunityChatListRow extends StatelessWidget {
     final c = context.colors;
     final theme = context.watch<ThemeController>();
     final latest = entry.latestChat;
-    final preview = _preview(context, latest);
     return Container(
       height: theme.rowHeight,
       color: selected
@@ -51,18 +50,14 @@ class CommunityChatListRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
       child: Row(
         children: [
-          SizedBox(
-            width: theme.avatarSize,
-            height: theme.avatarSize,
+          _CommunityStackedAvatar(
+            title: entry.community.name,
+            photo: entry.community.photo,
+            size: theme.avatarSize,
+            square: !theme.circularGroupAvatars,
             child: Stack(
               clipBehavior: Clip.none,
               children: [
-                PhotoAvatar(
-                  title: entry.community.name,
-                  photo: entry.community.photo,
-                  size: theme.avatarSize,
-                  square: !theme.circularGroupAvatars,
-                ),
                 if (entry.unreadCount > 0)
                   Positioned(
                     right: 0,
@@ -123,14 +118,13 @@ class CommunityChatListRow extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: AppSpacing.xs),
-                Text(
-                  preview,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: AppTextSize.callout,
-                    color: c.textSecondary,
-                  ),
+                ChatPreviewText(
+                  sender: latest.lastSender,
+                  message: latest.lastMessage.trim().isEmpty
+                      ? AppStrings.t(AppStringKeys.communityChatCount, {
+                          'value1': entry.chats.length,
+                        })
+                      : latest.lastMessage,
                 ),
               ],
             ),
@@ -173,20 +167,68 @@ class CommunityChatListRow extends StatelessWidget {
       ),
     );
   }
+}
 
-  String _preview(BuildContext context, ChatSummary latest) {
-    final message = latest.lastMessage.trim();
-    final sender = latest.lastSender?.trim();
-    final body = [
-      if (sender != null && sender.isNotEmpty) sender,
-      if (message.isNotEmpty) message,
-    ].join(': ');
-    if (body.isEmpty) {
-      return AppStrings.t(AppStringKeys.communityChatCount, {
-        'value1': entry.chats.length,
-      });
-    }
-    return '${latest.title}: $body';
+class _CommunityStackedAvatar extends StatelessWidget {
+  const _CommunityStackedAvatar({
+    required this.title,
+    required this.photo,
+    required this.size,
+    required this.square,
+    required this.child,
+  });
+
+  final String title;
+  final TdFileRef? photo;
+  final double size;
+  final bool square;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final backColor = context.colors.textTertiary;
+    final cornerRadius = square
+        ? size * AppTheme.groupAvatarCornerRatio
+        : size / 2;
+    Widget plate(Key key, double opacity) => Container(
+      key: key,
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: backColor.withValues(alpha: opacity),
+        borderRadius: BorderRadius.circular(cornerRadius),
+      ),
+    );
+
+    return SizedBox(
+      key: const ValueKey('community-stacked-avatar'),
+      width: size,
+      height: size,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned(
+            left: -size * 0.18,
+            top: size * 0.12,
+            child: plate(const ValueKey('community-avatar-back-2'), 0.28),
+          ),
+          Positioned(
+            left: -size * 0.09,
+            top: size * 0.06,
+            child: plate(const ValueKey('community-avatar-back-1'), 0.42),
+          ),
+          PhotoAvatar(
+            key: const ValueKey('community-avatar-front'),
+            title: title,
+            photo: photo,
+            size: size,
+            square: square,
+            allowAnimation: false,
+          ),
+          child,
+        ],
+      ),
+    );
   }
 }
 
@@ -354,40 +396,52 @@ class _CommunityViewState extends State<CommunityView> {
   Widget _communityHeader() {
     final c = context.colors;
     return Container(
-      padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
+      key: const ValueKey('community-header'),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
         color: c.card,
         borderRadius: BorderRadius.circular(14),
       ),
-      child: Column(
+      child: Row(
         children: [
           PhotoAvatar(
             title: widget.community.name,
             photo: widget.community.photo,
-            size: 76,
+            size: 64,
             square: true,
           ),
-          const SizedBox(height: 12),
-          Text(
-            widget.community.name,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: AppTextSize.title,
-              fontWeight: FontWeight.w700,
-              color: c.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            AppStrings.t(AppStringKeys.communityChatCount, {
-              'value1': {
-                ..._currentChats.map((chat) => chat.id),
-                ..._currentViewableChats.map((chat) => chat.id),
-              }.length,
-            }),
-            style: TextStyle(
-              fontSize: AppTextSize.callout,
-              color: c.textTertiary,
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.community.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.left,
+                  style: TextStyle(
+                    fontSize: AppTextSize.title,
+                    fontWeight: FontWeight.w700,
+                    color: c.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  AppStrings.t(AppStringKeys.communityChatCount, {
+                    'value1': {
+                      ..._currentChats.map((chat) => chat.id),
+                      ..._currentViewableChats.map((chat) => chat.id),
+                    }.length,
+                  }),
+                  textAlign: TextAlign.left,
+                  style: TextStyle(
+                    fontSize: AppTextSize.callout,
+                    color: c.textTertiary,
+                  ),
+                ),
+              ],
             ),
           ),
         ],

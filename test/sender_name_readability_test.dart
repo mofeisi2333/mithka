@@ -9,45 +9,67 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test(
-    'sender name readability plate is off by default and persists',
-    () async {
-      SharedPreferences.setMockInitialValues({});
-      final preferences = await SharedPreferences.getInstance();
-      final controller = ThemeController(preferences);
+  test('sender name readability defaults to shadow and persists', () async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    final controller = ThemeController(preferences);
 
-      expect(controller.showSenderNameReadabilityPlate, isFalse);
+    expect(
+      controller.senderNameReadabilityMode,
+      SenderNameReadabilityMode.shadow,
+    );
 
-      controller.showSenderNameReadabilityPlate = true;
-      expect(controller.showSenderNameReadabilityPlate, isTrue);
-      expect(preferences.getBool('showSenderNameReadabilityPlate'), isTrue);
+    controller.senderNameReadabilityMode = SenderNameReadabilityMode.background;
+    expect(preferences.getString('senderNameReadabilityMode.v1'), 'background');
 
-      final restored = ThemeController(preferences);
-      expect(restored.showSenderNameReadabilityPlate, isTrue);
-    },
-  );
+    final restored = ThemeController(preferences);
+    expect(
+      restored.senderNameReadabilityMode,
+      SenderNameReadabilityMode.background,
+    );
+  });
+
+  test('legacy sender name background preference migrates', () async {
+    SharedPreferences.setMockInitialValues({
+      'showSenderNameReadabilityPlate': false,
+    });
+    var preferences = await SharedPreferences.getInstance();
+    expect(
+      ThemeController(preferences).senderNameReadabilityMode,
+      SenderNameReadabilityMode.none,
+    );
+
+    SharedPreferences.setMockInitialValues({
+      'showSenderNameReadabilityPlate': true,
+    });
+    preferences = await SharedPreferences.getInstance();
+    expect(
+      ThemeController(preferences).senderNameReadabilityMode,
+      SenderNameReadabilityMode.background,
+    );
+  });
 
   testWidgets('sender name plate only decorates its child when enabled', (
     tester,
   ) async {
-    Future<void> pump(bool enabled) => tester.pumpWidget(
+    Future<void> pump(SenderNameReadabilityMode mode) => tester.pumpWidget(
       Directionality(
         textDirection: TextDirection.ltr,
         child: SenderNameReadabilityPlate(
-          enabled: enabled,
+          mode: mode,
           bubbleColor: const Color(0xFF223344),
           child: const Text('Bob Harris'),
         ),
       ),
     );
 
-    await pump(false);
+    await pump(SenderNameReadabilityMode.none);
     expect(
       find.byKey(const ValueKey('senderNameReadabilityPlate')),
       findsNothing,
     );
 
-    await pump(true);
+    await pump(SenderNameReadabilityMode.background);
     expect(
       find.byKey(const ValueKey('senderNameReadabilityPlate')),
       findsOneWidget,
@@ -56,6 +78,35 @@ void main() {
     expect(decoration.color, const Color(0xFF223344));
     expect(decoration.borderRadius, isNotNull);
     expect(decoration.boxShadow, isNotEmpty);
+  });
+
+  testWidgets('shadow mode uses its incoming theme bubble color', (
+    tester,
+  ) async {
+    const renderedBubbleColor = Color(0xFF223344);
+    const incomingThemeBubbleColor = Color(0xFF556677);
+    await tester.pumpWidget(
+      const Directionality(
+        textDirection: TextDirection.ltr,
+        child: SenderNameReadabilityPlate(
+          mode: SenderNameReadabilityMode.shadow,
+          bubbleColor: renderedBubbleColor,
+          shadowColor: incomingThemeBubbleColor,
+          child: Text('Bob Harris'),
+        ),
+      ),
+    );
+
+    final defaultText = tester.widget<DefaultTextStyle>(
+      find.byKey(const ValueKey('senderNameReadabilityShadow')),
+    );
+    final shadows = defaultText.style.shadows!;
+    expect(shadows, hasLength(2));
+    expect(shadows.map((shadow) => shadow.color), [
+      incomingThemeBubbleColor,
+      incomingThemeBubbleColor,
+    ]);
+    expect(shadows.map((shadow) => shadow.blurRadius), [12, 6]);
   });
 
   testWidgets('sender role and name become connected equal-size pills', (
@@ -67,10 +118,14 @@ void main() {
         child: Align(
           alignment: Alignment.topLeft,
           child: SenderIdentityPills(
-            enabled: true,
+            readabilityMode: SenderNameReadabilityMode.background,
             bubbleColor: Color(0xFF223344),
             name: 'Bob Harris',
-            nameStyle: TextStyle(fontSize: 12, color: Color(0xFFB4C4E2)),
+            nameStyle: TextStyle(
+              fontSize: 12,
+              color: Color(0xFFB4C4E2),
+              fontWeight: FontWeight.w700,
+            ),
             role: MemberRole.admin,
             roleTitle: 'Moderator',
           ),
@@ -106,6 +161,7 @@ void main() {
     final roleText = tester.widget<Text>(find.text('Moderator'));
     final nameText = tester.widget<Text>(find.text('Bob Harris'));
     expect(roleText.style?.fontSize, nameText.style?.fontSize);
+    expect(nameText.style?.fontWeight, FontWeight.w500);
 
     final nameDecoration =
         tester.widget<DecoratedBox>(namePill).decoration as BoxDecoration;

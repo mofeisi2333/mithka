@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/intl.dart';
+import 'package:mithka/chat/ai_reply_service.dart';
 import 'package:mithka/chat/chat_input_bar.dart';
 import 'package:mithka/chat/chat_message_merge.dart';
 import 'package:mithka/chat/chat_view_model.dart';
@@ -26,12 +27,15 @@ import 'package:mithka/chat/secret_chat_service.dart';
 import 'package:mithka/chat/sponsored_messages_cache.dart';
 import 'package:mithka/chat/sticker_item.dart';
 import 'package:mithka/chat/sticker_store.dart';
+import 'package:mithka/chat/telegram_ai_service.dart';
 import 'package:mithka/components/app_icons.dart';
 import 'package:mithka/components/keyboard_dismiss_on_tap.dart';
 import 'package:mithka/components/photo_avatar.dart';
 import 'package:mithka/components/ui_components.dart';
 import 'package:mithka/l10n/app_locale_controller.dart';
 import 'package:mithka/l10n/app_localizations.dart';
+import 'package:mithka/settings/ai_settings_controller.dart';
+import 'package:mithka/settings/apple_pcc_api.dart';
 import 'package:mithka/settings/country_message_filter.dart';
 import 'package:mithka/settings/keyword_blocker.dart';
 import 'package:mithka/settings/translation_controller.dart';
@@ -94,8 +98,11 @@ Future<MusicPlayerController> _pumpMusicPlayerBar(WidgetTester tester) async {
 }
 
 class _FocusTestChatViewModel extends ChatViewModel {
-  _FocusTestChatViewModel()
-    : super(chatId: 1, title: 'Test', markReadOnOpen: false);
+  _FocusTestChatViewModel({
+    super.title = 'Test',
+    super.sessionMessages = const [],
+    super.sessionAnchorMessageId,
+  }) : super(chatId: 1, markReadOnOpen: false);
 
   @override
   void sendTyping() {}
@@ -107,6 +114,19 @@ class _FocusTestChatViewModel extends ChatViewModel {
     List<Map<String, dynamic>> entities = const [],
   }) {
     draft = value;
+  }
+
+  void appendMessage(ChatMessage message) {
+    messages = [...messages, message];
+    notifyListeners();
+  }
+
+  void replaceMessage(ChatMessage replacement) {
+    messages = [
+      for (final message in messages)
+        if (message.id == replacement.id) replacement else message,
+    ];
+    notifyListeners();
   }
 }
 
@@ -817,6 +837,1616 @@ void main() {
   });
 
   group('ChatInputBar', () {
+    Future<(_FocusTestChatViewModel, ChatMessage)> pumpAiReplyComposer(
+      WidgetTester tester,
+      AiReplyGenerator? generator, {
+      AiReplyStreamingGenerator? streamingGenerator,
+      AiReplyChatHistoryLoader? historyLoader,
+      bool includeReplyKeyboard = false,
+      bool includeSenderOptions = false,
+      bool useExplicitReplyTarget = false,
+      bool includeLatestOutgoingMessage = false,
+      bool anchoredHistory = false,
+      bool isGroup = false,
+      String? aiReplyPrompt,
+      int messageAutoDeleteTime = 0,
+      bool targetIsOutgoing = false,
+      bool? telegramReplySupported = true,
+      bool appleOnDeviceAvailable = false,
+      VoidCallback? onMessageSent,
+      List<ChatMessage> leadingMessages = const [],
+      List<ChatMessage> trailingMessages = const [],
+      int targetId = 7,
+    }) async {
+      SharedPreferences.setMockInitialValues({});
+      final preferences = await SharedPreferences.getInstance();
+      final theme = ThemeController(preferences);
+      addTearDown(theme.dispose);
+      final settings = AiSettingsController(
+        preferences,
+        pccApi: ApplePccApi(
+          invokeMethod: (_, _) async => {
+            'available': false,
+            'sdkAvailable': false,
+            'onDeviceSdkAvailable': appleOnDeviceAvailable,
+            'onDeviceAvailable': appleOnDeviceAvailable,
+            'onDeviceReason': appleOnDeviceAvailable
+                ? 'available'
+                : 'unavailable',
+            if (appleOnDeviceAvailable) 'onDeviceContextSize': 4096,
+          },
+        ),
+        secureRead: (_) async => null,
+        secureWrite: (_, _) async {},
+      );
+      await settings.initialize();
+      if (aiReplyPrompt != null) {
+        await settings.setAiReplyPrompt(aiReplyPrompt);
+      }
+      addTearDown(settings.dispose);
+
+      final target = ChatMessage(
+        id: targetId,
+        isOutgoing: targetIsOutgoing,
+        text: 'Can you join at three?',
+        date: 1,
+        senderName: 'Alice',
+        contentType: 'messageText',
+        buttonRows: includeReplyKeyboard
+            ? const [
+                [
+                  MessageButton(
+                    text: 'Reply option',
+                    type: 'keyboardButtonTypeText',
+                    isReplyKeyboard: true,
+                  ),
+                ],
+              ]
+            : const [],
+      );
+      final vm =
+          _FocusTestChatViewModel(
+              title: 'Project',
+              sessionMessages: [
+                ...leadingMessages,
+                target,
+                ...trailingMessages,
+                if (includeLatestOutgoingMessage)
+                  ChatMessage(
+                    id: targetId + 1,
+                    isOutgoing: true,
+                    text: 'I already answered.',
+                    date: 2,
+                    contentType: 'messageText',
+                  ),
+              ],
+              sessionAnchorMessageId: anchoredHistory ? targetId : null,
+            )
+            ..aiCapabilities = telegramReplySupported == null
+                ? null
+                : TelegramAiCapabilities(
+                    tdlibVersion: '1.8.66',
+                    compositionSupported: true,
+                    richCompositionSupported: true,
+                    replySupported: telegramReplySupported,
+                    customStylesSupported: true,
+                    summarySupported: true,
+                    transcriptionSupported: true,
+                    styleTitleMax: 64,
+                    stylePromptMax: 1024,
+                    addedStyleCountMax: 10,
+                  )
+            ..isGroup = isGroup
+            ..messageAutoDeleteTime = messageAutoDeleteTime;
+      vm.anchoredHistory = anchoredHistory;
+      if (includeSenderOptions) {
+        vm.availableMessageSenders = const [
+          MessageSenderOption(
+            sender: {'@type': 'messageSenderUser', 'user_id': 1},
+            id: 1,
+            title: 'Me',
+          ),
+          MessageSenderOption(
+            sender: {'@type': 'messageSenderChat', 'chat_id': 2},
+            id: 2,
+            title: 'Project',
+          ),
+        ];
+        vm.selectedMessageSender = vm.availableMessageSenders.first;
+      }
+      if (useExplicitReplyTarget) vm.setReply(target);
+      addTearDown(vm.dispose);
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<ThemeController>.value(value: theme),
+            ChangeNotifierProvider<AiSettingsController>.value(value: settings),
+          ],
+          child: MaterialApp(
+            locale: const Locale('en'),
+            localizationsDelegates: const [
+              AppLocalizations.delegate,
+              GlobalMaterialLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(
+              body: Align(
+                alignment: Alignment.bottomCenter,
+                child: ChatInputBar(
+                  vm: vm,
+                  onStartCall: (_) {},
+                  onMessageSent: onMessageSent ?? () {},
+                  aiReplyGenerator: generator,
+                  aiReplyStreamingGenerator: streamingGenerator,
+                  aiReplyHistoryLoader:
+                      historyLoader ??
+                      ({
+                        required beforeMessageId,
+                        required query,
+                        required limit,
+                      }) async => const AiReplyChatHistoryPage.empty(),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      return (vm, target);
+    }
+
+    testWidgets('shows AI Reply inside an empty input and inserts its draft', (
+      tester,
+    ) async {
+      final result = Completer<TelegramAiFormattedText>();
+      AiReplyRequest? capturedRequest;
+      var requestCount = 0;
+      final (vm, target) = await pumpAiReplyComposer(tester, (request) {
+        capturedRequest = request;
+        requestCount++;
+        return result.future;
+      });
+      vm.meUsernames = const {'nekoko14'};
+
+      final action = find.byKey(const ValueKey('composerAiReplyButton'));
+      final inputBox = find.byKey(const ValueKey('composerTextInputBox'));
+      expect(action, findsOneWidget);
+      expect(find.descendant(of: inputBox, matching: action), findsOneWidget);
+      expect(tester.widget<GestureDetector>(action).child, isA<SizedBox>());
+      expect(
+        tester.getCenter(action).dx,
+        greaterThan(tester.getCenter(find.byType(TextField)).dx),
+      );
+      await tester.tap(action);
+      await tester.pump();
+
+      expect(
+        find.byKey(const ValueKey('composerAiReplyProgress')),
+        findsOneWidget,
+      );
+      expect(find.text('AI Reply'), findsNothing);
+
+      result.complete(
+        const TelegramAiFormattedText(
+          text: 'I can join at three.',
+          entities: [
+            {
+              '@type': 'textEntity',
+              'offset': 0,
+              'length': 1,
+              'type': {'@type': 'textEntityTypeBold'},
+            },
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final field = tester.widget<TextField>(find.byType(TextField));
+      final controller = field.controller! as EmojiTextEditingController;
+      final (text, entities) = controller.toFormatted();
+      expect(field.controller!.text, 'I can join at three.');
+      expect(text, 'I can join at three.');
+      expect(entities, hasLength(1));
+      expect(entities.single['type'], {'@type': 'textEntityTypeBold'});
+      expect(vm.draft, 'I can join at three.');
+      expect(vm.replyTo, isNull);
+      expect(capturedRequest?.targetMessageId, target.id);
+      expect(capturedRequest?.currentUserUsernames, contains('nekoko14'));
+      expect(requestCount, 1);
+      expect(action, findsNothing);
+      expect(find.byKey(const ValueKey('composerSendButton')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('composerAiReplyProgress')),
+        findsNothing,
+      );
+    });
+
+    testWidgets(
+      'long press opens the Reply model selector without generating',
+      (tester) async {
+        var generationCount = 0;
+        await pumpAiReplyComposer(tester, (_) async {
+          generationCount++;
+          return const TelegramAiFormattedText(text: 'Generated reply');
+        });
+
+        final action = find.byKey(const ValueKey('composerAiReplyButton'));
+        await tester.longPress(action);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const ValueKey('aiFeatureModelPicker-reply')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(
+            const ValueKey(
+              'aiFeatureModelOption-reply-builtin:telegram_cocoon',
+            ),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(
+            const ValueKey('aiFeatureModelOption-reply-builtin:apple_pcc'),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(
+            const ValueKey(
+              'aiFeatureModelOption-reply-builtin:apple_on_device',
+            ),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(
+            const ValueKey(
+              'aiFeatureModelSelected-reply-builtin:telegram_cocoon',
+            ),
+          ),
+          findsOneWidget,
+        );
+        expect(generationCount, 0);
+        expect(
+          find.byKey(const ValueKey('composerAiReplyProgress')),
+          findsNothing,
+        );
+
+        await tester.tapAt(const Offset(8, 8));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const ValueKey('aiFeatureModelPicker-reply')),
+          findsNothing,
+        );
+        expect(generationCount, 0);
+      },
+    );
+
+    testWidgets('selected Reply model is persisted and used for generation', (
+      tester,
+    ) async {
+      const channel = MethodChannel(ApplePccApi.channelName);
+      MethodCall? summarizeCall;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+        call,
+      ) async {
+        if (call.method != 'summarize') return null;
+        summarizeCall = call;
+        return const {
+          'text': 'I can join at three.',
+          'provider': 'apple_on_device',
+        };
+      });
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
+      var sentCount = 0;
+      await pumpAiReplyComposer(
+        tester,
+        null,
+        appleOnDeviceAvailable: true,
+        onMessageSent: () => sentCount++,
+      );
+
+      final action = find.byKey(const ValueKey('composerAiReplyButton'));
+      final settings = Provider.of<AiSettingsController>(
+        tester.element(action),
+        listen: false,
+      );
+      await tester.longPress(action);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(
+          const ValueKey('aiFeatureModelOption-reply-builtin:apple_on_device'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        settings.replyModelCandidateId,
+        AiSettingsController.appleOnDeviceModelCandidateId,
+      );
+      final preferences = await SharedPreferences.getInstance();
+      expect(
+        preferences.getString(
+          AiSettingsController.replyModelCandidatePreferenceKey,
+        ),
+        AiSettingsController.appleOnDeviceModelCandidateId,
+      );
+      expect(summarizeCall?.method, 'summarize');
+      expect(
+        (summarizeCall?.arguments as Map<Object?, Object?>)['modelMode'],
+        AppleAiModel.onDevice.bridgeValue,
+      );
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        'I can join at three.',
+      );
+      expect(sentCount, 0);
+      expect(
+        find.byKey(const ValueKey('composerAiReplyProgress')),
+        findsNothing,
+      );
+    });
+
+    testWidgets(
+      'shows auto-delete as a gray icon before AI without replacing the hint',
+      (tester) async {
+        final (vm, _) = await pumpAiReplyComposer(
+          tester,
+          (_) async => const TelegramAiFormattedText(text: 'Generated reply'),
+          messageAutoDeleteTime: 7 * 24 * 60 * 60,
+        );
+
+        final inputBox = find.byKey(const ValueKey('composerTextInputBox'));
+        final autoDelete = find.byKey(
+          const ValueKey('composerAutoDeleteIndicator'),
+        );
+        final ai = find.byKey(const ValueKey('composerAiReplyButton'));
+        final field = tester.widget<TextField>(find.byType(TextField));
+
+        expect(field.decoration?.hintText, 'Message…');
+        expect(autoDelete, findsOneWidget);
+        expect(
+          find.bySemanticsLabel(
+            'Message will be automatically deleted in 7 days',
+          ),
+          findsOneWidget,
+        );
+        expect(find.descendant(of: inputBox, matching: autoDelete), findsOne);
+        expect(ai, findsOneWidget);
+        expect(
+          tester.getCenter(autoDelete).dx,
+          lessThan(tester.getCenter(ai).dx),
+        );
+        final icon = tester.widget<AppIcon>(
+          find.descendant(of: autoDelete, matching: find.byType(AppIcon)),
+        );
+        expect(icon.icon, HeroAppIcons.stopwatch);
+        expect(icon.size, 18);
+        expect(icon.color, AppColors.light.textTertiary);
+        expect(
+          tester
+              .widget<GestureDetector>(
+                find.descendant(
+                  of: autoDelete,
+                  matching: find.byType(GestureDetector),
+                ),
+              )
+              .onTap,
+          isNotNull,
+        );
+
+        await tester.enterText(find.byType(TextField), 'Draft');
+        await tester.pump();
+        expect(autoDelete, findsNothing);
+        await tester.enterText(find.byType(TextField), '');
+        await tester.pump();
+        expect(autoDelete, findsOneWidget);
+
+        vm.messageAutoDeleteTime = 0;
+        vm.notifyListeners();
+        await tester.pump();
+
+        expect(autoDelete, findsNothing);
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).decoration?.hintText,
+          'Message…',
+        );
+        expect(ai, findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'keeps AI Reply visible while Cocoon capability discovery is pending',
+      (tester) async {
+        await pumpAiReplyComposer(
+          tester,
+          (_) async => const TelegramAiFormattedText(text: 'Generated reply'),
+          telegramReplySupported: null,
+        );
+
+        expect(
+          find.byKey(const ValueKey('composerAiReplyButton')),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets('group can draft after only outgoing sender messages', (
+      tester,
+    ) async {
+      AiReplyRequest? capturedRequest;
+      await pumpAiReplyComposer(
+        tester,
+        (request) async {
+          capturedRequest = request;
+          return const TelegramAiFormattedText(text: 'A natural follow-up.');
+        },
+        isGroup: true,
+        targetIsOutgoing: true,
+      );
+
+      final action = find.byKey(const ValueKey('composerAiReplyButton'));
+      expect(action, findsOneWidget);
+      await tester.tap(action);
+      await tester.pumpAndSettle();
+
+      expect(capturedRequest?.targetMessageId, 7);
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        'A natural follow-up.',
+      );
+    });
+
+    testWidgets(
+      'progressively reveals a completed one-shot AI reply in the input',
+      (tester) async {
+        final result = Completer<TelegramAiFormattedText>();
+        final (vm, _) = await pumpAiReplyComposer(tester, (_) => result.future);
+        const completedText =
+            'I can join at three, bring the revised notes, and confirm the '
+            'room with everyone before the meeting starts.';
+
+        await tester.tap(find.byKey(const ValueKey('composerAiReplyButton')));
+        await tester.pump();
+        result.complete(
+          const TelegramAiFormattedText(
+            text: completedText,
+            entities: [
+              {
+                '@type': 'textEntity',
+                'offset': 0,
+                'length': 1,
+                'type': {'@type': 'textEntityTypeBold'},
+              },
+            ],
+          ),
+        );
+        await tester.pump();
+
+        final partial = tester
+            .widget<TextField>(find.byType(TextField))
+            .controller!
+            .text;
+        expect(partial, isNotEmpty);
+        expect(completedText, startsWith(partial));
+        expect(partial, isNot(completedText));
+        expect(vm.draft, partial);
+        expect(
+          find.byKey(const ValueKey('composerAiReplyProgress')),
+          findsOneWidget,
+        );
+        expect(
+          tester
+              .widget<GestureDetector>(
+                find.byKey(const ValueKey('composerSendButton')),
+              )
+              .onTap,
+          isNull,
+        );
+
+        await tester.pumpAndSettle();
+
+        final controller =
+            tester.widget<TextField>(find.byType(TextField)).controller!
+                as EmojiTextEditingController;
+        final (text, entities) = controller.toFormatted();
+        expect(text, completedText);
+        expect(entities.single['type'], {'@type': 'textEntityTypeBold'});
+        expect(vm.draft, completedText);
+        expect(
+          find.byKey(const ValueKey('composerAiReplyProgress')),
+          findsNothing,
+        );
+        expect(
+          tester
+              .widget<GestureDetector>(
+                find.byKey(const ValueKey('composerSendButton')),
+              )
+              .onTap,
+          isNotNull,
+        );
+      },
+    );
+
+    testWidgets(
+      'streams a partial AI reply into the composer and keeps progress visible',
+      (tester) async {
+        late AiReplyDraftCallback emitDraft;
+        final result = Completer<TelegramAiFormattedText>();
+        final (vm, _) = await pumpAiReplyComposer(
+          tester,
+          null,
+          streamingGenerator:
+              (
+                request, {
+                required AiReplyDraftCallback onDraft,
+                AiReplyProgressCallback? onProgress,
+              }) {
+                emitDraft = onDraft;
+                return result.future;
+              },
+        );
+
+        await tester.tap(find.byKey(const ValueKey('composerAiReplyButton')));
+        await tester.pump();
+        emitDraft(const TelegramAiFormattedText(text: 'I can'));
+        await tester.pump();
+
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).controller!.text,
+          'I can',
+        );
+        expect(vm.draft, 'I can');
+        expect(
+          find.byKey(const ValueKey('composerAiReplyProgress')),
+          findsOneWidget,
+        );
+
+        emitDraft(const TelegramAiFormattedText(text: 'I can join'));
+        await tester.pump();
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).controller!.text,
+          'I can join',
+        );
+        expect(
+          find.byKey(const ValueKey('composerAiReplyProgress')),
+          findsOneWidget,
+        );
+
+        result.complete(
+          const TelegramAiFormattedText(
+            text: 'I can join at three.',
+            entities: [
+              {
+                '@type': 'textEntity',
+                'offset': 0,
+                'length': 1,
+                'type': {'@type': 'textEntityTypeBold'},
+              },
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final controller =
+            tester.widget<TextField>(find.byType(TextField)).controller!
+                as EmojiTextEditingController;
+        final (text, entities) = controller.toFormatted();
+        expect(text, 'I can join at three.');
+        expect(entities.single['type'], {'@type': 'textEntityTypeBold'});
+        expect(
+          find.byKey(const ValueKey('composerAiReplyProgress')),
+          findsNothing,
+        );
+      },
+    );
+
+    testWidgets(
+      'keeps generic AI phases collapsed above the send-ready draft',
+      (tester) async {
+        late AiReplyDraftCallback emitDraft;
+        late AiReplyProgressCallback emitProgress;
+        final result = Completer<TelegramAiFormattedText>();
+        var sentCount = 0;
+        final (vm, _) = await pumpAiReplyComposer(
+          tester,
+          null,
+          streamingGenerator:
+              (
+                request, {
+                required AiReplyDraftCallback onDraft,
+                AiReplyProgressCallback? onProgress,
+              }) {
+                emitDraft = onDraft;
+                emitProgress = onProgress!;
+                return result.future;
+              },
+          onMessageSent: () => sentCount++,
+        );
+
+        await tester.tap(find.byKey(const ValueKey('composerAiReplyButton')));
+        await tester.pump();
+
+        final process = find.byKey(const ValueKey('composerAiReplyProcess'));
+        final details = find.byKey(
+          const ValueKey('composerAiReplyProcessDetails'),
+        );
+        expect(process, findsOneWidget);
+        expect(details, findsNothing);
+        expect(vm.draft, isEmpty);
+
+        emitProgress(AiReplyProgressPhase.checkingEarlierContext);
+        await tester.pump();
+        expect(vm.draft, isEmpty);
+        await tester.tap(
+          find.byKey(const ValueKey('composerAiReplyProcessToggle')),
+        );
+        await tester.pump(const Duration(milliseconds: 220));
+
+        expect(details, findsOneWidget);
+        expect(
+          find.text('Reviewing recent messages and the reply target.'),
+          findsOneWidget,
+        );
+        expect(
+          find.text('Checking earlier chat context for relevant details.'),
+          findsOneWidget,
+        );
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).controller!.text,
+          isEmpty,
+        );
+
+        emitProgress(AiReplyProgressPhase.writingReply);
+        emitDraft(const TelegramAiFormattedText(text: 'Direct reply'));
+        result.complete(const TelegramAiFormattedText(text: 'Direct reply'));
+        await tester.pumpAndSettle();
+
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).controller!.text,
+          'Direct reply',
+        );
+        expect(
+          find.text('Writing a send-ready response in your voice.'),
+          findsOneWidget,
+        );
+        expect(process, findsOneWidget);
+        expect(sentCount, 0);
+
+        await tester.enterText(find.byType(TextField), 'My edit');
+        await tester.pumpAndSettle();
+        expect(process, findsNothing);
+        expect(sentCount, 0);
+      },
+    );
+
+    testWidgets('typing after a streamed draft rejects later AI chunks', (
+      tester,
+    ) async {
+      late AiReplyDraftCallback emitDraft;
+      final result = Completer<TelegramAiFormattedText>();
+      await pumpAiReplyComposer(
+        tester,
+        null,
+        streamingGenerator:
+            (
+              request, {
+              required AiReplyDraftCallback onDraft,
+              AiReplyProgressCallback? onProgress,
+            }) {
+              emitDraft = onDraft;
+              return result.future;
+            },
+      );
+
+      await tester.tap(find.byKey(const ValueKey('composerAiReplyButton')));
+      await tester.pump();
+      emitDraft(const TelegramAiFormattedText(text: 'Partial reply'));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField), 'My own draft');
+      await tester.pump();
+
+      emitDraft(const TelegramAiFormattedText(text: 'Late streamed reply'));
+      result.complete(
+        const TelegramAiFormattedText(text: 'Late completed reply'),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        'My own draft',
+      );
+      expect(
+        find.byKey(const ValueKey('composerAiReplyProgress')),
+        findsNothing,
+      );
+    });
+
+    testWidgets('cancel after a streamed draft rejects later AI chunks', (
+      tester,
+    ) async {
+      late AiReplyDraftCallback emitDraft;
+      final result = Completer<TelegramAiFormattedText>();
+      await pumpAiReplyComposer(
+        tester,
+        null,
+        streamingGenerator:
+            (
+              request, {
+              required AiReplyDraftCallback onDraft,
+              AiReplyProgressCallback? onProgress,
+            }) {
+              emitDraft = onDraft;
+              return result.future;
+            },
+      );
+
+      await tester.tap(find.byKey(const ValueKey('composerAiReplyButton')));
+      await tester.pump();
+      emitDraft(const TelegramAiFormattedText(text: 'Useful partial'));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('composerAiReplyButton')));
+      await tester.pump();
+
+      emitDraft(const TelegramAiFormattedText(text: 'Late streamed reply'));
+      result.complete(
+        const TelegramAiFormattedText(text: 'Late completed reply'),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        'Useful partial',
+      );
+      expect(
+        find.byKey(const ValueKey('composerAiReplyProgress')),
+        findsNothing,
+      );
+    });
+
+    testWidgets(
+      'AI reply history eagerly grounds generation with older messages',
+      (tester) async {
+        AiReplyRequest? capturedRequest;
+        int? capturedBeforeMessageId;
+        String? capturedQuery;
+        int? capturedLimit;
+        var generatorCalls = 0;
+        final olderMessages = [
+          ChatMessage(
+            id: 4,
+            isOutgoing: false,
+            text: 'The launch is still planned for Friday.',
+            date: 4,
+            senderName: 'Alice',
+            contentType: 'messageText',
+          ),
+          ChatMessage(
+            id: 5,
+            isOutgoing: true,
+            text: 'Friday works for me.',
+            date: 5,
+            contentType: 'messageText',
+          ),
+        ];
+        final (_, target) = await pumpAiReplyComposer(
+          tester,
+          (request) async {
+            capturedRequest = request;
+            generatorCalls++;
+            return const TelegramAiFormattedText(
+              text: 'Yes, I can join at three.',
+            );
+          },
+          historyLoader:
+              ({
+                required beforeMessageId,
+                required query,
+                required limit,
+              }) async {
+                capturedBeforeMessageId = beforeMessageId;
+                capturedQuery = query;
+                capturedLimit = limit;
+                return AiReplyChatHistoryPage(
+                  messages: olderMessages,
+                  hasMore: false,
+                );
+              },
+        );
+
+        await tester.tap(find.byKey(const ValueKey('composerAiReplyButton')));
+        await tester.pumpAndSettle();
+
+        expect(generatorCalls, 1);
+        expect(capturedBeforeMessageId, target.id);
+        expect(capturedQuery, isEmpty);
+        expect(capturedLimit, AiReplyRequest.earlierContextFetchLimit);
+        expect(capturedRequest?.contextExpanded, isTrue);
+        expect(capturedRequest?.contextComplete, isTrue);
+        expect(capturedRequest?.messages.map((message) => message.id), [
+          4,
+          5,
+          target.id,
+        ]);
+        expect(
+          capturedRequest?.messages
+              .firstWhere((message) => message.id == 5)
+              .isCurrentUser,
+          isTrue,
+        );
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).controller!.text,
+          'Yes, I can join at three.',
+        );
+      },
+    );
+
+    testWidgets(
+      'AI reply history loading stops before generation when the user types',
+      (tester) async {
+        final history = Completer<AiReplyChatHistoryPage>();
+        var historyCalls = 0;
+        var generatorCalls = 0;
+        await pumpAiReplyComposer(
+          tester,
+          (_) async {
+            generatorCalls++;
+            return const TelegramAiFormattedText(text: 'Generated reply');
+          },
+          historyLoader:
+              ({required beforeMessageId, required query, required limit}) {
+                historyCalls++;
+                return history.future;
+              },
+        );
+
+        await tester.tap(find.byKey(const ValueKey('composerAiReplyButton')));
+        await tester.pump();
+        expect(historyCalls, 1);
+        expect(generatorCalls, 0);
+        expect(
+          find.byKey(const ValueKey('composerAiReplyProgress')),
+          findsOneWidget,
+        );
+
+        await tester.enterText(find.byType(TextField), 'My own draft');
+        await tester.pump();
+        expect(
+          find.byKey(const ValueKey('composerAiReplyProgress')),
+          findsNothing,
+        );
+
+        history.complete(const AiReplyChatHistoryPage.empty());
+        await tester.pumpAndSettle();
+
+        expect(generatorCalls, 0);
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).controller!.text,
+          'My own draft',
+        );
+      },
+    );
+
+    testWidgets(
+      'AI reply history loading stops before generation when the target changes',
+      (tester) async {
+        final history = Completer<AiReplyChatHistoryPage>();
+        var historyCalls = 0;
+        var generatorCalls = 0;
+        final (vm, _) = await pumpAiReplyComposer(
+          tester,
+          (_) async {
+            generatorCalls++;
+            return const TelegramAiFormattedText(text: 'Generated reply');
+          },
+          useExplicitReplyTarget: true,
+          historyLoader:
+              ({required beforeMessageId, required query, required limit}) {
+                historyCalls++;
+                return history.future;
+              },
+        );
+
+        await tester.tap(find.byKey(const ValueKey('composerAiReplyButton')));
+        await tester.pump();
+        expect(historyCalls, 1);
+        expect(generatorCalls, 0);
+
+        final replacement = ChatMessage(
+          id: 8,
+          isOutgoing: false,
+          text: 'Actually, can you join at four?',
+          date: 2,
+          senderName: 'Alice',
+          contentType: 'messageText',
+        );
+        vm.setReply(replacement);
+        await tester.pump();
+        expect(
+          find.byKey(const ValueKey('composerAiReplyProgress')),
+          findsNothing,
+        );
+
+        history.complete(const AiReplyChatHistoryPage.empty());
+        await tester.pumpAndSettle();
+
+        expect(generatorCalls, 0);
+        expect(vm.replyTo, same(replacement));
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).controller!.text,
+          isEmpty,
+        );
+      },
+    );
+
+    testWidgets(
+      'AI reply does not generate when blocked-user privacy cannot be verified',
+      (tester) async {
+        var generatorCalls = 0;
+        await pumpAiReplyComposer(
+          tester,
+          (_) async {
+            generatorCalls++;
+            return const TelegramAiFormattedText(text: 'Generated reply');
+          },
+          historyLoader:
+              ({
+                required beforeMessageId,
+                required query,
+                required limit,
+              }) async =>
+                  throw const AiReplyPrivacyException('Block list unavailable'),
+        );
+
+        await tester.tap(find.byKey(const ValueKey('composerAiReplyButton')));
+        await tester.pumpAndSettle();
+
+        expect(generatorCalls, 0);
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).controller!.text,
+          isEmpty,
+        );
+        expect(
+          find.byKey(const ValueKey('composerAiReplyProgress')),
+          findsNothing,
+        );
+        await tester.pump(const Duration(seconds: 2));
+      },
+    );
+
+    testWidgets('hides contextual AI Reply after the user has answered', (
+      tester,
+    ) async {
+      await pumpAiReplyComposer(
+        tester,
+        (_) async => const TelegramAiFormattedText(text: 'Generated reply'),
+        includeLatestOutgoingMessage: true,
+      );
+
+      expect(find.byKey(const ValueKey('composerAiReplyButton')), findsNothing);
+    });
+
+    testWidgets(
+      'group keeps AI Reply after an outgoing message and supplies more context',
+      (tester) async {
+        AiReplyRequest? capturedRequest;
+        int? capturedHistoryLimit;
+        const guidance = 'Reply warmly and address the whole group.';
+        final leadingMessages = <ChatMessage>[
+          for (var id = 70; id < 95; id++)
+            ChatMessage(
+              id: id,
+              isOutgoing: id % 5 == 0,
+              text: 'Earlier group message $id',
+              date: id,
+              senderName: id.isEven ? 'Alice' : 'Bob',
+              senderId: id.isEven ? 11 : 22,
+              contentType: 'messageText',
+            ),
+        ];
+        final (_, target) = await pumpAiReplyComposer(
+          tester,
+          (request) async {
+            capturedRequest = request;
+            return const TelegramAiFormattedText(text: 'Hello everyone!');
+          },
+          isGroup: true,
+          includeLatestOutgoingMessage: true,
+          leadingMessages: leadingMessages,
+          targetId: 100,
+          aiReplyPrompt: guidance,
+          historyLoader:
+              ({
+                required beforeMessageId,
+                required query,
+                required limit,
+              }) async {
+                capturedHistoryLimit = limit;
+                return const AiReplyChatHistoryPage.empty();
+              },
+        );
+
+        expect(
+          find.byKey(const ValueKey('composerAiReplyButton')),
+          findsOneWidget,
+        );
+        await tester.tap(find.byKey(const ValueKey('composerAiReplyButton')));
+        await tester.pumpAndSettle();
+
+        expect(capturedRequest?.targetMessageId, target.id);
+        expect(capturedRequest?.isGroupChat, isTrue);
+        expect(capturedRequest?.guidance, guidance);
+        expect(
+          capturedHistoryLimit,
+          AiReplyRequest.groupEarlierContextFetchLimit,
+        );
+        expect(
+          capturedRequest?.messages.length,
+          greaterThan(AiReplyRequest.maximumMessages),
+        );
+        expect(
+          capturedRequest?.messages.map((message) => message.speaker),
+          containsAll(<String>['Alice', 'Bob']),
+        );
+        expect(
+          capturedRequest?.toUntrustedPayload(),
+          containsPair('chat_type', 'group'),
+        );
+      },
+    );
+
+    testWidgets(
+      'group invalidates an in-flight reply after a new owner message',
+      (tester) async {
+        late AiReplyDraftCallback emitDraft;
+        final result = Completer<TelegramAiFormattedText>();
+        final (vm, target) = await pumpAiReplyComposer(
+          tester,
+          null,
+          isGroup: true,
+          streamingGenerator:
+              (
+                request, {
+                required AiReplyDraftCallback onDraft,
+                AiReplyProgressCallback? onProgress,
+              }) {
+                emitDraft = onDraft;
+                return result.future;
+              },
+        );
+
+        await tester.tap(find.byKey(const ValueKey('composerAiReplyButton')));
+        await tester.pump();
+        emitDraft(const TelegramAiFormattedText(text: 'Possibly stale'));
+        await tester.pump();
+        vm.appendMessage(
+          ChatMessage(
+            id: target.id + 1,
+            isOutgoing: true,
+            text: 'I have answered this already.',
+            date: 2,
+            contentType: 'messageText',
+          ),
+        );
+        await tester.pump();
+
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).controller!.text,
+          isEmpty,
+        );
+        expect(
+          find.byKey(const ValueKey('composerAiReplyProgress')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const ValueKey('composerAiReplyButton')),
+          findsOneWidget,
+        );
+
+        emitDraft(const TelegramAiFormattedText(text: 'Late stale chunk'));
+        result.complete(
+          const TelegramAiFormattedText(text: 'Late stale completion'),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).controller!.text,
+          isEmpty,
+        );
+      },
+    );
+
+    testWidgets('revoked non-target context invalidates streamed reply', (
+      tester,
+    ) async {
+      late AiReplyDraftCallback emitDraft;
+      final result = Completer<TelegramAiFormattedText>();
+      final contextMessage = ChatMessage(
+        id: 6,
+        isOutgoing: false,
+        text: 'Earlier context that was initially shareable.',
+        date: 1,
+        senderName: 'Bob',
+        senderId: 22,
+        contentType: 'messageText',
+      );
+      final (vm, _) = await pumpAiReplyComposer(
+        tester,
+        null,
+        leadingMessages: [contextMessage],
+        streamingGenerator:
+            (
+              request, {
+              required AiReplyDraftCallback onDraft,
+              AiReplyProgressCallback? onProgress,
+            }) {
+              emitDraft = onDraft;
+              return result.future;
+            },
+      );
+
+      await tester.tap(find.byKey(const ValueKey('composerAiReplyButton')));
+      await tester.pump();
+      emitDraft(const TelegramAiFormattedText(text: 'Uses old context'));
+      await tester.pump();
+      vm.replaceMessage(
+        ChatMessage(
+          id: contextMessage.id,
+          isOutgoing: false,
+          text: contextMessage.text,
+          date: contextMessage.date,
+          senderName: contextMessage.senderName,
+          senderId: contextMessage.senderId,
+          contentType: 'messageText',
+          restrictionReason: 'content is no longer shareable',
+        ),
+      );
+      await tester.pump();
+
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        isEmpty,
+      );
+      expect(
+        find.byKey(const ValueKey('composerAiReplyProgress')),
+        findsNothing,
+      );
+
+      emitDraft(const TelegramAiFormattedText(text: 'Late revoked chunk'));
+      result.complete(
+        const TelegramAiFormattedText(text: 'Late revoked completion'),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        isEmpty,
+      );
+    });
+
+    testWidgets('anchors contextual AI Reply to the visible group message', (
+      tester,
+    ) async {
+      int? generatedTargetId;
+      await pumpAiReplyComposer(
+        tester,
+        (request) async {
+          generatedTargetId = request.targetMessageId;
+          return const TelegramAiFormattedText(text: 'Generated reply');
+        },
+        anchoredHistory: true,
+        isGroup: true,
+        trailingMessages: [
+          ChatMessage(
+            id: 8,
+            isOutgoing: false,
+            text: 'Newer loaded but offscreen message',
+            date: 2,
+            senderName: 'Bob',
+            contentType: 'messageText',
+          ),
+        ],
+      );
+
+      expect(
+        find.byKey(const ValueKey('composerAiReplyButton')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('composerAiReplyButton')));
+      await tester.pumpAndSettle();
+      expect(generatedTargetId, 7);
+    });
+
+    testWidgets('lets the in-input progress control cancel AI generation', (
+      tester,
+    ) async {
+      final result = Completer<TelegramAiFormattedText>();
+      var requestCount = 0;
+      await pumpAiReplyComposer(tester, (_) {
+        requestCount++;
+        return result.future;
+      });
+
+      final action = find.byKey(const ValueKey('composerAiReplyButton'));
+      await tester.tap(action);
+      await tester.pump();
+      final progress = find.byKey(const ValueKey('composerAiReplyProgress'));
+      expect(progress, findsOneWidget);
+      final thinkingIcon = find.descendant(
+        of: progress,
+        matching: find.byType(AppIcon),
+      );
+      expect(thinkingIcon, findsOneWidget);
+      expect(
+        tester.widget<AppIcon>(thinkingIcon).icon,
+        HeroAppIcons.wandMagicSparkles,
+      );
+      expect(
+        find.descendant(
+          of: progress,
+          matching: find.byType(CircularProgressIndicator),
+        ),
+        findsNothing,
+      );
+      final orbit = find.byKey(const ValueKey('composerAiReplyOrbit'));
+      final beforeRotation = List<double>.of(
+        tester.widget<Transform>(orbit).transform.storage,
+      );
+      await tester.pump(const Duration(milliseconds: 225));
+      final afterRotation = List<double>.of(
+        tester.widget<Transform>(orbit).transform.storage,
+      );
+      expect(afterRotation, isNot(equals(beforeRotation)));
+      expect(tester.widget<GestureDetector>(action).onLongPress, isNull);
+
+      await tester.tap(action);
+      await tester.pump();
+      expect(requestCount, 1);
+      expect(
+        find.byKey(const ValueKey('composerAiReplyProgress')),
+        findsNothing,
+      );
+
+      result.complete(
+        const TelegramAiFormattedText(text: 'Canceled generated reply'),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        isEmpty,
+      );
+      expect(action, findsOneWidget);
+    });
+
+    testWidgets('keeps AI rightmost beside a bot keyboard on a narrow input', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(320, 640);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await pumpAiReplyComposer(
+        tester,
+        (_) async => const TelegramAiFormattedText(text: 'Generated reply'),
+        includeReplyKeyboard: true,
+        includeSenderOptions: true,
+        messageAutoDeleteTime: 7 * 24 * 60 * 60,
+      );
+
+      final sender = find.byKey(const ValueKey('composerSenderPicker'));
+      final keyboard = find.bySemanticsLabel('Show bot keyboard');
+      final autoDelete = find.byKey(
+        const ValueKey('composerAutoDeleteIndicator'),
+      );
+      final ai = find.byKey(const ValueKey('composerAiReplyButton'));
+      expect(sender, findsOneWidget);
+      expect(keyboard, findsOneWidget);
+      expect(autoDelete, findsOneWidget);
+      expect(ai, findsOneWidget);
+      expect(
+        tester.getCenter(sender).dx,
+        lessThan(tester.getCenter(keyboard).dx),
+      );
+      expect(
+        tester.getCenter(keyboard).dx,
+        lessThan(tester.getCenter(autoDelete).dx),
+      );
+      expect(
+        tester.getCenter(autoDelete).dx,
+        lessThan(tester.getCenter(ai).dx),
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('bottom-aligns the sender identity beside wrapped text', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(320, 640);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await pumpAiReplyComposer(
+        tester,
+        (_) async => const TelegramAiFormattedText(text: 'Generated reply'),
+        includeSenderOptions: true,
+      );
+
+      final field = find.byType(TextField);
+      final sender = find.byKey(const ValueKey('composerSenderPicker'));
+      await tester.enterText(
+        field,
+        'This longer message wraps across several lines in the narrow input.',
+      );
+      await tester.pump();
+
+      expect(
+        tester.getSize(field).height,
+        greaterThan(tester.getSize(sender).height),
+      );
+      expect(
+        tester.getRect(sender).bottom,
+        closeTo(tester.getRect(field).bottom, 0.1),
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('does not overwrite text typed while an AI reply is running', (
+      tester,
+    ) async {
+      final result = Completer<TelegramAiFormattedText>();
+      await pumpAiReplyComposer(tester, (_) => result.future);
+
+      await tester.tap(find.byKey(const ValueKey('composerAiReplyButton')));
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('composerAiReplyProgress')),
+        findsOneWidget,
+      );
+
+      await tester.enterText(find.byType(TextField), 'My own draft');
+      await tester.pump();
+      expect(find.byKey(const ValueKey('composerAiReplyButton')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('composerAiReplyProgress')),
+        findsNothing,
+      );
+
+      result.complete(
+        const TelegramAiFormattedText(text: 'Late generated reply'),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        'My own draft',
+      );
+
+      await tester.enterText(find.byType(TextField), '');
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('composerAiReplyButton')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('does not apply an AI reply after the reply target changes', (
+      tester,
+    ) async {
+      final result = Completer<TelegramAiFormattedText>();
+      final (vm, _) = await pumpAiReplyComposer(
+        tester,
+        (_) => result.future,
+        useExplicitReplyTarget: true,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('composerAiReplyButton')));
+      await tester.pump();
+      final replacement = ChatMessage(
+        id: 8,
+        isOutgoing: false,
+        text: 'What about four?',
+        date: 2,
+        senderName: 'Alice',
+        contentType: 'messageText',
+      );
+      vm.setReply(replacement);
+      await tester.pump();
+
+      result.complete(
+        const TelegramAiFormattedText(text: 'Stale generated reply'),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        isEmpty,
+      );
+      expect(vm.replyTo, same(replacement));
+    });
+
+    testWidgets('discards a contextual reply when a newer message arrives', (
+      tester,
+    ) async {
+      final result = Completer<TelegramAiFormattedText>();
+      final (vm, _) = await pumpAiReplyComposer(tester, (_) => result.future);
+
+      await tester.tap(find.byKey(const ValueKey('composerAiReplyButton')));
+      await tester.pump();
+      vm.appendMessage(
+        ChatMessage(
+          id: 8,
+          isOutgoing: false,
+          text: 'Actually, can you join at four?',
+          date: 2,
+          senderName: 'Alice',
+          contentType: 'messageText',
+        ),
+      );
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('composerAiReplyProgress')),
+        findsNothing,
+      );
+
+      result.complete(
+        const TelegramAiFormattedText(text: 'Stale generated reply'),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        isEmpty,
+      );
+      expect(
+        find.byKey(const ValueKey('composerAiReplyButton')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('discards contextual generation when explicit Reply starts', (
+      tester,
+    ) async {
+      final result = Completer<TelegramAiFormattedText>();
+      final (vm, target) = await pumpAiReplyComposer(
+        tester,
+        (_) => result.future,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('composerAiReplyButton')));
+      await tester.pump();
+      vm.setReply(target);
+      await tester.pump();
+
+      result.complete(
+        const TelegramAiFormattedText(text: 'Stale contextual reply'),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        isEmpty,
+      );
+      expect(vm.replyTo, same(target));
+    });
+
+    testWidgets('keeps the draft intact and allows retry after AI failure', (
+      tester,
+    ) async {
+      var requestCount = 0;
+      await pumpAiReplyComposer(tester, (_) {
+        requestCount++;
+        if (requestCount == 1) {
+          return Future<TelegramAiFormattedText>.error(
+            const AiReplyException('Reply failed'),
+          );
+        }
+        return Future.value(
+          const TelegramAiFormattedText(text: 'Reply after retry'),
+        );
+      });
+
+      final action = find.byKey(const ValueKey('composerAiReplyButton'));
+      await tester.tap(action);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        isEmpty,
+      );
+      expect(
+        find.byKey(const ValueKey('composerAiReplyProgress')),
+        findsNothing,
+      );
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+
+      await tester.tap(action);
+      await tester.pumpAndSettle();
+      expect(requestCount, 2);
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        'Reply after retry',
+      );
+    });
+
+    testWidgets('shows a circular style action above the send button', (
+      tester,
+    ) async {
+      final vm = _FocusTestChatViewModel()
+        ..aiCapabilities = const TelegramAiCapabilities(
+          tdlibVersion: 'test',
+          compositionSupported: true,
+          customStylesSupported: true,
+          summarySupported: true,
+          transcriptionSupported: true,
+          styleTitleMax: 64,
+          stylePromptMax: 1024,
+          addedStyleCountMax: 10,
+        );
+      addTearDown(vm.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('en'),
+          localizationsDelegates: const [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.bottomCenter,
+              child: ChatInputBar(
+                vm: vm,
+                onStartCall: (_) {},
+                onMessageSent: () {},
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final field = find.byType(TextField).first;
+      final aiButton = find.byKey(const ValueKey('composerAiPrefixButton'));
+      expect(aiButton, findsNothing);
+
+      await tester.enterText(field, 'one\ntwo');
+      await tester.pump();
+
+      expect(aiButton, findsOneWidget);
+      final sendButton = find.byKey(const ValueKey('composerSendButton'));
+      expect(sendButton, findsOneWidget);
+      expect(tester.getSize(aiButton), const Size.square(36));
+      final styleIcon = tester.widget<AppIcon>(
+        find.byKey(const ValueKey('composerAiStyleIcon')),
+      );
+      expect(styleIcon.icon, HeroAppIcons.palette);
+      expect(styleIcon.size, 19);
+      expect(
+        tester.getCenter(aiButton).dx,
+        greaterThan(tester.getRect(field).right),
+      );
+      expect(
+        tester.getCenter(aiButton).dx,
+        closeTo(tester.getCenter(sendButton).dx, 0.1),
+      );
+      expect(
+        tester.getCenter(aiButton).dy,
+        lessThan(tester.getCenter(sendButton).dy),
+      );
+
+      await tester.enterText(field, 'one');
+      await tester.pump();
+      expect(aiButton, findsNothing);
+    });
+
     test('builds awaitable sticker send requests', () {
       final vm = ChatViewModel(chatId: 42, title: 'Test', markReadOnOpen: false)
         ..paidMessageStarCount = 3;
@@ -1512,21 +3142,25 @@ void main() {
       final prefs = await SharedPreferences.getInstance();
       final theme = ThemeController(prefs);
       addTearDown(theme.dispose);
-      final gifPreview = TDParse.messageText({
+      final content = <String, dynamic>{
         '@type': 'messageAnimation',
         'caption': {'@type': 'formattedText', 'text': ''},
-      });
-      final message = ChatMessage(
-        id: 8,
-        isOutgoing: true,
-        text: gifPreview,
-        date: 1,
-        contentType: 'messageAnimation',
-        video: TdFileRef(id: 81),
-        videoDuration: 25,
-        imageWidth: 320,
-        imageHeight: 240,
-      );
+        'animation': {
+          '@type': 'animation',
+          'duration': 25,
+          'width': 320,
+          'height': 240,
+          'animation': {'@type': 'file', 'id': 81},
+        },
+      };
+      final gifPreview = TDParse.messageText(content);
+      final message = TDParse.message({
+        '@type': 'message',
+        'id': 8,
+        'date': 1,
+        'is_outgoing': true,
+        'content': content,
+      })!;
 
       await tester.pumpWidget(
         ChangeNotifierProvider<ThemeController>.value(
@@ -1550,10 +3184,14 @@ void main() {
       );
 
       expect(gifPreview, '[GIF]');
+      expect(message.text, isEmpty);
       expect(find.text(gifPreview), findsNothing);
       expect(find.byKey(const ValueKey('message-animation-8')), findsOneWidget);
       expect(find.byIcon(HeroAppIcons.play.data), findsNothing);
       expect(find.text('0:25'), findsNothing);
+
+      // Expire the mocked TDLib file lookup before test teardown.
+      await tester.pump(const Duration(minutes: 3, seconds: 1));
     });
 
     testWidgets('long press reveals retained restricted message content', (
@@ -1794,18 +3432,39 @@ void main() {
         find.byKey(const ValueKey('messageTappedTimestamp')),
         findsOneWidget,
       );
+      var bubbleRect = tester.getRect(
+        find.byKey(const ValueKey('messageTextBubble-2')),
+      );
+      var timestampRect = tester.getRect(
+        find.byKey(const ValueKey('messageTappedTimestamp')),
+      );
+      expect(timestampRect.top, greaterThan(bubbleRect.bottom));
+
+      await tester.tap(find.byKey(const ValueKey('messageTapTarget-2')));
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('messageTappedTimestamp')),
+        findsNothing,
+      );
 
       theme.alwaysShowMessageTime = true;
       addTearDown(theme.dispose);
       await pump();
       expect(
-        find.byKey(const ValueKey('messageInlineTimestamp')),
+        find.byKey(const ValueKey('messageTappedTimestamp')),
         findsOneWidget,
       );
       expect(
-        find.byKey(const ValueKey('messageTappedTimestamp')),
+        find.byKey(const ValueKey('messageInlineTimestamp')),
         findsNothing,
       );
+      bubbleRect = tester.getRect(
+        find.byKey(const ValueKey('messageTextBubble-2')),
+      );
+      timestampRect = tester.getRect(
+        find.byKey(const ValueKey('messageTappedTimestamp')),
+      );
+      expect(timestampRect.top, greaterThan(bubbleRect.bottom));
     });
 
     testWidgets('opens text selection through a double tap', (tester) async {
@@ -2413,46 +4072,6 @@ void main() {
       theme.chatFolderDisplayMode = ChatFolderDisplayMode.menu;
       expect(prefs.getString('chatFolderDisplayMode'), 'menu');
     });
-
-    test('migrates legacy folder swipe preferences', () async {
-      SharedPreferences.setMockInitialValues({
-        'chatFolderDisplayMode': 'tabs',
-        'disableChatListSwipeActions': true,
-        'chatListFolderSwipeSwitching': true,
-      });
-      final prefs = await SharedPreferences.getInstance();
-      final theme = ThemeController(prefs);
-
-      expect(theme.chatListSwipeBehavior, ChatListSwipeBehavior.switchFolders);
-      expect(theme.disableChatListSwipeActions, isTrue);
-      expect(theme.chatListFolderSwipeSwitching, isTrue);
-      expect(prefs.getString('chatListSwipeBehavior'), 'switchFolders');
-
-      theme.chatFolderDisplayMode = ChatFolderDisplayMode.menu;
-      expect(theme.disableChatListSwipeActions, isTrue);
-      expect(theme.chatListFolderSwipeSwitching, isTrue);
-    });
-
-    test('uses gesture defaults and persists explicit choices', () async {
-      SharedPreferences.setMockInitialValues({});
-      final prefs = await SharedPreferences.getInstance();
-      final theme = ThemeController(prefs);
-
-      expect(theme.chatListSwipeBehavior, ChatListSwipeBehavior.chatActions);
-      expect(
-        theme.threeFingerSwipeBehavior,
-        ThreeFingerSwipeBehavior.switchFolders,
-      );
-      expect(theme.chatListHoldSwipeActions, isFalse);
-
-      theme.chatListSwipeBehavior = ChatListSwipeBehavior.switchFolders;
-      theme.chatListHoldSwipeActions = true;
-      theme.threeFingerSwipeBehavior = ThreeFingerSwipeBehavior.switchAccounts;
-
-      expect(prefs.getString('chatListSwipeBehavior'), 'switchFolders');
-      expect(prefs.getBool('chatListHoldSwipeActions'), isTrue);
-      expect(prefs.getString('threeFingerSwipeBehavior'), 'switchAccounts');
-    });
   });
 
   group('ThemeController fonts', () {
@@ -2647,6 +4266,82 @@ void main() {
       };
 
       expect(TDParse.messageText(content), '[GIF]');
+    });
+
+    test('caption-bearing media keep preview labels out of message text', () {
+      final contents = <Map<String, dynamic>>[
+        {
+          '@type': 'messagePhoto',
+          'caption': {'@type': 'formattedText', 'text': ''},
+        },
+        {
+          '@type': 'messageVideo',
+          'caption': {'@type': 'formattedText', 'text': ''},
+        },
+        {
+          '@type': 'messageAnimation',
+          'caption': {'@type': 'formattedText', 'text': ''},
+        },
+        {
+          '@type': 'messageAudio',
+          'caption': {'@type': 'formattedText', 'text': ''},
+        },
+        {
+          '@type': 'messageDocument',
+          'caption': {'@type': 'formattedText', 'text': ''},
+          'document': {'@type': 'document', 'file_name': 'report.pdf'},
+        },
+        {
+          '@type': 'messageVoiceNote',
+          'caption': {'@type': 'formattedText', 'text': ''},
+        },
+        {
+          '@type': 'messagePaidMedia',
+          'caption': {'@type': 'formattedText', 'text': ''},
+        },
+      ];
+
+      for (final content in contents) {
+        expect(
+          TDParse.messageText(content),
+          isNotEmpty,
+          reason: '${content['@type']} needs a useful list preview',
+        );
+        expect(
+          TDParse.messageContentText(content),
+          isEmpty,
+          reason: '${content['@type']} has no user-authored caption',
+        );
+        final parsed = TDParse.message({
+          '@type': 'message',
+          'id': 100,
+          'date': 1,
+          'content': content,
+        });
+        expect(
+          parsed?.text,
+          isEmpty,
+          reason: '${content['@type']} parser text',
+        );
+      }
+    });
+
+    test('captions that equal preview labels remain real message text', () {
+      final content = <String, dynamic>{
+        '@type': 'messageVideo',
+        'caption': {'@type': 'formattedText', 'text': 'Video'},
+      };
+
+      expect(TDParse.messageContentText(content), 'Video');
+      expect(
+        TDParse.message({
+          '@type': 'message',
+          'id': 101,
+          'date': 1,
+          'content': content,
+        })?.text,
+        'Video',
+      );
     });
 
     test('redacts only a message carrying restriction info', () {

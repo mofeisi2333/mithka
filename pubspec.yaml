@@ -1,7 +1,7 @@
 name: mithka
 description: "Mithka — a cross-platform Telegram client (Flutter), built on TDLib."
 publish_to: 'none'
-version: 0.7.4+281
+version: 0.7.5+281
 
 environment:
   sdk: ^3.12.2
@@ -34,7 +34,10 @@ dependencies:
   # Voice notes: record + play Telegram's OGG/Opus (bundles libopus, so it works
   # on iOS where AVFoundation can't decode Opus). + mic permission.
   audio_session: ^0.2.3
-  flutter_sound: ^9.28.0
+  # 9.30.0 advertises desktop plugins whose native registration metadata is
+  # incomplete (including a mismatched macOS podspec). Keep the last mobile-
+  # only release so desktop builds compile and voice notes remain mobile-only.
+  flutter_sound: 9.28.0
   logger: ^2.7.0
   permission_handler: ^11.3.1
 
@@ -68,6 +71,8 @@ dependencies:
   video_compress: ^3.1.4
   video_thumbnail_gen: ^0.6.3
   fvp: ^0.37.2
+  system_picture_in_picture:
+    path: third_party/system_picture_in_picture
   flutter_local_notifications: ^22.0.1
   google_fonts: ^8.1.0
   firebase_core: ^4.11.0
@@ -111,7 +116,6 @@ flutter_launcher_icons:
   ios: true
   android: true
   remove_alpha_ios: true
-
 flutter:
   uses-material-design: true
   assets:
@@ -119,3 +123,4 @@ flutter:
     - assets/app_icon.png
     - assets/app_icons/
     - assets/emoji_preview/
+    - assets/message_bubbles/

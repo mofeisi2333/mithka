@@ -5,8 +5,15 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'ai_endpoint_style.dart';
 import 'apple_pcc_api.dart';
 import 'openai_compatible_models_api.dart';
+
+const defaultAiReplyPrompt = '''
+Reply naturally and concisely in my usual tone. Address the latest question or
+request directly. In groups, keep participant identities clear and avoid
+unnecessary replies.
+''';
 
 enum AiProviderMode {
   applePcc('apple_pcc'),
@@ -29,24 +36,29 @@ class AiServerProvider {
     required this.id,
     required this.name,
     required this.endpoint,
+    this.endpointStyle = AiEndpointStyle.openAiChatCompletions,
     this.availableModels = const [],
   });
 
   final String id;
   final String name;
   final String endpoint;
+  final AiEndpointStyle endpointStyle;
   final List<OpenAiCompatibleModelInfo> availableModels;
 
-  Uri get chatCompletionsUri => Uri.parse(endpoint);
+  Uri get requestUri => Uri.parse(endpoint);
+  Uri get chatCompletionsUri => requestUri;
 
   AiServerProvider copyWith({
     String? name,
     String? endpoint,
+    AiEndpointStyle? endpointStyle,
     List<OpenAiCompatibleModelInfo>? availableModels,
   }) => AiServerProvider(
     id: id,
     name: name ?? this.name,
     endpoint: endpoint ?? this.endpoint,
+    endpointStyle: endpointStyle ?? this.endpointStyle,
     availableModels: availableModels ?? this.availableModels,
   );
 
@@ -54,6 +66,7 @@ class AiServerProvider {
     'id': id,
     'name': name,
     'endpoint': endpoint,
+    'endpoint_style': endpointStyle.storageValue,
     'available_models': availableModels
         .map((model) => model.toJson())
         .toList(growable: false),
@@ -63,13 +76,25 @@ class AiServerProvider {
     if (value is! Map) return null;
     final id = value['id'];
     final endpoint = value['endpoint'];
+    final endpointStyle = value['endpoint_style'] is String
+        ? AiEndpointStyle.fromStorage(value['endpoint_style'] as String)
+        : AiEndpointStyle.inferFromEndpoint(
+                endpoint is String ? endpoint : '',
+              ) ??
+              AiEndpointStyle.openAiChatCompletions;
     if (id is! String ||
         id.trim().isEmpty ||
         endpoint is! String ||
-        !AiSettingsController.isValidOpenAiCompatibleEndpoint(endpoint)) {
+        !AiSettingsController.isValidOpenAiCompatibleEndpoint(
+          endpoint,
+          endpointStyle: endpointStyle,
+        )) {
       return null;
     }
-    final uri = AiSettingsController.validateOpenAiCompatibleEndpoint(endpoint);
+    final uri = AiSettingsController.validateOpenAiCompatibleEndpoint(
+      endpoint,
+      endpointStyle: endpointStyle,
+    );
     final rawName = value['name'];
     final availableModels = <OpenAiCompatibleModelInfo>[];
     final rawModels = value['available_models'];
@@ -85,6 +110,7 @@ class AiServerProvider {
           ? rawName.trim()
           : uri.host,
       endpoint: uri.toString(),
+      endpointStyle: endpointStyle,
       availableModels: List.unmodifiable(availableModels),
     );
   }
@@ -165,6 +191,85 @@ class AiModelProfile {
   }
 }
 
+enum AiFeature { translation, summary, reply }
+
+enum AiModelCandidateKind { applePcc, appleOnDevice, server, telegramCocoon }
+
+@immutable
+class AiModelCandidate {
+  const AiModelCandidate._({
+    required this.id,
+    required this.kind,
+    this.profile,
+    this.serverProvider,
+  });
+
+  const AiModelCandidate.applePcc()
+    : this._(
+        id: AiSettingsController.applePccModelCandidateId,
+        kind: AiModelCandidateKind.applePcc,
+      );
+
+  const AiModelCandidate.appleOnDevice()
+    : this._(
+        id: AiSettingsController.appleOnDeviceModelCandidateId,
+        kind: AiModelCandidateKind.appleOnDevice,
+      );
+
+  const AiModelCandidate.telegramCocoon()
+    : this._(
+        id: AiSettingsController.telegramCocoonModelCandidateId,
+        kind: AiModelCandidateKind.telegramCocoon,
+      );
+
+  factory AiModelCandidate.server({
+    required AiModelProfile profile,
+    required AiServerProvider provider,
+  }) => AiModelCandidate._(
+    id: AiSettingsController.serverModelCandidateId(profile.id),
+    kind: AiModelCandidateKind.server,
+    profile: profile,
+    serverProvider: provider,
+  );
+
+  final String id;
+  final AiModelCandidateKind kind;
+  final AiModelProfile? profile;
+  final AiServerProvider? serverProvider;
+
+  AiProviderMode get providerMode => switch (kind) {
+    AiModelCandidateKind.applePcc => AiProviderMode.applePcc,
+    AiModelCandidateKind.appleOnDevice => AiProviderMode.appleOnDevice,
+    AiModelCandidateKind.server => AiProviderMode.openAiCompatible,
+    AiModelCandidateKind.telegramCocoon => throw UnsupportedError(
+      'Telegram Cocoon is a reply-only specialized provider.',
+    ),
+  };
+
+  String get model => profile?.model ?? '';
+  int? get contextWindowTokens => profile?.contextWindowTokens;
+}
+
+@immutable
+class AiFeatureModelConfiguration {
+  const AiFeatureModelConfiguration({
+    required this.candidate,
+    required this.endpoint,
+    required this.endpointStyle,
+    required this.apiKey,
+    required this.contextWindowTokens,
+  });
+
+  final AiModelCandidate candidate;
+  final Uri? endpoint;
+  final AiEndpointStyle endpointStyle;
+  final String apiKey;
+  final int? contextWindowTokens;
+
+  AiProviderMode get providerMode => candidate.providerMode;
+  String get model => candidate.model;
+}
+
 typedef AiSecureRead = Future<String?> Function(String key);
 typedef AiSecureWrite = Future<void> Function(String key, String? value);
 
@@ -202,6 +307,17 @@ class AiSettingsController extends ChangeNotifier {
       'ai.custom_server.active_provider_id.v2';
   static const activeModelProfileIdPreferenceKey =
       'ai.custom_server.active_model_id.v1';
+  static const translationModelCandidatePreferenceKey =
+      'ai.feature.translation.model_candidate.v1';
+  static const summaryModelCandidatePreferenceKey =
+      'ai.feature.summary.model_candidate.v1';
+  static const replyModelCandidatePreferenceKey =
+      'ai.feature.reply.model_candidate.v1';
+  static const replyPromptPreferenceKey = 'ai.feature.reply.prompt.v1';
+  static const replyPromptMaximumCharacters = 1000;
+  static const applePccModelCandidateId = 'builtin:apple_pcc';
+  static const appleOnDeviceModelCandidateId = 'builtin:apple_on_device';
+  static const telegramCocoonModelCandidateId = 'builtin:telegram_cocoon';
   static const openAiChatCompletionsPath = '/v1/chat/completions';
 
   static const _secureStorage = FlutterSecureStorage();
@@ -223,6 +339,10 @@ class AiSettingsController extends ChangeNotifier {
   List<AiModelProfile> _modelProfiles = const [];
   String? _activeServerProviderId;
   String? _activeModelProfileId;
+  String _translationModelCandidateId = applePccModelCandidateId;
+  String _summaryModelCandidateId = applePccModelCandidateId;
+  String _replyModelCandidateId = telegramCocoonModelCandidateId;
+  String _replyPrompt = defaultAiReplyPrompt.trim();
   final Map<String, String> _profileApiKeys = {};
   ApplePccCapabilities? _pccCapabilities;
 
@@ -258,6 +378,115 @@ class AiSettingsController extends ChangeNotifier {
         _modelProfiles.where((profile) => profile.providerId == providerId),
       );
 
+  List<AiModelCandidate> get modelCandidates => List.unmodifiable([
+    const AiModelCandidate.applePcc(),
+    const AiModelCandidate.appleOnDevice(),
+    for (final profile in _modelProfiles)
+      if (_providerById(profile.providerId) case final provider?)
+        AiModelCandidate.server(profile: profile, provider: provider),
+  ]);
+
+  List<AiModelCandidate> modelCandidatesForFeature(AiFeature feature) =>
+      switch (feature) {
+        AiFeature.translation || AiFeature.summary => modelCandidates,
+        AiFeature.reply => List.unmodifiable([
+          const AiModelCandidate.telegramCocoon(),
+          ...modelCandidates,
+        ]),
+      };
+
+  String get translationModelCandidateId => _translationModelCandidateId;
+  String get summaryModelCandidateId => _summaryModelCandidateId;
+  String get replyModelCandidateId => _replyModelCandidateId;
+  String get aiReplyPrompt => _replyPrompt;
+  bool get hasCustomAiReplyPrompt =>
+      _replyPrompt != defaultAiReplyPrompt.trim();
+  AiModelCandidate get translationModelCandidate =>
+      modelCandidateById(_translationModelCandidateId) ??
+      const AiModelCandidate.applePcc();
+  AiModelCandidate get summaryModelCandidate =>
+      modelCandidateById(_summaryModelCandidateId) ??
+      const AiModelCandidate.applePcc();
+  AiModelCandidate get replyModelCandidate =>
+      modelCandidateByIdForFeature(AiFeature.reply, _replyModelCandidateId) ??
+      const AiModelCandidate.telegramCocoon();
+
+  String modelCandidateIdForFeature(AiFeature feature) => switch (feature) {
+    AiFeature.translation => _translationModelCandidateId,
+    AiFeature.summary => _summaryModelCandidateId,
+    AiFeature.reply => _replyModelCandidateId,
+  };
+
+  AiModelCandidate modelCandidateForFeature(AiFeature feature) =>
+      switch (feature) {
+        AiFeature.translation => translationModelCandidate,
+        AiFeature.summary => summaryModelCandidate,
+        AiFeature.reply => replyModelCandidate,
+      };
+
+  AiModelCandidate? modelCandidateById(String? id) {
+    if (id == null) return null;
+    for (final candidate in modelCandidates) {
+      if (candidate.id == id) return candidate;
+    }
+    return null;
+  }
+
+  AiModelCandidate? modelCandidateByIdForFeature(
+    AiFeature feature,
+    String? id,
+  ) {
+    if (id == null) return null;
+    for (final candidate in modelCandidatesForFeature(feature)) {
+      if (candidate.id == id) return candidate;
+    }
+    return null;
+  }
+
+  AiFeatureModelConfiguration configurationForFeature(AiFeature feature) {
+    final candidate = modelCandidateForFeature(feature);
+    final provider = candidate.serverProvider;
+    Uri? endpoint;
+    if (provider != null) {
+      try {
+        endpoint = validateOpenAiCompatibleEndpoint(
+          provider.endpoint,
+          endpointStyle: provider.endpointStyle,
+        );
+      } on FormatException {
+        endpoint = null;
+      }
+    }
+    return AiFeatureModelConfiguration(
+      candidate: candidate,
+      endpoint: endpoint,
+      endpointStyle:
+          provider?.endpointStyle ?? AiEndpointStyle.openAiChatCompletions,
+      apiKey: provider == null ? '' : apiKeyForServerProvider(provider.id),
+      contextWindowTokens: switch (candidate.kind) {
+        AiModelCandidateKind.applePcc => _pccCapabilities?.contextSize,
+        AiModelCandidateKind.appleOnDevice =>
+          _pccCapabilities?.onDeviceContextSize,
+        AiModelCandidateKind.server => candidate.contextWindowTokens,
+        AiModelCandidateKind.telegramCocoon => null,
+      },
+    );
+  }
+
+  bool isConfiguredForFeature(AiFeature feature) {
+    final configuration = configurationForFeature(feature);
+    return switch (configuration.candidate.kind) {
+      AiModelCandidateKind.applePcc =>
+        _pccCapabilities?.available == true &&
+            _pccCapabilities?.quotaLimitReached != true,
+      AiModelCandidateKind.appleOnDevice =>
+        _pccCapabilities?.onDeviceAvailable == true,
+      AiModelCandidateKind.server =>
+        configuration.model.isNotEmpty && configuration.endpoint != null,
+      AiModelCandidateKind.telegramCocoon => true,
+    };
+  }
+
   // Compatibility aliases for callers that only need provider identity.
   List<AiServerProvider> get serverProfiles => serverProviders;
   String? get activeServerProfileId => activeServerProviderId;
@@ -279,7 +508,11 @@ class AiSettingsController extends ChangeNotifier {
           _pccCapabilities?.quotaLimitReached != true,
     AiProviderMode.appleOnDevice => _pccCapabilities?.onDeviceAvailable == true,
     AiProviderMode.openAiCompatible =>
-      model.isNotEmpty && isValidOpenAiCompatibleEndpoint(endpoint),
+      model.isNotEmpty &&
+          isValidOpenAiCompatibleEndpoint(
+            endpoint,
+            endpointStyle: activeServerProvider?.endpointStyle,
+          ),
   };
 
   Uri? get openAiChatCompletionsUri {
@@ -287,7 +520,10 @@ class AiSettingsController extends ChangeNotifier {
       return null;
     }
     try {
-      return validateOpenAiCompatibleEndpoint(endpoint);
+      return validateOpenAiCompatibleEndpoint(
+        endpoint,
+        endpointStyle: activeServerProvider?.endpointStyle,
+      );
     } on FormatException {
       return null;
     }
@@ -311,6 +547,9 @@ class AiSettingsController extends ChangeNotifier {
     _enabled = _preferences.getBool(enabledPreferenceKey) ?? false;
     _provider = AiProviderMode.fromStorage(
       _preferences.getString(providerPreferenceKey),
+    );
+    _replyPrompt = _normalizeReplyPrompt(
+      _preferences.getString(replyPromptPreferenceKey),
     );
     _serverProviders = _readStoredProviders();
     _modelProfiles = _readStoredModels();
@@ -351,6 +590,9 @@ class AiSettingsController extends ChangeNotifier {
           id: 'legacy',
           name: uri.host,
           endpoint: normalizedEndpoint,
+          endpointStyle:
+              AiEndpointStyle.inferFromEndpoint(normalizedEndpoint) ??
+              AiEndpointStyle.openAiChatCompletions,
         );
         _serverProviders = [provider];
         _activeServerProviderId = provider.id;
@@ -373,6 +615,33 @@ class AiSettingsController extends ChangeNotifier {
     }
     _removeOrphanedModels();
     _ensureActiveModelMatchesProvider();
+    final legacyCandidateId = _legacyFeatureModelCandidateId();
+    final storedTranslationCandidate = _preferences.getString(
+      translationModelCandidatePreferenceKey,
+    );
+    final storedSummaryCandidate = _preferences.getString(
+      summaryModelCandidatePreferenceKey,
+    );
+    final storedReplyCandidate = _preferences.getString(
+      replyModelCandidatePreferenceKey,
+    );
+    _translationModelCandidateId =
+        modelCandidateById(storedTranslationCandidate)?.id ?? legacyCandidateId;
+    _summaryModelCandidateId =
+        modelCandidateById(storedSummaryCandidate)?.id ?? legacyCandidateId;
+    _replyModelCandidateId =
+        modelCandidateByIdForFeature(
+          AiFeature.reply,
+          storedReplyCandidate,
+        )?.id ??
+        telegramCocoonModelCandidateId;
+    final migratedFeatureSelections =
+        storedTranslationCandidate == null ||
+        storedSummaryCandidate == null ||
+        storedReplyCandidate == null ||
+        storedTranslationCandidate != _translationModelCandidateId ||
+        storedSummaryCandidate != _summaryModelCandidateId ||
+        storedReplyCandidate != _replyModelCandidateId;
 
     final keyResults = await Future.wait(
       _serverProviders.map((provider) async {
@@ -400,7 +669,9 @@ class AiSettingsController extends ChangeNotifier {
 
     final capabilities = await _pccApi.capabilities();
     _pccCapabilities = capabilities;
-    if (migratedLegacyConfiguration) await _persistConfiguration();
+    if (migratedLegacyConfiguration || migratedFeatureSelections) {
+      await _persistConfiguration();
+    }
     _initialized = true;
     notifyListeners();
   }
@@ -425,15 +696,57 @@ class AiSettingsController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setFeatureModelCandidate(
+    AiFeature feature,
+    String candidateId,
+  ) async {
+    if (modelCandidateByIdForFeature(feature, candidateId) == null) return;
+    final current = modelCandidateIdForFeature(feature);
+    if (current == candidateId) return;
+    switch (feature) {
+      case AiFeature.translation:
+        _translationModelCandidateId = candidateId;
+      case AiFeature.summary:
+        _summaryModelCandidateId = candidateId;
+      case AiFeature.reply:
+        _replyModelCandidateId = candidateId;
+    }
+    await _persistFeatureModelSelections();
+    notifyListeners();
+  }
+
+  Future<void> setAiReplyPrompt(String value) async {
+    final normalized = _normalizeReplyPrompt(value);
+    if (_replyPrompt == normalized) return;
+    _replyPrompt = normalized;
+    if (normalized == defaultAiReplyPrompt.trim()) {
+      await _preferences.remove(replyPromptPreferenceKey);
+    } else {
+      await _preferences.setString(replyPromptPreferenceKey, normalized);
+    }
+    notifyListeners();
+  }
+
+  Future<void> resetAiReplyPrompt() => setAiReplyPrompt(defaultAiReplyPrompt);
+
   Future<List<OpenAiCompatibleModelInfo>> discoverModels({
     required String endpoint,
     required String apiKey,
     String? preferredModel,
+    AiEndpointStyle? endpointStyle,
   }) async {
-    final uri = validateOpenAiCompatibleEndpoint(endpoint);
+    final resolvedStyle =
+        endpointStyle ??
+        AiEndpointStyle.inferFromEndpoint(endpoint) ??
+        AiEndpointStyle.openAiChatCompletions;
+    final uri = validateOpenAiCompatibleEndpoint(
+      endpoint,
+      endpointStyle: resolvedStyle,
+    );
     final models = await _modelsApi.listModels(
       chatCompletionsUri: uri,
       apiKey: apiKey,
+      endpointStyle: resolvedStyle,
     );
     if (models.isEmpty) return models;
     final normalizedPreferred = preferredModel?.trim() ?? '';
@@ -448,6 +761,7 @@ class AiSettingsController extends ChangeNotifier {
         chatCompletionsUri: uri,
         modelId: models[targetIndex].id,
         apiKey: apiKey,
+        endpointStyle: resolvedStyle,
       );
       if (detail?.contextWindowTokens == null) return models;
       final enriched = models.toList();
@@ -467,11 +781,40 @@ class AiSettingsController extends ChangeNotifier {
     required String endpoint,
     required String apiKey,
     required String model,
-  }) => _modelsApi.retrieveModel(
-    chatCompletionsUri: validateOpenAiCompatibleEndpoint(endpoint),
-    modelId: model,
-    apiKey: apiKey,
-  );
+    AiEndpointStyle? endpointStyle,
+  }) {
+    final resolvedStyle =
+        endpointStyle ??
+        AiEndpointStyle.inferFromEndpoint(endpoint) ??
+        AiEndpointStyle.openAiChatCompletions;
+    return _modelsApi.retrieveModel(
+      chatCompletionsUri: validateOpenAiCompatibleEndpoint(
+        endpoint,
+        endpointStyle: resolvedStyle,
+      ),
+      modelId: model,
+      apiKey: apiKey,
+      endpointStyle: resolvedStyle,
+    );
+  }
+
+  Future<String> testServerModel({
+    required String providerId,
+    required String model,
+    required String prompt,
+  }) {
+    final provider = _providerById(providerId);
+    if (provider == null) {
+      throw const FormatException('The selected AI provider no longer exists.');
+    }
+    return _modelsApi.testModel(
+      chatCompletionsUri: provider.chatCompletionsUri,
+      model: model,
+      prompt: prompt,
+      apiKey: _profileApiKeys[providerId],
+      endpointStyle: provider.endpointStyle,
+    );
+  }
 
   Future<List<OpenAiCompatibleModelInfo>> refreshModelsForProvider(
     String providerId,
@@ -491,6 +834,7 @@ class AiSettingsController extends ChangeNotifier {
       endpoint: provider.endpoint,
       apiKey: _profileApiKeys[providerId] ?? '',
       preferredModel: selectedModel?.model,
+      endpointStyle: provider.endpointStyle,
     );
     final selectedResult = models.where(
       (item) => item.id == selectedModel?.model,
@@ -524,18 +868,28 @@ class AiSettingsController extends ChangeNotifier {
     required String name,
     required String endpoint,
     required String apiKey,
+    AiEndpointStyle? endpointStyle,
     List<OpenAiCompatibleModelInfo>? availableModels,
   }) async {
-    final uri = validateOpenAiCompatibleEndpoint(endpoint);
     final normalizedId = id?.trim();
     final providerId = normalizedId != null && normalizedId.isNotEmpty
         ? normalizedId
         : _newId('provider');
     final existing = _providerById(providerId);
+    final resolvedStyle =
+        endpointStyle ??
+        AiEndpointStyle.inferFromEndpoint(endpoint) ??
+        existing?.endpointStyle ??
+        AiEndpointStyle.openAiChatCompletions;
+    final uri = validateOpenAiCompatibleEndpoint(
+      endpoint,
+      endpointStyle: resolvedStyle,
+    );
     final provider = AiServerProvider(
       id: providerId,
       name: name.trim().isEmpty ? uri.host : name.trim(),
       endpoint: uri.toString(),
+      endpointStyle: resolvedStyle,
       availableModels: List.unmodifiable(
         availableModels ?? existing?.availableModels ?? const [],
       ),
@@ -633,6 +987,7 @@ class AiSettingsController extends ChangeNotifier {
       _activeServerProviderId = _serverProviders.firstOrNull?.id;
     }
     _ensureActiveModelMatchesProvider();
+    _repairFeatureModelSelections();
     await _persistConfiguration();
     notifyListeners();
   }
@@ -646,6 +1001,7 @@ class AiSettingsController extends ChangeNotifier {
       _activeModelProfileId = null;
       _ensureActiveModelMatchesProvider();
     }
+    _repairFeatureModelSelections();
     await _persistConfiguration();
     notifyListeners();
   }
@@ -664,6 +1020,7 @@ class AiSettingsController extends ChangeNotifier {
     required String endpoint,
     required String model,
     required String apiKey,
+    AiEndpointStyle? endpointStyle,
     required int contextWindowTokens,
     bool contextWindowDetected = false,
     List<OpenAiCompatibleModelInfo>? availableModels,
@@ -673,6 +1030,7 @@ class AiSettingsController extends ChangeNotifier {
       name: name,
       endpoint: endpoint,
       apiKey: apiKey,
+      endpointStyle: endpointStyle,
       availableModels: availableModels,
     );
     await saveModelProfile(
@@ -687,19 +1045,29 @@ class AiSettingsController extends ChangeNotifier {
   // Compatibility helpers for callers that still edit the active server one
   // field at a time. New UI should commit an entire provider atomically.
   Future<void> setEndpoint(String value) async {
-    final endpoint = validateOpenAiCompatibleEndpoint(value).toString();
     final active = activeServerProvider;
+    final endpointStyle =
+        AiEndpointStyle.inferFromEndpoint(value) ??
+        active?.endpointStyle ??
+        AiEndpointStyle.openAiChatCompletions;
+    final endpoint = validateOpenAiCompatibleEndpoint(
+      value,
+      endpointStyle: endpointStyle,
+    ).toString();
     if (active == null) {
       final uri = Uri.parse(endpoint);
       final provider = AiServerProvider(
         id: _newId('provider'),
         name: uri.host,
         endpoint: endpoint,
+        endpointStyle: endpointStyle,
       );
       await _replaceProvider(provider, makeActive: true);
       return;
     }
-    await _replaceProvider(active.copyWith(endpoint: endpoint));
+    await _replaceProvider(
+      active.copyWith(endpoint: endpoint, endpointStyle: endpointStyle),
+    );
   }
 
   Future<void> setModel(String value) async {
@@ -730,16 +1098,22 @@ class AiSettingsController extends ChangeNotifier {
     notifyListeners();
   }
 
-  static bool isValidOpenAiCompatibleEndpoint(String value) {
+  static bool isValidOpenAiCompatibleEndpoint(
+    String value, {
+    AiEndpointStyle? endpointStyle,
+  }) {
     try {
-      validateOpenAiCompatibleEndpoint(value);
+      validateOpenAiCompatibleEndpoint(value, endpointStyle: endpointStyle);
       return true;
     } on FormatException {
       return false;
     }
   }
 
-  static Uri validateOpenAiCompatibleEndpoint(String value) {
+  static Uri validateOpenAiCompatibleEndpoint(
+    String value, {
+    AiEndpointStyle? endpointStyle,
+  }) {
     final trimmed = value.trim();
     if (trimmed.isEmpty) {
       throw const FormatException('The server endpoint is required.');
@@ -764,9 +1138,14 @@ class AiSettingsController extends ChangeNotifier {
         'The server endpoint must not include a query or fragment.',
       );
     }
-    if (!uri.path.endsWith(openAiChatCompletionsPath)) {
-      throw const FormatException(
-        'The server endpoint path must end in /v1/chat/completions.',
+    final resolvedStyle =
+        endpointStyle ??
+        AiEndpointStyle.inferFromEndpoint(trimmed) ??
+        AiEndpointStyle.openAiChatCompletions;
+    if (!uri.path.endsWith(resolvedStyle.endpointSuffix)) {
+      throw FormatException(
+        'The server endpoint path must end in '
+        '${resolvedStyle.endpointSuffix}.',
       );
     }
 
@@ -957,6 +1336,22 @@ class AiSettingsController extends ChangeNotifier {
         activeModelId,
       );
     }
+    await _persistFeatureModelSelections();
+  }
+
+  Future<void> _persistFeatureModelSelections() async {
+    await _preferences.setString(
+      translationModelCandidatePreferenceKey,
+      _translationModelCandidateId,
+    );
+    await _preferences.setString(
+      summaryModelCandidatePreferenceKey,
+      _summaryModelCandidateId,
+    );
+    await _preferences.setString(
+      replyModelCandidatePreferenceKey,
+      _replyModelCandidateId,
+    );
   }
 
   void _removeOrphanedModels() {
@@ -980,6 +1375,30 @@ class AiSettingsController extends ChangeNotifier {
         ?.id;
   }
 
+  void _repairFeatureModelSelections() {
+    if (modelCandidateById(_translationModelCandidateId) == null) {
+      _translationModelCandidateId = applePccModelCandidateId;
+    }
+    if (modelCandidateById(_summaryModelCandidateId) == null) {
+      _summaryModelCandidateId = applePccModelCandidateId;
+    }
+    if (modelCandidateByIdForFeature(AiFeature.reply, _replyModelCandidateId) ==
+        null) {
+      _replyModelCandidateId = telegramCocoonModelCandidateId;
+    }
+  }
+
+  String _legacyFeatureModelCandidateId() {
+    return switch (_provider) {
+      AiProviderMode.applePcc => applePccModelCandidateId,
+      AiProviderMode.appleOnDevice => appleOnDeviceModelCandidateId,
+      AiProviderMode.openAiCompatible =>
+        activeModelProfile == null
+            ? applePccModelCandidateId
+            : serverModelCandidateId(activeModelProfile!.id),
+    };
+  }
+
   AiServerProvider? _providerById(String? id) {
     if (id == null) return null;
     for (final provider in _serverProviders) {
@@ -996,18 +1415,35 @@ class AiSettingsController extends ChangeNotifier {
     return null;
   }
 
+  static String _normalizeReplyPrompt(String? value) {
+    final trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) return defaultAiReplyPrompt.trim();
+    final runes = trimmed.runes.toList(growable: false);
+    if (runes.length <= replyPromptMaximumCharacters) return trimmed;
+    return String.fromCharCodes(runes.take(replyPromptMaximumCharacters));
+  }
+
   static String _profileKey(String profileId) =>
       '$_profileApiKeyPrefix$profileId$_profileApiKeySuffix';
 
   static String _newId(String prefix) =>
       '${prefix}_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}';
 
+  static String serverModelCandidateId(String modelProfileId) =>
+      'server:$modelProfileId';
+
   static String _legacyModelId(String providerId) => '${providerId}_model';
 
   static String _normalizeStoredEndpoint(String value) {
     if (value.isEmpty) return '';
     try {
-      return validateOpenAiCompatibleEndpoint(value).toString();
+      final style =
+          AiEndpointStyle.inferFromEndpoint(value) ??
+          AiEndpointStyle.openAiChatCompletions;
+      return validateOpenAiCompatibleEndpoint(
+        value,
+        endpointStyle: style,
+      ).toString();
     } on FormatException {
       return '';
     }

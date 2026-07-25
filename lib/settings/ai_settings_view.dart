@@ -8,6 +8,7 @@ import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../l10n/app_localizations.dart';
 import '../theme/app_theme.dart';
+import 'ai_endpoint_style.dart';
 import 'ai_settings_controller.dart';
 import 'openai_compatible_models_api.dart';
 
@@ -18,252 +19,17 @@ class AiSettingsView extends StatefulWidget {
   State<AiSettingsView> createState() => _AiSettingsViewState();
 }
 
-class _AiModelEditorSheet extends StatefulWidget {
-  const _AiModelEditorSheet({
-    required this.settings,
-    required this.provider,
-    required this.discoveredModel,
-    required this.manual,
-  });
-
-  final AiSettingsController settings;
-  final AiServerProvider provider;
-  final OpenAiCompatibleModelInfo? discoveredModel;
-  final bool manual;
-
-  @override
-  State<_AiModelEditorSheet> createState() => _AiModelEditorSheetState();
-}
-
-class _AiModelEditorSheetState extends State<_AiModelEditorSheet> {
-  late final TextEditingController _model;
-  late final TextEditingController _contextWindow;
-  bool _saving = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _model = TextEditingController(text: widget.discoveredModel?.id ?? '');
-    _contextWindow = TextEditingController(
-      text:
-          '${widget.discoveredModel?.contextWindowTokens ?? AiModelProfile.defaultContextWindowTokens}',
-    );
-  }
-
-  @override
-  void dispose() {
-    _model.dispose();
-    _contextWindow.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return SafeArea(
-      child: Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.viewInsetsOf(context).bottom,
-        ),
-        child: Container(
-          margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          decoration: BoxDecoration(
-            color: c.groupedBackground,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                SettingsRow(
-                  title: AppStringKeys.aiProviders.l10n(context),
-                  value: widget.provider.name,
-                  leading: const SettingsIconTile(
-                    icon: HeroAppIcons.server,
-                    backgroundColor: Color(0xFF3478F6),
-                  ),
-                  showChevron: false,
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                _field(
-                  controller: _model,
-                  icon: HeroAppIcons.cube,
-                  label: AppStringKeys.aiServerModel.l10n(context),
-                  hint: AppStringKeys.aiServerModelHint.l10n(context),
-                  readOnly: !widget.manual,
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                _field(
-                  controller: _contextWindow,
-                  icon: HeroAppIcons.tokenStack,
-                  label: AppStringKeys.aiContextWindow.l10n(context),
-                  hint: '${AiModelProfile.defaultContextWindowTokens}',
-                  keyboardType: TextInputType.number,
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(4, AppSpacing.sm, 4, 0),
-                  child: Text(
-                    (widget.discoveredModel?.contextWindowTokens != null
-                            ? AppStringKeys.aiContextDetected
-                            : AppStringKeys.aiContextManual)
-                        .l10n(context),
-                    style: AppTextStyle.footnote(c.textSecondary),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                _saveButton(),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _field({
-    required TextEditingController controller,
-    required AppIconData icon,
-    required String label,
-    required String hint,
-    TextInputType? keyboardType,
-    bool readOnly = false,
-  }) {
-    final c = context.colors;
-    return Semantics(
-      textField: true,
-      label: label,
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 60),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: c.card,
-          borderRadius: BorderRadius.circular(AppRadius.card),
-          border: Border.all(color: c.divider, width: 0.5),
-        ),
-        child: Row(
-          children: [
-            AppIcon(icon, size: 19, color: c.textSecondary),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label, style: AppTextStyle.caption(c.textTertiary)),
-                  const SizedBox(height: 3),
-                  TextField(
-                    controller: controller,
-                    readOnly: readOnly,
-                    autocorrect: false,
-                    enableSuggestions: false,
-                    keyboardType: keyboardType,
-                    style: AppTextStyle.body(c.textPrimary),
-                    cursorColor: AppTheme.brand,
-                    decoration: InputDecoration(
-                      border: InputBorder.none,
-                      isCollapsed: true,
-                      hintText: hint,
-                      hintStyle: AppTextStyle.body(c.textTertiary),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _saveButton() => Semantics(
-    button: true,
-    enabled: !_saving,
-    child: GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: _saving ? null : _save,
-      child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 140),
-        opacity: _saving ? 0.55 : 1,
-        child: Container(
-          height: 48,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: AppTheme.brand,
-            borderRadius: BorderRadius.circular(AppRadius.card),
-          ),
-          child: _saving
-              ? const AppActivityIndicator(size: 20, color: Color(0xFFFFFFFF))
-              : Text(
-                  AppStringKeys.aiSaveModel.l10n(context),
-                  style: const TextStyle(
-                    color: Color(0xFFFFFFFF),
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-        ),
-      ),
-    ),
-  );
-
-  Future<void> _save() async {
-    final contextWindow = int.tryParse(_contextWindow.text.trim());
-    if (contextWindow == null) {
-      showToast(context, AppStringKeys.aiInvalidModel.l10n(context));
-      return;
-    }
-    setState(() => _saving = true);
-    try {
-      await widget.settings.saveModelProfile(
-        providerId: widget.provider.id,
-        model: _model.text,
-        contextWindowTokens: contextWindow,
-        contextWindowDetected:
-            widget.discoveredModel?.contextWindowTokens != null,
-      );
-      if (!mounted) return;
-      showToast(context, AppStringKeys.aiSaved.l10n(context));
-      Navigator.of(context).pop();
-    } on FormatException {
-      if (!mounted) return;
-      showToast(context, AppStringKeys.aiInvalidModel.l10n(context));
-      setState(() => _saving = false);
-    }
-  }
-}
-
 class _AiSettingsViewState extends State<AiSettingsView> {
-  final _providerName = TextEditingController();
-  final _endpoint = TextEditingController();
-  final _apiKey = TextEditingController();
-  String? _editingProfileId;
-  bool _didLoadValues = false;
-  bool _didRefreshPccCapabilities = false;
-  bool _saving = false;
-  bool _obscureApiKey = true;
+  bool _refreshedCapabilities = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final settings = context.watch<AiSettingsController>();
-    if (settings.initialized && !_didRefreshPccCapabilities) {
-      _didRefreshPccCapabilities = true;
+    if (settings.initialized && !_refreshedCapabilities) {
+      _refreshedCapabilities = true;
       unawaited(settings.refreshPccCapabilities());
     }
-    if (!_didLoadValues && settings.initialized) {
-      _loadProfile(settings.activeServerProfile, settings.apiKey);
-      _didLoadValues = true;
-    }
-  }
-
-  @override
-  void dispose() {
-    _providerName.dispose();
-    _endpoint.dispose();
-    _apiKey.dispose();
-    super.dispose();
   }
 
   @override
@@ -322,26 +88,86 @@ class _AiSettingsViewState extends State<AiSettingsView> {
                       const SizedBox(height: AppSpacing.section),
                       _sectionTitle(
                         context,
-                        AppStringKeys.aiProcessingMode.l10n(context),
+                        AppStringKeys.aiModels.l10n(context),
                       ),
                       SettingsCard(
                         children: [
                           SettingsRow(
-                            title: AppStringKeys.aiProcessingMode.l10n(context),
-                            value: _providerLabel(context, settings.provider),
-                            leading: SettingsIconTile(
-                              icon: _providerIcon(settings.provider),
-                              backgroundColor: const Color(0xFF3478F6),
+                            title: AppStringKeys.aiProviders.l10n(context),
+                            value: '${settings.serverProviders.length}',
+                            leading: const SettingsIconTile(
+                              icon: HeroAppIcons.server,
+                              backgroundColor: Color(0xFF3478F6),
                             ),
-                            onTap: () => _showProviderPicker(settings),
+                            onTap: () =>
+                                _push(context, const AiProviderListView()),
+                          ),
+                          const InsetDivider(leadingInset: 56),
+                          SettingsRow(
+                            title: AppStringKeys.aiModels.l10n(context),
+                            value: '${settings.modelCandidates.length}',
+                            leading: const SettingsIconTile(
+                              icon: HeroAppIcons.cube,
+                              backgroundColor: Color(0xFF7467F0),
+                            ),
+                            onTap: () =>
+                                _push(context, const AiModelListView()),
                           ),
                         ],
                       ),
                       const SizedBox(height: AppSpacing.section),
-                      if (settings.provider == AiProviderMode.openAiCompatible)
-                        _serverConfiguration(context, settings),
-                      if (settings.provider != AiProviderMode.openAiCompatible)
-                        _appleConfiguration(context, settings),
+                      _sectionTitle(
+                        context,
+                        AppStringKeys.aiModelConfiguration.l10n(context),
+                      ),
+                      SettingsCard(
+                        children: [
+                          _featureModelRow(
+                            context,
+                            settings: settings,
+                            feature: AiFeature.translation,
+                            title: AppStringKeys.aiTranslateUsing.l10n(context),
+                            icon: HeroAppIcons.language,
+                            color: const Color(0xFF16A085),
+                          ),
+                          const InsetDivider(leadingInset: 56),
+                          _featureModelRow(
+                            context,
+                            settings: settings,
+                            feature: AiFeature.summary,
+                            title: AppStringKeys.aiSummarizeUsing.l10n(context),
+                            icon: HeroAppIcons.listCheck,
+                            color: const Color(0xFF7467F0),
+                          ),
+                          const InsetDivider(leadingInset: 56),
+                          _featureModelRow(
+                            context,
+                            settings: settings,
+                            feature: AiFeature.reply,
+                            title: AppStringKeys.aiReplyUsing.l10n(context),
+                            icon: HeroAppIcons.reply,
+                            color: const Color(0xFF229ED9),
+                          ),
+                          const InsetDivider(leadingInset: 56),
+                          SettingsRow(
+                            key: const ValueKey('aiReplyPromptRow'),
+                            title: AppStringKeys.aiReplyGuidance.l10n(context),
+                            value: settings.hasCustomAiReplyPrompt
+                                ? settings.aiReplyPrompt.replaceAll('\n', ' ')
+                                : AppStringKeys.editProfileDefault.l10n(
+                                    context,
+                                  ),
+                            leading: const SettingsIconTile(
+                              icon: HeroAppIcons.penToSquare,
+                              backgroundColor: Color(0xFF20A45B),
+                            ),
+                            onTap: () => _push(
+                              context,
+                              AiReplyPromptEditorView(settings: settings),
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
           ),
@@ -350,905 +176,1473 @@ class _AiSettingsViewState extends State<AiSettingsView> {
     );
   }
 
-  Widget _appleConfiguration(
+  Widget _featureModelRow(
+    BuildContext context, {
+    required AiSettingsController settings,
+    required AiFeature feature,
+    required String title,
+    required AppIconData icon,
+    required Color color,
+  }) {
+    final candidate = settings.modelCandidateForFeature(feature);
+    return SettingsRow(
+      title: title,
+      value: _candidateLabel(context, candidate),
+      leading: SettingsIconTile(icon: icon, backgroundColor: color),
+      onTap: () => showAiFeatureModelPicker(
+        context,
+        settings: settings,
+        feature: feature,
+      ),
+    );
+  }
+}
+
+class AiReplyPromptEditorView extends StatefulWidget {
+  const AiReplyPromptEditorView({super.key, required this.settings});
+
+  final AiSettingsController settings;
+
+  @override
+  State<AiReplyPromptEditorView> createState() =>
+      _AiReplyPromptEditorViewState();
+}
+
+class _AiReplyPromptEditorViewState extends State<AiReplyPromptEditorView> {
+  late final TextEditingController _prompt = TextEditingController(
+    text: widget.settings.aiReplyPrompt,
+  );
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _prompt.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Scaffold(
+      backgroundColor: c.groupedBackground,
+      body: Column(
+        children: [
+          NavHeader(
+            title: AppStringKeys.aiReplyTitle.l10n(context),
+            onBack: () => Navigator.of(context).pop(),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.xl,
+                AppSpacing.lg,
+                AppSpacing.section,
+              ),
+              children: [
+                Semantics(
+                  textField: true,
+                  label: AppStringKeys.aiReplyGuidance.l10n(context),
+                  child: Container(
+                    constraints: const BoxConstraints(minHeight: 260),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: c.card,
+                      borderRadius: BorderRadius.circular(AppRadius.card),
+                      border: Border.all(color: c.divider, width: 0.5),
+                    ),
+                    child: TextField(
+                      key: const ValueKey('aiReplyPromptField'),
+                      controller: _prompt,
+                      minLines: 11,
+                      maxLines: null,
+                      maxLength:
+                          AiSettingsController.replyPromptMaximumCharacters,
+                      keyboardType: TextInputType.multiline,
+                      textCapitalization: TextCapitalization.sentences,
+                      style: AppTextStyle.body(
+                        c.textPrimary,
+                      ).copyWith(height: 1.4),
+                      cursorColor: AppTheme.brand,
+                      decoration: InputDecoration(
+                        border: InputBorder.none,
+                        isCollapsed: true,
+                        hintText: AppStringKeys.aiReplyGuidanceHint.l10n(
+                          context,
+                        ),
+                        hintStyle: AppTextStyle.body(
+                          c.textTertiary,
+                        ).copyWith(height: 1.4),
+                        counterText: '',
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                _actionButton(
+                  context,
+                  label: AppStringKeys.accentColorPickerSave.l10n(context),
+                  saving: _saving,
+                  onTap: _save,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                _actionButton(
+                  context,
+                  label: AppStringKeys.editProfileDefault.l10n(context),
+                  saving: _saving,
+                  onTap: () => setState(
+                    () => _prompt.text = defaultAiReplyPrompt.trim(),
+                  ),
+                  backgroundColor: c.card,
+                  foregroundColor: AppTheme.brand,
+                  borderColor: AppTheme.brand,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    await widget.settings.setAiReplyPrompt(_prompt.text);
+    if (!mounted) return;
+    showToast(context, AppStringKeys.aiSaved.l10n(context));
+    Navigator.of(context).pop();
+  }
+}
+
+class AiProviderListView extends StatelessWidget {
+  const AiProviderListView({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final settings = context.watch<AiSettingsController>();
+    final providers = settings.serverProviders;
+    return Scaffold(
+      backgroundColor: c.groupedBackground,
+      body: Column(
+        children: [
+          NavHeader(
+            title: AppStringKeys.aiProviders.l10n(context),
+            onBack: () => Navigator.of(context).pop(),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.xl,
+                AppSpacing.lg,
+                AppSpacing.section,
+              ),
+              children: [
+                SettingsCard(
+                  children: [
+                    for (var index = 0; index < providers.length; index++) ...[
+                      if (index > 0) const InsetDivider(leadingInset: 56),
+                      SettingsRow(
+                        title: providers[index].name,
+                        value: providers[index].endpoint,
+                        leading: const SettingsIconTile(
+                          icon: HeroAppIcons.server,
+                          backgroundColor: Color(0xFF3478F6),
+                        ),
+                        onTap: () => _push(
+                          context,
+                          AiProviderEditorView(
+                            provider: providers[index],
+                            initialApiKey: settings.apiKeyForServerProvider(
+                              providers[index].id,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (providers.isNotEmpty)
+                      const InsetDivider(leadingInset: 56),
+                    SettingsRow(
+                      title: AppStringKeys.aiAddProvider.l10n(context),
+                      leading: const SettingsIconTile(
+                        icon: HeroAppIcons.circlePlus,
+                        backgroundColor: Color(0xFF20A45B),
+                      ),
+                      onTap: () => _push(context, const AiProviderEditorView()),
+                    ),
+                  ],
+                ),
+                if (providers.isEmpty)
+                  _note(context, AppStringKeys.aiNoProvider.l10n(context)),
+                _note(context, AppStringKeys.aiServerPrivacy.l10n(context)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class AiProviderEditorView extends StatefulWidget {
+  const AiProviderEditorView({
+    super.key,
+    this.provider,
+    this.initialApiKey = '',
+  });
+
+  final AiServerProvider? provider;
+  final String initialApiKey;
+
+  @override
+  State<AiProviderEditorView> createState() => _AiProviderEditorViewState();
+}
+
+class _AiProviderEditorViewState extends State<AiProviderEditorView> {
+  late final TextEditingController _name;
+  late final TextEditingController _endpoint;
+  late final TextEditingController _apiKey;
+  late AiEndpointStyle _endpointStyle;
+  bool _obscureApiKey = true;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _name = TextEditingController(text: widget.provider?.name ?? '');
+    _endpoint = TextEditingController(text: widget.provider?.endpoint ?? '');
+    _apiKey = TextEditingController(text: widget.initialApiKey);
+    _endpointStyle =
+        widget.provider?.endpointStyle ?? AiEndpointStyle.openAiChatCompletions;
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _endpoint.dispose();
+    _apiKey.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Scaffold(
+      backgroundColor: c.groupedBackground,
+      body: Column(
+        children: [
+          NavHeader(
+            title:
+                (widget.provider == null
+                        ? AppStringKeys.aiAddProvider
+                        : AppStringKeys.aiEditProvider)
+                    .l10n(context),
+            onBack: () => Navigator.of(context).pop(),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.xl,
+                AppSpacing.lg,
+                AppSpacing.section,
+              ),
+              children: [
+                _inputField(
+                  context,
+                  controller: _name,
+                  icon: HeroAppIcons.server,
+                  label: AppStringKeys.aiProviderName.l10n(context),
+                  hint: AppStringKeys.aiProviderNameHint.l10n(context),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                SettingsCard(
+                  children: [
+                    SettingsRow(
+                      key: const ValueKey('aiEndpointStyleRow'),
+                      title: AppStringKeys.aiEndpointStyle.l10n(context),
+                      value: _endpointStyleLabel(context, _endpointStyle),
+                      leading: const SettingsIconTile(
+                        icon: HeroAppIcons.code,
+                        backgroundColor: Color(0xFF7467F0),
+                      ),
+                      onTap: _pickEndpointStyle,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                _inputField(
+                  context,
+                  controller: _endpoint,
+                  icon: HeroAppIcons.link,
+                  label: AppStringKeys.aiServerEndpoint.l10n(context),
+                  hint: _endpointStyle.exampleEndpoint,
+                  keyboardType: TextInputType.url,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                _inputField(
+                  context,
+                  controller: _apiKey,
+                  icon: HeroAppIcons.key,
+                  label: AppStringKeys.aiServerApiKey.l10n(context),
+                  hint: AppStringKeys.aiServerApiKeyOptional.l10n(context),
+                  obscureText: _obscureApiKey,
+                  trailing: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () =>
+                        setState(() => _obscureApiKey = !_obscureApiKey),
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: AppIcon(
+                        _obscureApiKey
+                            ? HeroAppIcons.eye
+                            : HeroAppIcons.eyeSlash,
+                        size: 19,
+                        color: c.textSecondary,
+                      ),
+                    ),
+                  ),
+                ),
+                _note(context, AppStringKeys.aiServerPrivacy.l10n(context)),
+                const SizedBox(height: AppSpacing.lg),
+                _actionButton(
+                  context,
+                  label: AppStringKeys.aiSaveProvider.l10n(context),
+                  saving: _saving,
+                  onTap: _save,
+                ),
+                if (widget.provider != null) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  _actionButton(
+                    context,
+                    label: AppStringKeys.aiDeleteProvider.l10n(context),
+                    saving: _saving,
+                    onTap: _delete,
+                    backgroundColor: const Color(0xFFDC3C3C),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      await context.read<AiSettingsController>().saveServerProvider(
+        id: widget.provider?.id,
+        name: _name.text,
+        endpoint: _endpoint.text,
+        apiKey: _apiKey.text,
+        endpointStyle: _endpointStyle,
+      );
+      if (!mounted) return;
+      showToast(context, AppStringKeys.aiSaved.l10n(context));
+      Navigator.of(context).pop();
+    } on FormatException {
+      if (!mounted) return;
+      showToast(context, AppStringKeys.aiInvalidEndpoint.l10n(context));
+      setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _pickEndpointStyle() async {
+    final selected = await showModalBottomSheet<AiEndpointStyle>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => _PickerCard(
+        children: [
+          for (final style in AiEndpointStyle.values)
+            _pickerRow(
+              sheetContext,
+              icon: HeroAppIcons.code,
+              color: const Color(0xFF7467F0),
+              title: _endpointStyleLabel(sheetContext, style),
+              value: style.endpointSuffix,
+              selected: style == _endpointStyle,
+              onTap: () => Navigator.of(sheetContext).pop(style),
+            ),
+        ],
+      ),
+    );
+    if (selected == null || selected == _endpointStyle || !mounted) return;
+    final previous = _endpointStyle;
+    setState(() {
+      _endpointStyle = selected;
+      final current = _endpoint.text.trim();
+      if (current.isEmpty) return;
+      final uri = Uri.tryParse(current);
+      if (uri == null || !uri.path.endsWith(previous.endpointSuffix)) return;
+      final prefix = uri.path.substring(
+        0,
+        uri.path.length - previous.endpointSuffix.length,
+      );
+      _endpoint.text = uri
+          .replace(path: '$prefix${selected.endpointSuffix}')
+          .toString();
+    });
+  }
+
+  Future<void> _delete() async {
+    final provider = widget.provider;
+    if (provider == null || _saving) return;
+    setState(() => _saving = true);
+    await context.read<AiSettingsController>().deleteServerProvider(
+      provider.id,
+    );
+    if (mounted) Navigator.of(context).pop();
+  }
+}
+
+class AiModelListView extends StatelessWidget {
+  const AiModelListView({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final settings = context.watch<AiSettingsController>();
+    final candidates = settings.modelCandidates;
+    return Scaffold(
+      backgroundColor: c.groupedBackground,
+      body: Column(
+        children: [
+          NavHeader(
+            title: AppStringKeys.aiModels.l10n(context),
+            onBack: () => Navigator.of(context).pop(),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.xl,
+                AppSpacing.lg,
+                AppSpacing.section,
+              ),
+              children: [
+                SettingsCard(
+                  children: [
+                    for (var index = 0; index < candidates.length; index++) ...[
+                      if (index > 0) const InsetDivider(leadingInset: 56),
+                      _candidateListRow(
+                        context,
+                        settings: settings,
+                        candidate: candidates[index],
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                _addModelCard(context, settings),
+                _note(
+                  context,
+                  AppStringKeys.aiModelCandidatesDescription.l10n(context),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _candidateListRow(
+    BuildContext context, {
+    required AiSettingsController settings,
+    required AiModelCandidate candidate,
+  }) {
+    final profile = candidate.profile;
+    return SettingsRow(
+      title: _candidateLabel(context, candidate),
+      value: _candidateDetail(context, settings, candidate),
+      leading: SettingsIconTile(
+        icon: _candidateIcon(candidate),
+        backgroundColor: _candidateColor(candidate),
+      ),
+      onTap: profile == null
+          ? null
+          : () => _push(context, AiModelEditorView(profile: profile)),
+      showChevron: profile != null,
+    );
+  }
+
+  Widget _addModelCard(BuildContext context, AiSettingsController settings) {
+    final c = context.colors;
+    final enabled = settings.serverProviders.isNotEmpty;
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      child: GestureDetector(
+        key: const ValueKey('aiAddModelCard'),
+        behavior: HitTestBehavior.opaque,
+        onTap: enabled ? () => _push(context, const AiModelEditorView()) : null,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 160),
+          opacity: enabled ? 1 : 0.58,
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.lg,
+              vertical: AppSpacing.md,
+            ),
+            decoration: BoxDecoration(
+              color: enabled ? AppTheme.brand.withValues(alpha: 0.08) : c.card,
+              borderRadius: BorderRadius.circular(AppRadius.card),
+              border: Border.all(
+                color: enabled
+                    ? AppTheme.brand.withValues(alpha: 0.24)
+                    : c.divider,
+                width: 0.8,
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: enabled ? const Color(0xFF20A45B) : c.textTertiary,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const AppIcon(
+                    HeroAppIcons.circlePlus,
+                    size: 21,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        AppStringKeys.aiAddModel.l10n(context),
+                        style: AppTextStyle.body(
+                          enabled ? c.textPrimary : c.textTertiary,
+                          weight: AppTextWeight.semibold,
+                        ),
+                      ),
+                      if (!enabled) ...[
+                        const SizedBox(height: AppSpacing.xxs),
+                        Text(
+                          AppStringKeys.aiAddProviderFirst.l10n(context),
+                          style: AppTextStyle.footnote(c.textTertiary),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                if (enabled)
+                  AppIcon(
+                    HeroAppIcons.chevronRight,
+                    size: AppIconSize.chevron,
+                    color: c.textTertiary,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class AiModelEditorView extends StatefulWidget {
+  const AiModelEditorView({super.key, this.profile});
+
+  final AiModelProfile? profile;
+
+  @override
+  State<AiModelEditorView> createState() => _AiModelEditorViewState();
+}
+
+class _AiModelEditorViewState extends State<AiModelEditorView> {
+  late final TextEditingController _model;
+  late final TextEditingController _contextWindow;
+  late final TextEditingController _testPrompt;
+  String? _providerId;
+  bool _contextDetected = false;
+  bool _saving = false;
+  bool _loadingModels = false;
+  bool _modelsLoadFailed = false;
+  bool _manualModelEntry = false;
+  bool _testingModel = false;
+  bool _testFailed = false;
+  String? _testResponse;
+  String? _autoDiscoveryProviderId;
+  int _discoveryGeneration = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    final profile = widget.profile;
+    _providerId = profile?.providerId;
+    _model = TextEditingController(text: profile?.model ?? '');
+    _contextWindow = TextEditingController(
+      text:
+          '${profile?.contextWindowTokens ?? AiModelProfile.defaultContextWindowTokens}',
+    );
+    _testPrompt = TextEditingController();
+    _contextDetected = profile?.contextWindowDetected ?? false;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_testPrompt.text.isEmpty) {
+      _testPrompt.text = AppStringKeys.aiTestPromptDefault.l10n(context);
+    }
+    final settings = context.read<AiSettingsController>();
+    _providerId ??= settings.serverProviders.firstOrNull?.id;
+    final providerId = _providerId;
+    if (providerId != null && _autoDiscoveryProviderId != providerId) {
+      _autoDiscoveryProviderId = providerId;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _providerId == providerId) {
+          unawaited(_loadModels(settings));
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _model.dispose();
+    _contextWindow.dispose();
+    _testPrompt.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final settings = context.watch<AiSettingsController>();
+    final provider = settings.serverProviders
+        .where((item) => item.id == _providerId)
+        .firstOrNull;
+    return Scaffold(
+      backgroundColor: c.groupedBackground,
+      body: Column(
+        children: [
+          NavHeader(
+            title:
+                (widget.profile == null
+                        ? AppStringKeys.aiAddModel
+                        : AppStringKeys.aiEditModel)
+                    .l10n(context),
+            onBack: () => Navigator.of(context).pop(),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.xl,
+                AppSpacing.lg,
+                AppSpacing.section,
+              ),
+              children: [
+                SettingsCard(
+                  children: [
+                    SettingsRow(
+                      title: AppStringKeys.aiProviders.l10n(context),
+                      value:
+                          provider?.name ??
+                          AppStringKeys.aiNoProvider.l10n(context),
+                      leading: const SettingsIconTile(
+                        icon: HeroAppIcons.server,
+                        backgroundColor: Color(0xFF3478F6),
+                      ),
+                      onTap: settings.serverProviders.isEmpty
+                          ? null
+                          : () => _pickProvider(settings),
+                      showChevron: settings.serverProviders.isNotEmpty,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                if (provider != null)
+                  _modelDiscoveryCard(context, settings, provider)
+                else
+                  _inputField(
+                    context,
+                    controller: _model,
+                    icon: HeroAppIcons.cube,
+                    label: AppStringKeys.aiServerModel.l10n(context),
+                    hint: AppStringKeys.aiServerModelHint.l10n(context),
+                  ),
+                const SizedBox(height: AppSpacing.sm),
+                _inputField(
+                  context,
+                  controller: _contextWindow,
+                  icon: HeroAppIcons.tokenStack,
+                  label: AppStringKeys.aiContextWindow.l10n(context),
+                  hint: '${AiModelProfile.defaultContextWindowTokens}',
+                  keyboardType: TextInputType.number,
+                ),
+                _note(
+                  context,
+                  (_contextDetected
+                          ? AppStringKeys.aiContextDetected
+                          : AppStringKeys.aiContextManual)
+                      .l10n(context),
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                _inputField(
+                  context,
+                  controller: _testPrompt,
+                  icon: HeroAppIcons.message,
+                  label: AppStringKeys.aiTestPrompt.l10n(context),
+                  hint: AppStringKeys.aiTestPromptHint.l10n(context),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                _actionButton(
+                  context,
+                  label: AppStringKeys.aiTestModel.l10n(context),
+                  saving: _testingModel,
+                  onTap: provider == null ? null : () => _testModel(settings),
+                  backgroundColor: c.card,
+                  foregroundColor: provider == null
+                      ? c.textTertiary
+                      : AppTheme.brand,
+                  borderColor: c.divider,
+                ),
+                if (_testResponse case final response?) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  _modelTestResponse(context, response, failed: _testFailed),
+                ],
+                const SizedBox(height: AppSpacing.lg),
+                _actionButton(
+                  context,
+                  label: AppStringKeys.aiSaveModel.l10n(context),
+                  saving: _saving,
+                  onTap: _save,
+                ),
+                if (widget.profile != null) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  _actionButton(
+                    context,
+                    label: AppStringKeys.aiDeleteModel.l10n(context),
+                    saving: _saving,
+                    onTap: _delete,
+                    backgroundColor: const Color(0xFFDC3C3C),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickProvider(AiSettingsController settings) async {
+    final selected = await showModalBottomSheet<AiServerProvider>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => _PickerCard(
+        children: [
+          for (final provider in settings.serverProviders)
+            _pickerRow(
+              sheetContext,
+              icon: HeroAppIcons.server,
+              color: const Color(0xFF3478F6),
+              title: provider.name,
+              value: provider.endpoint,
+              selected: provider.id == _providerId,
+              onTap: () => Navigator.of(sheetContext).pop(provider),
+            ),
+        ],
+      ),
+    );
+    if (selected == null || !mounted) return;
+    final providerChanged = selected.id != _providerId;
+    setState(() {
+      _providerId = selected.id;
+      _modelsLoadFailed = false;
+      _manualModelEntry = false;
+      if (providerChanged) {
+        _model.clear();
+        _contextWindow.text = '${AiModelProfile.defaultContextWindowTokens}';
+        _contextDetected = false;
+      }
+    });
+    _autoDiscoveryProviderId = selected.id;
+    unawaited(_loadModels(settings));
+  }
+
+  Widget _modelDiscoveryCard(
     BuildContext context,
     AiSettingsController settings,
+    AiServerProvider provider,
   ) {
-    final capabilities = settings.pccCapabilities;
-    final isPcc = settings.provider == AiProviderMode.applePcc;
-    final available = isPcc
-        ? capabilities?.available == true &&
-              capabilities?.quotaLimitReached != true
-        : capabilities?.onDeviceAvailable == true;
-    final contextSize = isPcc
-        ? capabilities?.contextSize
-        : capabilities?.onDeviceContextSize;
+    final models = provider.availableModels;
+    final hasDiscoveryRow =
+        models.isNotEmpty || _loadingModels || _modelsLoadFailed;
     return Column(
+      key: const ValueKey('aiModelDiscoveryCard'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SettingsCard(
           children: [
+            if (models.isNotEmpty)
+              SettingsRow(
+                key: const ValueKey('aiDiscoveredModelSelector'),
+                title: AppStringKeys.aiServerModel.l10n(context),
+                value: _model.text.trim().isEmpty
+                    ? AppStringKeys.aiServerModelHint.l10n(context)
+                    : _model.text.trim(),
+                leading: const SettingsIconTile(
+                  icon: HeroAppIcons.cube,
+                  backgroundColor: Color(0xFF7467F0),
+                ),
+                onTap: () => _pickAvailableModel(settings, provider),
+              ),
+            if (models.isNotEmpty && (_loadingModels || _modelsLoadFailed))
+              const InsetDivider(leadingInset: 56),
+            if (_loadingModels)
+              SettingsRow(
+                key: const ValueKey('aiModelDiscoveryLoading'),
+                title: AppStringKeys.aiModels.l10n(context),
+                value: provider.name,
+                leading: const SettingsIconTile(
+                  icon: HeroAppIcons.arrowsRotate,
+                  backgroundColor: Color(0xFF3478F6),
+                ),
+                trailing: const AppActivityIndicator(size: 17),
+                showChevron: false,
+              )
+            else if (_modelsLoadFailed)
+              _modelDiscoveryErrorRow(context, settings),
+            if (hasDiscoveryRow) const InsetDivider(leadingInset: 56),
             SettingsRow(
-              title: _providerLabel(context, settings.provider),
-              value:
-                  (available
-                          ? AppStringKeys.aiPccAvailable
-                          : AppStringKeys.aiPccUnavailable)
-                      .l10n(context),
-              leading: SettingsIconTile(
-                icon: available
-                    ? (isPcc ? HeroAppIcons.cloud : HeroAppIcons.cpuChip)
-                    : HeroAppIcons.triangleExclamation,
-                backgroundColor: available
-                    ? const Color(0xFF20A45B)
-                    : const Color(0xFFE39A20),
+              key: const ValueKey('aiEnterModelManually'),
+              title: AppStringKeys.aiEnterModelManually.l10n(context),
+              leading: const SettingsIconTile(
+                icon: HeroAppIcons.penToSquare,
+                backgroundColor: Color(0xFF8E7BFF),
+              ),
+              onTap: () =>
+                  setState(() => _manualModelEntry = !_manualModelEntry),
+              trailing: AppIcon(
+                _manualModelEntry
+                    ? HeroAppIcons.chevronUp
+                    : HeroAppIcons.chevronDown,
+                size: AppIconSize.chevron,
+                color: context.colors.textTertiary,
               ),
               showChevron: false,
             ),
           ],
         ),
-        _note(
-          context,
-          available
-              ? (isPcc
-                        ? AppStringKeys.aiPccPrivacy
-                        : AppStringKeys.aiOnDevicePrivacy)
-                    .l10n(context)
-              : (isPcc
-                        ? AppStringKeys.aiPccUnavailableDescription
-                        : AppStringKeys.aiOnDeviceUnavailableDescription)
-                    .l10n(context),
-        ),
-        if (contextSize != null)
-          _note(
+        if (_manualModelEntry) ...[
+          const SizedBox(height: AppSpacing.sm),
+          _inputField(
             context,
-            AppStrings.t(AppStringKeys.aiTokenContext, {
-              'value1': contextSize ~/ 1024,
-            }),
+            controller: _model,
+            icon: HeroAppIcons.cube,
+            label: AppStringKeys.aiServerModel.l10n(context),
+            hint: AppStringKeys.aiServerModelHint.l10n(context),
           ),
+        ],
       ],
     );
   }
 
-  Widget _serverConfiguration(
+  Widget _modelDiscoveryErrorRow(
     BuildContext context,
     AiSettingsController settings,
   ) {
-    final activeProvider = settings.activeServerProvider;
-    final activeModel = settings.activeModelProfile;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _sectionTitle(context, AppStringKeys.aiProviders.l10n(context)),
-        SettingsCard(
-          children: [
-            if (settings.serverProviders.isNotEmpty) ...[
-              SettingsRow(
-                title: AppStringKeys.aiProviders.l10n(context),
-                value:
-                    activeProvider?.name ??
-                    AppStringKeys.aiNoProvider.l10n(context),
-                leading: const SettingsIconTile(
-                  icon: HeroAppIcons.server,
-                  backgroundColor: Color(0xFF3478F6),
-                ),
-                onTap: () => _showServerProviderPicker(settings),
-              ),
-              const InsetDivider(leadingInset: 56),
-            ],
-            SettingsRow(
-              title: AppStringKeys.aiAddProvider.l10n(context),
-              leading: const SettingsIconTile(
-                icon: HeroAppIcons.circlePlus,
-                backgroundColor: Color(0xFF20A45B),
-              ),
-              onTap: _startNewProfile,
-            ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.section),
-        _inputField(
-          context,
-          controller: _providerName,
-          icon: HeroAppIcons.server,
-          label: AppStringKeys.aiProviderName.l10n(context),
-          hint: AppStringKeys.aiProviderNameHint.l10n(context),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        _inputField(
-          context,
-          controller: _endpoint,
-          icon: HeroAppIcons.link,
-          label: AppStringKeys.aiServerEndpoint.l10n(context),
-          hint: AppStringKeys.aiServerEndpointHint.l10n(context),
-          keyboardType: TextInputType.url,
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        _inputField(
-          context,
-          controller: _apiKey,
-          icon: HeroAppIcons.key,
-          label: AppStringKeys.aiServerApiKey.l10n(context),
-          hint: AppStringKeys.aiServerApiKeyOptional.l10n(context),
-          obscureText: _obscureApiKey,
-          trailing: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => setState(() => _obscureApiKey = !_obscureApiKey),
-            child: Padding(
-              padding: const EdgeInsets.all(8),
-              child: AppIcon(
-                _obscureApiKey ? HeroAppIcons.eye : HeroAppIcons.eyeSlash,
-                size: 19,
-                color: context.colors.textSecondary,
-              ),
-            ),
-          ),
-        ),
-        _note(context, AppStringKeys.aiServerPrivacy.l10n(context)),
-        const SizedBox(height: AppSpacing.lg),
-        _actionButton(
-          context,
-          label: AppStringKeys.aiSaveProvider.l10n(context),
-          saving: _saving,
-          onTap: _saveServerProvider,
-        ),
-        if (_editingProfileId != null) ...[
-          const SizedBox(height: AppSpacing.sm),
-          _actionButton(
-            context,
-            label: AppStringKeys.aiDeleteProvider.l10n(context),
-            saving: _saving,
-            onTap: _deleteServerProvider,
-            backgroundColor: const Color(0xFFDC3C3C),
-          ),
-        ],
-        const SizedBox(height: AppSpacing.section),
-        _sectionTitle(context, AppStringKeys.aiModels.l10n(context)),
-        SettingsCard(
-          children: [
-            if (activeProvider != null) ...[
-              SettingsRow(
-                title: AppStringKeys.aiServerModel.l10n(context),
-                value:
-                    activeModel?.model ?? AppStringKeys.aiNoModel.l10n(context),
-                leading: const SettingsIconTile(
-                  icon: HeroAppIcons.cube,
-                  backgroundColor: Color(0xFF7467F0),
-                ),
-                onTap: settings.modelsForProvider(activeProvider.id).isEmpty
-                    ? null
-                    : () => _showSavedModelPicker(settings),
-              ),
-              const InsetDivider(leadingInset: 56),
-            ],
-            SettingsRow(
-              title: AppStringKeys.aiAddModel.l10n(context),
-              value: activeProvider == null
-                  ? AppStringKeys.aiAddProviderFirst.l10n(context)
-                  : '',
-              leading: SettingsIconTile(
-                icon: HeroAppIcons.circlePlus,
-                backgroundColor: activeProvider == null
-                    ? context.colors.textTertiary
-                    : const Color(0xFF20A45B),
-              ),
-              onTap: activeProvider == null
-                  ? null
-                  : () => _startAddModel(settings),
-              showChevron: activeProvider != null,
-            ),
-          ],
-        ),
-        if (activeModel != null) ...[
-          _note(
-            context,
-            context.l10n.t(AppStringKeys.aiModelProvider, {
-              'value1': activeProvider?.name ?? '',
-            }),
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          _actionButton(
-            context,
-            label: AppStringKeys.aiDeleteModel.l10n(context),
-            saving: _saving,
-            onTap: () => _deleteActiveModel(settings),
-            backgroundColor: const Color(0xFFDC3C3C),
-          ),
-        ],
-      ],
-    );
-  }
-
-  Widget _inputField(
-    BuildContext context, {
-    required TextEditingController controller,
-    required AppIconData icon,
-    required String label,
-    required String hint,
-    TextInputType? keyboardType,
-    bool obscureText = false,
-    bool readOnly = false,
-    Widget? trailing,
-    ValueChanged<String>? onChanged,
-  }) {
     final c = context.colors;
-    return Semantics(
-      textField: true,
-      label: label,
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 60),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: c.card,
-          borderRadius: BorderRadius.circular(AppRadius.card),
-          border: Border.all(color: c.divider, width: 0.5),
+    return GestureDetector(
+      key: const ValueKey('aiModelDiscoveryError'),
+      behavior: HitTestBehavior.opaque,
+      onTap: () => unawaited(_loadModels(settings)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppMetric.settingsLeadingInset,
+          AppSpacing.sm,
+          AppMetric.settingsTrailingInset,
+          AppSpacing.sm,
         ),
         child: Row(
           children: [
-            AppIcon(icon, size: 19, color: c.textSecondary),
-            const SizedBox(width: 12),
+            const SettingsIconTile(
+              icon: HeroAppIcons.triangleExclamation,
+              backgroundColor: Color(0xFFDC3C3C),
+            ),
+            const SizedBox(width: AppSpacing.md),
             Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label, style: AppTextStyle.caption(c.textTertiary)),
-                  const SizedBox(height: 3),
-                  TextField(
-                    controller: controller,
-                    obscureText: obscureText,
-                    readOnly: readOnly,
-                    autocorrect: false,
-                    enableSuggestions: false,
-                    keyboardType: keyboardType,
-                    onChanged: onChanged,
-                    style: AppTextStyle.body(c.textPrimary),
-                    cursorColor: AppTheme.brand,
-                    decoration: InputDecoration(
-                      border: InputBorder.none,
-                      isCollapsed: true,
-                      hintText: hint,
-                      hintStyle: AppTextStyle.body(c.textTertiary),
-                    ),
-                  ),
-                ],
+              child: Text(
+                AppStringKeys.aiModelsFailed.l10n(context),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyle.footnote(c.textSecondary),
               ),
             ),
-            ?trailing,
+            const SizedBox(width: AppSpacing.sm),
+            AppIcon(
+              HeroAppIcons.arrowsRotate,
+              size: AppIconSize.md,
+              color: AppTheme.brand,
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _actionButton(
-    BuildContext context, {
-    required String label,
-    required bool saving,
-    required VoidCallback onTap,
-    Color? backgroundColor,
-    Color? foregroundColor,
-    Color? borderColor,
-  }) {
-    return Semantics(
-      button: true,
-      enabled: !saving,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: saving ? null : onTap,
-        child: AnimatedOpacity(
-          duration: const Duration(milliseconds: 140),
-          opacity: saving ? 0.55 : 1,
-          child: Container(
-            height: 48,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: backgroundColor ?? AppTheme.brand,
-              borderRadius: BorderRadius.circular(AppRadius.card),
-              border: borderColor == null
-                  ? null
-                  : Border.all(color: borderColor),
-            ),
-            child: saving
-                ? const AppActivityIndicator(size: 20, color: Color(0xFFFFFFFF))
-                : Text(
-                    label,
-                    style: TextStyle(
-                      color: foregroundColor ?? const Color(0xFFFFFFFF),
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-          ),
-        ),
-      ),
-    );
+  Future<void> _pickAvailableModel(
+    AiSettingsController settings,
+    AiServerProvider provider,
+  ) async {
+    final selected = await _pickDiscoveredModel(provider.availableModels);
+    if (selected == null || !mounted) return;
+    await _applyDiscoveredModel(settings, provider, selected);
   }
 
-  Future<void> _saveServerProvider() async {
-    if (_saving) return;
-    setState(() => _saving = true);
-    final settings = context.read<AiSettingsController>();
-    try {
-      final saved = await settings.saveServerProvider(
-        id: _editingProfileId,
-        name: _providerName.text,
-        endpoint: _endpoint.text,
-        apiKey: _apiKey.text,
-      );
-      _editingProfileId = saved.id;
-      if (mounted) showToast(context, AppStringKeys.aiSaved.l10n(context));
-    } on FormatException {
-      if (mounted) {
-        showToast(context, AppStringKeys.aiInvalidEndpoint.l10n(context));
-      }
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  Future<void> _deleteServerProvider() async {
-    final profileId = _editingProfileId;
-    if (profileId == null || _saving) return;
-    setState(() => _saving = true);
-    try {
-      final settings = context.read<AiSettingsController>();
-      await settings.deleteServerProvider(profileId);
-      if (!mounted) return;
-      _loadProfile(settings.activeServerProvider, settings.apiKey);
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  void _startNewProfile() {
+  Future<void> _loadModels(AiSettingsController settings) async {
+    final providerId = _providerId;
+    if (providerId == null) return;
+    final generation = ++_discoveryGeneration;
     setState(() {
-      _editingProfileId = null;
-      _providerName.clear();
-      _endpoint.clear();
-      _apiKey.clear();
+      _loadingModels = true;
+      _modelsLoadFailed = false;
     });
-  }
-
-  void _loadProfile(AiServerProvider? provider, String apiKey) {
-    _editingProfileId = provider?.id;
-    _providerName.text = provider?.name ?? '';
-    _endpoint.text = provider?.endpoint ?? '';
-    _apiKey.text = apiKey;
-  }
-
-  Future<void> _showServerProviderPicker(AiSettingsController settings) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        final c = sheetContext.colors;
-        return SafeArea(
-          child: Container(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.62,
-            ),
-            margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-            decoration: BoxDecoration(
-              color: c.card,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: ListView.separated(
-              shrinkWrap: true,
-              itemCount: settings.serverProviders.length,
-              separatorBuilder: (_, _) => const InsetDivider(leadingInset: 56),
-              itemBuilder: (_, index) {
-                final provider = settings.serverProviders[index];
-                final selected = provider.id == settings.activeServerProviderId;
-                return GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () async {
-                    await settings.selectServerProvider(provider.id);
-                    if (!mounted || !sheetContext.mounted) return;
-                    setState(() {
-                      _loadProfile(
-                        provider,
-                        settings.apiKeyForServerProvider(provider.id),
-                      );
-                    });
-                    Navigator.of(sheetContext).pop();
-                  },
-                  child: SizedBox(
-                    height: 64,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(
-                        children: [
-                          const SettingsIconTile(
-                            icon: HeroAppIcons.server,
-                            backgroundColor: Color(0xFF3478F6),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  provider.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: AppTextStyle.body(c.textPrimary),
-                                ),
-                                Text(
-                                  provider.endpoint,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: AppTextStyle.caption(c.textSecondary),
-                                ),
-                              ],
-                            ),
-                          ),
-                          if (selected)
-                            AppIcon(
-                              HeroAppIcons.check,
-                              size: 18,
-                              color: AppTheme.brand,
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Future<void> _showSavedModelPicker(AiSettingsController settings) async {
-    final provider = settings.activeServerProvider;
-    if (provider == null) return;
-    final models = settings.modelsForProvider(provider.id);
-    if (models.isEmpty) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        final c = sheetContext.colors;
-        return SafeArea(
-          child: Container(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.68,
-            ),
-            margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-            decoration: BoxDecoration(
-              color: c.card,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: ListView.separated(
-              shrinkWrap: true,
-              itemCount: models.length,
-              separatorBuilder: (_, _) => const InsetDivider(leadingInset: 56),
-              itemBuilder: (_, index) {
-                final model = models[index];
-                final selected = model.id == settings.activeModelProfileId;
-                return GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () async {
-                    await settings.selectModelProfile(model.id);
-                    if (sheetContext.mounted) {
-                      Navigator.of(sheetContext).pop();
-                    }
-                  },
-                  child: SizedBox(
-                    height: 60,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(
-                        children: [
-                          const SettingsIconTile(
-                            icon: HeroAppIcons.cube,
-                            backgroundColor: Color(0xFF7467F0),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              model.model,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: AppTextStyle.body(c.textPrimary),
-                            ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.only(right: 10),
-                            child: Text(
-                              '${model.contextWindowTokens ~/ 1024}K',
-                              style: AppTextStyle.caption(c.textSecondary),
-                            ),
-                          ),
-                          if (selected)
-                            AppIcon(
-                              HeroAppIcons.check,
-                              size: 18,
-                              color: AppTheme.brand,
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Future<void> _startAddModel(AiSettingsController settings) async {
-    final provider = await _pickModelProvider(settings);
-    if (provider == null || !mounted) return;
-    var models = provider.availableModels;
     try {
-      models = await settings.refreshModelsForProvider(provider.id);
-      if (mounted) {
-        showToast(
-          context,
-          context.l10n.t(AppStringKeys.aiModelsLoaded, {
-            'value1': models.length,
-          }),
-        );
-      }
+      final models = await settings.refreshModelsForProvider(providerId);
+      if (!mounted || generation != _discoveryGeneration) return;
+      final currentModel = _model.text.trim();
+      final selected = models
+          .where((model) => model.id == currentModel)
+          .firstOrNull;
+      setState(() {
+        _loadingModels = false;
+        _modelsLoadFailed = false;
+        _manualModelEntry =
+            models.isEmpty || (currentModel.isNotEmpty && selected == null);
+        final contextTokens = selected?.contextWindowTokens;
+        if (contextTokens != null) {
+          _contextWindow.text = '$contextTokens';
+          _contextDetected = true;
+        }
+      });
     } on Object {
-      if (mounted) {
-        showToast(context, AppStringKeys.aiModelsFailed.l10n(context));
+      if (!mounted || generation != _discoveryGeneration) return;
+      setState(() {
+        _loadingModels = false;
+        _modelsLoadFailed = true;
+        if (_model.text.trim().isEmpty) _manualModelEntry = true;
+      });
+    } finally {
+      if (mounted && generation == _discoveryGeneration && _loadingModels) {
+        setState(() => _loadingModels = false);
       }
     }
-    if (!mounted) return;
-    final choice = await _pickDiscoveredModel(models);
-    if (choice == null || !mounted) return;
-    var discovered = choice.model;
-    if (!choice.manual && discovered?.contextWindowTokens == null) {
-      try {
-        discovered =
-            await settings.discoverModelDetails(
-              endpoint: provider.endpoint,
-              apiKey: settings.apiKeyForServerProvider(provider.id),
-              model: discovered!.id,
-            ) ??
-            discovered;
-      } on Object {
-        // The model remains usable with an explicitly confirmed context size.
-      }
-    }
-    if (!mounted) return;
-    await _showModelEditor(
-      settings: settings,
-      provider: provider,
-      discoveredModel: discovered,
-      manual: choice.manual,
-    );
   }
 
-  Future<AiServerProvider?> _pickModelProvider(AiSettingsController settings) =>
-      showModalBottomSheet<AiServerProvider>(
-        context: context,
-        backgroundColor: Colors.transparent,
-        builder: (sheetContext) {
-          final c = sheetContext.colors;
-          return SafeArea(
-            child: Container(
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.62,
-              ),
-              margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              decoration: BoxDecoration(
-                color: c.card,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: ListView.separated(
-                shrinkWrap: true,
-                itemCount: settings.serverProviders.length,
-                separatorBuilder: (_, _) =>
-                    const InsetDivider(leadingInset: 56),
-                itemBuilder: (_, index) {
-                  final provider = settings.serverProviders[index];
-                  return GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => Navigator.of(sheetContext).pop(provider),
-                    child: SizedBox(
-                      height: 64,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Row(
-                          children: [
-                            const SettingsIconTile(
-                              icon: HeroAppIcons.server,
-                              backgroundColor: Color(0xFF3478F6),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    provider.name,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: AppTextStyle.body(c.textPrimary),
-                                  ),
-                                  Text(
-                                    provider.endpoint,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: AppTextStyle.caption(
-                                      c.textSecondary,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          );
-        },
-      );
-
-  Future<({bool manual, OpenAiCompatibleModelInfo? model})?>
-  _pickDiscoveredModel(List<OpenAiCompatibleModelInfo> models) =>
-      showModalBottomSheet<({bool manual, OpenAiCompatibleModelInfo? model})>(
-        context: context,
-        backgroundColor: Colors.transparent,
-        builder: (sheetContext) {
-          final c = sheetContext.colors;
-          return SafeArea(
-            child: Container(
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.68,
-              ),
-              margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              decoration: BoxDecoration(
-                color: c.card,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: ListView.separated(
-                shrinkWrap: true,
-                itemCount: models.length + 1,
-                separatorBuilder: (_, _) =>
-                    const InsetDivider(leadingInset: 56),
-                itemBuilder: (_, index) {
-                  if (index == models.length) {
-                    return _modelChoiceRow(
-                      sheetContext,
-                      icon: HeroAppIcons.pen,
-                      title: AppStringKeys.aiEnterModelManually.l10n(
-                        sheetContext,
-                      ),
-                      onTap: () => Navigator.of(
-                        sheetContext,
-                      ).pop((manual: true, model: null)),
-                    );
-                  }
-                  final model = models[index];
-                  return _modelChoiceRow(
-                    sheetContext,
-                    icon: HeroAppIcons.cube,
-                    title: model.id,
-                    value: model.contextWindowTokens == null
-                        ? ''
-                        : '${model.contextWindowTokens! ~/ 1024}K',
-                    onTap: () => Navigator.of(
-                      sheetContext,
-                    ).pop((manual: false, model: model)),
-                  );
-                },
-              ),
-            ),
-          );
-        },
-      );
-
-  Widget _modelChoiceRow(
-    BuildContext context, {
-    required AppIconData icon,
-    required String title,
-    String value = '',
-    required VoidCallback onTap,
-  }) {
-    final c = context.colors;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: SizedBox(
-        height: 60,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              SettingsIconTile(
-                icon: icon,
-                backgroundColor: const Color(0xFF7467F0),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTextStyle.body(c.textPrimary),
-                ),
-              ),
-              if (value.isNotEmpty)
-                Text(value, style: AppTextStyle.caption(c.textSecondary)),
-              const SizedBox(width: 8),
-              AppIcon(
-                HeroAppIcons.chevronRight,
-                size: 16,
-                color: c.textTertiary,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _showModelEditor({
-    required AiSettingsController settings,
-    required AiServerProvider provider,
-    required OpenAiCompatibleModelInfo? discoveredModel,
-    required bool manual,
-  }) => showModalBottomSheet<void>(
+  Future<OpenAiCompatibleModelInfo?> _pickDiscoveredModel(
+    List<OpenAiCompatibleModelInfo> models,
+  ) => showModalBottomSheet<OpenAiCompatibleModelInfo>(
     context: context,
-    isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (_) => _AiModelEditorSheet(
-      settings: settings,
-      provider: provider,
-      discoveredModel: discoveredModel,
-      manual: manual,
+    builder: (sheetContext) => _PickerCard(
+      children: [
+        for (final model in models)
+          _pickerRow(
+            sheetContext,
+            icon: HeroAppIcons.cube,
+            color: const Color(0xFF7467F0),
+            title: model.id,
+            value: model.contextWindowTokens == null
+                ? ''
+                : '${model.contextWindowTokens! ~/ 1024}K',
+            selected: model.id == _model.text.trim(),
+            onTap: () => Navigator.of(sheetContext).pop(model),
+          ),
+      ],
     ),
   );
 
-  Future<void> _deleteActiveModel(AiSettingsController settings) async {
-    final id = settings.activeModelProfileId;
-    if (id == null || _saving) return;
-    setState(() => _saving = true);
+  Future<void> _applyDiscoveredModel(
+    AiSettingsController settings,
+    AiServerProvider provider,
+    OpenAiCompatibleModelInfo selected,
+  ) async {
+    var details = selected;
+    if (selected.contextWindowTokens == null) {
+      try {
+        details =
+            await settings.discoverModelDetails(
+              endpoint: provider.endpoint,
+              apiKey: settings.apiKeyForServerProvider(provider.id),
+              model: selected.id,
+              endpointStyle: provider.endpointStyle,
+            ) ??
+            selected;
+      } on Object {
+        details = selected;
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _manualModelEntry = false;
+      _model.text = details.id;
+      final contextTokens = details.contextWindowTokens;
+      if (contextTokens != null) _contextWindow.text = '$contextTokens';
+      _contextDetected = contextTokens != null;
+    });
+  }
+
+  Future<void> _testModel(AiSettingsController settings) async {
+    final providerId = _providerId;
+    final model = _model.text.trim();
+    final prompt = _testPrompt.text.trim();
+    if (providerId == null || model.isEmpty || prompt.isEmpty) {
+      showToast(context, AppStringKeys.aiInvalidModel.l10n(context));
+      return;
+    }
+    setState(() {
+      _testingModel = true;
+      _testResponse = null;
+      _testFailed = false;
+    });
     try {
-      await settings.deleteModelProfile(id);
+      final response = await settings.testServerModel(
+        providerId: providerId,
+        model: model,
+        prompt: prompt,
+      );
+      if (!mounted) return;
+      setState(() => _testResponse = response);
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _testFailed = true;
+        _testResponse = error.toString();
+      });
     } finally {
-      if (mounted) setState(() => _saving = false);
+      if (mounted) setState(() => _testingModel = false);
     }
   }
 
-  Future<void> _showProviderPicker(AiSettingsController settings) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        final c = sheetContext.colors;
-        return SafeArea(
-          child: Container(
-            margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-            decoration: BoxDecoration(
-              color: c.card,
-              borderRadius: BorderRadius.circular(14),
+  Future<void> _save() async {
+    final providerId = _providerId;
+    final contextWindow = int.tryParse(_contextWindow.text.trim());
+    if (providerId == null || contextWindow == null) {
+      showToast(context, AppStringKeys.aiInvalidModel.l10n(context));
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      await context.read<AiSettingsController>().saveModelProfile(
+        id: widget.profile?.id,
+        providerId: providerId,
+        model: _model.text,
+        contextWindowTokens: contextWindow,
+        contextWindowDetected: _contextDetected,
+      );
+      if (!mounted) return;
+      showToast(context, AppStringKeys.aiSaved.l10n(context));
+      Navigator.of(context).pop();
+    } on FormatException {
+      if (!mounted) return;
+      showToast(context, AppStringKeys.aiInvalidModel.l10n(context));
+      setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _delete() async {
+    final profile = widget.profile;
+    if (profile == null || _saving) return;
+    setState(() => _saving = true);
+    await context.read<AiSettingsController>().deleteModelProfile(profile.id);
+    if (mounted) Navigator.of(context).pop();
+  }
+}
+
+/// Shows the shared model selector for an AI feature and returns the model the
+/// user selected. A dismissed sheet leaves the current selection unchanged.
+Future<AiModelCandidate?> showAiFeatureModelPicker(
+  BuildContext context, {
+  required AiSettingsController settings,
+  required AiFeature feature,
+}) async {
+  final selectedId = settings.modelCandidateIdForFeature(feature);
+  return showModalBottomSheet<AiModelCandidate>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    builder: (sheetContext) => KeyedSubtree(
+      key: ValueKey('aiFeatureModelPicker-${feature.name}'),
+      child: _PickerCard(
+        children: [
+          for (final candidate in settings.modelCandidatesForFeature(feature))
+            _pickerRow(
+              sheetContext,
+              key: ValueKey(
+                'aiFeatureModelOption-${feature.name}-${candidate.id}',
+              ),
+              selectedIndicatorKey: ValueKey(
+                'aiFeatureModelSelected-${feature.name}-${candidate.id}',
+              ),
+              icon: _candidateIcon(candidate),
+              color: _candidateColor(candidate),
+              title: _candidateLabel(sheetContext, candidate),
+              value: _candidateDetail(sheetContext, settings, candidate),
+              selected: candidate.id == selectedId,
+              onTap: () async {
+                await settings.setFeatureModelCandidate(feature, candidate.id);
+                if (!sheetContext.mounted ||
+                    settings.modelCandidateIdForFeature(feature) !=
+                        candidate.id) {
+                  return;
+                }
+                Navigator.of(sheetContext).pop(candidate);
+              },
             ),
-            clipBehavior: Clip.antiAlias,
+        ],
+      ),
+    ),
+  );
+}
+
+class _PickerCard extends StatelessWidget {
+  const _PickerCard({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return SafeArea(
+      child: Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.72,
+        ),
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        decoration: BoxDecoration(
+          color: c.card,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: ListView.separated(
+          shrinkWrap: true,
+          itemCount: children.length,
+          separatorBuilder: (_, _) => const InsetDivider(leadingInset: 56),
+          itemBuilder: (_, index) => children[index],
+        ),
+      ),
+    );
+  }
+}
+
+Widget _pickerRow(
+  BuildContext context, {
+  Key? key,
+  Key? selectedIndicatorKey,
+  required AppIconData icon,
+  required Color color,
+  required String title,
+  required String value,
+  required bool selected,
+  required VoidCallback onTap,
+}) {
+  final c = context.colors;
+  return Semantics(
+    button: true,
+    selected: selected,
+    inMutuallyExclusiveGroup: true,
+    label: title,
+    value: value,
+    onTap: onTap,
+    child: ExcludeSemantics(
+      child: GestureDetector(
+        key: key,
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 62),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                SettingsIconTile(icon: icon, backgroundColor: color),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyle.body(c.textPrimary),
+                      ),
+                      if (value.isNotEmpty)
+                        Text(
+                          value,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyle.caption(c.textSecondary),
+                        ),
+                    ],
+                  ),
+                ),
+                if (selected)
+                  AppIcon(
+                    HeroAppIcons.check,
+                    key: selectedIndicatorKey,
+                    size: 18,
+                    color: AppTheme.brand,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+String _candidateLabel(BuildContext context, AiModelCandidate candidate) =>
+    switch (candidate.kind) {
+      AiModelCandidateKind.applePcc => AppStringKeys.aiProviderApplePcc.l10n(
+        context,
+      ),
+      AiModelCandidateKind.appleOnDevice =>
+        AppStringKeys.aiProviderAppleOnDevice.l10n(context),
+      AiModelCandidateKind.server => candidate.model,
+      AiModelCandidateKind.telegramCocoon =>
+        AppStringKeys.aiProviderTelegramCocoon.l10n(context),
+    };
+
+String _endpointStyleLabel(BuildContext context, AiEndpointStyle style) =>
+    switch (style) {
+      AiEndpointStyle.openAiChatCompletions =>
+        AppStringKeys.aiEndpointStyleOpenAiChatCompletions.l10n(context),
+      AiEndpointStyle.openAiResponses =>
+        AppStringKeys.aiEndpointStyleOpenAiResponses.l10n(context),
+      AiEndpointStyle.anthropicMessages =>
+        AppStringKeys.aiEndpointStyleAnthropicMessages.l10n(context),
+      AiEndpointStyle.ollamaChat =>
+        AppStringKeys.aiEndpointStyleOllamaChat.l10n(context),
+    };
+
+String _candidateDetail(
+  BuildContext context,
+  AiSettingsController settings,
+  AiModelCandidate candidate,
+) => switch (candidate.kind) {
+  AiModelCandidateKind.applePcc => _appleCandidateDetail(
+    context,
+    available:
+        settings.pccCapabilities?.available == true &&
+        settings.pccCapabilities?.quotaLimitReached != true,
+    contextWindowTokens: settings.pccCapabilities?.contextSize,
+  ),
+  AiModelCandidateKind.appleOnDevice => _appleCandidateDetail(
+    context,
+    available: settings.pccCapabilities?.onDeviceAvailable == true,
+    contextWindowTokens: settings.pccCapabilities?.onDeviceContextSize,
+  ),
+  AiModelCandidateKind.server =>
+    '${candidate.serverProvider?.name ?? ''} · ${(candidate.contextWindowTokens ?? 0) ~/ 1024}K',
+  AiModelCandidateKind.telegramCocoon => '',
+};
+
+String _appleCandidateDetail(
+  BuildContext context, {
+  required bool available,
+  required int? contextWindowTokens,
+}) {
+  final availability =
+      (available
+              ? AppStringKeys.aiPccAvailable
+              : AppStringKeys.aiPccUnavailable)
+          .l10n(context);
+  if (contextWindowTokens == null || contextWindowTokens <= 0) {
+    return availability;
+  }
+  return '$availability · ${contextWindowTokens ~/ 1024}K';
+}
+
+AppIconData _candidateIcon(AiModelCandidate candidate) =>
+    switch (candidate.kind) {
+      AiModelCandidateKind.applePcc => HeroAppIcons.cloud,
+      AiModelCandidateKind.appleOnDevice => HeroAppIcons.cpuChip,
+      AiModelCandidateKind.server => HeroAppIcons.cube,
+      AiModelCandidateKind.telegramCocoon => HeroAppIcons.wandMagicSparkles,
+    };
+
+Color _candidateColor(AiModelCandidate candidate) => switch (candidate.kind) {
+  AiModelCandidateKind.applePcc => const Color(0xFF7467F0),
+  AiModelCandidateKind.appleOnDevice => const Color(0xFF16A085),
+  AiModelCandidateKind.server => const Color(0xFF3478F6),
+  AiModelCandidateKind.telegramCocoon => const Color(0xFF229ED9),
+};
+
+Future<T?> _push<T>(BuildContext context, Widget view) =>
+    Navigator.of(context).push<T>(MaterialPageRoute<T>(builder: (_) => view));
+
+Widget _inputField(
+  BuildContext context, {
+  required TextEditingController controller,
+  required AppIconData icon,
+  required String label,
+  required String hint,
+  TextInputType? keyboardType,
+  bool obscureText = false,
+  Widget? trailing,
+}) {
+  final c = context.colors;
+  return Semantics(
+    textField: true,
+    label: label,
+    child: Container(
+      constraints: const BoxConstraints(minHeight: 60),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: c.card,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        border: Border.all(color: c.divider, width: 0.5),
+      ),
+      child: Row(
+        children: [
+          AppIcon(icon, size: 19, color: c.textSecondary),
+          const SizedBox(width: 12),
+          Expanded(
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _providerOption(
-                  sheetContext,
-                  settings: settings,
-                  provider: AiProviderMode.applePcc,
-                  icon: HeroAppIcons.cloud,
-                ),
-                const InsetDivider(leadingInset: 56),
-                _providerOption(
-                  sheetContext,
-                  settings: settings,
-                  provider: AiProviderMode.appleOnDevice,
-                  icon: HeroAppIcons.cpuChip,
-                ),
-                const InsetDivider(leadingInset: 56),
-                _providerOption(
-                  sheetContext,
-                  settings: settings,
-                  provider: AiProviderMode.openAiCompatible,
-                  icon: HeroAppIcons.server,
+                Text(label, style: AppTextStyle.caption(c.textTertiary)),
+                const SizedBox(height: 3),
+                TextField(
+                  controller: controller,
+                  obscureText: obscureText,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  keyboardType: keyboardType,
+                  style: AppTextStyle.body(c.textPrimary),
+                  cursorColor: AppTheme.brand,
+                  decoration: InputDecoration(
+                    border: InputBorder.none,
+                    isCollapsed: true,
+                    hintText: hint,
+                    hintStyle: AppTextStyle.body(c.textTertiary),
+                  ),
                 ),
               ],
             ),
           ),
-        );
-      },
-    );
-  }
-
-  Widget _providerOption(
-    BuildContext context, {
-    required AiSettingsController settings,
-    required AiProviderMode provider,
-    required AppIconData icon,
-  }) {
-    final c = context.colors;
-    final selected = settings.provider == provider;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () async {
-        await settings.setProvider(provider);
-        if (context.mounted) Navigator.of(context).pop();
-      },
-      child: SizedBox(
-        height: 56,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              SettingsIconTile(
-                icon: icon,
-                backgroundColor: switch (provider) {
-                  AiProviderMode.applePcc => const Color(0xFF7467F0),
-                  AiProviderMode.appleOnDevice => const Color(0xFF16A085),
-                  AiProviderMode.openAiCompatible => const Color(0xFF3478F6),
-                },
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  _providerLabel(context, provider),
-                  style: AppTextStyle.body(c.textPrimary),
-                ),
-              ),
-              if (selected)
-                AppIcon(HeroAppIcons.check, size: 18, color: AppTheme.brand),
-            ],
-          ),
-        ),
+          ?trailing,
+        ],
       ),
-    );
-  }
-
-  String _providerLabel(BuildContext context, AiProviderMode provider) =>
-      switch (provider) {
-        AiProviderMode.applePcc => AppStringKeys.aiProviderApplePcc.l10n(
-          context,
-        ),
-        AiProviderMode.appleOnDevice =>
-          AppStringKeys.aiProviderAppleOnDevice.l10n(context),
-        AiProviderMode.openAiCompatible =>
-          AppStringKeys.aiProviderOpenAiCompatible.l10n(context),
-      };
-
-  AppIconData _providerIcon(AiProviderMode provider) => switch (provider) {
-    AiProviderMode.applePcc => HeroAppIcons.cloud,
-    AiProviderMode.appleOnDevice => HeroAppIcons.cpuChip,
-    AiProviderMode.openAiCompatible => HeroAppIcons.server,
-  };
-
-  Widget _sectionTitle(BuildContext context, String title) => Padding(
-    padding: const EdgeInsets.only(left: 4, bottom: AppSpacing.sm),
-    child: Text(
-      title,
-      style: AppTextStyle.caption(context.colors.textTertiary),
-    ),
-  );
-
-  Widget _note(BuildContext context, String text) => Padding(
-    padding: const EdgeInsets.fromLTRB(4, AppSpacing.sm, 4, 0),
-    child: Text(
-      text,
-      style: AppTextStyle.footnote(context.colors.textSecondary),
     ),
   );
 }
+
+Widget _actionButton(
+  BuildContext context, {
+  required String label,
+  required bool saving,
+  required VoidCallback? onTap,
+  Color? backgroundColor,
+  Color? foregroundColor,
+  Color? borderColor,
+}) => Semantics(
+  button: true,
+  enabled: !saving && onTap != null,
+  child: GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    onTap: saving ? null : onTap,
+    child: AnimatedOpacity(
+      duration: const Duration(milliseconds: 140),
+      opacity: saving || onTap == null ? 0.55 : 1,
+      child: Container(
+        height: 48,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: backgroundColor ?? AppTheme.brand,
+          borderRadius: BorderRadius.circular(AppRadius.card),
+          border: borderColor == null ? null : Border.all(color: borderColor),
+        ),
+        child: saving
+            ? const AppActivityIndicator(size: 20, color: Color(0xFFFFFFFF))
+            : Text(
+                label,
+                style: TextStyle(
+                  color: foregroundColor ?? const Color(0xFFFFFFFF),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+      ),
+    ),
+  ),
+);
+
+Widget _modelTestResponse(
+  BuildContext context,
+  String response, {
+  required bool failed,
+}) {
+  final c = context.colors;
+  final accent = failed ? const Color(0xFFDC3C3C) : const Color(0xFF16A085);
+  final title =
+      (failed ? AppStringKeys.aiTestFailed : AppStringKeys.aiTestResponse).l10n(
+        context,
+      );
+  return Semantics(
+    liveRegion: true,
+    label: title,
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: c.card,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        border: Border.all(color: accent.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AppIcon(
+            failed ? HeroAppIcons.circleXmark : HeroAppIcons.circleCheck,
+            size: 20,
+            color: accent,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: AppTextStyle.caption(accent)),
+                const SizedBox(height: 5),
+                SelectableText(
+                  response,
+                  style: AppTextStyle.body(c.textPrimary),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+Widget _sectionTitle(BuildContext context, String title) => Padding(
+  padding: const EdgeInsets.only(left: 4, bottom: AppSpacing.sm),
+  child: Text(title, style: AppTextStyle.caption(context.colors.textTertiary)),
+);
+
+Widget _note(BuildContext context, String text) => Padding(
+  padding: const EdgeInsets.fromLTRB(4, AppSpacing.sm, 4, 0),
+  child: Text(text, style: AppTextStyle.footnote(context.colors.textSecondary)),
+);

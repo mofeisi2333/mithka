@@ -21,6 +21,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:provider/provider.dart';
 
 import '../components/app_dialog.dart';
 import '../components/app_icons.dart';
@@ -31,6 +32,9 @@ import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../l10n/telegram_language_controller.dart';
 import '../media/app_asset_picker.dart';
+import '../settings/ai_settings_controller.dart';
+import '../settings/ai_settings_view.dart';
+import '../settings/apple_pcc_api.dart';
 import '../settings/business_service.dart';
 import '../settings/rich_message_relay_config.dart';
 import '../settings/rich_message_relay_view.dart';
@@ -39,6 +43,7 @@ import '../tdlib/td_client.dart';
 import '../tdlib/td_image_loader.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
+import 'ai_reply_service.dart';
 import 'audio_search_view.dart';
 import 'bot_button_presentation.dart';
 import 'bot_platform_service.dart';
@@ -117,7 +122,113 @@ MentionQuery? activeMentionQuery(String text, TextSelection selection) {
   );
 }
 
+bool isTelegramAiDraftEligible(String text) =>
+    text.trim().isNotEmpty && text.split('\n').length >= 2;
+
 typedef _ClipboardImage = ({Uint8List data, String mimeType});
+
+typedef AiReplyGenerator =
+    Future<TelegramAiFormattedText> Function(AiReplyRequest request);
+
+typedef AiReplyStreamingGenerator =
+    Future<TelegramAiFormattedText> Function(
+      AiReplyRequest request, {
+      required AiReplyDraftCallback onDraft,
+      AiReplyProgressCallback? onProgress,
+    });
+
+class _AiReplyContextSnapshot {
+  const _AiReplyContextSnapshot({
+    required this.chatTitle,
+    required this.currentUserName,
+    required this.isGroup,
+    required this.isSecretChat,
+    required this.hasProtectedContent,
+    required this.selectedMessageFingerprints,
+    required this.tailFingerprints,
+  });
+
+  static const _tailLength = 8;
+
+  final String chatTitle;
+  final String currentUserName;
+  final bool isGroup;
+  final bool isSecretChat;
+  final bool hasProtectedContent;
+  final Map<int, int> selectedMessageFingerprints;
+  final List<int> tailFingerprints;
+
+  factory _AiReplyContextSnapshot.capture(
+    ChatViewModel vm,
+    AiReplyRequest request,
+  ) {
+    final selectedIds = {for (final message in request.messages) message.id};
+    return _AiReplyContextSnapshot(
+      chatTitle: vm.peerTitle,
+      currentUserName: vm.meName,
+      isGroup: vm.isGroup,
+      isSecretChat: vm.isSecretChat,
+      hasProtectedContent: vm.hasProtectedContent,
+      selectedMessageFingerprints: {
+        for (final message in vm.messages)
+          if (selectedIds.contains(message.id))
+            message.id: _messageFingerprint(message),
+      },
+      tailFingerprints: [
+        for (final message in vm.messages.skip(
+          math.max(0, vm.messages.length - _tailLength),
+        ))
+          _messageFingerprint(message),
+      ],
+    );
+  }
+
+  bool matches(ChatViewModel vm) {
+    if (chatTitle != vm.peerTitle ||
+        currentUserName != vm.meName ||
+        isGroup != vm.isGroup ||
+        isSecretChat != vm.isSecretChat ||
+        hasProtectedContent != vm.hasProtectedContent) {
+      return false;
+    }
+    var matchedSelectedMessages = 0;
+    for (final message in vm.messages) {
+      final expected = selectedMessageFingerprints[message.id];
+      if (expected == null) continue;
+      if (_messageFingerprint(message) != expected) return false;
+      matchedSelectedMessages++;
+    }
+    if (matchedSelectedMessages != selectedMessageFingerprints.length) {
+      return false;
+    }
+    final currentTail = vm.messages.skip(
+      math.max(0, vm.messages.length - _tailLength),
+    );
+    var index = 0;
+    for (final message in currentTail) {
+      if (index >= tailFingerprints.length ||
+          _messageFingerprint(message) != tailFingerprints[index]) {
+        return false;
+      }
+      index++;
+    }
+    return index == tailFingerprints.length;
+  }
+
+  static int _messageFingerprint(ChatMessage message) => Object.hash(
+    message.id,
+    message.isOutgoing,
+    message.isService,
+    message.isContentRestricted,
+    message.blockedByUser,
+    message.senderName,
+    message.senderId,
+    message.senderIsChat,
+    message.replyToMessageId,
+    message.date,
+    message.text,
+  );
+}
 
 class _SendComposerIntent extends Intent {
   const _SendComposerIntent();
@@ -136,6 +247,9 @@ class ChatInputBar extends StatefulWidget {
     this.quickReplyLoader,
     this.quickReplySender,
     this.onVoicePanelOpenedForTesting,
+    this.aiReplyGenerator,
+    this.aiReplyStreamingGenerator,
+    this.aiReplyHistoryLoader,
   });
   final ChatViewModel vm;
   final FutureOr<void> Function(bool isVideo) onStartCall;
@@ -151,6 +265,12 @@ class ChatInputBar extends StatefulWidget {
   final Future<void> Function(int chatId, int shortcutId)? quickReplySender;
   @visibleForTesting
   final VoidCallback? onVoicePanelOpenedForTesting;
+  @visibleForTesting
+  final AiReplyGenerator? aiReplyGenerator;
+  @visibleForTesting
+  final AiReplyStreamingGenerator? aiReplyStreamingGenerator;
+  @visibleForTesting
+  final AiReplyChatHistoryLoader? aiReplyHistoryLoader;
 
   @override
   State<ChatInputBar> createState() => _ChatInputBarState();
@@ -200,6 +320,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   final List<double> _recLevels = [];
   String? _recPath;
   late bool _hasText = vm.draft.trim().isNotEmpty;
+  late bool _aiDraftEligible = isTelegramAiDraftEligible(vm.draft);
   bool _replyKeyboardVisible = false;
   Timer? _mentionSearchTimer;
   MentionQuery? _mentionQuery;
@@ -219,6 +340,16 @@ class _ChatInputBarState extends State<ChatInputBar> {
   bool _quickReplyContextVisible = false;
   int? _quickReplySendingId;
   List<BusinessQuickReplyShortcut> _quickReplies = const [];
+  int _composerRevision = 0;
+  int _aiReplyGeneration = 0;
+  int? _aiReplyWorkingTargetId;
+  bool? _aiReplyWorkingUsesExplicitTarget;
+  int? _aiReplyWorkingTargetFingerprint;
+  _AiReplyContextSnapshot? _aiReplyWorkingContextSnapshot;
+  bool _applyingAiReplyDraft = false;
+  AiReplyProvider? _activeAiReplyProvider;
+  List<AiReplyProgressPhase> _aiReplyProgressPhases = const [];
+  bool _aiReplyProgressExpanded = false;
   ChatViewModel get vm => widget.vm;
 
   bool get _canUseQuickReplies =>
@@ -288,20 +419,28 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   DateTime? _lastTyping;
   void _onTextChanged() {
+    final applyingAiReplyDraft = _applyingAiReplyDraft;
+    if (!applyingAiReplyDraft) {
+      _composerRevision++;
+      _invalidateAiReplyGeneration(clearProgress: true);
+    }
     final (text, entities) = _controller.toFormatted();
     vm.setDraft(_controller.text, formattedText: text, entities: entities);
     // setDraft doesn't notify (it would rebuild the whole chat per keystroke), so
     // rebuild just the composer here — otherwise `hasText` stays stale and the
     // send button never appears while typing.
     final hasText = _controller.text.trim().isNotEmpty;
-    if (hasText != _hasText) {
+    final aiDraftEligible = isTelegramAiDraftEligible(_controller.text);
+    if (hasText != _hasText || aiDraftEligible != _aiDraftEligible) {
       _hasText = hasText;
+      _aiDraftEligible = aiDraftEligible;
       if (hasText) {
         _replyKeyboardVisible = false;
         _quickReplyContextVisible = false;
       }
       if (mounted) setState(() {});
     }
+    if (applyingAiReplyDraft) return;
     _updateMentionSuggestions();
     _queueInlineBotResults();
     final now = DateTime.now();
@@ -450,6 +589,22 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   void _syncFromVm() {
+    final workingTargetId = _aiReplyWorkingTargetId;
+    final workingUsesExplicitTarget = _aiReplyWorkingUsesExplicitTarget;
+    final workingTargetFingerprint = _aiReplyWorkingTargetFingerprint;
+    final workingContextSnapshot = _aiReplyWorkingContextSnapshot;
+    if (workingTargetId != null &&
+        (workingUsesExplicitTarget == null ||
+            workingTargetFingerprint == null ||
+            workingContextSnapshot == null ||
+            !workingContextSnapshot.matches(vm) ||
+            !_isCurrentAiReplyTarget(
+              workingTargetId,
+              usesExplicitTarget: workingUsesExplicitTarget,
+              fingerprint: workingTargetFingerprint,
+            ))) {
+      _invalidateAiReplyGeneration(discardGeneratedDraft: true);
+    }
     final composing = _controller.value.composing;
     final editing = _focus.hasFocus || composing.isValid;
     if (!editing && vm.draft != _controller.text) {
@@ -459,6 +614,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
       );
     }
     _hasText = _controller.text.trim().isNotEmpty;
+    _aiDraftEligible = isTelegramAiDraftEligible(_controller.text);
     if (_hasText) _quickReplyContextVisible = false;
     if (mounted) setState(() {});
   }
@@ -480,6 +636,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
   @override
   void didUpdateWidget(ChatInputBar oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.vm, widget.vm)) {
+      _invalidateAiReplyGeneration(discardGeneratedDraft: true);
+    }
     if (oldWidget.quickRepliesEnabled && !widget.quickRepliesEnabled) {
       _quickReplyContextVisible = false;
     } else if (!oldWidget.quickRepliesEnabled &&
@@ -492,6 +651,15 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   @override
   void dispose() {
+    _aiReplyGeneration++;
+    if (_activeAiReplyProvider case final HostedAiReplyProvider hosted) {
+      hosted.close();
+    }
+    _activeAiReplyProvider = null;
+    _aiReplyWorkingTargetId = null;
+    _aiReplyWorkingUsesExplicitTarget = null;
+    _aiReplyWorkingTargetFingerprint = null;
+    _aiReplyWorkingContextSnapshot = null;
     vm.removeListener(_syncFromVm);
     EmojiStore.shared.removeListener(_onStore);
     StickerStore.shared.removeListener(_onStore);
@@ -928,6 +1096,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   Future<void> _sendCurrentText() async {
+    if (_aiReplyWorkingTargetId != null) return;
     if (_controller.text.trim().isEmpty) return;
     final (text, entities) = _controller.toFormatted();
     final lengthTier = telegramMessageLengthTier(text);
@@ -985,6 +1154,474 @@ class _ChatInputBarState extends State<ChatInputBar> {
     if (!mounted || result == null) return;
     _controller.setFormattedText(result.text, result.entities);
     _focus.requestFocus();
+  }
+
+  bool _isAiReplyTargetEligible(ChatMessage target) {
+    return !vm.isSecretChat &&
+        !vm.hasProtectedContent &&
+        !target.isService &&
+        !target.isContentRestricted &&
+        !target.blockedByUser &&
+        target.text.trim().isNotEmpty;
+  }
+
+  bool _canOfferAiReply(ChatMessage target, AiSettingsController? settings) {
+    if (settings?.initialized != true || !_isAiReplyTargetEligible(target)) {
+      return false;
+    }
+    return switch (settings!.replyModelCandidate.kind) {
+      AiModelCandidateKind.telegramCocoon =>
+        vm.aiCapabilities?.replySupported == true,
+      AiModelCandidateKind.applePcc ||
+      AiModelCandidateKind.appleOnDevice ||
+      AiModelCandidateKind.server => settings.isConfiguredForFeature(
+        AiFeature.reply,
+      ),
+    };
+  }
+
+  ChatMessage? _contextualAiReplyTarget() {
+    final anchorId = vm.anchoredHistory ? vm.historyAnchorMessageId : null;
+    if (anchorId != null) {
+      final anchor = vm.messages
+          .where((message) => message.id == anchorId)
+          .firstOrNull;
+      if (anchor != null) {
+        final safeAnchor =
+            anchor.id > 0 &&
+            !anchor.isService &&
+            !anchor.isContentRestricted &&
+            !anchor.blockedByUser &&
+            anchor.text.trim().isNotEmpty;
+        if (safeAnchor && (!anchor.isOutgoing || vm.isGroup)) return anchor;
+        if (!vm.isGroup) return null;
+      }
+    }
+    ChatMessage? groupFallback;
+    for (final message in vm.messages.reversed) {
+      if (message.isService) continue;
+      final safeText =
+          message.id > 0 &&
+          !message.isContentRestricted &&
+          !message.blockedByUser &&
+          message.text.trim().isNotEmpty;
+      if (safeText) {
+        groupFallback ??= message;
+        if (!message.isOutgoing) return message;
+      }
+      // In a busy group, keep looking for the newest participant message even
+      // if the account owner or an ineligible message was posted afterwards.
+      // Private chats retain the stronger "already answered" behavior.
+      if (!vm.isGroup) {
+        return null;
+      }
+    }
+    // Group and channel composers also support drafting the next message when
+    // the visible context only contains posts sent by the account owner or the
+    // currently selected sender identity.
+    return groupFallback;
+  }
+
+  ChatMessage? _currentAiReplyTarget() =>
+      vm.replyTo ?? _contextualAiReplyTarget();
+
+  bool _isCurrentAiReplyTarget(
+    int targetMessageId, {
+    required bool usesExplicitTarget,
+    required int fingerprint,
+  }) {
+    final ChatMessage? current;
+    if (usesExplicitTarget) {
+      current = vm.replyTo;
+    } else {
+      if (vm.replyTo != null) return false;
+      current = _contextualAiReplyTarget();
+    }
+    return current?.id == targetMessageId &&
+        _aiReplyTargetFingerprint(current!) == fingerprint;
+  }
+
+  int _aiReplyTargetFingerprint(ChatMessage target) => Object.hash(
+    target.id,
+    target.isOutgoing,
+    target.isService,
+    target.isContentRestricted,
+    target.blockedByUser,
+    target.senderName,
+    target.text,
+  );
+
+  bool _isCurrentAiReplyTargetWithoutFingerprint(
+    ChatMessage target, {
+    required bool usesExplicitTarget,
+  }) {
+    final fingerprint = _aiReplyTargetFingerprint(target);
+    return _isCurrentAiReplyTarget(
+      target.id,
+      usesExplicitTarget: usesExplicitTarget,
+      fingerprint: fingerprint,
+    );
+  }
+
+  void _invalidateAiReplyGeneration({
+    bool discardGeneratedDraft = false,
+    bool clearProgress = false,
+  }) {
+    final shouldClearProgress = clearProgress || discardGeneratedDraft;
+    if (_aiReplyWorkingTargetId == null &&
+        _activeAiReplyProvider == null &&
+        (!shouldClearProgress || _aiReplyProgressPhases.isEmpty)) {
+      return;
+    }
+    _aiReplyGeneration++;
+    _aiReplyWorkingTargetId = null;
+    _aiReplyWorkingUsesExplicitTarget = null;
+    _aiReplyWorkingTargetFingerprint = null;
+    _aiReplyWorkingContextSnapshot = null;
+    final activeProvider = _activeAiReplyProvider;
+    _activeAiReplyProvider = null;
+    if (activeProvider case final HostedAiReplyProvider hosted) {
+      hosted.close();
+    }
+    if (discardGeneratedDraft && _controller.text.isNotEmpty) {
+      _applyingAiReplyDraft = true;
+      try {
+        _controller.setFormattedText('', const []);
+      } finally {
+        _applyingAiReplyDraft = false;
+      }
+    }
+    if (shouldClearProgress) {
+      _aiReplyProgressPhases = const [];
+      _aiReplyProgressExpanded = false;
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _recordAiReplyProgress(
+    AiReplyProgressPhase phase, {
+    required int generation,
+  }) {
+    if (!mounted || generation != _aiReplyGeneration) return;
+    if (_aiReplyProgressPhases.contains(phase)) return;
+    final wasEmpty = _aiReplyProgressPhases.isEmpty;
+    setState(() {
+      _aiReplyProgressPhases = [..._aiReplyProgressPhases, phase];
+    });
+    if (wasEmpty) _notifyComposerGeometryChanged();
+  }
+
+  void _notifyComposerGeometryChanged() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onPanelGeometryChanged?.call();
+    });
+  }
+
+  bool _isAiReplyGenerationCurrent({
+    required int generation,
+    required ChatViewModel requestVm,
+    required AiSettingsController settings,
+    required String modelCandidateId,
+    required ChatMessage target,
+    required int targetMessageId,
+    required bool usesExplicitTarget,
+    required int targetFingerprint,
+    required int draftRevision,
+    required _AiReplyContextSnapshot contextSnapshot,
+  }) =>
+      mounted &&
+      generation == _aiReplyGeneration &&
+      identical(vm, requestVm) &&
+      settings.replyModelCandidate.id == modelCandidateId &&
+      (widget.aiReplyHistoryLoader != null || vm.canShareAiReplyContext) &&
+      _canOfferAiReply(target, settings) &&
+      _isCurrentAiReplyTarget(
+        targetMessageId,
+        usesExplicitTarget: usesExplicitTarget,
+        fingerprint: targetFingerprint,
+      ) &&
+      contextSnapshot.matches(vm) &&
+      _composerRevision == draftRevision;
+
+  bool _applyAiReplyDraft(
+    TelegramAiFormattedText draft, {
+    required int generation,
+    required ChatViewModel requestVm,
+    required AiSettingsController settings,
+    required String modelCandidateId,
+    required ChatMessage target,
+    required int targetMessageId,
+    required bool usesExplicitTarget,
+    required int targetFingerprint,
+    required int draftRevision,
+    required _AiReplyContextSnapshot contextSnapshot,
+  }) {
+    if (!_isAiReplyGenerationCurrent(
+      generation: generation,
+      requestVm: requestVm,
+      settings: settings,
+      modelCandidateId: modelCandidateId,
+      target: target,
+      targetMessageId: targetMessageId,
+      usesExplicitTarget: usesExplicitTarget,
+      targetFingerprint: targetFingerprint,
+      draftRevision: draftRevision,
+      contextSnapshot: contextSnapshot,
+    )) {
+      if (mounted && generation == _aiReplyGeneration) {
+        _invalidateAiReplyGeneration(
+          discardGeneratedDraft: _composerRevision == draftRevision,
+        );
+      }
+      return false;
+    }
+    _applyingAiReplyDraft = true;
+    try {
+      _controller.setFormattedText(draft.text, draft.entities);
+    } finally {
+      _applyingAiReplyDraft = false;
+    }
+    return true;
+  }
+
+  Future<bool> _revealCompletedAiReply(
+    TelegramAiFormattedText result, {
+    required bool Function(TelegramAiFormattedText draft) applyDraft,
+  }) async {
+    final characters = result.text.characters.toList(growable: false);
+    if (characters.length < 2) return true;
+
+    // Telegram Cocoon and Apple's native model bridge currently return one
+    // completed value rather than transport-level deltas. Reveal those replies
+    // through the same composer path so every AI Reply provider has consistent
+    // incremental input feedback. Keep the animation bounded for long replies
+    // and apply the provider's formatted entities only with the final value.
+    const maximumFrames = 48;
+    const frameDuration = Duration(milliseconds: 12);
+    final charactersPerFrame = math.max(
+      1,
+      (characters.length / maximumFrames).ceil(),
+    );
+    final buffer = StringBuffer();
+    var offset = 0;
+    while (offset < characters.length) {
+      final end = math.min(characters.length, offset + charactersPerFrame);
+      buffer.writeAll(characters.getRange(offset, end));
+      offset = end;
+      if (offset == characters.length) break;
+      if (!applyDraft(TelegramAiFormattedText(text: buffer.toString()))) {
+        return false;
+      }
+      await Future<void>.delayed(frameDuration);
+    }
+    return true;
+  }
+
+  Future<void> _generateAiReply(
+    ChatMessage target, {
+    String? requiredModelCandidateId,
+  }) async {
+    if (_aiReplyWorkingTargetId == target.id) return;
+    final usesExplicitTarget = vm.replyTo?.id == target.id;
+    if (!_isCurrentAiReplyTargetWithoutFingerprint(
+      target,
+      usesExplicitTarget: usesExplicitTarget,
+    )) {
+      showToast(context, AppStringKeys.aiReplyStale.l10n(context));
+      return;
+    }
+    final settings = context.read<AiSettingsController?>();
+    if (!_canOfferAiReply(target, settings)) {
+      showToast(context, AppStringKeys.aiReplyUnavailable.l10n(context));
+      return;
+    }
+
+    final configuration = settings!.configurationForFeature(AiFeature.reply);
+    final modelCandidateId = configuration.candidate.id;
+    if (requiredModelCandidateId != null &&
+        modelCandidateId != requiredModelCandidateId) {
+      showToast(context, AppStringKeys.aiReplyUnavailable.l10n(context));
+      return;
+    }
+    final (draftText, _) = _controller.toFormatted();
+    final AiReplyRequest request;
+    try {
+      request = AiReplyRequest.fromChatMessages(
+        chatTitle: vm.peerTitle,
+        currentUserName: vm.meName,
+        currentUserId: vm.meId,
+        currentUserUsernames: vm.meUsernames,
+        target: target,
+        visibleMessages: vm.messages,
+        isGroupChat: vm.isGroup,
+        currentDraft: draftText,
+        guidance: settings.aiReplyPrompt,
+        outputLanguageCode: Localizations.localeOf(context).toLanguageTag(),
+        contextWindowTokens: configuration.contextWindowTokens,
+        historyLoader: widget.aiReplyHistoryLoader ?? vm.loadAiReplyContext,
+      );
+    } on AiReplyException catch (error) {
+      showToast(context, error.message);
+      return;
+    }
+
+    AiReplyProvider? provider;
+    if (widget.aiReplyGenerator == null &&
+        widget.aiReplyStreamingGenerator == null) {
+      switch (configuration.candidate.kind) {
+        case AiModelCandidateKind.telegramCocoon:
+          provider = TelegramCocoonAiReplyProvider(service: vm.telegramAi);
+        case AiModelCandidateKind.applePcc:
+          provider = AppleAiReplyProvider(api: ApplePccApi());
+        case AiModelCandidateKind.appleOnDevice:
+          provider = AppleAiReplyProvider(
+            api: ApplePccApi(),
+            model: AppleAiModel.onDevice,
+          );
+        case AiModelCandidateKind.server:
+          final endpoint = configuration.endpoint;
+          if (endpoint == null || configuration.model.isEmpty) {
+            showToast(context, AppStringKeys.aiReplyUnavailable.l10n(context));
+            return;
+          }
+          provider = HostedAiReplyProvider(
+            endpoint: endpoint,
+            model: configuration.model,
+            endpointStyle: configuration.endpointStyle,
+            apiKey: configuration.apiKey,
+          );
+      }
+    }
+
+    final targetMessageId = target.id;
+    final targetFingerprint = _aiReplyTargetFingerprint(target);
+    final requestVm = vm;
+    final draftRevision = _composerRevision;
+    final initialContextSnapshot = _AiReplyContextSnapshot.capture(
+      requestVm,
+      request,
+    );
+    final generation = ++_aiReplyGeneration;
+    setState(() {
+      _aiReplyWorkingTargetId = targetMessageId;
+      _aiReplyWorkingUsesExplicitTarget = usesExplicitTarget;
+      _aiReplyWorkingTargetFingerprint = targetFingerprint;
+      _aiReplyWorkingContextSnapshot = initialContextSnapshot;
+      _activeAiReplyProvider = provider;
+      _aiReplyProgressPhases = const [
+        AiReplyProgressPhase.readingRecentMessages,
+      ];
+      _aiReplyProgressExpanded = false;
+    });
+    _notifyComposerGeometryChanged();
+    try {
+      var groundedRequest = request;
+      try {
+        groundedRequest = await request.withEarlierContext();
+      } on AiReplyPrivacyException {
+        rethrow;
+      } catch (_) {
+        groundedRequest = request.copyWith(contextExpanded: true);
+      }
+      if (!_isAiReplyGenerationCurrent(
+        generation: generation,
+        requestVm: requestVm,
+        settings: settings,
+        modelCandidateId: modelCandidateId,
+        target: target,
+        targetMessageId: targetMessageId,
+        usesExplicitTarget: usesExplicitTarget,
+        targetFingerprint: targetFingerprint,
+        draftRevision: draftRevision,
+        contextSnapshot: initialContextSnapshot,
+      )) {
+        return;
+      }
+      final contextSnapshot = _AiReplyContextSnapshot.capture(
+        requestVm,
+        groundedRequest,
+      );
+      _aiReplyWorkingContextSnapshot = contextSnapshot;
+      bool applyDraft(TelegramAiFormattedText draft) => _applyAiReplyDraft(
+        draft,
+        generation: generation,
+        requestVm: requestVm,
+        settings: settings,
+        modelCandidateId: modelCandidateId,
+        target: target,
+        targetMessageId: targetMessageId,
+        usesExplicitTarget: usesExplicitTarget,
+        targetFingerprint: targetFingerprint,
+        draftRevision: draftRevision,
+        contextSnapshot: contextSnapshot,
+      );
+
+      void onDraft(TelegramAiFormattedText draft) {
+        applyDraft(draft);
+      }
+
+      void onProgress(AiReplyProgressPhase phase) {
+        _recordAiReplyProgress(phase, generation: generation);
+      }
+
+      late final TelegramAiFormattedText result;
+      var revealCompletedResult = false;
+      final streamingGenerator = widget.aiReplyStreamingGenerator;
+      if (streamingGenerator != null) {
+        result = await streamingGenerator(
+          groundedRequest,
+          onDraft: onDraft,
+          onProgress: onProgress,
+        );
+      } else if (widget.aiReplyGenerator case final generator?) {
+        result = await generator(groundedRequest);
+        revealCompletedResult = true;
+      } else if (provider case final StreamingAiReplyProvider streaming) {
+        result = await streaming.generateStreaming(
+          groundedRequest,
+          onDraft: onDraft,
+          onProgress: onProgress,
+        );
+      } else {
+        result = await provider!.generate(groundedRequest);
+        revealCompletedResult = true;
+      }
+      onProgress(AiReplyProgressPhase.writingReply);
+      if (revealCompletedResult &&
+          !await _revealCompletedAiReply(result, applyDraft: applyDraft)) {
+        return;
+      }
+      if (!applyDraft(result)) {
+        return;
+      }
+      _focus.requestFocus();
+    } catch (error) {
+      if (mounted && generation == _aiReplyGeneration) {
+        setState(() {
+          _aiReplyProgressPhases = const [];
+          _aiReplyProgressExpanded = false;
+        });
+        _notifyComposerGeometryChanged();
+        showToast(
+          context,
+          error is AiReplyException ? error.message : error.toString(),
+        );
+      }
+      return;
+    } finally {
+      if (provider case final HostedAiReplyProvider hosted) hosted.close();
+      if (identical(_activeAiReplyProvider, provider)) {
+        _activeAiReplyProvider = null;
+      }
+      if (mounted && generation == _aiReplyGeneration) {
+        setState(() {
+          _aiReplyWorkingTargetId = null;
+          _aiReplyWorkingUsesExplicitTarget = null;
+          _aiReplyWorkingTargetFingerprint = null;
+          _aiReplyWorkingContextSnapshot = null;
+        });
+      }
+    }
   }
 
   Future<void> _showTextSendOptions() async {
@@ -1167,6 +1804,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final aiSettings = context.watch<AiSettingsController?>();
     final replyKeyboard = _activeReplyKeyboard();
     final replyKeyboardPanelVisible =
         replyKeyboard != null && _replyKeyboardVisible && !_hasText;
@@ -1191,7 +1829,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                 _mentionMenu()
               else if (_quickReplyContextVisible && _quickReplies.isNotEmpty)
                 _quickReplyContextMenu(),
-              _inputRow(replyKeyboard),
+              _inputRow(replyKeyboard, aiSettings: aiSettings),
               if (replyKeyboardPanelVisible)
                 _replyKeyboardPanel(replyKeyboard)
               else
@@ -2404,9 +3042,19 @@ class _ChatInputBarState extends State<ChatInputBar> {
     );
   }
 
-  Widget _inputRow(_ReplyKeyboard? replyKeyboard) {
+  Widget _inputRow(
+    _ReplyKeyboard? replyKeyboard, {
+    required AiSettingsController? aiSettings,
+  }) {
     final c = context.colors;
     final hasText = _hasText;
+    final replyTarget = _currentAiReplyTarget();
+    final aiReplyWorking =
+        replyTarget != null && _aiReplyWorkingTargetId == replyTarget.id;
+    final showAiReply =
+        (!hasText || aiReplyWorking) &&
+        replyTarget != null &&
+        _isAiReplyTargetEligible(replyTarget);
     final sender = vm.selectedMessageSender;
     final botMenu = vm.botMenu;
     final menuWebApp = botMenu?.isWebApp == true ? botMenu : null;
@@ -2449,245 +3097,528 @@ class _ChatInputBarState extends State<ChatInputBar> {
             ),
           ],
           Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: c.searchFill,
-                borderRadius: BorderRadius.circular(18),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-              child: Row(
-                children: [
-                  if (vm.canChooseMessageSender && sender != null) ...[
-                    GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: _showSenderPicker,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          PhotoAvatar(
-                            title: sender.title,
-                            photo: sender.photo,
-                            size: 28,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (_aiReplyProgressPhases.isNotEmpty) ...[
+                  _aiReplyProgressDisclosure(isWorking: aiReplyWorking),
+                  const SizedBox(height: 4),
+                ],
+                Container(
+                  key: const ValueKey('composerTextInputBox'),
+                  decoration: BoxDecoration(
+                    color: c.searchFill,
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 9,
+                  ),
+                  child: Row(
+                    crossAxisAlignment: hasText
+                        ? CrossAxisAlignment.end
+                        : CrossAxisAlignment.center,
+                    children: [
+                      if (vm.canChooseMessageSender && sender != null) ...[
+                        GestureDetector(
+                          key: const ValueKey('composerSenderPicker'),
+                          behavior: HitTestBehavior.opaque,
+                          onTap: _showSenderPicker,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              PhotoAvatar(
+                                title: sender.title,
+                                photo: sender.photo,
+                                size: 28,
+                              ),
+                              const SizedBox(width: 2),
+                              AppIcon(
+                                HeroAppIcons.chevronDown,
+                                size: 16,
+                                color: c.textTertiary,
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 2),
-                          AppIcon(
-                            HeroAppIcons.chevronDown,
-                            size: 16,
-                            color: c.textTertiary,
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                  ],
-                  Expanded(
-                    child: Shortcuts(
-                      shortcuts: const {
-                        SingleActivator(LogicalKeyboardKey.enter):
-                            _SendComposerIntent(),
-                        SingleActivator(LogicalKeyboardKey.numpadEnter):
-                            _SendComposerIntent(),
-                      },
-                      child: Actions(
-                        actions: {
-                          PasteTextIntent: CallbackAction<PasteTextIntent>(
-                            onInvoke: (_) {
-                              unawaited(_handlePaste());
-                              return null;
-                            },
-                          ),
-                          _SendComposerIntent:
-                              CallbackAction<_SendComposerIntent>(
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Expanded(
+                        child: Shortcuts(
+                          shortcuts: const {
+                            SingleActivator(LogicalKeyboardKey.enter):
+                                _SendComposerIntent(),
+                            SingleActivator(LogicalKeyboardKey.numpadEnter):
+                                _SendComposerIntent(),
+                          },
+                          child: Actions(
+                            actions: {
+                              PasteTextIntent: CallbackAction<PasteTextIntent>(
                                 onInvoke: (_) {
-                                  unawaited(_sendCurrentText());
+                                  unawaited(_handlePaste());
                                   return null;
                                 },
                               ),
-                        },
-                        child: TextField(
-                          controller: _controller,
-                          focusNode: _focus,
-                          onTap: _handleEmptyInputTap,
-                          minLines: 1,
-                          maxLines: 4,
-                          keyboardType: TextInputType.multiline,
-                          textInputAction: Platform.isIOS
-                              ? TextInputAction.newline
-                              : TextInputAction.send,
-                          onSubmitted: Platform.isIOS
-                              ? null
-                              : (_) => unawaited(_sendCurrentText()),
-                          style: TextStyle(fontSize: 16, color: c.textPrimary),
-                          contentInsertionConfiguration:
-                              ContentInsertionConfiguration(
-                                allowedMimeTypes: _imageMimeTypes,
-                                onContentInserted: _handleInsertedContent,
+                              _SendComposerIntent:
+                                  CallbackAction<_SendComposerIntent>(
+                                    onInvoke: (_) {
+                                      unawaited(_sendCurrentText());
+                                      return null;
+                                    },
+                                  ),
+                            },
+                            child: TextField(
+                              controller: _controller,
+                              focusNode: _focus,
+                              onTap: _handleEmptyInputTap,
+                              minLines: 1,
+                              maxLines: 4,
+                              keyboardType: TextInputType.multiline,
+                              textInputAction: Platform.isIOS
+                                  ? TextInputAction.newline
+                                  : TextInputAction.send,
+                              onSubmitted: Platform.isIOS
+                                  ? null
+                                  : (_) => unawaited(_sendCurrentText()),
+                              style: TextStyle(
+                                fontSize: 15,
+                                color: c.textPrimary,
                               ),
-                          contextMenuBuilder:
-                              (
-                                BuildContext context,
-                                EditableTextState editableTextState,
-                              ) {
-                                ContextMenuButtonItem? originalPaste;
-                                final items = <ContextMenuButtonItem>[];
-                                for (final item
-                                    in editableTextState
-                                        .contextMenuButtonItems) {
-                                  if (item.type ==
-                                      ContextMenuButtonType.paste) {
-                                    originalPaste = item;
-                                  } else {
-                                    items.add(item);
-                                  }
-                                }
-                                final paste = ContextMenuButtonItem(
-                                  type: ContextMenuButtonType.paste,
-                                  label:
-                                      originalPaste?.label ??
-                                      AppStringKeys
-                                          .accountBackupLoadPyrogramPaste
-                                          .l10n(context),
-                                  onPressed: () =>
-                                      unawaited(_handlePaste(originalPaste)),
-                                );
-                                final copyIndex = items.indexWhere(
-                                  (item) =>
-                                      item.type == ContextMenuButtonType.copy,
-                                );
-                                final pasteIndex = copyIndex < 0
-                                    ? 0
-                                    : copyIndex + 1;
-                                items.insert(pasteIndex, paste);
-                                final selection = _controller.selection;
-                                if (selection.isValid &&
-                                    !selection.isCollapsed) {
-                                  items.insert(
-                                    pasteIndex + 1,
-                                    ContextMenuButtonItem(
-                                      label: AppStringKeys.composerFormat.l10n(
-                                        context,
-                                      ),
+                              contentInsertionConfiguration:
+                                  ContentInsertionConfiguration(
+                                    allowedMimeTypes: _imageMimeTypes,
+                                    onContentInserted: _handleInsertedContent,
+                                  ),
+                              contextMenuBuilder:
+                                  (
+                                    BuildContext context,
+                                    EditableTextState editableTextState,
+                                  ) {
+                                    ContextMenuButtonItem? originalPaste;
+                                    final items = <ContextMenuButtonItem>[];
+                                    for (final item
+                                        in editableTextState
+                                            .contextMenuButtonItems) {
+                                      if (item.type ==
+                                          ContextMenuButtonType.paste) {
+                                        originalPaste = item;
+                                      } else {
+                                        items.add(item);
+                                      }
+                                    }
+                                    final paste = ContextMenuButtonItem(
+                                      type: ContextMenuButtonType.paste,
+                                      label:
+                                          originalPaste?.label ??
+                                          AppStringKeys
+                                              .accountBackupLoadPyrogramPaste
+                                              .l10n(context),
                                       onPressed: () => unawaited(
-                                        _showComposerFormatMenu(
-                                          editableTextState,
-                                        ),
+                                        _handlePaste(originalPaste),
                                       ),
-                                    ),
-                                  );
-                                }
-                                return AdaptiveTextSelectionToolbar.buttonItems(
-                                  anchors: editableTextState.contextMenuAnchors,
-                                  buttonItems: items,
-                                );
-                              },
-                          decoration: InputDecoration(
-                            hintText: vm.inputPlaceholder,
-                            border: InputBorder.none,
-                            isCollapsed: true,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (!hasText && replyKeyboard != null)
-                    Semantics(
-                      button: true,
-                      label: _replyKeyboardVisible
-                          ? 'Hide bot keyboard'
-                          : 'Show bot keyboard',
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: _toggleReplyKeyboard,
-                        child: SizedBox(
-                          width: 32,
-                          height: 24,
-                          child: Center(
-                            child: AppIcon(
-                              _replyKeyboardVisible
-                                  ? HeroAppIcons.chevronDown
-                                  : HeroAppIcons.tableCells,
-                              size: _replyKeyboardVisible ? 22 : 23,
-                              color: c.textSecondary,
+                                    );
+                                    final copyIndex = items.indexWhere(
+                                      (item) =>
+                                          item.type ==
+                                          ContextMenuButtonType.copy,
+                                    );
+                                    final pasteIndex = copyIndex < 0
+                                        ? 0
+                                        : copyIndex + 1;
+                                    items.insert(pasteIndex, paste);
+                                    final selection = _controller.selection;
+                                    if (selection.isValid &&
+                                        !selection.isCollapsed) {
+                                      items.insert(
+                                        pasteIndex + 1,
+                                        ContextMenuButtonItem(
+                                          label: AppStringKeys.composerFormat
+                                              .l10n(context),
+                                          onPressed: () => unawaited(
+                                            _showComposerFormatMenu(
+                                              editableTextState,
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                    return AdaptiveTextSelectionToolbar.buttonItems(
+                                      anchors:
+                                          editableTextState.contextMenuAnchors,
+                                      buttonItems: items,
+                                    );
+                                  },
+                              decoration: InputDecoration(
+                                hintText: AppStringKeys
+                                    .chatMessageInputPlaceholder
+                                    .l10n(context),
+                                border: InputBorder.none,
+                                isCollapsed: true,
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                ],
-              ),
+                      if (!hasText && replyKeyboard != null)
+                        Semantics(
+                          button: true,
+                          label: _replyKeyboardVisible
+                              ? 'Hide bot keyboard'
+                              : 'Show bot keyboard',
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: _toggleReplyKeyboard,
+                            child: SizedBox(
+                              width: 32,
+                              height: 24,
+                              child: Center(
+                                child: AppIcon(
+                                  _replyKeyboardVisible
+                                      ? HeroAppIcons.chevronDown
+                                      : HeroAppIcons.tableCells,
+                                  size: _replyKeyboardVisible ? 22 : 23,
+                                  color: c.textSecondary,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (!hasText && vm.messageAutoDeleteTime > 0) ...[
+                        const SizedBox(width: 4),
+                        _autoDeleteInputIndicator(),
+                      ],
+                      if (showAiReply) ...[
+                        const SizedBox(width: 4),
+                        _aiReplyInputButton(replyTarget),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
           if (hasText) ...[
             const SizedBox(width: 8),
-            if (vm.canUseAiComposition &&
-                _controller.text.split('\n').length > 3) ...[
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => unawaited(_openTelegramAiEditor()),
-                child: Container(
-                  width: 36,
-                  height: 36,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: c.searchFill,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: AppTheme.brand.withValues(alpha: 0.45),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (vm.canUseAiComposition && _aiDraftEligible) ...[
+                  Semantics(
+                    button: true,
+                    label: AppStringKeys.telegramAiEditorTelegramAIEditor.l10n(
+                      context,
+                    ),
+                    child: GestureDetector(
+                      key: const ValueKey('composerAiPrefixButton'),
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => unawaited(_openTelegramAiEditor()),
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: AppTheme.brand.withValues(alpha: 0.10),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: AppTheme.brand.withValues(alpha: 0.34),
+                            width: 0.75,
+                          ),
+                        ),
+                        child: AppIcon(
+                          HeroAppIcons.palette,
+                          key: const ValueKey('composerAiStyleIcon'),
+                          size: 19,
+                          color: AppTheme.brand,
+                        ),
+                      ),
                     ),
                   ),
-                  child: Text(
-                    'AI',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.brand,
+                  const SizedBox(height: 6),
+                ],
+                GestureDetector(
+                  key: const ValueKey('composerSendButton'),
+                  onTap: _aiReplyWorkingTargetId != null
+                      ? null
+                      : () => unawaited(_sendCurrentText()),
+                  onLongPress: _aiReplyWorkingTargetId != null
+                      ? null
+                      : () => unawaited(_showTextSendOptions()),
+                  child: Container(
+                    width: vm.requiresPaidMessage ? 58 : 36,
+                    height: 36,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: _aiReplyWorkingTargetId != null
+                          ? AppTheme.brand.withValues(alpha: 0.42)
+                          : AppTheme.brand,
+                      shape: BoxShape.circle,
                     ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-            ],
-            GestureDetector(
-              onTap: () => unawaited(_sendCurrentText()),
-              onLongPress: () => unawaited(_showTextSendOptions()),
-              child: Container(
-                width: vm.requiresPaidMessage ? 58 : 36,
-                height: 36,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: AppTheme.brand,
-                  shape: BoxShape.circle,
-                ),
-                child: vm.requiresPaidMessage
-                    ? Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const AppIcon(
-                            HeroAppIcons.solidStar,
-                            size: 14,
+                    child: vm.requiresPaidMessage
+                        ? Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const AppIcon(
+                                HeroAppIcons.solidStar,
+                                size: 14,
+                                color: Colors.white,
+                              ),
+                              const SizedBox(width: 3),
+                              Text(
+                                'x${vm.paidMessageStarCount}',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
+                          )
+                        : const AppIcon(
+                            HeroAppIcons.solidPaperPlane,
+                            size: 17,
                             color: Colors.white,
                           ),
-                          const SizedBox(width: 3),
-                          Text(
-                            'x${vm.paidMessageStarCount}',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ],
-                      )
-                    : const AppIcon(
-                        HeroAppIcons.solidPaperPlane,
-                        size: 17,
-                        color: Colors.white,
-                      ),
-              ),
+                  ),
+                ),
+              ],
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _autoDeleteInputIndicator() {
+    final label = AppLocalizations.of(context).t(
+      AppStringKeys.chatAutoDeleteCountdown,
+      {'value1': TDParse.formatDuration(vm.messageAutoDeleteTime)},
+    );
+    return Semantics(
+      key: const ValueKey('composerAutoDeleteIndicator'),
+      button: true,
+      label: label,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => showToast(context, label),
+        child: SizedBox(
+          width: 28,
+          height: 28,
+          child: Center(
+            child: AppIcon(
+              HeroAppIcons.stopwatch,
+              size: 18,
+              color: context.colors.textTertiary,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _aiReplyProgressDisclosure({required bool isWorking}) {
+    final c = context.colors;
+    final expanded = _aiReplyProgressExpanded;
+    return AnimatedSize(
+      key: const ValueKey('composerAiReplyProcess'),
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topCenter,
+      onEnd: () => widget.onPanelGeometryChanged?.call(),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Color.alphaBlend(
+            AppTheme.brand.withValues(alpha: 0.06),
+            c.searchFill,
+          ),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: AppTheme.brand.withValues(alpha: 0.18),
+            width: 0.6,
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Semantics(
+              button: true,
+              expanded: expanded,
+              label: AppStringKeys.aiReplyProcessTitle.l10n(context),
+              value: isWorking
+                  ? AppStringKeys.topicChatLoading.l10n(context)
+                  : null,
+              child: GestureDetector(
+                key: const ValueKey('composerAiReplyProcessToggle'),
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  setState(() {
+                    _aiReplyProgressExpanded = !_aiReplyProgressExpanded;
+                  });
+                  _notifyComposerGeometryChanged();
+                },
+                child: SizedBox(
+                  height: 34,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: Row(
+                      children: [
+                        ExcludeSemantics(
+                          child: AppIcon(
+                            HeroAppIcons.wandMagicSparkles,
+                            size: 14,
+                            color: AppTheme.brand,
+                          ),
+                        ),
+                        const SizedBox(width: 7),
+                        Expanded(
+                          child: Text(
+                            AppStringKeys.aiReplyProcessTitle.l10n(context),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 13,
+                              height: 1.1,
+                              fontWeight: FontWeight.w600,
+                              color: c.textPrimary,
+                            ),
+                          ),
+                        ),
+                        if (isWorking) ...[
+                          const SizedBox(width: 8),
+                          ExcludeSemantics(
+                            child: AppActivityIndicator(
+                              size: 13,
+                              color: AppTheme.brand,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(width: 7),
+                        ExcludeSemantics(
+                          child: AppIcon(
+                            expanded
+                                ? HeroAppIcons.chevronUp
+                                : HeroAppIcons.chevronDown,
+                            size: 15,
+                            color: c.textTertiary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            if (expanded) ...[
+              Container(height: 0.6, color: c.divider.withValues(alpha: 0.55)),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 132),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 9),
+                  child: Column(
+                    key: const ValueKey('composerAiReplyProcessDetails'),
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (final (index, phase)
+                          in _aiReplyProgressPhases.indexed) ...[
+                        if (index > 0) const SizedBox(height: 7),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 5,
+                              height: 5,
+                              margin: const EdgeInsets.only(top: 5, right: 8),
+                              decoration: BoxDecoration(
+                                color: AppTheme.brand,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            Expanded(
+                              child: Text(
+                                _aiReplyProgressLabel(phase),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  height: 1.35,
+                                  color: c.textSecondary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _aiReplyProgressLabel(AiReplyProgressPhase phase) => switch (phase) {
+    AiReplyProgressPhase.readingRecentMessages =>
+      AppStringKeys.aiReplyProcessReading.l10n(context),
+    AiReplyProgressPhase.checkingEarlierContext =>
+      AppStringKeys.aiReplyProcessChecking.l10n(context),
+    AiReplyProgressPhase.writingReply =>
+      AppStringKeys.aiReplyProcessWriting.l10n(context),
+  };
+
+  Future<void> _showAiReplyModelPicker(ChatMessage target) async {
+    if (_aiReplyWorkingTargetId != null) return;
+    final settings = context.read<AiSettingsController?>();
+    if (settings?.initialized != true) {
+      showToast(context, AppStringKeys.aiReplyUnavailable.l10n(context));
+      return;
+    }
+    final candidate = await showAiFeatureModelPicker(
+      context,
+      settings: settings!,
+      feature: AiFeature.reply,
+    );
+    if (!mounted || candidate == null) return;
+    await _generateAiReply(target, requiredModelCandidateId: candidate.id);
+  }
+
+  Widget _aiReplyInputButton(ChatMessage target) {
+    final working = _aiReplyWorkingTargetId == target.id;
+    return Semantics(
+      button: true,
+      liveRegion: working,
+      label: working
+          ? AppStringKeys.confirmCancel.l10n(context)
+          : AppStringKeys.aiReplyAction.l10n(context),
+      value: working ? AppStringKeys.topicChatLoading.l10n(context) : null,
+      child: GestureDetector(
+        key: const ValueKey('composerAiReplyButton'),
+        behavior: HitTestBehavior.opaque,
+        onTap: working
+            ? () => _invalidateAiReplyGeneration(clearProgress: true)
+            : () => unawaited(_generateAiReply(target)),
+        onLongPress: working
+            ? null
+            : () => unawaited(_showAiReplyModelPicker(target)),
+        child: SizedBox(
+          width: 32,
+          height: 28,
+          child: Center(
+            child: working
+                ? const ExcludeSemantics(
+                    child: _AiReplyThinkingIndicator(
+                      key: ValueKey('composerAiReplyProgress'),
+                    ),
+                  )
+                : AppIcon(
+                    HeroAppIcons.wandMagicSparkles,
+                    size: 19,
+                    color: AppTheme.brand,
+                  ),
+          ),
+        ),
       ),
     );
   }
@@ -4720,6 +5651,87 @@ class _ChatInputBarState extends State<ChatInputBar> {
     StickerStore.shared.loadIfNeeded();
     EmojiStore.shared.loadIfNeeded();
   }
+}
+
+class _AiReplyThinkingIndicator extends StatefulWidget {
+  const _AiReplyThinkingIndicator({super.key});
+
+  @override
+  State<_AiReplyThinkingIndicator> createState() =>
+      _AiReplyThinkingIndicatorState();
+}
+
+class _AiReplyThinkingIndicatorState extends State<_AiReplyThinkingIndicator>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _animation = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _animation.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _animation,
+    builder: (context, _) {
+      final pulse = (math.sin(_animation.value * math.pi * 2) + 1) / 2;
+      return Transform.scale(
+        scale: 0.96 + pulse * 0.05,
+        child: SizedBox(
+          width: 24,
+          height: 24,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: AppTheme.brand.withValues(alpha: 0.10 + pulse * 0.06),
+              border: Border.all(
+                color: AppTheme.brand.withValues(alpha: 0.24),
+                width: 0.75,
+              ),
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                AppIcon(
+                  HeroAppIcons.wandMagicSparkles,
+                  size: 14,
+                  color: AppTheme.brand,
+                ),
+                Positioned.fill(
+                  child: Transform.rotate(
+                    key: const ValueKey('composerAiReplyOrbit'),
+                    angle: _animation.value * math.pi * 2,
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      child: Container(
+                        width: 5,
+                        height: 5,
+                        margin: const EdgeInsets.only(top: 1),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: AppTheme.brand,
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppTheme.brand.withValues(alpha: 0.36),
+                              blurRadius: 3,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
 }
 
 class _RelaySendingOverlay extends StatefulWidget {

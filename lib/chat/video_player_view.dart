@@ -33,10 +33,31 @@ import 'forward_options.dart';
 import 'video_playback_preferences.dart';
 import 'video_playback_queue.dart';
 
-class _TdVideoStreamServer {
-  _TdVideoStreamServer(this.fileId);
+typedef TdVideoStreamQuery =
+    Future<Map<String, dynamic>> Function(Map<String, dynamic> request);
+
+/// A loopback range server for partially downloaded TDLib videos.
+///
+/// The class is public only so its HTTP behavior can be exercised without a
+/// native media player in tests. App code should treat it as an implementation
+/// detail of [VideoPlayerView].
+@visibleForTesting
+class TdVideoStreamServer {
+  TdVideoStreamServer(
+    this.fileId, {
+    TdVideoStreamQuery? query,
+    int maxResponseBytes = _defaultMaxResponseBytes,
+    this.rangeWaitTimeout = const Duration(seconds: 45),
+    this.rangePollInterval = const Duration(milliseconds: 100),
+  }) : assert(maxResponseBytes > 0),
+       _query = query ?? TdClient.shared.query,
+       _maxResponseBytes = maxResponseBytes;
 
   final int fileId;
+  final TdVideoStreamQuery _query;
+  final int _maxResponseBytes;
+  final Duration rangeWaitTimeout;
+  final Duration rangePollInterval;
   HttpServer? _server;
   String? _path;
   int _total = 0;
@@ -47,34 +68,25 @@ class _TdVideoStreamServer {
   Future<void> _downloadQueue = Future<void>.value();
 
   static const _chunkSize = 2 * 1024 * 1024;
-  static const _streamChunkSize = 512 * 1024;
+  static const _defaultMaxResponseBytes = 2 * 1024 * 1024;
   static const _nativeMetadataChunkSize = 4 * 1024 * 1024;
 
   Future<Uri?> start() async {
     try {
-      final file = await TdClient.shared.query({
-        '@type': 'getFile',
-        'file_id': fileId,
-      });
+      final file = await _query({'@type': 'getFile', 'file_id': fileId});
       _updateFileInfo(file);
     } catch (_) {}
 
     if (_path == null || _path!.isEmpty || _total <= 0) {
-      await _startContinuousDownload(0);
+      await _primePlaybackRange(0, _chunkSize);
     }
     if (_total <= 0) {
       try {
-        final file = await TdClient.shared.query({
-          '@type': 'getFile',
-          'file_id': fileId,
-        });
+        final file = await _query({'@type': 'getFile', 'file_id': fileId});
         _updateFileInfo(file);
       } catch (_) {}
     }
     if (_total <= 0) return null;
-    if (!_downloadComplete && _continuousDownloadOffset == null) {
-      await _startContinuousDownload(0);
-    }
 
     _server = await HttpServer.bind(
       InternetAddress.loopbackIPv4,
@@ -112,6 +124,25 @@ class _TdVideoStreamServer {
     unawaited(_startContinuousDownload(0));
   }
 
+  /// Creates TDLib's partial file using a bounded request. Keeping the first
+  /// request finite is important when transfer boost is enabled: an unlimited
+  /// download can have many large parts in flight, and changing that same
+  /// download to a playback range forces TDLib to cancel those parts before it
+  /// can serve the player.
+  Future<void> _primePlaybackRange(int offset, int length) async {
+    try {
+      final file = await _query({
+        '@type': 'downloadFile',
+        'file_id': fileId,
+        'priority': 32,
+        'offset': offset,
+        'limit': length,
+        'synchronous': false,
+      });
+      _updateFileInfo(file);
+    } catch (_) {}
+  }
+
   void _updateFileInfo(Map<String, dynamic> file) {
     final expected = file.integer('expected_size') ?? 0;
     final size = file.integer('size') ?? 0;
@@ -137,7 +168,7 @@ class _TdVideoStreamServer {
     if (_downloadComplete) return;
     _continuousDownloadOffset = offset;
     try {
-      final file = await TdClient.shared.query({
+      final file = await _query({
         '@type': 'downloadFile',
         'file_id': fileId,
         'priority': 32,
@@ -154,6 +185,13 @@ class _TdVideoStreamServer {
   }
 
   Future<void> _handleRequest(HttpRequest request) async {
+    var requestFinished = false;
+    unawaited(
+      request.response.done.then<void>(
+        (_) => requestFinished = true,
+        onError: (_, _) => requestFinished = true,
+      ),
+    );
     try {
       if (request.method != 'GET' && request.method != 'HEAD') {
         request.response.statusCode = HttpStatus.methodNotAllowed;
@@ -181,28 +219,73 @@ class _TdVideoStreamServer {
         return;
       }
       final (start, end) = range ?? (0, _total - 1);
-      final partial = range != null;
       if (request.method == 'HEAD') {
-        _writeRangeHeaders(request.response, start, end, partial);
+        if (range == null) {
+          _writeRangeHeaders(request.response, start, end, false);
+        } else {
+          final boundedEnd = _boundedEnd(start, end);
+          _writeRangeHeaders(request.response, start, boundedEnd, true);
+        }
         await request.response.close();
         return;
       }
 
-      await _streamRange(request, start, end, partial: partial);
+      final boundedEnd = _boundedEnd(start, end);
+      final partial = range != null || boundedEnd < _total - 1;
+      final bytes = await _loadRange(
+        start,
+        boundedEnd,
+        isCancelled: () => requestFinished,
+      );
+      if (requestFinished) return;
+      if (bytes == null) {
+        await _closeEmptyResponse(
+          request.response,
+          HttpStatus.serviceUnavailable,
+          retryAfter: const Duration(seconds: 1),
+        );
+        return;
+      }
+      _writeRangeHeaders(request.response, start, boundedEnd, partial);
+      request.response.add(bytes);
+      await request.response.close();
     } catch (_) {
       // The player may cancel a range request after headers were sent. Do not
       // attempt to mutate that response again; just finish it if it is open.
       try {
         request.response.statusCode = HttpStatus.internalServerError;
-      } on StateError {
+        request.response.contentLength = 0;
+      } catch (_) {
         // Headers were already sent.
       }
       try {
         await request.response.close();
-      } on StateError {
+      } catch (_) {
         // The client already closed the response.
       }
     }
+  }
+
+  int _boundedEnd(int start, int requestedEnd) => math.min(
+    requestedEnd,
+    math.min(_total - 1, start + _maxResponseBytes - 1),
+  );
+
+  Future<void> _closeEmptyResponse(
+    HttpResponse response,
+    int statusCode, {
+    Duration? retryAfter,
+  }) async {
+    response
+      ..statusCode = statusCode
+      ..contentLength = 0;
+    if (retryAfter != null) {
+      response.headers.set(
+        HttpHeaders.retryAfterHeader,
+        retryAfter.inSeconds.toString(),
+      );
+    }
+    await response.close();
   }
 
   void _writeRangeHeaders(
@@ -222,32 +305,24 @@ class _TdVideoStreamServer {
     }
   }
 
-  /// Delivers exactly the range advertised in the response header. AVFoundation
-  /// validates it strictly, so a smaller response must never be used as a
-  /// shortcut for a larger requested range.
-  Future<void> _streamRange(
-    HttpRequest request,
+  /// Loads the complete bounded response before committing its headers.
+  /// AVFoundation validates `Content-Length` strictly, so an unavailable or
+  /// truncated TDLib range must become an empty retryable response rather than
+  /// a short successful body.
+  Future<List<int>?> _loadRange(
     int start,
     int end, {
-    required bool partial,
+    required bool Function() isCancelled,
   }) async {
-    _writeRangeHeaders(request.response, start, end, partial);
-    var offset = start;
-    while (offset <= end) {
-      final chunkEnd = math.min(end, offset + _streamChunkSize - 1);
-      final ok = await _ensureRange(offset, chunkEnd);
-      if (!ok || _path == null) {
-        throw const HttpException('Video bytes are not available');
-      }
-      final bytes = await _readRange(offset, chunkEnd);
-      if (bytes.length != chunkEnd - offset + 1) {
-        throw const HttpException('Video range was only partially downloaded');
-      }
-      request.response.add(bytes);
-      await request.response.flush();
-      offset += bytes.length;
+    if (isCancelled() ||
+        !await _ensureRange(start, end, isCancelled: isCancelled) ||
+        isCancelled() ||
+        _path == null) {
+      return null;
     }
-    await request.response.close();
+    final bytes = await _readRange(start, end);
+    if (isCancelled() || bytes.length != end - start + 1) return null;
+    return bytes;
   }
 
   (int, int)? _requestedRange(String header) {
@@ -260,7 +335,7 @@ class _TdVideoStreamServer {
     if (parts.first.isEmpty) {
       final suffixLength = int.tryParse(parts[1]) ?? 0;
       if (suffixLength <= 0) return null;
-      start = math.max(0, _total - suffixLength);
+      start = math.max(0, _total - math.min(suffixLength, _maxResponseBytes));
       requestedEnd = _total - 1;
     } else {
       start = int.tryParse(parts.first) ?? -1;
@@ -276,7 +351,12 @@ class _TdVideoStreamServer {
     return (start, end);
   }
 
-  Future<bool> _ensureRange(int start, int end) async {
+  Future<bool> _ensureRange(
+    int start,
+    int end, {
+    bool Function()? isCancelled,
+  }) async {
+    if (isCancelled?.call() == true) return false;
     if (await _rangeIsReadable(start, end)) return true;
 
     final readableEnd = _downloadOffset + _downloadedPrefixSize - 1;
@@ -286,24 +366,21 @@ class _TdVideoStreamServer {
         continuousOffset <= start &&
         start <= readableEnd + _chunkSize;
     if (continuousDownloadCanReachRange &&
-        await _waitForReadableRange(start, end)) {
+        await _waitForReadableRange(start, end, isCancelled: isCancelled)) {
       return true;
     }
 
+    if (isCancelled?.call() == true) return false;
     final length = end - start + 1;
     try {
       final file = await _downloadPlaybackRange(start, length);
       if (file != null) _updateFileInfo(file);
       if (_path == null || _path!.isEmpty) {
-        await _startContinuousDownload(start);
+        await _primePlaybackRange(start, length);
       }
-      final readable = await _waitForReadableRange(start, end);
-      if (!_downloadComplete && start != 0) {
-        unawaited(_startContinuousDownload(0));
-      }
-      return readable;
+      return _waitForReadableRange(start, end, isCancelled: isCancelled);
     } catch (_) {
-      return _waitForReadableRange(start, end);
+      return _waitForReadableRange(start, end, isCancelled: isCancelled);
     }
   }
 
@@ -311,16 +388,14 @@ class _TdVideoStreamServer {
     final task = _downloadQueue.then((_) async {
       _continuousDownloadOffset = null;
       try {
-        return await TdClient.shared
-            .query({
-              '@type': 'downloadFile',
-              'file_id': fileId,
-              'priority': 32,
-              'offset': offset,
-              'limit': length,
-              'synchronous': true,
-            })
-            .timeout(const Duration(seconds: 45));
+        return await _query({
+          '@type': 'downloadFile',
+          'file_id': fileId,
+          'priority': 32,
+          'offset': offset,
+          'limit': length,
+          'synchronous': true,
+        }).timeout(const Duration(seconds: 45));
       } catch (_) {
         return null;
       }
@@ -329,11 +404,16 @@ class _TdVideoStreamServer {
     return task;
   }
 
-  Future<bool> _waitForReadableRange(int start, int end) async {
-    final deadline = DateTime.now().add(const Duration(seconds: 45));
+  Future<bool> _waitForReadableRange(
+    int start,
+    int end, {
+    bool Function()? isCancelled,
+  }) async {
+    final deadline = DateTime.now().add(rangeWaitTimeout);
     while (DateTime.now().isBefore(deadline)) {
+      if (isCancelled?.call() == true) return false;
       if (await _rangeIsReadable(start, end)) return true;
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await Future<void>.delayed(rangePollInterval);
     }
     return false;
   }
@@ -341,7 +421,7 @@ class _TdVideoStreamServer {
   Future<bool> _rangeIsReadable(int start, int end) async {
     if (_downloadComplete) return true;
     try {
-      final prefix = await TdClient.shared.query({
+      final prefix = await _query({
         '@type': 'getFileDownloadedPrefixSize',
         'file_id': fileId,
         'offset': start,
@@ -374,6 +454,8 @@ enum VideoPlayerPresentation { fullscreen, embedded, pictureInPicture }
 enum VideoDisplayMode { fullscreen, pictureInPicture, split }
 
 enum _PlayerGesture { brightness, volume, seek, changeVideo, skipTenSeconds }
+
+enum _PlayerGestureSide { left, right }
 
 class _VideoControlsLayout {
   const _VideoControlsLayout({
@@ -534,7 +616,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   DateTime? _lastProgressAt;
   double _downloadSpeed = 0;
   int _lastSavedPositionMs = 0;
-  _TdVideoStreamServer? _streamServer;
+  TdVideoStreamServer? _streamServer;
   bool _openedCompletedLocalFile = false;
   bool _systemPiPHandoff = false;
   bool _systemPiPUsesActivePlayer = false;
@@ -544,6 +626,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   int _lastSystemPiPSyncMs = -1;
   bool _wakelockActive = false;
   _PlayerGesture? _activeGesture;
+  _PlayerGestureSide? _activeGestureSide;
   Offset? _gestureOrigin;
   double _gestureStartValue = 0;
   double _gestureValue = 0;
@@ -553,7 +636,12 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   int _gestureNavigationDelta = 0;
   VideoHorizontalSwipeAction _horizontalSwipeAction =
       VideoHorizontalSwipeAction.adjustProgress;
+  VideoVerticalSwipeAction _leftVerticalSwipeAction =
+      VideoVerticalSwipeAction.brightness;
+  VideoVerticalSwipeAction _rightVerticalSwipeAction =
+      VideoVerticalSwipeAction.volume;
   VideoCompletionAction _completionAction = VideoCompletionAction.prompt;
+  late final Future<PlayerBrightnessSession?> _brightnessSession;
   bool _completionHandled = false;
   bool _showCompletionPrompt = false;
   final GlobalKey _scrubberKey = GlobalKey(debugLabel: 'video-scrubber');
@@ -578,6 +666,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   @override
   void initState() {
     super.initState();
+    _brightnessSession = PlayerBrightnessSession.capture();
     if (widget.initialMuted) _volume = 0;
     unawaited(_loadPlaybackPreferences());
     _load();
@@ -588,6 +677,8 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     if (!mounted) return;
     setState(() {
       _horizontalSwipeAction = preferences.horizontalSwipeAction;
+      _leftVerticalSwipeAction = preferences.leftVerticalSwipeAction;
+      _rightVerticalSwipeAction = preferences.rightVerticalSwipeAction;
       _completionAction = preferences.completionAction;
     });
   }
@@ -643,7 +734,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       if (initialized || !mounted) return;
       _openedCompletedLocalFile = false;
     }
-    final server = _TdVideoStreamServer(widget.video.id);
+    final server = TdVideoStreamServer(widget.video.id);
     _streamServer = server;
     final uri = await server.start();
     if (!mounted) {
@@ -796,6 +887,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         speed: _speed,
         muted: _volume <= 0.01,
         playing: c.value.isPlaying,
+        videoSize: c.value.size,
       ),
     );
   }
@@ -988,6 +1080,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         speed: _speed,
         muted: _volume <= 0.01,
         playing: c.value.isPlaying,
+        videoSize: c.value.size,
       );
     }
     if (!started) {
@@ -1009,6 +1102,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         speed: _speed,
         muted: _volume <= 0.01,
         playing: c.value.isPlaying,
+        videoSize: c.value.size,
         playerId: c.fvpPlayerId,
         onStop: () async {
           if (SystemPictureInPicture.usesActivePlayer(id!)) {
@@ -1027,6 +1121,12 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         showToast(context, AppStringKeys.videoPlayerPictureInPictureFailed);
       }
       return false;
+    }
+    if (SystemPictureInPicture.keepsFlutterPlayerInActivity) {
+      // Android PiP hosts this Activity. Keep the Flutter route and its video
+      // texture mounted so the system captures the active player, not chat.
+      if (mounted) setState(() => _controlsVisible = false);
+      return true;
     }
     _systemPiPUsesActivePlayer =
         id != null && SystemPictureInPicture.usesActivePlayer(id);
@@ -1067,6 +1167,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       speed: _speed,
       muted: _volume <= 0.01,
       playing: c.value.isPlaying,
+      videoSize: c.value.size,
       playerId: c.fvpPlayerId,
       onStop: () async {
         if (SystemPictureInPicture.usesActivePlayer(id)) {
@@ -1107,6 +1208,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   }
 
   void _close() {
+    unawaited(_restorePlayerBrightness());
     if (_wakelockActive) {
       _wakelockActive = false;
       unawaited(ScreenWakelock.disable());
@@ -1122,6 +1224,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
 
   @override
   void dispose() {
+    unawaited(_restorePlayerBrightness());
     if (_wakelockActive) {
       _wakelockActive = false;
       unawaited(ScreenWakelock.disable());
@@ -1148,6 +1251,11 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       TdFileCenter.shared.cancelDownload(widget.video.id);
     }
     super.dispose();
+  }
+
+  Future<void> _restorePlayerBrightness() async {
+    final session = await _brightnessSession;
+    await session?.restore();
   }
 
   @override
@@ -1182,7 +1290,11 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
               widget.presentation != VideoPlayerPresentation.pictureInPicture)
             _topTechnicalInfo(_debugText(c)),
           if (ready && _controlsVisible) ..._controls(c),
-          if (ready && _activeGesture != null) _gestureIndicator(c),
+          if (ready && _gestureIndicatorReady)
+            _activeGesture == _PlayerGesture.brightness ||
+                    _activeGesture == _PlayerGesture.volume
+                ? _sideLevelIndicator()
+                : _gestureIndicator(c),
           if (ready && _showCompletionPrompt) _completionPrompt(),
           if (!ready || _controlsVisible)
             widget.presentation == VideoPlayerPresentation.pictureInPicture &&
@@ -1203,6 +1315,10 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
 
   bool get _supportsPlaybackGestures =>
       widget.presentation == VideoPlayerPresentation.fullscreen;
+
+  bool get _gestureIndicatorReady =>
+      _activeGesture != null &&
+      (_activeGesture != _PlayerGesture.brightness || _gestureBrightnessReady);
 
   void _startPlaybackGesture(
     DragStartDetails details,
@@ -1230,6 +1346,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     if (gesture == null) {
       if (math.max(delta.dx.abs(), delta.dy.abs()) < 12) return;
       if (delta.dx.abs() > delta.dy.abs()) {
+        _activeGestureSide = null;
         gesture = switch (_horizontalSwipeAction) {
           VideoHorizontalSwipeAction.disabled => null,
           VideoHorizontalSwipeAction.adjustProgress => _PlayerGesture.seek,
@@ -1239,9 +1356,19 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         };
         if (gesture == null) return;
       } else {
-        gesture = origin.dx < size.width / 2
-            ? _PlayerGesture.brightness
-            : _PlayerGesture.volume;
+        final isLeftSide = origin.dx < size.width / 2;
+        _activeGestureSide = isLeftSide
+            ? _PlayerGestureSide.left
+            : _PlayerGestureSide.right;
+        final action = isLeftSide
+            ? _leftVerticalSwipeAction
+            : _rightVerticalSwipeAction;
+        gesture = switch (action) {
+          VideoVerticalSwipeAction.disabled => null,
+          VideoVerticalSwipeAction.brightness => _PlayerGesture.brightness,
+          VideoVerticalSwipeAction.volume => _PlayerGesture.volume,
+        };
+        if (gesture == null) return;
       }
       if (gesture == _PlayerGesture.brightness) {
         unawaited(_beginBrightnessGesture());
@@ -1269,7 +1396,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
           0.01,
           1.0,
         );
-        unawaited(PlayerBrightness.set(_gestureValue));
+        unawaited(_setPlayerBrightness(_gestureValue));
       case _PlayerGesture.changeVideo:
         final threshold = (size.width * 0.14).clamp(56.0, 120.0);
         _gestureNavigationDelta = delta.dx.abs() < threshold
@@ -1296,6 +1423,8 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   }
 
   Future<void> _beginBrightnessGesture() async {
+    final session = await _brightnessSession;
+    if (session == null) return;
     final current = await PlayerBrightness.current();
     if (!mounted ||
         _activeGesture != _PlayerGesture.brightness ||
@@ -1307,6 +1436,11 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       _gestureValue = current;
       _gestureBrightnessReady = true;
     });
+  }
+
+  Future<void> _setPlayerBrightness(double value) async {
+    final session = await _brightnessSession;
+    await session?.set(value);
   }
 
   void _finishPlaybackGesture(VideoPlayerController controller) {
@@ -1331,6 +1465,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     if (!mounted) return;
     setState(() {
       _activeGesture = null;
+      _activeGestureSide = null;
       _gestureOrigin = null;
       _gestureNavigationDelta = 0;
     });
@@ -1395,6 +1530,76 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _sideLevelIndicator() {
+    final gesture = _activeGesture!;
+    final side = _activeGestureSide ?? _PlayerGestureSide.right;
+    final value = _gestureValue.clamp(0.0, 1.0);
+    final icon = gesture == _PlayerGesture.brightness
+        ? HeroAppIcons.sun
+        : value <= 0.01
+        ? HeroAppIcons.volumeXmark
+        : HeroAppIcons.volumeHigh;
+    return SafeArea(
+      child: Align(
+        alignment: side == _PlayerGestureSide.left
+            ? Alignment.centerLeft
+            : Alignment.centerRight,
+        child: IgnorePointer(
+          child: Container(
+            width: 52,
+            height: 164,
+            margin: const EdgeInsets.symmetric(horizontal: 18),
+            padding: const EdgeInsets.fromLTRB(10, 13, 10, 11),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.72),
+              borderRadius: BorderRadius.circular(26),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+            ),
+            child: Column(
+              children: [
+                AppIcon(icon, color: Colors.white, size: 21),
+                const SizedBox(height: 10),
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: SizedBox(
+                      width: 8,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          ColoredBox(
+                            color: Colors.white.withValues(alpha: 0.18),
+                          ),
+                          Align(
+                            alignment: Alignment.bottomCenter,
+                            child: FractionallySizedBox(
+                              widthFactor: 1,
+                              heightFactor: value,
+                              child: const ColoredBox(color: Colors.white),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '${(value * 100).round()}%',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -2769,82 +2974,12 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   Widget _modeSwitchButton({double size = 50}) {
     final callback = widget.onSwitchMode;
     if (callback == null) return const SizedBox.shrink();
-    return PopupMenuButton<VideoDisplayMode>(
-      tooltip: AppStringKeys.videoPlayerToggleDisplayMode.l10n(context),
-      color: const Color(0xFF1C1C1E),
-      onOpened: () {
-        setState(() => _controlsVisible = true);
-        _hideTimer?.cancel();
-      },
-      onCanceled: _scheduleHide,
-      onSelected: (mode) {
-        if (mode != widget.currentMode) {
-          unawaited(_selectDisplayMode(mode, callback));
-        }
+    return Tooltip(
+      message: AppStringKeys.videoPlayerSplitScreen.l10n(context),
+      child: _roundIconButton(HeroAppIcons.tableColumns.data, () {
+        callback(VideoDisplayMode.split);
         _scheduleHide();
-      },
-      itemBuilder: (_) => [
-        _modeItem(
-          VideoDisplayMode.fullscreen,
-          AppStringKeys.videoPlayerFullscreen,
-        ),
-        _modeItem(
-          VideoDisplayMode.pictureInPicture,
-          AppStringKeys.videoPlayerPictureInPicture,
-        ),
-        _modeItem(VideoDisplayMode.split, AppStringKeys.videoPlayerSplitScreen),
-      ],
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: Center(
-          child: AppIcon(
-            HeroAppIcons.tableColumns,
-            color: Colors.white.withValues(alpha: 0.92),
-            size: size * 0.5,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _selectDisplayMode(
-    VideoDisplayMode mode,
-    ValueChanged<VideoDisplayMode> callback,
-  ) async {
-    if (mode == VideoDisplayMode.pictureInPicture) {
-      await _enterPictureInPicture();
-      return;
-    }
-    if (!mounted) return;
-    callback(mode);
-  }
-
-  PopupMenuItem<VideoDisplayMode> _modeItem(
-    VideoDisplayMode mode,
-    String label,
-  ) {
-    return PopupMenuItem<VideoDisplayMode>(
-      value: mode,
-      child: Row(
-        children: [
-          SizedBox(
-            width: 20,
-            child: mode == widget.currentMode
-                ? const AppIcon(
-                    HeroAppIcons.check,
-                    size: 14,
-                    color: Colors.white,
-                  )
-                : null,
-          ),
-          const SizedBox(width: 8),
-          Text(
-            label.l10n(context),
-            style: const TextStyle(color: Colors.white),
-          ),
-        ],
-      ),
+      }, size: size),
     );
   }
 

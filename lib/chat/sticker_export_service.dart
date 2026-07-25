@@ -15,6 +15,7 @@ import 'package:video_player/video_player.dart';
 import '../tdlib/td_image_loader.dart';
 import '../tdlib/td_models.dart';
 import 'media_library_saver.dart';
+import 'sticker_item.dart';
 
 enum StickerExportFormat { png, gif, mov, lottie }
 
@@ -57,13 +58,22 @@ class StickerExportService {
   static List<StickerExportFormat> availableFormats(
     ChatMessage message, {
     bool? supportsMov,
-  }) => [
-    StickerExportFormat.png,
-    StickerExportFormat.gif,
-    if (supportsMov ?? defaultTargetPlatform == TargetPlatform.iOS)
-      StickerExportFormat.mov,
-    if (message.animatedSticker != null) StickerExportFormat.lottie,
-  ];
+  }) {
+    if (!isAnimated(message)) return const [StickerExportFormat.png];
+    return [
+      StickerExportFormat.png,
+      StickerExportFormat.gif,
+      if (supportsMov ?? defaultTargetPlatform == TargetPlatform.iOS)
+        StickerExportFormat.mov,
+      if (message.animatedSticker != null) StickerExportFormat.lottie,
+    ];
+  }
+
+  static List<StickerExportFormat> availableSetFormats(
+    List<StickerItem> stickers,
+  ) => stickers.any(_isAnimatedItem)
+      ? const [StickerExportFormat.png, StickerExportFormat.gif]
+      : const [StickerExportFormat.png];
 
   static Future<StickerExportResult> export(
     ChatMessage message, {
@@ -74,6 +84,9 @@ class StickerExportService {
       return StickerExportResult.unsupported;
     }
     if (format == StickerExportFormat.mov && !Platform.isIOS) {
+      return StickerExportResult.unsupported;
+    }
+    if (!isAnimated(message) && format != StickerExportFormat.png) {
       return StickerExportResult.unsupported;
     }
     if (format == StickerExportFormat.lottie &&
@@ -134,6 +147,119 @@ class StickerExportService {
       }
     }
   }
+
+  static Future<StickerExportResult> exportSet(
+    List<StickerItem> stickers, {
+    required String title,
+    required StickerExportFormat format,
+    void Function(int completed, int total)? onProgress,
+  }) async {
+    if (!_isSupportedPlatform(StickerExportDestination.files) ||
+        (format != StickerExportFormat.png &&
+            format != StickerExportFormat.gif)) {
+      return StickerExportResult.unsupported;
+    }
+    if (stickers.isEmpty) return StickerExportResult.failed;
+    if (!availableSetFormats(stickers).contains(format)) {
+      return StickerExportResult.unsupported;
+    }
+
+    final prepared = <File>[];
+    try {
+      final archive = Archive();
+      onProgress?.call(0, stickers.length);
+      for (var index = 0; index < stickers.length; index++) {
+        final item = stickers[index];
+        final file = TdFileRef(id: item.id);
+        final message = ChatMessage(
+          id: item.id,
+          isOutgoing: false,
+          text: '',
+          date: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+          image: item.isAnimated || item.isVideo ? null : file,
+          animatedSticker: item.isAnimated ? file : null,
+          videoSticker: item.isVideo ? file : null,
+        );
+        final itemFormat = _setItemFormat(item, format);
+        final output = await _prepare(message, itemFormat);
+        if (output == null || !await output.exists()) {
+          return StickerExportResult.failed;
+        }
+        prepared.add(output);
+        final bytes = await output.readAsBytes();
+        final name = _setArchiveEntryName(index, item, format);
+        archive.addFile(ArchiveFile(name, bytes.length, bytes));
+        onProgress?.call(index + 1, stickers.length);
+      }
+
+      final bytes = ZipEncoder().encode(archive);
+      if (bytes == null) return StickerExportResult.failed;
+      final baseName = _safeFileName(title.trim().isEmpty ? 'stickers' : title);
+      final formatName = _setArchiveFormatName(stickers, format);
+      final selectedPath = await FilePicker.platform.saveFile(
+        fileName: '$baseName-$formatName.zip',
+        type: FileType.custom,
+        allowedExtensions: const ['zip'],
+        bytes: Uint8List.fromList(bytes),
+      );
+      if (selectedPath != null && !Platform.isIOS && !Platform.isAndroid) {
+        await File(selectedPath).writeAsBytes(bytes, flush: true);
+      }
+      return selectedPath == null
+          ? StickerExportResult.cancelled
+          : StickerExportResult.saved;
+    } catch (_) {
+      return StickerExportResult.failed;
+    } finally {
+      for (final file in prepared) {
+        try {
+          if (await file.exists()) await file.delete();
+        } catch (_) {}
+      }
+    }
+  }
+
+  static String _safeFileName(String value) {
+    final safe = value.replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1f]'), '_');
+    return safe.length <= 80 ? safe : safe.substring(0, 80);
+  }
+
+  static StickerExportFormat _setItemFormat(
+    StickerItem item,
+    StickerExportFormat requestedFormat,
+  ) => _isAnimatedItem(item) ? requestedFormat : StickerExportFormat.png;
+
+  static bool _isAnimatedItem(StickerItem item) =>
+      item.isAnimated || item.isVideo;
+
+  static String _setArchiveFormatName(
+    List<StickerItem> stickers,
+    StickerExportFormat format,
+  ) => format == StickerExportFormat.png
+      ? (stickers.any(_isAnimatedItem) ? 'apng' : 'png')
+      : format.extension;
+
+  static String _setArchiveEntryName(
+    int index,
+    StickerItem item,
+    StickerExportFormat requestedFormat,
+  ) {
+    final format = _setItemFormat(item, requestedFormat);
+    return '${(index + 1).toString().padLeft(3, '0')}.${format.extension}';
+  }
+
+  @visibleForTesting
+  static String setArchiveEntryNameForTest(
+    int index,
+    StickerItem item,
+    StickerExportFormat requestedFormat,
+  ) => _setArchiveEntryName(index, item, requestedFormat);
+
+  @visibleForTesting
+  static String setArchiveFormatNameForTest(
+    List<StickerItem> stickers,
+    StickerExportFormat format,
+  ) => _setArchiveFormatName(stickers, format);
 
   static bool _isSupportedPlatform(StickerExportDestination destination) {
     if (destination == StickerExportDestination.photos) {
@@ -207,18 +333,11 @@ class StickerExportService {
     File input,
     StickerExportFormat format,
   ) async {
+    if (format != StickerExportFormat.png) return null;
     final decoded = image_lib.decodeImage(await input.readAsBytes());
     if (decoded == null) return null;
     final frame = decoded.frames.first;
-    frame.frameDuration = 100;
-    final encoder = _StickerFrameEncoder(format, frameCount: 1);
-    encoder.addRgba(
-      frame.getBytes(order: image_lib.ChannelOrder.rgba),
-      width: frame.width,
-      height: frame.height,
-      durationMs: frame.frameDuration,
-    );
-    return encoder.finish();
+    return image_lib.PngEncoder().encode(frame, singleFrame: true);
   }
 
   static Future<Uint8List?> _encodeTgs(

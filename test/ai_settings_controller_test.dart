@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:mithka/settings/ai_endpoint_style.dart';
 import 'package:mithka/settings/ai_settings_controller.dart';
 import 'package:mithka/settings/apple_pcc_api.dart';
 import 'package:mithka/settings/openai_compatible_models_api.dart';
@@ -37,7 +38,218 @@ void main() {
       expect(controller.apiKey, isEmpty);
       expect(controller.pccCapabilities?.available, isFalse);
       expect(controller.isConfiguredForCurrentProvider, isFalse);
+      expect(controller.modelCandidates, hasLength(2));
+      expect(
+        controller.modelCandidatesForFeature(AiFeature.translation),
+        hasLength(2),
+      );
+      expect(
+        controller.modelCandidatesForFeature(AiFeature.summary),
+        hasLength(2),
+      );
+      expect(
+        controller.modelCandidatesForFeature(AiFeature.reply),
+        hasLength(3),
+      );
+      expect(
+        controller.translationModelCandidate.kind,
+        AiModelCandidateKind.applePcc,
+      );
+      expect(
+        controller.summaryModelCandidate.kind,
+        AiModelCandidateKind.applePcc,
+      );
+      expect(
+        controller.replyModelCandidate.kind,
+        AiModelCandidateKind.telegramCocoon,
+      );
+      expect(controller.isConfiguredForFeature(AiFeature.reply), isTrue);
     });
+
+    test(
+      'scopes Telegram Cocoon to replies and persists a reply choice',
+      () async {
+        SharedPreferences.setMockInitialValues({});
+        final preferences = await SharedPreferences.getInstance();
+        final controller = AiSettingsController(
+          preferences,
+          pccApi: _pccApi(available: false),
+          secureRead: (_) async => null,
+          secureWrite: (_, _) async {},
+        );
+        await controller.initialize();
+
+        expect(
+          controller.modelCandidates
+              .where(
+                (candidate) =>
+                    candidate.kind == AiModelCandidateKind.telegramCocoon,
+              )
+              .isEmpty,
+          isTrue,
+        );
+        expect(
+          controller
+              .modelCandidatesForFeature(AiFeature.translation)
+              .where(
+                (candidate) =>
+                    candidate.kind == AiModelCandidateKind.telegramCocoon,
+              )
+              .isEmpty,
+          isTrue,
+        );
+        expect(
+          controller
+              .modelCandidatesForFeature(AiFeature.summary)
+              .where(
+                (candidate) =>
+                    candidate.kind == AiModelCandidateKind.telegramCocoon,
+              )
+              .isEmpty,
+          isTrue,
+        );
+        expect(
+          controller.modelCandidatesForFeature(AiFeature.reply).first.kind,
+          AiModelCandidateKind.telegramCocoon,
+        );
+
+        await controller.setFeatureModelCandidate(
+          AiFeature.translation,
+          AiSettingsController.telegramCocoonModelCandidateId,
+        );
+        await controller.setFeatureModelCandidate(
+          AiFeature.summary,
+          AiSettingsController.telegramCocoonModelCandidateId,
+        );
+        expect(
+          controller.translationModelCandidate.kind,
+          AiModelCandidateKind.applePcc,
+        );
+        expect(
+          controller.summaryModelCandidate.kind,
+          AiModelCandidateKind.applePcc,
+        );
+
+        await controller.setFeatureModelCandidate(
+          AiFeature.reply,
+          AiSettingsController.appleOnDeviceModelCandidateId,
+        );
+        expect(
+          preferences.getString(
+            AiSettingsController.replyModelCandidatePreferenceKey,
+          ),
+          AiSettingsController.appleOnDeviceModelCandidateId,
+        );
+
+        final restored = AiSettingsController(
+          preferences,
+          pccApi: _pccApi(available: false),
+          secureRead: (_) async => null,
+          secureWrite: (_, _) async {},
+        );
+        await restored.initialize();
+        expect(
+          restored.replyModelCandidate.kind,
+          AiModelCandidateKind.appleOnDevice,
+        );
+      },
+    );
+
+    test(
+      'persists independent translation and summary model choices',
+      () async {
+        SharedPreferences.setMockInitialValues({});
+        final preferences = await SharedPreferences.getInstance();
+        final secureValues = <String, String>{};
+        final appleApi = ApplePccApi(
+          invokeMethod: (_, _) async => const {
+            'sdkAvailable': true,
+            'available': true,
+            'reason': '',
+            'contextSize': 32768,
+            'quotaLimitReached': false,
+            'onDeviceSdkAvailable': true,
+            'onDeviceAvailable': true,
+            'onDeviceReason': 'available',
+            'onDeviceContextSize': 4096,
+          },
+        );
+        final controller = AiSettingsController(
+          preferences,
+          pccApi: appleApi,
+          secureRead: (key) async => secureValues[key],
+          secureWrite: (key, value) async {
+            if (value == null) {
+              secureValues.remove(key);
+            } else {
+              secureValues[key] = value;
+            }
+          },
+        );
+        await controller.initialize();
+        final provider = await controller.saveServerProvider(
+          name: 'Translation Server',
+          endpoint: 'https://translate.example/v1/chat/completions',
+          apiKey: 'secret',
+        );
+        final model = await controller.saveModelProfile(
+          providerId: provider.id,
+          model: 'translate-model',
+          contextWindowTokens: 65536,
+        );
+        final serverCandidateId = AiSettingsController.serverModelCandidateId(
+          model.id,
+        );
+
+        await controller.setFeatureModelCandidate(
+          AiFeature.translation,
+          serverCandidateId,
+        );
+        await controller.setFeatureModelCandidate(
+          AiFeature.summary,
+          AiSettingsController.appleOnDeviceModelCandidateId,
+        );
+
+        final translation = controller.configurationForFeature(
+          AiFeature.translation,
+        );
+        final summary = controller.configurationForFeature(AiFeature.summary);
+        expect(controller.modelCandidates, hasLength(3));
+        expect(translation.providerMode, AiProviderMode.openAiCompatible);
+        expect(translation.model, 'translate-model');
+        expect(translation.apiKey, 'secret');
+        expect(summary.providerMode, AiProviderMode.appleOnDevice);
+        expect(summary.contextWindowTokens, 4096);
+        expect(
+          controller.isConfiguredForFeature(AiFeature.translation),
+          isTrue,
+        );
+        expect(controller.isConfiguredForFeature(AiFeature.summary), isTrue);
+
+        final restored = AiSettingsController(
+          preferences,
+          pccApi: appleApi,
+          secureRead: (key) async => secureValues[key],
+          secureWrite: (_, _) async {},
+        );
+        await restored.initialize();
+        expect(restored.translationModelCandidate.id, serverCandidateId);
+        expect(
+          restored.summaryModelCandidate.id,
+          AiSettingsController.appleOnDeviceModelCandidateId,
+        );
+
+        await controller.deleteModelProfile(model.id);
+        expect(
+          controller.translationModelCandidate.id,
+          AiSettingsController.applePccModelCandidateId,
+        );
+        expect(
+          controller.summaryModelCandidate.id,
+          AiSettingsController.appleOnDeviceModelCandidateId,
+        );
+      },
+    );
 
     test(
       'persists ordinary values but keeps API key in secure storage',
@@ -364,6 +576,14 @@ void main() {
       expect(controller.provider, AiProviderMode.appleOnDevice);
       expect(controller.pccCapabilities?.onDeviceContextSize, 4096);
       expect(controller.isConfiguredForCurrentProvider, isTrue);
+      expect(
+        controller.translationModelCandidate.kind,
+        AiModelCandidateKind.appleOnDevice,
+      );
+      expect(
+        controller.summaryModelCandidate.kind,
+        AiModelCandidateKind.appleOnDevice,
+      );
     });
 
     test(
@@ -423,15 +643,134 @@ void main() {
       expect(controller.endpoint, isEmpty);
       expect(controller.isConfiguredForCurrentProvider, isFalse);
     });
+
+    test('persists and restores the selected hosted API style', () async {
+      SharedPreferences.setMockInitialValues({});
+      final preferences = await SharedPreferences.getInstance();
+      final controller = AiSettingsController(
+        preferences,
+        pccApi: _pccApi(available: false),
+        secureRead: (_) async => null,
+        secureWrite: (_, _) async {},
+      );
+      await controller.initialize();
+
+      final provider = await controller.saveServerProvider(
+        name: 'Responses Provider',
+        endpoint: 'https://api.example/v1/responses',
+        endpointStyle: AiEndpointStyle.openAiResponses,
+        apiKey: '',
+      );
+      final model = await controller.saveModelProfile(
+        providerId: provider.id,
+        model: 'response-model',
+        contextWindowTokens: 128000,
+      );
+      await controller.setFeatureModelCandidate(
+        AiFeature.summary,
+        AiSettingsController.serverModelCandidateId(model.id),
+      );
+
+      final encoded = preferences.getString(
+        AiSettingsController.serverProvidersPreferenceKey,
+      );
+      expect(encoded, contains('open_ai_responses'));
+      final restored = AiSettingsController(
+        preferences,
+        pccApi: _pccApi(available: false),
+        secureRead: (_) async => null,
+        secureWrite: (_, _) async {},
+      );
+      await restored.initialize();
+
+      expect(
+        restored.serverProviders.single.endpointStyle,
+        AiEndpointStyle.openAiResponses,
+      );
+      expect(
+        restored.configurationForFeature(AiFeature.summary).endpointStyle,
+        AiEndpointStyle.openAiResponses,
+      );
+    });
+
+    test('AI reply prompt persists, bounds Unicode, and resets', () async {
+      SharedPreferences.setMockInitialValues({});
+      final preferences = await SharedPreferences.getInstance();
+      final controller = AiSettingsController(
+        preferences,
+        pccApi: _pccApi(available: false),
+        secureRead: (_) async => null,
+        secureWrite: (_, _) async {},
+      );
+      await controller.initialize();
+
+      expect(controller.aiReplyPrompt, defaultAiReplyPrompt.trim());
+      expect(controller.hasCustomAiReplyPrompt, isFalse);
+      expect(
+        preferences.containsKey(AiSettingsController.replyPromptPreferenceKey),
+        isFalse,
+      );
+
+      const customPrompt =
+          '  Reply warmly, preserve emoji, and ask one short follow-up.  ';
+      await controller.setAiReplyPrompt(customPrompt);
+      expect(
+        controller.aiReplyPrompt,
+        'Reply warmly, preserve emoji, and ask one short follow-up.',
+      );
+      expect(controller.hasCustomAiReplyPrompt, isTrue);
+      expect(
+        preferences.getString(AiSettingsController.replyPromptPreferenceKey),
+        controller.aiReplyPrompt,
+      );
+
+      final restored = AiSettingsController(
+        preferences,
+        pccApi: _pccApi(available: false),
+        secureRead: (_) async => null,
+        secureWrite: (_, _) async {},
+      );
+      await restored.initialize();
+      expect(restored.aiReplyPrompt, controller.aiReplyPrompt);
+      expect(restored.hasCustomAiReplyPrompt, isTrue);
+
+      final oversized = List.filled(
+        AiSettingsController.replyPromptMaximumCharacters + 1,
+        '🦊',
+      ).join();
+      await restored.setAiReplyPrompt(oversized);
+      expect(
+        restored.aiReplyPrompt.runes.length,
+        AiSettingsController.replyPromptMaximumCharacters,
+      );
+      expect(
+        preferences
+            .getString(AiSettingsController.replyPromptPreferenceKey)!
+            .runes
+            .length,
+        AiSettingsController.replyPromptMaximumCharacters,
+      );
+
+      await restored.resetAiReplyPrompt();
+      expect(restored.aiReplyPrompt, defaultAiReplyPrompt.trim());
+      expect(restored.hasCustomAiReplyPrompt, isFalse);
+      expect(
+        preferences.containsKey(AiSettingsController.replyPromptPreferenceKey),
+        isFalse,
+      );
+    });
   });
 
-  group('OpenAI-compatible endpoint validation', () {
-    test('accepts HTTPS and HTTP loopback chat-completions URLs', () {
+  group('hosted AI endpoint validation', () {
+    test('accepts supported HTTPS styles and HTTP loopback URLs', () {
       const valid = [
         'https://api.openai.com/v1/chat/completions',
+        'https://api.openai.com/v1/responses',
+        'https://api.anthropic.com/v1/messages',
         'https://ai.example.com:8443/v1/chat/completions',
         'https://ai.example.com/custom/v1/chat/completions',
         'http://localhost:11434/v1/chat/completions',
+        'http://localhost:11434/api/chat',
         'http://api.localhost/v1/chat/completions',
         'http://127.0.0.1:8080/v1/chat/completions',
         'http://127.12.3.4/v1/chat/completions',
@@ -445,6 +784,23 @@ void main() {
           reason: endpoint,
         );
       }
+    });
+
+    test('requires the endpoint to match an explicitly selected style', () {
+      expect(
+        AiSettingsController.isValidOpenAiCompatibleEndpoint(
+          'https://api.example/v1/responses',
+          endpointStyle: AiEndpointStyle.openAiResponses,
+        ),
+        isTrue,
+      );
+      expect(
+        AiSettingsController.isValidOpenAiCompatibleEndpoint(
+          'https://api.example/v1/chat/completions',
+          endpointStyle: AiEndpointStyle.openAiResponses,
+        ),
+        isFalse,
+      );
     });
 
     test('rejects insecure remote, inexact, and credential-bearing URLs', () {

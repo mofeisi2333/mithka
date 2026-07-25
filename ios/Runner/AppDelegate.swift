@@ -21,7 +21,6 @@ import UserNotifications
   private var pendingNotificationTap: [String: Any]?
   private var apnsDeviceToken: String?
   private var didRegisterFlutterPlugins = false
-  private var systemPictureInPictureBridge: SystemPictureInPictureBridge?
   private var liveCommunicationBridge: AnyObject?
   private var groupCallMediaBridge: TelegramGroupCallMediaBridge?
   private var mediaDropBridge: MediaDropBridge?
@@ -73,6 +72,12 @@ import UserNotifications
       // Keep this in lockstep with `sentryTracesSampleRate` so TestFlight
       // builds also emit the sampled app-start/native performance traces.
       options.tracesSampleRate = 0.02
+      // Sentry Cocoa 8.58.3 scans every app runtime class to auto-instrument
+      // UIViewControllers. On affected iOS 16 devices that background scan
+      // crashes in `swift_getTypeByMangledName` before Flutter can start.
+      // Keep crash reporting and sampled app-start traces, but do not enable
+      // the unsafe automatic UIKit transaction instrumentation.
+      options.enableUIViewControllerTracing = false
       options.enableWatchdogTerminationTracking = true
     }
   }
@@ -105,12 +110,11 @@ import UserNotifications
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
-    // Flutter creates the implicit engine before FlutterViewController runs it.
-    // Some plugins send an initial platform message during registration, so
-    // register after the engine has had a chance to launch on the main loop.
-    DispatchQueue.main.async { [weak self] in
-      self?.registerFlutterPluginsAndChannels(engineBridge)
-    }
+    // The engine is ready at this callback. Register synchronously so Dart
+    // cannot invoke a plugin between engine startup and the next main-loop
+    // turn; that race produced MissingPluginException reports from secure
+    // storage, MobileScanner, and platform channels.
+    registerFlutterPluginsAndChannels(engineBridge)
   }
 
   private func registerFlutterPluginsAndChannels(_ engineBridge: FlutterImplicitEngineBridge) {
@@ -459,11 +463,6 @@ import UserNotifications
     communicationNotificationBridge = CommunicationNotificationBridge(
       messenger: engineBridge.applicationRegistrar.messenger()
     )
-
-    let systemPiPBridge = SystemPictureInPictureBridge(
-      messenger: engineBridge.applicationRegistrar.messenger()
-    )
-    systemPictureInPictureBridge = systemPiPBridge
 
     var liveCommunicationOwnsAudioSession = false
     if #available(iOS 17.4, *) {
@@ -1553,404 +1552,22 @@ private final class LiveCommunicationBridge: NSObject, ConversationManagerDelega
   }
 }
 
-@MainActor
-private final class SystemPictureInPictureBridge: NSObject, AVPictureInPictureControllerDelegate {
-  private let channel: FlutterMethodChannel
-  private var player: AVPlayer?
-  private var playerLayer: AVPlayerLayer?
-  private var pictureInPictureController: AVPictureInPictureController?
-  private var hostView: UIView?
-  private var activeId: String?
-  private var pendingStartResult: FlutterResult?
-  private var startTimeout: DispatchWorkItem?
-  private var possibleObservation: NSKeyValueObservation?
-  private var statusObservation: NSKeyValueObservation?
-  private var preferredRate: Float = 1.0
-
-  init(messenger: FlutterBinaryMessenger) {
-    channel = FlutterMethodChannel(
-      name: "mithka/system_picture_in_picture",
-      binaryMessenger: messenger
-    )
-    super.init()
-    channel.setMethodCallHandler { [weak self] call, result in
-      Task { @MainActor in
-        self?.handle(call: call, result: result)
-      }
-    }
-  }
-
-  private func handle(call: FlutterMethodCall, result: @escaping FlutterResult) {
-    switch call.method {
-    case "isSupported":
-      let supported = AVPictureInPictureController.isPictureInPictureSupported()
-      NSLog("Mithka system PiP isSupported: \(supported)")
-      result(supported)
-    case "prepare":
-      result(prepare(call: call))
-    case "startPrepared":
-      startPrepared(call: call, result: result)
-    case "update":
-      update(call: call)
-      result(nil)
-    case "cancel":
-      let args = call.arguments as? [String: Any]
-      let id = args?["id"] as? String
-      if id == nil || id == activeId {
-        stop(notifyFlutter: false)
-      }
-      result(nil)
-    case "start":
-      start(call: call, result: result)
-    case "stop":
-      stop()
-      result(nil)
-    default:
-      result(FlutterMethodNotImplemented)
-    }
-  }
-
-  private func start(call: FlutterMethodCall, result: @escaping FlutterResult) {
-    guard prepare(call: call) else {
-      result(false)
-      return
-    }
-    startPrepared(call: call, result: result)
-  }
-
-  private func prepare(call: FlutterMethodCall) -> Bool {
-    guard AVPictureInPictureController.isPictureInPictureSupported() else {
-      NSLog("Mithka system PiP prepare failed: unsupported")
-      return false
-    }
-    guard
-      let args = call.arguments as? [String: Any],
-      let id = args["id"] as? String,
-      let rawURL = args["url"] as? String,
-      let url = URL(string: rawURL)
-    else {
-      NSLog("Mithka system PiP prepare failed: bad arguments")
-      return false
-    }
-
-    stop(notifyFlutter: false)
-
-    do {
-      let audioSession = AVAudioSession.sharedInstance()
-      try audioSession.setCategory(.playback, mode: .moviePlayback)
-      try audioSession.setActive(true)
-    } catch {
-      // PiP can still work when another owner already configured the session.
-      NSLog("Mithka system PiP audio session setup failed: \(error.localizedDescription)")
-    }
-
-    NSLog("Mithka system PiP prepare source: \(url.absoluteString)")
-    let item = AVPlayerItem(url: url)
-    let player = AVPlayer(playerItem: item)
-    applyPlaybackArguments(args, to: player, shouldSeek: true)
-
-    guard let (layer, pipController, hostView) = attach(player: player) else {
-      NSLog("Mithka system PiP prepare failed: could not attach AVPlayerLayer")
-      return false
-    }
-
-    self.activeId = id
-    self.player = player
-    self.playerLayer = layer
-    self.pictureInPictureController = pipController
-    self.hostView = hostView
-    return true
-  }
-
-  private func startPrepared(call: FlutterMethodCall, result: @escaping FlutterResult) {
-    guard
-      let args = call.arguments as? [String: Any],
-      let id = args["id"] as? String,
-      id == activeId,
-      let player,
-      let pipController = pictureInPictureController
-    else {
-      NSLog("Mithka system PiP startPrepared failed: no active prepared controller")
-      result(false)
-      return
-    }
-
-    applyPlaybackArguments(args, to: player, shouldSeek: true)
-    beginPictureInPictureStart(player: player, pipController: pipController, result: result)
-  }
-
-  private func update(call: FlutterMethodCall) {
-    guard
-      let args = call.arguments as? [String: Any],
-      let id = args["id"] as? String,
-      id == activeId,
-      let player
-    else {
-      return
-    }
-    applyPlaybackArguments(args, to: player, shouldSeek: true)
-  }
-
-  private func applyPlaybackArguments(
-    _ args: [String: Any],
-    to player: AVPlayer,
-    shouldSeek: Bool
-  ) {
-    player.isMuted = args["muted"] as? Bool ?? false
-    preferredRate = (args["speed"] as? NSNumber)?.floatValue ?? 1.0
-    if shouldSeek {
-      let positionMs = (args["positionMs"] as? NSNumber)?.doubleValue ?? 0
-      if positionMs > 0 {
-        let currentMs = player.currentTime().seconds * 1000
-        if currentMs.isNaN || abs(currentMs - positionMs) > 750 {
-          player.seek(
-            to: CMTime(seconds: positionMs / 1000.0, preferredTimescale: 600),
-            toleranceBefore: .zero,
-            toleranceAfter: .zero
-          )
-        }
-      }
-    }
-  }
-
-  private func beginPictureInPictureStart(
-    player: AVPlayer,
-    pipController: AVPictureInPictureController,
-    result: @escaping FlutterResult
-  ) {
-    startTimeout?.cancel()
-    startTimeout = nil
-    possibleObservation?.invalidate()
-    possibleObservation = nil
-    statusObservation?.invalidate()
-    statusObservation = nil
-    self.pendingStartResult = result
-
-    player.play()
-    let speed = preferredRate
-    if speed > 0, speed != 1.0 {
-      player.rate = speed
-    }
-
-    let timeout = DispatchWorkItem { [weak self] in
-      guard let self, self.pendingStartResult != nil else { return }
-      let itemStatus = player.currentItem?.status.rawValue ?? -1
-      let itemError = player.currentItem?.error?.localizedDescription ?? "none"
-      NSLog(
-        "Mithka system PiP start timed out: possible=\(pipController.isPictureInPicturePossible) itemStatus=\(itemStatus) itemError=\(itemError)"
-      )
-      self.pendingStartResult?(false)
-      self.pendingStartResult = nil
-      self.possibleObservation?.invalidate()
-      self.possibleObservation = nil
-      self.statusObservation?.invalidate()
-      self.statusObservation = nil
-      self.stop(notifyFlutter: false)
-    }
-    startTimeout = timeout
-    DispatchQueue.main.asyncAfter(deadline: .now() + 6.0, execute: timeout)
-
-    possibleObservation = pipController.observe(
-      \.isPictureInPicturePossible,
-      options: [.initial, .new]
-    ) { [weak self, weak pipController] _, _ in
-      Task { @MainActor in
-        guard let self, let pipController else { return }
-        self.startPictureInPictureIfPossible(pipController)
-      }
-    }
-
-    statusObservation = player.currentItem?.observe(
-      \.status,
-      options: [.initial, .new]
-    ) { [weak self] item, _ in
-      Task { @MainActor in
-        if item.status == .failed {
-          let error = item.error?.localizedDescription ?? "unknown"
-          NSLog("Mithka system PiP item failed: \(error)")
-          self?.pendingStartResult?(false)
-          self?.pendingStartResult = nil
-          self?.stop(notifyFlutter: false)
-        }
-      }
-    }
-
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self, weak pipController] in
-      Task { @MainActor in
-        guard
-          let self,
-          let pipController,
-          self.pendingStartResult != nil,
-          self.pictureInPictureController === pipController
-        else {
-          return
-        }
-        self.possibleObservation?.invalidate()
-        self.possibleObservation = nil
-        self.statusObservation?.invalidate()
-        self.statusObservation = nil
-        NSLog(
-          "Mithka system PiP force start: possible=\(pipController.isPictureInPicturePossible)"
-        )
-        if pipController.isPictureInPicturePossible {
-          pipController.startPictureInPicture()
-        } else {
-          self.possibleObservation = pipController.observe(
-            \.isPictureInPicturePossible,
-            options: [.new]
-          ) { [weak self, weak pipController] _, _ in
-            Task { @MainActor in
-              guard let self, let pipController else { return }
-              self.startPictureInPictureIfPossible(pipController)
-            }
-          }
-        }
-      }
-    }
-  }
-
-  private func startPictureInPictureIfPossible(_ pipController: AVPictureInPictureController) {
-    guard
-      pendingStartResult != nil,
-      pictureInPictureController === pipController,
-      pipController.isPictureInPicturePossible
-    else {
-      return
-    }
-    possibleObservation?.invalidate()
-    possibleObservation = nil
-    statusObservation?.invalidate()
-    statusObservation = nil
-    NSLog("Mithka system PiP startPictureInPicture")
-    pipController.startPictureInPicture()
-  }
-
-  private func attach(player: AVPlayer) -> (AVPlayerLayer, AVPictureInPictureController, UIView)? {
-    guard let root = Self.rootViewController() else { return nil }
-    let hostView = UIView(frame: root.view.bounds)
-    hostView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-    hostView.alpha = 0.01
-    hostView.backgroundColor = .clear
-    hostView.isUserInteractionEnabled = false
-    let layer = AVPlayerLayer(player: player)
-    layer.frame = hostView.bounds
-    layer.videoGravity = .resizeAspect
-    hostView.layer.addSublayer(layer)
-    root.view.addSubview(hostView)
-
-    guard let pipController = AVPictureInPictureController(playerLayer: layer) else {
-      hostView.removeFromSuperview()
-      return nil
-    }
-    pipController.delegate = self
-    if #available(iOS 14.2, *) {
-      pipController.canStartPictureInPictureAutomaticallyFromInline = true
-    }
-    return (layer, pipController, hostView)
-  }
-
-  private func stop(notifyFlutter: Bool = true) {
-    startTimeout?.cancel()
-    startTimeout = nil
-    possibleObservation?.invalidate()
-    possibleObservation = nil
-    statusObservation?.invalidate()
-    statusObservation = nil
-    pendingStartResult?(false)
-    pendingStartResult = nil
-
-    let stoppedId = activeId
-    player?.pause()
-    if pictureInPictureController?.isPictureInPictureActive == true {
-      pictureInPictureController?.stopPictureInPicture()
-    }
-    pictureInPictureController?.delegate = nil
-    pictureInPictureController = nil
-    playerLayer?.player = nil
-    playerLayer?.removeFromSuperlayer()
-    playerLayer = nil
-    hostView?.removeFromSuperview()
-    hostView = nil
-    player = nil
-    activeId = nil
-    preferredRate = 1.0
-
-    if notifyFlutter, let stoppedId {
-      channel.invokeMethod("didStop", arguments: ["id": stoppedId])
-    }
-  }
-
-  nonisolated func pictureInPictureControllerDidStartPictureInPicture(
-    _ pictureInPictureController: AVPictureInPictureController
-  ) {
-    Task { @MainActor in
-      startTimeout?.cancel()
-      startTimeout = nil
-      pendingStartResult?(true)
-      pendingStartResult = nil
-    }
-  }
-
-  nonisolated func pictureInPictureController(
-    _ pictureInPictureController: AVPictureInPictureController,
-    failedToStartPictureInPictureWithError error: Error
-  ) {
-    Task { @MainActor in
-      pendingStartResult?(false)
-      pendingStartResult = nil
-      stop(notifyFlutter: false)
-    }
-  }
-
-  nonisolated func pictureInPictureControllerDidStopPictureInPicture(
-    _ pictureInPictureController: AVPictureInPictureController
-  ) {
-    Task { @MainActor in
-      stop()
-    }
-  }
-
-  nonisolated func pictureInPictureController(
-    _ pictureInPictureController: AVPictureInPictureController,
-    restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler:
-      @escaping (Bool) -> Void
-  ) {
-    completionHandler(false)
-  }
-
-  private static func rootViewController() -> UIViewController? {
-    let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-    let activeScene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
-    let root = activeScene?.windows.first { $0.isKeyWindow }?.rootViewController
-    return topViewController(from: root)
-  }
-
-  private static func topViewController(from root: UIViewController?) -> UIViewController? {
-    if let nav = root as? UINavigationController {
-      return topViewController(from: nav.visibleViewController)
-    }
-    if let tab = root as? UITabBarController {
-      return topViewController(from: tab.selectedViewController)
-    }
-    if let presented = root?.presentedViewController {
-      return topViewController(from: presented)
-    }
-    return root
-  }
-}
-
 private final class AccountSessionBackupKeychain {
-  private let service: String
+  private let syncedService: String
+  private let localService: String
 
   init() {
     let bundleId = Bundle.main.bundleIdentifier ?? "ad.neko.mithka"
-    self.service = "\(bundleId).sessionsbackup"
+    self.syncedService = "\(bundleId).sessionsbackup"
+    self.localService = "\(bundleId).sessionsbackup.local"
   }
 
   func handle(call: FlutterMethodCall, result: FlutterResult) {
     do {
       switch call.method {
       case "isSupported":
+        result(true)
+      case "isLocalStorageSupported":
         result(true)
       case "saveSession":
         guard
@@ -1961,10 +1578,14 @@ private final class AccountSessionBackupKeychain {
         else {
           throw AccountSessionBackupError.invalidArguments
         }
-        try saveSession(id: id, data: data.data)
+        try saveSession(id: id, data: data.data, storage: storage(for: call))
         result(nil)
       case "getAllSessions":
-        result(try getAllSessions().map { FlutterStandardTypedData(bytes: $0) })
+        result(
+          try getAllSessions(storage: storage(for: call)).map {
+            FlutterStandardTypedData(bytes: $0)
+          }
+        )
       case "deleteSession":
         guard
           let args = call.arguments as? [String: Any],
@@ -1973,10 +1594,10 @@ private final class AccountSessionBackupKeychain {
         else {
           throw AccountSessionBackupError.invalidArguments
         }
-        try deleteSession(id: id)
+        try deleteSession(id: id, storage: storage(for: call))
         result(nil)
       case "deleteAllSessions":
-        try deleteAllSessions()
+        try deleteAllSessions(storage: storage(for: call))
         result(nil)
       default:
         result(FlutterMethodNotImplemented)
@@ -1992,37 +1613,62 @@ private final class AccountSessionBackupKeychain {
     }
   }
 
-  private func saveSession(id: String, data: Data) throws {
-    try saveSession(id: id, data: data, synchronizable: true)
+  private enum Storage: String {
+    case synced
+    case local
   }
 
-  private func saveSession(id: String, data: Data, synchronizable: Bool) throws {
+  private func storage(for call: FlutterMethodCall) -> Storage {
+    guard
+      let args = call.arguments as? [String: Any],
+      let value = args["storage"] as? String
+    else {
+      return .synced
+    }
+    return Storage(rawValue: value) ?? .synced
+  }
+
+  private func saveSession(id: String, data: Data, storage: Storage) throws {
+    try saveSession(
+      id: id,
+      data: data,
+      service: storage == .local ? localService : syncedService,
+      synchronizable: storage == .local ? false : true,
+      accessibility: storage == .local
+        ? kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        : kSecAttrAccessibleWhenUnlocked
+    )
+  }
+
+  private func saveSession(
+    id: String,
+    data: Data,
+    service: String,
+    synchronizable: Bool,
+    accessibility: CFString
+  ) throws {
     var query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service,
       kSecAttrAccount as String: id,
       kSecValueData as String: data,
-      kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlocked
+      kSecAttrAccessible as String: accessibility,
+      kSecAttrSynchronizable as String: synchronizable
     ]
-    if synchronizable {
-      query[kSecAttrSynchronizable as String] = true
-    }
 
     let status = SecItemAdd(query as CFDictionary, nil)
     if status == errSecDuplicateItem {
       var updateQuery: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
         kSecAttrService as String: service,
-        kSecAttrAccount as String: id
+        kSecAttrAccount as String: id,
+        kSecAttrSynchronizable as String: synchronizable
       ]
-      if synchronizable {
-        updateQuery[kSecAttrSynchronizable as String] = true
-      }
       let updateStatus = SecItemUpdate(
         updateQuery as CFDictionary,
         [
           kSecValueData as String: data,
-          kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlocked
+          kSecAttrAccessible as String: accessibility
         ] as CFDictionary
       )
       guard updateStatus == errSecSuccess else {
@@ -2033,16 +1679,25 @@ private final class AccountSessionBackupKeychain {
     }
   }
 
-  private func getAllSessions() throws -> [Data] {
+  private func getAllSessions(storage: Storage) throws -> [Data] {
+    if storage == .local {
+      return try getAllSessions(service: localService, synchronizable: false)
+    }
     do {
-      return try getAllSessions(synchronizable: kSecAttrSynchronizableAny)
+      return try getAllSessions(
+        service: syncedService,
+        synchronizable: kSecAttrSynchronizableAny
+      )
     } catch AccountSessionBackupError.keychain(let status)
       where isSynchronizableUnsupported(status) {
-      return try getAllSessions(synchronizable: nil)
+      return try getAllSessions(service: syncedService, synchronizable: nil)
     }
   }
 
-  private func getAllSessions(synchronizable: CFString?) throws -> [Data] {
+  private func getAllSessions(
+    service: String,
+    synchronizable: Any?
+  ) throws -> [Data] {
     var query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service,
@@ -2063,16 +1718,28 @@ private final class AccountSessionBackupKeychain {
     return result as? [Data] ?? []
   }
 
-  private func deleteSession(id: String) throws {
+  private func deleteSession(id: String, storage: Storage) throws {
+    if storage == .local {
+      try deleteSession(id: id, service: localService, synchronizable: false)
+      return
+    }
     do {
-      try deleteSession(id: id, synchronizable: kSecAttrSynchronizableAny)
+      try deleteSession(
+        id: id,
+        service: syncedService,
+        synchronizable: kSecAttrSynchronizableAny
+      )
     } catch AccountSessionBackupError.keychain(let status)
       where isSynchronizableUnsupported(status) {
-      try deleteSession(id: id, synchronizable: nil)
+      try deleteSession(id: id, service: syncedService, synchronizable: nil)
     }
   }
 
-  private func deleteSession(id: String, synchronizable: CFString?) throws {
+  private func deleteSession(
+    id: String,
+    service: String,
+    synchronizable: Any?
+  ) throws {
     var query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service,
@@ -2087,16 +1754,26 @@ private final class AccountSessionBackupKeychain {
     }
   }
 
-  private func deleteAllSessions() throws {
+  private func deleteAllSessions(storage: Storage) throws {
+    if storage == .local {
+      try deleteAllSessions(service: localService, synchronizable: false)
+      return
+    }
     do {
-      try deleteAllSessions(synchronizable: kSecAttrSynchronizableAny)
+      try deleteAllSessions(
+        service: syncedService,
+        synchronizable: kSecAttrSynchronizableAny
+      )
     } catch AccountSessionBackupError.keychain(let status)
       where isSynchronizableUnsupported(status) {
-      try deleteAllSessions(synchronizable: nil)
+      try deleteAllSessions(service: syncedService, synchronizable: nil)
     }
   }
 
-  private func deleteAllSessions(synchronizable: CFString?) throws {
+  private func deleteAllSessions(
+    service: String,
+    synchronizable: Any?
+  ) throws {
     var query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service

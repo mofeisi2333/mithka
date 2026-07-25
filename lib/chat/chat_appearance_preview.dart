@@ -3,6 +3,7 @@ import 'package:flutter/widgets.dart';
 import '../components/photo_avatar.dart';
 import '../components/ui_components.dart';
 import '../tdlib/td_models.dart';
+import '../theme/theme_controller.dart';
 
 /// A compact, realistic conversation sample used by appearance pickers.
 ///
@@ -22,7 +23,7 @@ class ChatAppearancePreview extends StatelessWidget {
     this.outgoingName = 'Jessica',
     this.incomingNameColor,
     this.outgoingNameColor,
-    this.showSenderNamePlate = false,
+    this.senderNameReadabilityMode = SenderNameReadabilityMode.shadow,
   });
 
   final Color incomingBubbleColor;
@@ -35,7 +36,7 @@ class ChatAppearancePreview extends StatelessWidget {
   final String outgoingName;
   final Color? incomingNameColor;
   final Color? outgoingNameColor;
-  final bool showSenderNamePlate;
+  final SenderNameReadabilityMode senderNameReadabilityMode;
 
   @override
   Widget build(BuildContext context) {
@@ -48,7 +49,7 @@ class ChatAppearancePreview extends StatelessWidget {
           bubbleColor: incomingBubbleColor,
           textColor: incomingTextColor,
           nameColor: incomingNameColor ?? incomingTextColor,
-          showNamePlate: showSenderNamePlate,
+          readabilityMode: senderNameReadabilityMode,
           outgoing: false,
         ),
         const SizedBox(height: 11),
@@ -58,7 +59,7 @@ class ChatAppearancePreview extends StatelessWidget {
           bubbleColor: outgoingBubbleColor,
           textColor: outgoingTextColor,
           nameColor: outgoingNameColor ?? outgoingTextColor,
-          showNamePlate: showSenderNamePlate,
+          readabilityMode: senderNameReadabilityMode,
           outgoing: true,
         ),
       ],
@@ -66,27 +67,40 @@ class ChatAppearancePreview extends StatelessWidget {
   }
 }
 
-/// Adds a bubble-colored plate and soft shadow behind a sender name. Keeping
-/// this as a shared widget makes the appearance preview match real messages.
+/// Applies the selected readability treatment behind a sender name.
 class SenderNameReadabilityPlate extends StatelessWidget {
   const SenderNameReadabilityPlate({
     super.key,
-    required this.enabled,
+    required this.mode,
     required this.bubbleColor,
     required this.child,
+    this.shadowColor,
     this.padding = const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
     this.connectedToLeading = false,
   });
 
-  final bool enabled;
+  final SenderNameReadabilityMode mode;
   final Color bubbleColor;
   final Widget child;
+  final Color? shadowColor;
   final EdgeInsetsGeometry padding;
   final bool connectedToLeading;
 
   @override
   Widget build(BuildContext context) {
-    if (!enabled) return child;
+    if (mode == SenderNameReadabilityMode.none) return child;
+    if (mode == SenderNameReadabilityMode.shadow) {
+      return DefaultTextStyle.merge(
+        key: const ValueKey('senderNameReadabilityShadow'),
+        style: TextStyle(
+          shadows: [
+            Shadow(color: shadowColor ?? bubbleColor, blurRadius: 12),
+            Shadow(color: shadowColor ?? bubbleColor, blurRadius: 6),
+          ],
+        ),
+        child: child,
+      );
+    }
     return DecoratedBox(
       key: const ValueKey('senderNameReadabilityPlate'),
       decoration: senderNameReadabilityDecoration(
@@ -104,24 +118,28 @@ class SenderNameReadabilityPlate extends StatelessWidget {
 class SenderIdentityPills extends StatelessWidget {
   const SenderIdentityPills({
     super.key,
-    required this.enabled,
+    required this.readabilityMode,
     required this.bubbleColor,
     required this.name,
     required this.nameStyle,
+    this.shadowColor,
     this.role,
     this.roleTitle,
   });
 
-  final bool enabled;
+  final SenderNameReadabilityMode readabilityMode;
   final Color bubbleColor;
   final String name;
   final TextStyle nameStyle;
+  final Color? shadowColor;
   final MemberRole? role;
   final String? roleTitle;
 
   @override
   Widget build(BuildContext context) {
-    final connected = enabled && role != null;
+    final effectiveNameStyle = nameStyle.copyWith(fontWeight: FontWeight.w500);
+    final connected =
+        readabilityMode == SenderNameReadabilityMode.background && role != null;
     return Row(
       key: connected ? const ValueKey('connectedSenderIdentityPills') : null,
       mainAxisSize: MainAxisSize.min,
@@ -131,20 +149,21 @@ class SenderIdentityPills extends StatelessWidget {
             role: role!,
             title: roleTitle,
             connectedToTrailing: connected,
-            fontSize: connected ? nameStyle.fontSize : null,
+            fontSize: connected ? effectiveNameStyle.fontSize : null,
           ),
           if (!connected) const SizedBox(width: 4),
         ],
         Flexible(
           child: SenderNameReadabilityPlate(
-            enabled: enabled,
+            mode: readabilityMode,
             bubbleColor: bubbleColor,
+            shadowColor: shadowColor,
             connectedToLeading: connected,
             child: Text(
               name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: nameStyle,
+              style: effectiveNameStyle,
             ),
           ),
         ),
@@ -176,7 +195,7 @@ class _PreviewMessage extends StatelessWidget {
     required this.bubbleColor,
     required this.textColor,
     required this.nameColor,
-    required this.showNamePlate,
+    required this.readabilityMode,
     required this.outgoing,
   });
 
@@ -185,7 +204,7 @@ class _PreviewMessage extends StatelessWidget {
   final Color bubbleColor;
   final Color textColor;
   final Color nameColor;
-  final bool showNamePlate;
+  final SenderNameReadabilityMode readabilityMode;
   final bool outgoing;
 
   @override
@@ -197,18 +216,15 @@ class _PreviewMessage extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         SenderIdentityPills(
-          enabled: showNamePlate,
+          readabilityMode: readabilityMode,
           bubbleColor: bubbleColor,
           name: name,
           nameStyle: TextStyle(
             color: nameColor,
             fontSize: 11,
-            fontWeight: FontWeight.w700,
-            shadows: showNamePlate
-                ? null
-                : const [Shadow(color: Color(0x66000000), blurRadius: 4)],
+            fontWeight: FontWeight.w500,
           ),
-          role: showNamePlate
+          role: readabilityMode == SenderNameReadabilityMode.background
               ? (outgoing ? MemberRole.owner : MemberRole.admin)
               : null,
         ),

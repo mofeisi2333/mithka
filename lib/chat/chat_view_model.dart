@@ -24,6 +24,7 @@ import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../tdlib/td_requests.dart';
 import '../tdlib/td_user_index.dart';
+import 'ai_reply_service.dart';
 import 'chat_first_contact_info.dart';
 import 'chat_message_merge.dart';
 import 'chat_unread_progress.dart';
@@ -175,6 +176,9 @@ class _DraftMention {
 }
 
 class ChatViewModel extends ChangeNotifier {
+  static const int _maximumAiReplyContextMessages = 64;
+  static const int _maximumAiReplySearchCharacters = 160;
+
   ChatViewModel({
     required this.chatId,
     required String title,
@@ -185,7 +189,10 @@ class ChatViewModel extends ChangeNotifier {
     bool sessionAnchoredHistory = false,
     ChatFirstContactInfo? sessionFirstContactInfo,
     ChatMessage? seedMessage,
-  }) : peerTitle = title {
+  }) : _accountClientId = TdClient.shared.activeClientId,
+       _accountSlot = TdClient.shared.activeSlot,
+       peerTitle = title {
+    _historyAnchorMessageId = initialMessageId ?? sessionAnchorMessageId;
     if (sessionMessages != null && sessionMessages.isNotEmpty) {
       _allMessages = List<ChatMessage>.from(sessionMessages);
       messages = List<ChatMessage>.from(sessionMessages);
@@ -203,6 +210,8 @@ class ChatViewModel extends ChangeNotifier {
   final int? initialMessageId;
   final int? sessionAnchorMessageId;
   final bool markReadOnOpen;
+  int? _historyAnchorMessageId;
+  int? get historyAnchorMessageId => _historyAnchorMessageId;
 
   List<ChatMessage> messages = [];
   List<ChatMessage> _allMessages = [];
@@ -215,6 +224,7 @@ class ChatViewModel extends ChangeNotifier {
   int? peerSupergroupId;
   String meName = AppStrings.t(AppStringKeys.chatMeLabel);
   int? meId;
+  Set<String> meUsernames = const <String>{};
   TdFileRef? mePhoto;
   String draft = '';
   String _draftFormattedText = '';
@@ -251,6 +261,8 @@ class ChatViewModel extends ChangeNotifier {
   bool joinByRequest = false; // joining needs approval → "申请加入"
   bool joinRequested = false; // a join request was sent (awaiting approval)
   bool isChannel = false; // broadcast channel (members can't post)
+  bool isMessageBubbleRepository = false;
+  bool hasLinkedDiscussion = false;
   bool isDirectMessagesGroup = false;
   bool isAdministeredDirectMessagesGroup = false;
   bool isMuted =
@@ -282,6 +294,10 @@ class ChatViewModel extends ChangeNotifier {
   SponsoredMessagesSnapshot? sponsoredMessages;
 
   final TdClient _client = TdClient.shared;
+  final int _accountClientId;
+  final int _accountSlot;
+  Future<Set<String>>? _aiReplyBlockedSenderKeysFuture;
+  int _aiReplyBlockedSenderRevision = 0;
   late final TelegramAiService telegramAi = TelegramAiService(client: _client);
   TelegramAiCapabilities? aiCapabilities;
   static final SponsoredMessagesCache _sponsoredMessagesCache =
@@ -352,6 +368,7 @@ class ChatViewModel extends ChangeNotifier {
   bool get canLoadOlder =>
       !_isLoadingOlder && _allMessages.isNotEmpty && _hasOlderHistory;
   bool get isLoadingOlder => _isLoadingOlder;
+  bool get isLoadingLatest => _latestHistoryLoadInFlight;
   bool get hasOlderHistory => _hasOlderHistory;
   int get _oldestServerMessageId {
     for (final message in _allMessages) {
@@ -369,11 +386,8 @@ class ChatViewModel extends ChangeNotifier {
   bool get canSendWhenOnline => !isGroup && !peerIsBot;
   List<AvailableMessageEffect> availableMessageEffects = const [];
   MessageSendConfiguration? _nextSendConfiguration;
-  String get inputPlaceholder => messageAutoDeleteTime > 0
-      ? AppStrings.t(AppStringKeys.chatAutoDeleteCountdown, {
-          'value1': TDParse.formatDuration(messageAutoDeleteTime),
-        })
-      : AppStrings.t(AppStringKeys.chatMessageInputPlaceholder);
+  String get inputPlaceholder =>
+      AppStrings.t(AppStringKeys.chatMessageInputPlaceholder);
 
   final Map<int, _SenderInfo> _senderCache = {};
   final Set<int> _resolvingSenders = {};
@@ -524,6 +538,17 @@ class ChatViewModel extends ChangeNotifier {
       meId = me.int64('id');
       final name = TDParse.userName(me);
       if (name.isNotEmpty) meName = name;
+      final usernames = me.obj('usernames');
+      final active = usernames?['active_usernames'];
+      final editable = usernames?.str('editable_username');
+      meUsernames = Set.unmodifiable({
+        if (active is List)
+          for (final username in active.whereType<String>())
+            if (username.trim().isNotEmpty)
+              username.trim().replaceFirst('@', '').toLowerCase(),
+        if (editable?.trim().isNotEmpty == true)
+          editable!.trim().replaceFirst('@', '').toLowerCase(),
+      });
       mePhoto = TDParse.smallPhoto(me.obj('profile_photo'));
       notifyListeners();
     } catch (_) {}
@@ -2305,6 +2330,254 @@ class ChatViewModel extends ChangeNotifier {
 
   // MARK: - Paging
 
+  /// Loads a bounded, read-only slice of older messages for an AI reply.
+  ///
+  /// Unlike [loadOlder] and [loadAroundMessage], this never merges messages
+  /// into the transcript, moves the history window, or marks anything read.
+  /// The TDLib client is captured with the view model so an account switch
+  /// can't redirect a colliding chat id to another account while the request
+  /// is in flight. [beforeMessageId] is an exclusive cursor; zero starts from
+  /// the latest message available to TDLib.
+  Future<AiReplyChatHistoryPage> loadAiReplyContext({
+    required int beforeMessageId,
+    required String query,
+    required int limit,
+  }) async {
+    _requireAiReplyContextAccess();
+    final blockedSenderKeys = await _aiReplyBlockedSenderKeys();
+    _requireAiReplyContextAccess();
+
+    final boundedBeforeMessageId = math.max(0, beforeMessageId);
+    final boundedLimit = math.min(
+      _maximumAiReplyContextMessages,
+      math.max(1, limit),
+    );
+    // TDLib includes from_message_id at offset zero. Ask for one extra item so
+    // an exclusive cursor can still return the requested number of messages.
+    final requestLimit = boundedBeforeMessageId > 0
+        ? boundedLimit + 1
+        : boundedLimit;
+    final boundedQuery = _boundedAiReplySearchQuery(query);
+    final request = boundedQuery.isEmpty
+        ? <String, dynamic>{
+            '@type': 'getChatHistory',
+            'chat_id': chatId,
+            'from_message_id': boundedBeforeMessageId,
+            'offset': 0,
+            'limit': requestLimit,
+            'only_local': false,
+          }
+        : <String, dynamic>{
+            '@type': 'searchChatMessages',
+            'chat_id': chatId,
+            'query': boundedQuery,
+            'sender_id': null,
+            'from_message_id': boundedBeforeMessageId,
+            'offset': 0,
+            'limit': requestLimit,
+            'filter': {'@type': 'searchMessagesFilterEmpty'},
+          };
+
+    final Map<String, dynamic> response;
+    try {
+      response = await _client.queryTo(request, _accountClientId);
+    } catch (_) {
+      _requireAiReplyContextAccess();
+      return AiReplyChatHistoryPage(
+        messages: const [],
+        hasMore: true,
+        blockedSenderKeys: blockedSenderKeys,
+      );
+    }
+    _requireAiReplyContextAccess();
+
+    final messagesById = <int, ChatMessage>{};
+    final rawMessages =
+        response.objects('messages') ?? const <Map<String, dynamic>>[];
+    for (final raw in rawMessages) {
+      final message = TDParse.message(raw);
+      if (message == null ||
+          message.id <= 0 ||
+          (message.chatId != null && message.chatId != chatId) ||
+          (boundedBeforeMessageId > 0 &&
+              message.id >= boundedBeforeMessageId) ||
+          !_canShareMessageWithAi(message, blockedSenderKeys)) {
+        continue;
+      }
+      _hydrateAiReplySenderName(message);
+      messagesById[message.id] = message;
+      if (messagesById.length >= boundedLimit) break;
+    }
+
+    final result = messagesById.values.toList()
+      ..sort(compareChatMessagesChronologically);
+    final searchNextMessageId = response.int64('next_from_message_id');
+    // TDLib may return fewer messages than requested without reaching the
+    // beginning of chat history. Search responses expose an explicit cursor;
+    // plain history does not, so only an empty page proves exhaustion there.
+    final hasMore = boundedQuery.isNotEmpty
+        ? searchNextMessageId == null
+              ? rawMessages.isNotEmpty
+              : searchNextMessageId != 0
+        : rawMessages.isNotEmpty;
+    return AiReplyChatHistoryPage(
+      messages: List.unmodifiable(result),
+      hasMore: hasMore,
+      blockedSenderKeys: blockedSenderKeys,
+    );
+  }
+
+  bool get _canLoadAiReplyContext =>
+      !_isDisposed &&
+      !isSecretChat &&
+      !hasProtectedContent &&
+      _accountClientId > 0 &&
+      _client.activeClientId == _accountClientId &&
+      _client.activeSlot == _accountSlot;
+
+  bool get canShareAiReplyContext => _canLoadAiReplyContext;
+
+  void _requireAiReplyContextAccess() {
+    if (_canLoadAiReplyContext) return;
+    throw const AiReplyPrivacyException(
+      'AI Reply context is no longer available for this account.',
+    );
+  }
+
+  Future<Set<String>> _aiReplyBlockedSenderKeys() async {
+    final existing = _aiReplyBlockedSenderKeysFuture;
+    if (existing != null) return existing;
+    final revision = _aiReplyBlockedSenderRevision;
+    final future = () async {
+      final result = await _fetchAiReplyBlockedSenderKeys();
+      if (revision != _aiReplyBlockedSenderRevision) {
+        return _aiReplyBlockedSenderKeys();
+      }
+      return result;
+    }();
+    _aiReplyBlockedSenderKeysFuture = future;
+    try {
+      return await future;
+    } catch (_) {
+      if (identical(_aiReplyBlockedSenderKeysFuture, future)) {
+        _aiReplyBlockedSenderKeysFuture = null;
+      }
+      rethrow;
+    }
+  }
+
+  Future<Set<String>> _fetchAiReplyBlockedSenderKeys() async {
+    try {
+      const pageLimit = 100;
+      const maximumPages = 100;
+      final blocked = <String>{};
+      var offset = 0;
+      for (var page = 0; page < maximumPages; page++) {
+        _requireAiReplyContextAccess();
+        final response = await _client.queryTo({
+          '@type': 'getBlockedMessageSenders',
+          'block_list': {'@type': 'blockListMain'},
+          'offset': offset,
+          'limit': pageLimit,
+        }, _accountClientId);
+        _requireAiReplyContextAccess();
+        final senders =
+            response.objects('senders') ?? const <Map<String, dynamic>>[];
+        for (final raw in senders) {
+          final sender = raw.obj('sender') ?? raw;
+          final type = sender.type;
+          final senderId = switch (type) {
+            'messageSenderUser' => sender.int64('user_id'),
+            'messageSenderChat' => sender.int64('chat_id'),
+            _ => null,
+          };
+          final key = aiReplySenderKey(
+            senderId: senderId,
+            senderIsChat: type == 'messageSenderChat',
+          );
+          if (key != null) blocked.add(key);
+        }
+        // TDLib documents total_count as approximate, so it cannot safely
+        // prove that every blocked sender was checked. A short page is the
+        // only successful termination signal for this privacy gate.
+        if (senders.length < pageLimit) {
+          return Set.unmodifiable(blocked);
+        }
+        offset += senders.length;
+      }
+      throw const AiReplyPrivacyException(
+        'The blocked-user list is too large to verify safely for AI Reply.',
+      );
+    } on AiReplyPrivacyException {
+      rethrow;
+    } catch (_) {
+      throw const AiReplyPrivacyException(
+        'Could not verify blocked users safely for AI Reply.',
+      );
+    }
+  }
+
+  String _boundedAiReplySearchQuery(String value) {
+    final trimmed = value.trim();
+    final runes = trimmed.runes.toList(growable: false);
+    if (runes.length <= _maximumAiReplySearchCharacters) return trimmed;
+    return String.fromCharCodes(runes.take(_maximumAiReplySearchCharacters));
+  }
+
+  bool _canShareMessageWithAi(
+    ChatMessage message,
+    Set<String> blockedSenderKeys,
+  ) {
+    if (message.isService ||
+        message.isContentRestricted ||
+        message.blockedByUser ||
+        message.text.trim().isEmpty) {
+      return false;
+    }
+    if (message.isOutgoing) return true;
+
+    final senderId = message.senderId;
+    if (senderId != null && _blockedSenderIds.contains(senderId)) return false;
+    final keywordBlocker = KeywordBlocker.shared;
+    if (keywordBlocker.isSenderBlocked(senderId) ||
+        keywordBlocker.matches(message.text)) {
+      return false;
+    }
+    final senderKey = aiReplySenderKey(
+      senderId: senderId,
+      senderIsChat: message.senderIsChat,
+    );
+    return senderKey == null || !blockedSenderKeys.contains(senderKey);
+  }
+
+  void _hydrateAiReplySenderName(ChatMessage message) {
+    if (message.senderName?.trim().isNotEmpty ?? false) return;
+    if (message.isOutgoing && !message.senderIsChat) {
+      message.senderName = meName;
+      return;
+    }
+
+    final senderId = message.senderId;
+    final cached = senderId == null ? null : _senderCache[senderId];
+    if (cached != null && cached.name.trim().isNotEmpty) {
+      message.senderName = cached.name;
+      return;
+    }
+    if (senderId != null && senderId > 0 && !message.senderIsChat) {
+      final user = TdUserIndex.shared.userFor(_accountSlot, senderId);
+      if (user != null) {
+        final name = TDParse.userName(user).trim();
+        if (name.isNotEmpty) {
+          message.senderName = name;
+          return;
+        }
+      }
+    }
+    if (!isGroup && !message.isOutgoing && peerTitle.trim().isNotEmpty) {
+      message.senderName = peerTitle.trim();
+    }
+  }
+
   Future<bool> loadOlder() async {
     if (!canLoadOlder) return false;
     _isLoadingOlder = true;
@@ -2342,6 +2615,7 @@ class ChatViewModel extends ChangeNotifier {
     _latestHistoryLiveArrivals.clear();
     _latestHistoryDeletedMessageIds.clear();
     _latestHistoryLoadInvalidated = false;
+    notifyListeners();
     final messagesAtRequestStart = List<ChatMessage>.of(_allMessages);
     try {
       Map<String, dynamic> response;
@@ -2382,6 +2656,7 @@ class ChatViewModel extends ChangeNotifier {
       ++_historyWindowGeneration;
       ++_historyWindowRevision;
       anchoredHistory = false;
+      _historyAnchorMessageId = null;
       _pendingScrollToId = null;
       _hasOlderHistory = fetched.isNotEmpty;
       _historyReachesLatest = true;
@@ -2407,9 +2682,21 @@ class ChatViewModel extends ChangeNotifier {
       _latestHistoryLiveArrivals.clear();
       _latestHistoryDeletedMessageIds.clear();
       _latestHistoryLoadInvalidated = false;
+      notifyListeners();
     }
 
     return true;
+  }
+
+  /// Prevents an in-flight latest-history response from replacing the current
+  /// anchored window after the user takes control of the transcript.
+  ///
+  /// TDLib does not expose cancellation for an already-sent query, so the
+  /// generation check in [loadLatestHistory] discards its eventual response.
+  void invalidateLatestHistoryLoad() {
+    if (!_latestHistoryLoadInFlight) return;
+    _latestHistoryLoadInvalidated = true;
+    ++_historyWindowGeneration;
   }
 
   // MARK: - Header
@@ -2476,6 +2763,8 @@ class ChatViewModel extends ChangeNotifier {
     canJoin = false;
     joinByRequest = false;
     isChannel = false;
+    isMessageBubbleRepository = false;
+    hasLinkedDiscussion = false;
     isDirectMessagesGroup = false;
     isAdministeredDirectMessagesGroup = false;
     canDeleteMessagesBySender = false;
@@ -2562,6 +2851,17 @@ class ChatViewModel extends ChangeNotifier {
               );
             }
             isChannel = sg.boolean('is_channel') ?? false;
+            final usernames = sg.obj('usernames');
+            final activeUsernames = usernames?['active_usernames'];
+            final repositoryNames = <String>{
+              if (activeUsernames is List)
+                for (final value in activeUsernames.whereType<String>())
+                  value.toLowerCase(),
+              if ((usernames?.str('editable_username') ?? '').isNotEmpty)
+                usernames!.str('editable_username')!.toLowerCase(),
+            };
+            isMessageBubbleRepository =
+                isChannel && repositoryNames.contains('msgbubble');
             isDirectMessagesGroup =
                 sg.boolean('is_direct_messages_group') ?? false;
             isAdministeredDirectMessagesGroup =
@@ -2687,6 +2987,8 @@ class ChatViewModel extends ChangeNotifier {
         'supergroup_id': supergroupId,
       });
       memberCount = full.integer('member_count') ?? memberCount;
+      hasLinkedDiscussion =
+          isChannel && (full.int64('linked_chat_id') ?? 0) != 0;
       _setPaidMessageStarCount(_paidMessageStars(full), notify: false);
       notifyListeners();
     } catch (_) {}
@@ -3101,6 +3403,7 @@ class ChatViewModel extends ChangeNotifier {
 
   Future<void> _loadInitialLatestHistory() async {
     anchoredHistory = false;
+    _historyAnchorMessageId = null;
     final localLoaded = await _fetchHistory(0, 0, 40, onlyLocal: true);
     if (!localLoaded) {
       await _fetchHistory(0, 0, 40);
@@ -3179,6 +3482,7 @@ class ChatViewModel extends ChangeNotifier {
     }
     _hasOlderHistory = true;
     anchoredHistory = true;
+    _historyAnchorMessageId = messageId;
     if (scrollToTarget) _pendingScrollToId = messageId;
     _mergeHistoryWindow(
       batch,
@@ -3541,7 +3845,12 @@ class ChatViewModel extends ChangeNotifier {
         }
         _replaceText(
           messageId,
-          TDParse.messageText(content),
+          // Chat-list previews deliberately synthesize labels such as
+          // "Photo", "Video", and a document name. A transcript update must
+          // keep using only user-authored text, otherwise TDLib's live content
+          // update for a just-sent attachment turns that preview label into a
+          // visible caption until the confirmed message replaces it.
+          TDParse.messageContentText(content),
           entities: TDParse.messageTextEntities(content),
           customEmoji: TDParse.customEmojiEntitiesForContent(content),
           linkPreview: TDParse.linkPreview(content.obj('link_preview')),
@@ -3701,6 +4010,7 @@ class ChatViewModel extends ChangeNotifier {
         messages = [];
         _hasOlderHistory = false;
         anchoredHistory = false;
+        _historyAnchorMessageId = null;
         _historyReachesLatest = true;
         _knownLatestMessageId = 0;
         _pendingScrollToId = null;
@@ -3791,9 +4101,10 @@ class ChatViewModel extends ChangeNotifier {
 
       case 'updateSupergroupFullInfo':
         if (update.int64('supergroup_id') != peerSupergroupId) return;
-        _setPaidMessageStarCount(
-          _paidMessageStars(update.obj('supergroup_full_info') ?? update),
-        );
+        final fullInfo = update.obj('supergroup_full_info') ?? update;
+        hasLinkedDiscussion =
+            isChannel && (fullInfo.int64('linked_chat_id') ?? 0) != 0;
+        _setPaidMessageStarCount(_paidMessageStars(fullInfo));
 
       case 'updateUserStatus':
         if (isGroup || update.int64('user_id') != peerUserId) return;
@@ -3824,11 +4135,26 @@ class ChatViewModel extends ChangeNotifier {
         if (mid == null) return;
         final targets = _messageRefs(mid);
         if (targets.isNotEmpty) {
+          final interactionInfo = update.obj('interaction_info');
+          final replyInfo = interactionInfo?.obj('reply_info');
           final reactions = TDParse.reactionsFrom({
-            'interaction_info': update.obj('interaction_info'),
+            'interaction_info': interactionInfo,
           });
           for (final message in targets) {
             message.reactions = reactions;
+            message.viewCount = interactionInfo?.integer('view_count') ?? 0;
+            message.forwardCount =
+                interactionInfo?.integer('forward_count') ?? 0;
+            if (!message.isContentRestricted) {
+              message.hasCommentThread = replyInfo != null;
+              message.commentCount =
+                  replyInfo?.integer('reply_count') ??
+                  replyInfo?.integer('comment_count') ??
+                  0;
+              message.lastCommentMessageId = replyInfo?.int64(
+                'last_message_id',
+              );
+            }
           }
           notifyListeners();
         }
@@ -3843,6 +4169,8 @@ class ChatViewModel extends ChangeNotifier {
       case 'updateBlockMessageSender':
         // Invalidate blocked-user cache so the hide-on-block toggle
         // takes effect immediately without app restart.
+        _aiReplyBlockedSenderKeysFuture = null;
+        _aiReplyBlockedSenderRevision++;
         if (BlockedUserService.shared.enabled) {
           unawaited(
             BlockedUserService.shared.loadBlockedUsers().then((_) {
@@ -4103,28 +4431,58 @@ class ChatViewModel extends ChangeNotifier {
   /// For each message that replies to another, resolve the quoted sender +
   /// preview — from the already-loaded list when possible, else via getMessage.
   void _resolveRepliesIfNeeded(List<ChatMessage> batch) {
-    for (final m in batch) {
-      final rid = m.replyToMessageId;
-      if (rid == null || m.replyToPreview != null) continue;
-      final idx = messages.indexWhere((x) => x.id == rid);
-      if (idx >= 0) {
-        _applyReply(m, messages[idx]);
-      } else {
-        _client
-            .query({
-              '@type': 'getMessage',
-              'chat_id': chatId,
-              'message_id': rid,
-            })
-            .then((raw) {
-              final q = TDParse.message(raw);
-              if (q != null) {
-                _applyReply(m, q);
-                notifyListeners();
-              }
-            })
-            .catchError((_) {});
+    final repliesToResolve = batch
+        .where(
+          (message) =>
+              message.replyToMessageId != null &&
+              message.replyToPreview == null,
+        )
+        .toList(growable: false);
+    if (repliesToResolve.isEmpty) return;
+    final loadedById = repliesToResolve.length > 1
+        ? <int, ChatMessage>{
+            for (final message in messages) message.id: message,
+          }
+        : null;
+    final unresolved = <int, List<ChatMessage>>{};
+    for (final m in repliesToResolve) {
+      final rid = m.replyToMessageId!;
+      ChatMessage? quoted = loadedById?[rid];
+      if (loadedById == null) {
+        for (final message in messages) {
+          if (message.id != rid) continue;
+          quoted = message;
+          break;
+        }
       }
+      if (quoted != null) {
+        _applyReply(m, quoted);
+        continue;
+      }
+      unresolved.putIfAbsent(rid, () => <ChatMessage>[]).add(m);
+    }
+    for (final entry in unresolved.entries) {
+      _client
+          .query({
+            '@type': 'getMessage',
+            'chat_id': chatId,
+            'message_id': entry.key,
+          })
+          .then((raw) {
+            final quoted = TDParse.message(raw);
+            if (quoted == null) return;
+            var changed = false;
+            for (final message in entry.value) {
+              if (message.replyToMessageId != entry.key ||
+                  message.replyToPreview != null) {
+                continue;
+              }
+              _applyReply(message, quoted);
+              changed = true;
+            }
+            if (changed) notifyListeners();
+          })
+          .catchError((_) {});
     }
   }
 
@@ -4596,9 +4954,18 @@ class ChatViewModel extends ChangeNotifier {
   }
 
   void _patchSender(_SenderInfo info, int senderId) {
+    _patchSenders(<int, _SenderInfo>{senderId: info});
+  }
+
+  void _patchSenders(Map<int, _SenderInfo> senders) {
+    if (senders.isEmpty) return;
     var changed = false;
     for (final m in messages) {
-      if (m.senderId != senderId || (m.isOutgoing && !m.senderIsChat)) continue;
+      final senderId = m.senderId;
+      if (senderId == null) continue;
+      final info = senders[senderId];
+      if (info == null) continue;
+      if (m.isOutgoing && !m.senderIsChat) continue;
       if (m.senderName == info.name &&
           _sameSenderPhoto(m.senderPhoto, info.photo) &&
           m.senderRole == info.role &&
@@ -4642,17 +5009,13 @@ class ChatViewModel extends ChangeNotifier {
 
   void _resolveSendersIfNeeded(List<ChatMessage> batch) {
     if (!isGroup) return;
-    _primeCachedSenderIdentities(batch);
+    final senderIds = _resolvableSenderIds(batch);
+    final cachedToPatch = _primeCachedSenderIdentities(senderIds);
     final pending = <int>{};
-    for (final message in batch) {
-      if ((message.isOutgoing && !message.senderIsChat) || message.isService) {
-        continue;
-      }
-      final senderId = message.senderId;
-      if (senderId == null) continue;
+    for (final senderId in senderIds) {
       final cached = _senderCache[senderId];
       if (cached != null) {
-        _patchSender(cached, senderId);
+        cachedToPatch[senderId] = cached;
         if (!_resolvedSenderDetails.contains(senderId) &&
             !_resolvingSenders.contains(senderId)) {
           pending.add(senderId);
@@ -4661,19 +5024,25 @@ class ChatViewModel extends ChangeNotifier {
         pending.add(senderId);
       }
     }
+    _patchSenders(cachedToPatch);
     for (final senderId in pending) {
       _resolvingSenders.add(senderId);
       _resolveSender(senderId);
     }
   }
 
-  void _primeCachedSenderIdentities(List<ChatMessage> batch) {
-    for (final message in batch) {
-      if ((message.isOutgoing && !message.senderIsChat) || message.isService) {
-        continue;
-      }
-      final senderId = message.senderId;
-      if (senderId == null || senderId <= 0) continue;
+  Set<int> _resolvableSenderIds(Iterable<ChatMessage> batch) => {
+    for (final message in batch)
+      if (!(message.isOutgoing && !message.senderIsChat) &&
+          !message.isService &&
+          message.senderId != null)
+        message.senderId!,
+  };
+
+  Map<int, _SenderInfo> _primeCachedSenderIdentities(Set<int> senderIds) {
+    final primed = <int, _SenderInfo>{};
+    for (final senderId in senderIds) {
+      if (senderId <= 0) continue;
       final user = TdUserIndex.shared.userFor(_client.activeSlot, senderId);
       if (user == null) continue;
       final existing = _senderCache[senderId];
@@ -4683,18 +5052,24 @@ class ChatViewModel extends ChangeNotifier {
         title: existing?.title,
       );
       _senderCache[senderId] = info;
-      _patchSender(info, senderId);
+      primed[senderId] = info;
     }
+    return primed;
   }
 
   @visibleForTesting
   void primeCachedSenderIdentitiesForTesting() {
-    _primeCachedSenderIdentities(messages);
+    _patchSenders(_primeCachedSenderIdentities(_resolvableSenderIds(messages)));
   }
 
   @visibleForTesting
   void applySenderUserUpdateForTesting(Map<String, dynamic> user) {
     _applySenderUserUpdate(user);
+  }
+
+  @visibleForTesting
+  void applyLiveUpdateForTesting(Map<String, dynamic> update) {
+    _handle(update);
   }
 
   void _applySenderUserUpdate(Map<String, dynamic> user) {
@@ -4787,6 +5162,8 @@ class ChatViewModel extends ChangeNotifier {
         case 'messageChatJoinByLink':
         case 'messageChatJoinByRequest':
           _resolveJoinServiceText(message);
+        case 'messageChatBoost':
+          _resolveBoostServiceText(message);
         case 'messageChatDeleteMember':
           _resolveDeleteMemberServiceText(message);
       }
@@ -4797,10 +5174,9 @@ class ChatViewModel extends ChangeNotifier {
     final names = <String>[];
     for (final userId in message.serviceUserIds.take(5)) {
       try {
-        final user = await _client.query({
-          '@type': 'getUser',
-          'user_id': userId,
-        });
+        final user =
+            TdUserIndex.shared.userFor(_client.activeSlot, userId) ??
+            await _client.query({'@type': 'getUser', 'user_id': userId});
         final name = TDParse.userName(user);
         if (name.isNotEmpty) names.add(name);
       } catch (_) {}
@@ -4821,6 +5197,25 @@ class ChatViewModel extends ChangeNotifier {
     if (index < 0 || messages[index].text == text) return;
     messages[index].text = text;
     notifyListeners();
+  }
+
+  Future<void> _resolveBoostServiceText(ChatMessage message) async {
+    if (message.serviceUserIds.isEmpty) return;
+    final userId = message.serviceUserIds.first;
+    try {
+      final user =
+          TdUserIndex.shared.userFor(_client.activeSlot, userId) ??
+          await _client.query({'@type': 'getUser', 'user_id': userId});
+      final name = TDParse.userName(user);
+      if (name.isEmpty) return;
+      final text = AppStrings.t(AppStringKeys.chatUserBoostedGroup, {
+        'value1': name,
+      });
+      final index = messages.indexWhere((m) => m.id == message.id);
+      if (index < 0 || messages[index].text == text) return;
+      messages[index].text = text;
+      notifyListeners();
+    } catch (_) {}
   }
 
   Future<void> _resolveDeleteMemberServiceText(ChatMessage message) async {

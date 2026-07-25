@@ -17,7 +17,6 @@ import 'package:flutter/services.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
-import '../app/pip_bounds_debug_overlay.dart';
 import '../app/video_split_controller.dart';
 import '../auth/telegram_country_names.dart';
 import '../call/call_manager.dart';
@@ -33,11 +32,11 @@ import '../media/app_asset_picker.dart';
 import '../moments/story_viewer_view.dart';
 import '../notifications/notification_controller.dart';
 import '../profile/profile_detail_view.dart';
+import '../settings/ai_endpoint_style.dart';
 import '../settings/ai_settings_controller.dart';
 import '../settings/apple_pcc_api.dart';
 import '../settings/blocked_user_service.dart';
 import '../settings/business_tools_views.dart';
-import '../settings/developer_mode_controller.dart';
 import '../settings/keyword_blocker.dart';
 import '../settings/quick_reaction_settings_view.dart';
 import '../settings/sensitive_content_controller.dart';
@@ -61,11 +60,13 @@ import 'channel_direct_messages_view.dart';
 import 'chat_auto_scroll_policy.dart';
 import 'chat_first_contact_card.dart';
 import 'chat_first_contact_info.dart';
+import 'chat_frame_scheduler.dart';
 import 'chat_info_view.dart';
 import 'chat_input_bar.dart';
 import 'chat_media_drop_region.dart';
 import 'chat_message_merge.dart';
 import 'chat_picker_view.dart';
+import 'chat_return_to_latest_coordinator.dart';
 import 'chat_scroll_metrics.dart';
 import 'chat_search_view.dart';
 import 'chat_session_cache.dart';
@@ -86,6 +87,7 @@ import 'media_library_saver.dart';
 import 'media_send_preview_view.dart';
 import 'message_action_menu.dart';
 import 'message_bubble.dart';
+import 'message_bubble_repository_view.dart';
 import 'message_replies_sheet.dart';
 import 'music_player_controller.dart';
 import 'openai_compatible_unread_summary_provider.dart';
@@ -97,12 +99,39 @@ import 'shared_contact_sheet.dart';
 import 'sticker_set_detail_view.dart';
 import 'sticker_viewer.dart';
 import 'telegram_mini_app_view.dart';
+import 'telegram_rich_text.dart';
 import 'transcript_pivot_partition.dart';
 import 'unread_chat_summary_models.dart';
 import 'unread_chat_summary_service.dart';
 import 'unread_chat_summary_view.dart';
 import 'video_playback_queue.dart';
 import 'video_player_view.dart';
+
+@visibleForTesting
+ChatMessage selectMediaAlbumInteractionOwner(List<ChatMessage> group) {
+  for (final message in group) {
+    if (message.hasCommentThread || message.hasActualReplies) return message;
+  }
+  for (final message in group) {
+    if (message.reactions.isNotEmpty) return message;
+  }
+  return group.first;
+}
+
+@visibleForTesting
+bool chatTranscriptBoundaryChanged({
+  required int previousCount,
+  required int currentCount,
+  required int? previousNewestMessageId,
+  required int? currentNewestMessageId,
+  required int? previousOldestMessageId,
+  required int? currentOldestMessageId,
+  required bool hasBufferedLiveMessages,
+}) =>
+    previousCount != currentCount ||
+    previousNewestMessageId != currentNewestMessageId ||
+    previousOldestMessageId != currentOldestMessageId ||
+    hasBufferedLiveMessages;
 
 class _MessageDeleteOptions {
   const _MessageDeleteOptions({
@@ -752,7 +781,10 @@ class _TranscriptEntry {
   ChatMessage get last => messages.last;
   bool get isBlockedRun =>
       messages.isNotEmpty && messages.every((message) => message.blockedByUser);
-  bool get isImageGroup => messages.length > 1 && !isBlockedRun;
+  ChatMediaAlbumKind? get mediaAlbumKind =>
+      messages.length > 1 && !isBlockedRun ? chatMediaAlbumKind(first) : null;
+  bool get isImageGroup => mediaAlbumKind == ChatMediaAlbumKind.visual;
+  bool get isDocumentGroup => mediaAlbumKind == ChatMediaAlbumKind.document;
 
   /// Stable identity for element reuse across index shifts (history pages
   /// prepend and shift every index).
@@ -805,6 +837,9 @@ class _ChatViewState extends State<ChatView> {
   final Set<int> _reportedVisibleMessageIds = <int>{};
   final Set<int> _expandedBlockedRunIds = <int>{};
   bool _unreadProgressUpdateScheduled = false;
+  bool _viewTickerEnabled = true;
+  bool _modelDirtyWhileInactive = false;
+  bool _reactivationSyncScheduled = false;
   ChatMessage? _actionTarget;
   Rect? _actionRect; // global bounds of the long-pressed bubble
   MessageActionSource _actionSource = MessageActionSource.normal;
@@ -837,7 +872,7 @@ class _ChatViewState extends State<ChatView> {
   bool _shortFirstContactRevealScheduled = false;
   bool _showingFullyVisibleFirstContactHistory = false;
   bool _transcriptViewportClaimedByUser = false;
-  bool _loadingLatestFromAnchor = false;
+  late final ChatReturnToLatestCoordinator _returnToLatestCoordinator;
   bool _initialTranscriptReady = false;
   final Set<int> _transcriptPointersDown = <int>{};
   bool _bottomScrollScheduled = false;
@@ -848,6 +883,7 @@ class _ChatViewState extends State<ChatView> {
   int? _selectionAnchorId;
   bool _selectionScrollingUp = false;
   double _lastScrollPixels = 0;
+  ScrollDirection _lastTranscriptUserScrollDirection = ScrollDirection.idle;
   bool _backSwipePopping = false;
   bool _loadingOlderFromScroll = false;
   final OldestHistoryPullController _olderHistoryPull =
@@ -883,7 +919,6 @@ class _ChatViewState extends State<ChatView> {
   static const _initialTargetAlignment = 0.30;
   static const _initialUnreadAlignment = 0.12;
   static const _pendingTranscriptOrderId = 0x7FFFFFFFFFFFFFFF;
-  static OverlayEntry? _globalPictureInPictureVideo;
   static final Map<int, _ChatScrollSnapshot> _sessionScrollSnapshots = {};
   static final ChatSessionCache _sessionCache = ChatSessionCache();
   late final ChatAutoScrollPolicy _autoScrollPolicy;
@@ -1002,6 +1037,13 @@ class _ChatViewState extends State<ChatView> {
       sessionFirstContactInfo: _sessionRenderState?.firstContactInfo,
       seedMessage: widget.seedMessage,
     );
+    _returnToLatestCoordinator = ChatReturnToLatestCoordinator(
+      loadLatest: _vm.loadLatestHistory,
+      invalidateLatestLoad: _vm.invalidateLatestHistoryLoad,
+      needsLatestLoad: () => _vm.anchoredHistory,
+      onChanged: _onReturnToLatestCoordinatorChanged,
+      onReadyAvailable: _drainReturnToLatestIntent,
+    );
     _translation = context.read<TranslationController>();
     _translation.addListener(_onTranslationSettingsChanged);
     _historyWindowRevision = _vm.historyWindowRevision;
@@ -1034,7 +1076,7 @@ class _ChatViewState extends State<ChatView> {
     _setScrollTarget(widget.initialMessageId);
     _vm.onAppear();
     _readSyncTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (mounted && _isAtLoadedBottom(80)) {
+      if (mounted && _viewTickerEnabled && _isAtLoadedBottom(80)) {
         _markReadAtBottomIfNeeded();
       }
     });
@@ -1054,16 +1096,32 @@ class _ChatViewState extends State<ChatView> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_notificationVisibilityRegistered) return;
-    _notificationVisibilityRegistered = true;
-    NotificationController.shared.registerVisibleChat(
-      this,
-      widget.chatId,
-      () =>
-          mounted &&
-          (ModalRoute.of(context)?.isCurrent ?? false) &&
-          TickerMode.valuesOf(context).enabled,
-    );
+    final tickerEnabled = TickerMode.valuesOf(context).enabled;
+    final reactivated = !_viewTickerEnabled && tickerEnabled;
+    _viewTickerEnabled = tickerEnabled;
+    if (reactivated &&
+        _modelDirtyWhileInactive &&
+        !_reactivationSyncScheduled) {
+      _reactivationSyncScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _reactivationSyncScheduled = false;
+        if (!mounted || !_viewTickerEnabled || !_modelDirtyWhileInactive) {
+          return;
+        }
+        _onModel();
+      });
+    }
+    if (!_notificationVisibilityRegistered) {
+      _notificationVisibilityRegistered = true;
+      NotificationController.shared.registerVisibleChat(
+        this,
+        widget.chatId,
+        () =>
+            mounted &&
+            (ModalRoute.of(context)?.isCurrent ?? false) &&
+            TickerMode.valuesOf(context).enabled,
+      );
+    }
   }
 
   bool get _shouldRestoreSessionScroll {
@@ -1100,7 +1158,11 @@ class _ChatViewState extends State<ChatView> {
       towardOlderMessages: pos.userScrollDirection == ScrollDirection.forward,
       isAtBottom: _isAtLoadedBottom(1),
     );
-    _saveSessionScrollSnapshot();
+    // Persist cheap scalar state while the finger is moving. Capturing an
+    // anchor walks every mounted transcript entry and performs layout-space
+    // conversions, so defer that work until scrolling settles or the view
+    // exits.
+    _saveSessionScrollSnapshot(captureAnchor: false);
     _scheduleUnreadProgressUpdate();
     if (_selectionAnchorId != null && scrollingUp != _selectionScrollingUp) {
       setState(() => _selectionScrollingUp = scrollingUp);
@@ -1109,10 +1171,8 @@ class _ChatViewState extends State<ChatView> {
         isNearOldest(pos, threshold: 500)) {
       unawaited(_loadOlderFromScroll());
     }
-    if (_vm.anchoredHistory &&
-        pos.userScrollDirection == ScrollDirection.reverse &&
-        isNearLatest(pos, threshold: 36)) {
-      unawaited(_returnToLatest());
+    if (pos.userScrollDirection == ScrollDirection.reverse) {
+      _requestAutomaticReturnToLatestIfNearLatest();
     }
     final nearBottom = _isNearBottom(80);
     if (_isAtLoadedBottom(1)) _autoScrollPolicy.returnToBottom();
@@ -1133,8 +1193,16 @@ class _ChatViewState extends State<ChatView> {
   }
 
   bool _onTranscriptUserScroll(UserScrollNotification notification) {
-    if (_initialTranscriptReady &&
-        notification.direction != ScrollDirection.idle) {
+    if (notification.direction == ScrollDirection.idle) {
+      final endedTowardLatest =
+          _lastTranscriptUserScrollDirection == ScrollDirection.reverse;
+      _lastTranscriptUserScrollDirection = ScrollDirection.idle;
+      _returnToLatestCoordinator.userDragEnded();
+      if (endedTowardLatest) {
+        _requestAutomaticReturnToLatestIfNearLatest();
+      }
+    } else if (_initialTranscriptReady) {
+      _lastTranscriptUserScrollDirection = notification.direction;
       _claimTranscriptViewport();
     }
     return false;
@@ -1161,6 +1229,7 @@ class _ChatViewState extends State<ChatView> {
     } else if (notification is ScrollEndNotification) {
       _olderHistoryPull.reset();
       _scheduleLoadedOlderReveal();
+      _saveSessionScrollSnapshot();
     }
     return false;
   }
@@ -1217,10 +1286,12 @@ class _ChatViewState extends State<ChatView> {
     _scheduleShortTranscriptFill();
     _scheduleSessionScrollAnchorMaintenance();
     _scheduleRestoredBottomCorrection();
+    if (!_hasTranscriptPointerDown) _drainReturnToLatestIntent();
   }
 
   void _claimTranscriptViewport() {
     _cancelBottomFollow();
+    _returnToLatestCoordinator.cancelForUserDrag();
     ++_shortTranscriptFillGeneration;
     _transcriptViewportClaimedByUser = true;
     _showingFullyVisibleFirstContactHistory = false;
@@ -1243,7 +1314,7 @@ class _ChatViewState extends State<ChatView> {
     _scroll.jumpTo(_scroll.position.pixels);
   }
 
-  void _saveSessionScrollSnapshot() {
+  void _saveSessionScrollSnapshot({bool captureAnchor = true}) {
     if (!_didInitialScroll ||
         !_initialTranscriptReady ||
         _maintainSessionScrollAnchor ||
@@ -1254,7 +1325,9 @@ class _ChatViewState extends State<ChatView> {
     final pos = _scroll.position;
     if (!pos.hasContentDimensions) return;
     final wasAtLoadedBottom = _isAtLoadedBottom(80);
-    final anchor = wasAtLoadedBottom ? null : _captureSessionScrollAnchor();
+    final anchor = wasAtLoadedBottom || !captureAnchor
+        ? null
+        : _captureSessionScrollAnchor();
     _sessionScrollSnapshots[widget.chatId] = _ChatScrollSnapshot(
       pixels: clampScrollOffset(pos, pos.pixels),
       wasAtLoadedBottom: wasAtLoadedBottom,
@@ -1492,13 +1565,14 @@ class _ChatViewState extends State<ChatView> {
     }
     _bottomScrollScheduled = true;
     _scheduledBottomAnimated = animated;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    scheduleChatPostFrame(() {
       final shouldAnimate = _scheduledBottomAnimated;
       final scheduledGeneration = _scheduledBottomGeneration;
       _bottomScrollScheduled = false;
       _scheduledBottomAnimated = true;
-      if (!_bottomFollow.isCurrent(scheduledGeneration) ||
-          !_canFollowLoadedBottom()) {
+      if (!_bottomFollow.isCurrent(scheduledGeneration)) return;
+      if (!_canFollowLoadedBottom()) {
+        _autoScrollPolicy.allowViewportPreservation();
         return;
       }
       // Re-measure after this frame's layout before choosing min (fully
@@ -1515,7 +1589,7 @@ class _ChatViewState extends State<ChatView> {
 
   Future<void> _moveToLoadedBottom({required bool animated}) async {
     if (!_canFollowLoadedBottom()) return;
-    _autoScrollPolicy.returnToBottom();
+    _autoScrollPolicy.requestReturnToBottom();
     final target = _loadedBottomOffset;
     final delta = (target - _scroll.position.pixels).abs();
     if (delta <= 0.5) return;
@@ -1545,57 +1619,90 @@ class _ChatViewState extends State<ChatView> {
     _bottomFollow.follow(
       generation: generation,
       remainingFrames: remainingFrames,
-      schedulePostFrame: (callback) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => callback());
-      },
+      schedulePostFrame: scheduleChatPostFrame,
       canFollow: _canFollowLoadedBottom,
       distanceToLatest: () =>
           (_loadedBottomOffset - _scroll.position.pixels).abs(),
       latestExtent: () => _loadedBottomOffset,
       correct: () => _scroll.jumpTo(_loadedBottomOffset),
       settled: () {
+        _autoScrollPolicy.returnToBottom();
         _markReadAtBottomIfNeeded();
         _clearBottomIndicatorsIfNeeded();
         _saveSessionScrollSnapshot();
       },
+      abandoned: _autoScrollPolicy.allowViewportPreservation,
     );
   }
 
   void _cancelBottomFollow() {
     _bottomFollow.cancel();
+    _autoScrollPolicy.allowViewportPreservation();
   }
 
-  Future<void> _returnToLatest() async {
-    if (_loadingLatestFromAnchor) return;
-    _cancelSessionScrollAnchorMaintenance();
-    _autoScrollPolicy.returnToBottom();
-    if (!_vm.anchoredHistory) {
-      _setScrollTarget(null);
-      if (_liveNewMessageCount > 0) {
-        setState(() {
-          _unreadProgress.clearLiveMessages();
-          _bannerDismissed = _vm.unreadCount <= 0;
-        });
+  bool get _showReturnToLatestProgress =>
+      _returnToLatestCoordinator.showProgress;
+
+  void _onReturnToLatestTapped() {
+    _requestReturnToLatest(userInitiated: true);
+  }
+
+  void _onReturnToLatestCoordinatorChanged() {
+    if (!mounted) return;
+    final failure = _returnToLatestCoordinator.takeFailure();
+    if (failure != null) {
+      _autoScrollPolicy.allowViewportPreservation();
+      if (failure.userInitiated) {
+        showToast(context, AppStringKeys.topicPostContentActionFailed);
       }
-      _scheduleScrollToBottom();
-      unawaited(_vm.markLoadedMessagesRead());
-      return;
     }
-    _loadingLatestFromAnchor = true;
+    setState(() {});
+  }
+
+  void _drainReturnToLatestIntent() {
+    if (!mounted || !_scroll.hasClients) return;
+    final intent = _returnToLatestCoordinator.takeReady(
+      pointerDown: _hasTranscriptPointerDown,
+    );
+    if (intent == null) return;
+    _cancelSessionScrollAnchorMaintenance();
+    _stopActiveTranscriptScroll();
+    _autoScrollPolicy.requestReturnToBottom();
     _setScrollTarget(null);
-    try {
-      final ok = await _vm.loadLatestHistory();
-      if (!ok) return;
-      if (!mounted) return;
+    if (intent.userInitiated || _liveNewMessageCount > 0) {
       setState(() {
         _unreadProgress.clearLiveMessages();
         _bannerDismissed = _vm.unreadCount <= 0;
       });
-      _scheduleScrollToBottom();
-      unawaited(_vm.markLoadedMessagesRead());
-    } finally {
-      _loadingLatestFromAnchor = false;
     }
+    _scheduleScrollToBottom();
+    unawaited(_vm.markLoadedMessagesRead());
+  }
+
+  void _requestReturnToLatest({bool userInitiated = false}) {
+    if (!userInitiated && _hasTranscriptPointerDown) return;
+    if (userInitiated) {
+      _cancelSessionScrollAnchorMaintenance();
+      _cancelBottomFollow();
+      _stopActiveTranscriptScroll();
+      _autoScrollPolicy.requestReturnToBottom();
+    }
+    _returnToLatestCoordinator.request(
+      userInitiated
+          ? ChatReturnToLatestSource.user
+          : ChatReturnToLatestSource.automatic,
+    );
+  }
+
+  void _requestAutomaticReturnToLatestIfNearLatest() {
+    if (!_vm.anchoredHistory ||
+        _hasTranscriptPointerDown ||
+        _scrollTargetId != null ||
+        !_scroll.hasClients ||
+        !isNearLatest(_scroll.position, threshold: 36)) {
+      return;
+    }
+    _requestReturnToLatest();
   }
 
   void _markReadAtBottomIfNeeded() {
@@ -1613,7 +1720,7 @@ class _ChatViewState extends State<ChatView> {
     _unreadProgress.clearLiveMessages();
     _bannerDismissed = true;
     if (_vm.anchoredHistory) {
-      unawaited(_returnToLatest());
+      _requestReturnToLatest(userInitiated: true);
       return;
     }
     _scheduleScrollToBottom();
@@ -1633,10 +1740,10 @@ class _ChatViewState extends State<ChatView> {
   void _onComposerMediaSendTapped() {
     _cancelSessionScrollAnchorMaintenance();
     _maintainRestoredBottom = false;
-    _autoScrollPolicy.returnToBottom();
+    _autoScrollPolicy.requestReturnToBottom();
     _setScrollTarget(null);
     if (_vm.anchoredHistory) {
-      unawaited(_returnToLatest());
+      _requestReturnToLatest(userInitiated: true);
       return;
     }
     _scheduleScrollToBottom(animated: false);
@@ -1723,6 +1830,11 @@ class _ChatViewState extends State<ChatView> {
 
   void _onModel() {
     if (!mounted) return;
+    if (!_viewTickerEnabled) {
+      _modelDirtyWhileInactive = true;
+      return;
+    }
+    _modelDirtyWhileInactive = false;
     final olderLoadFinished = _wasLoadingOlder && !_vm.isLoadingOlder;
     _wasLoadingOlder = _vm.isLoadingOlder;
     final oldest = _oldestServerMessage(_vm.messages);
@@ -1818,10 +1930,19 @@ class _ChatViewState extends State<ChatView> {
     }
     final rebasedParkedShortArm = parkedShortArm || expandedInitialWindow;
     final liveIncomingMessageIds = _vm.consumeLiveIncomingMessageIds();
-    if (_vm.messages.length != _lastCount) {
+    final newest = _latestServerMessage(_vm.messages);
+    final transcriptBoundaryChanged = chatTranscriptBoundaryChanged(
+      previousCount: _lastCount,
+      currentCount: _vm.messages.length,
+      previousNewestMessageId: _lastNewestMessageId,
+      currentNewestMessageId: newest?.id,
+      previousOldestMessageId: _lastOldestMessageId,
+      currentOldestMessageId: oldest?.id,
+      hasBufferedLiveMessages: liveIncomingMessageIds.isNotEmpty,
+    );
+    if (transcriptBoundaryChanged) {
       final wasNearBottom = _isNearBottom(72);
       final previousNewestId = _lastNewestMessageId;
-      final newest = _latestServerMessage(_vm.messages);
       final appendedNewest =
           newest != null &&
           newest.id != previousNewestId &&
@@ -1941,6 +2062,7 @@ class _ChatViewState extends State<ChatView> {
 
   void _setScrollTarget(int? messageId) {
     if (messageId != null) {
+      _returnToLatestCoordinator.cancel();
       _maintainRestoredBottom = false;
       _cancelSessionScrollAnchorMaintenance();
       _cancelBottomFollow();
@@ -2271,6 +2393,12 @@ class _ChatViewState extends State<ChatView> {
     if (entry.isImageGroup) {
       return extent + _estimatedImageGroupExtent(entry);
     }
+    if (entry.isDocumentGroup) {
+      final hasCaption = entry.messages.any(
+        (message) => message.text.trim().isNotEmpty,
+      );
+      return extent + entry.messages.length * 71 + (hasCaption ? 54 : 0) + 16;
+    }
     return extent + _estimatedMessageExtent(first);
   }
 
@@ -2332,8 +2460,9 @@ class _ChatViewState extends State<ChatView> {
   void _scrollToBottom() {
     if (!_scroll.hasClients) return;
     _cancelSessionScrollAnchorMaintenance();
-    _autoScrollPolicy.returnToBottom();
+    _autoScrollPolicy.requestReturnToBottom();
     if (_positionShortFirstContactHistoryIfItFits(requireAtLatest: false)) {
+      _autoScrollPolicy.returnToBottom();
       _markReadAtBottomIfNeeded();
       _clearBottomIndicatorsIfNeeded();
       return;
@@ -2845,10 +2974,21 @@ class _ChatViewState extends State<ChatView> {
     );
   }
 
-  Widget _messageBubble(ChatMessage message, int messageIndex) {
-    _vm.ensureMessageCapabilities(message);
+  Widget _messageBubble(
+    ChatMessage message,
+    int messageIndex, {
+    List<ChatMessage> groupedMedia = const <ChatMessage>[],
+  }) {
+    if (groupedMedia.isEmpty) {
+      _vm.ensureMessageCapabilities(message);
+    } else {
+      for (final member in groupedMedia) {
+        _vm.ensureMessageCapabilities(member);
+      }
+    }
     return MessageBubble(
       message: message,
+      groupedMedia: groupedMedia,
       peerTitle: _vm.peerTitle,
       peerPhoto: _vm.peerPhoto,
       isGroup: _vm.isGroup,
@@ -2871,7 +3011,17 @@ class _ChatViewState extends State<ChatView> {
       onOpenReply: _scrollToMessage,
       onOpenComments: _openMessageComments,
       showCommentAttachment: _vm.isChannel,
+      channelHasLinkedDiscussion: _vm.hasLinkedDiscussion,
       onOpenImage: _openImage,
+      onApplyMessageBubble: offersMessageBubbleApplyAction(message)
+          ? (message) => unawaited(
+              applyMessageBubbleRepositoryPhoto(
+                context,
+                message,
+                sourceMessageLink: messageBubbleRepositoryLink(message.id),
+              ),
+            )
+          : null,
       onOpenSticker: _openSticker,
       onPlayVideo: _playVideo,
       onPlayMusic: _playMusicMessage,
@@ -3195,10 +3345,6 @@ class _ChatViewState extends State<ChatView> {
       VideoSplitController.instance.play(session);
       return;
     }
-    if (VideoPiPController.instance.isOpen) {
-      VideoPiPController.instance.play(session);
-      return;
-    }
     Navigator.of(context).push(
       MaterialPageRoute(
         fullscreenDialog: true,
@@ -3257,248 +3403,13 @@ class _ChatViewState extends State<ChatView> {
       case VideoDisplayMode.fullscreen:
         break;
       case VideoDisplayMode.pictureInPicture:
-        _showVideoPictureInPicture(routeContext, session);
+        // iOS has already handed the player to AVPictureInPictureController.
+        // There is no app-level PiP overlay fallback.
         Navigator.of(routeContext).maybePop();
       case VideoDisplayMode.split:
         VideoSplitController.instance.play(session);
         Navigator.of(routeContext).maybePop();
     }
-  }
-
-  static void _showVideoPictureInPicture(
-    BuildContext context,
-    VideoSplitSession initialSession,
-  ) {
-    final pip = VideoPiPController.instance;
-    if (_globalPictureInPictureVideo != null) {
-      pip.play(initialSession);
-      return;
-    }
-    if (pip.isOpen) {
-      pip.play(initialSession);
-      return;
-    }
-    pip.play(initialSession);
-    _globalPictureInPictureVideo?.remove();
-    _globalPictureInPictureVideo = null;
-
-    final overlay = Overlay.of(context, rootOverlay: true);
-    final screen = MediaQuery.sizeOf(context);
-    const margin = 16.0;
-    var aspect = _sessionAspect(initialSession);
-    var boxWidth = (screen.width * 0.46).clamp(220.0, 360.0);
-    var boxHeight = (boxWidth / aspect).clamp(130.0, 260.0);
-    boxWidth = boxHeight * aspect;
-    var displayedVideoId = initialSession.video.id;
-    var offset = Offset(
-      screen.width - boxWidth - margin,
-      screen.height - boxHeight - MediaQuery.paddingOf(context).bottom - 110,
-    );
-
-    late final OverlayEntry entry;
-    void close() {
-      entry.remove();
-      if (_globalPictureInPictureVideo == entry) {
-        _globalPictureInPictureVideo = null;
-      }
-      if (pip.session?.video.id == displayedVideoId) {
-        pip.close();
-      }
-    }
-
-    entry = OverlayEntry(
-      builder: (overlayContext) => StatefulBuilder(
-        builder: (context, setOverlayState) {
-          final media = MediaQuery.sizeOf(context);
-          final padding = MediaQuery.paddingOf(context);
-          void clampFrame() {
-            final maxWidth = math.max(80.0, media.width - margin * 2);
-            final maxHeight = math.max(
-              80.0,
-              media.height - padding.top - padding.bottom - margin * 2,
-            );
-            if (boxWidth > maxWidth) {
-              boxWidth = maxWidth;
-              boxHeight = boxWidth / aspect;
-            }
-            if (boxHeight > maxHeight) {
-              boxHeight = maxHeight;
-              boxWidth = boxHeight * aspect;
-            }
-            final minX = math.min(margin, media.width - boxWidth);
-            final maxX = math.max(minX, media.width - boxWidth - margin);
-            final minY = math.min(
-              padding.top + margin,
-              media.height - boxHeight,
-            );
-            final maxY = math.max(
-              minY,
-              media.height - boxHeight - padding.bottom - margin,
-            );
-            offset = Offset(
-              offset.dx.clamp(minX, maxX),
-              offset.dy.clamp(minY, maxY),
-            );
-          }
-
-          void syncSession(VideoSplitSession session) {
-            if (session.video.id == displayedVideoId) return;
-            displayedVideoId = session.video.id;
-            aspect = _sessionAspect(session);
-            boxHeight = (boxWidth / aspect).clamp(110.0, media.height * 0.72);
-            boxWidth = boxHeight * aspect;
-            clampFrame();
-          }
-
-          void move(DragUpdateDetails details) {
-            setOverlayState(() {
-              offset += details.delta;
-              clampFrame();
-            });
-          }
-
-          void resizeFromCorner(
-            DragUpdateDetails details, {
-            required int horizontalSign,
-            required int verticalSign,
-          }) {
-            setOverlayState(() {
-              final oldWidth = boxWidth;
-              final oldHeight = boxHeight;
-              final minW = math.min(180.0, media.width - margin * 2);
-              final maxW = math.max(minW, media.width - margin * 2);
-              final widthFromX = boxWidth + details.delta.dx * horizontalSign;
-              final widthFromY =
-                  boxWidth + details.delta.dy * verticalSign * aspect;
-              final nextWidth =
-                  (widthFromX - boxWidth).abs() > (widthFromY - boxWidth).abs()
-                  ? widthFromX
-                  : widthFromY;
-              boxWidth = nextWidth.clamp(minW, maxW);
-              boxHeight = boxWidth / aspect;
-              if (boxHeight > media.height * 0.72) {
-                boxHeight = media.height * 0.72;
-                boxWidth = boxHeight * aspect;
-              }
-              if (boxHeight < 110) {
-                boxHeight = 110;
-                boxWidth = boxHeight * aspect;
-              }
-              if (horizontalSign < 0) {
-                offset = offset.translate(oldWidth - boxWidth, 0);
-              }
-              if (verticalSign < 0) {
-                offset = offset.translate(0, oldHeight - boxHeight);
-              }
-              clampFrame();
-            });
-          }
-
-          return AnimatedBuilder(
-            animation: pip,
-            builder: (context, _) {
-              final session = pip.session;
-              if (session == null) return const SizedBox.shrink();
-              syncSession(session);
-              clampFrame();
-              final showDebugBounds = context
-                  .watch<DeveloperModeController>()
-                  .showPiPBounds;
-              return Positioned(
-                left: offset.dx,
-                top: offset.dy,
-                width: boxWidth,
-                height: boxHeight,
-                child: Material(
-                  type: MaterialType.transparency,
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      Positioned.fill(
-                        child: GestureDetector(
-                          onPanUpdate: move,
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(14),
-                            child: VideoPlayerView(
-                              key: ValueKey(
-                                '${session.video.id}:${session.messageId ?? 0}',
-                              ),
-                              video: session.video,
-                              thumb: session.thumb,
-                              width: session.width,
-                              height: session.height,
-                              presentation:
-                                  VideoPlayerPresentation.pictureInPicture,
-                              compactControls: true,
-                              onClose: close,
-                              sourceChatId: session.chatId,
-                              messageId: session.messageId,
-                              previousVideo: session.queue.previous,
-                              nextVideo: session.queue.next,
-                              onNavigate: (delta) {
-                                final nextSession = session.moveBy(delta);
-                                if (nextSession != null) pip.play(nextSession);
-                              },
-                              currentMode: VideoDisplayMode.pictureInPicture,
-                              onSwitchMode: (mode) => _switchPiPSessionMode(
-                                context,
-                                close,
-                                mode,
-                                session,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      _PiPCornerHandle(
-                        alignment: Alignment.topLeft,
-                        onDrag: (details) => resizeFromCorner(
-                          details,
-                          horizontalSign: -1,
-                          verticalSign: -1,
-                        ),
-                      ),
-                      _PiPCornerHandle(
-                        alignment: Alignment.topRight,
-                        onDrag: (details) => resizeFromCorner(
-                          details,
-                          horizontalSign: 1,
-                          verticalSign: -1,
-                        ),
-                      ),
-                      _PiPCornerHandle(
-                        alignment: Alignment.bottomLeft,
-                        onDrag: (details) => resizeFromCorner(
-                          details,
-                          horizontalSign: -1,
-                          verticalSign: 1,
-                        ),
-                      ),
-                      _PiPCornerHandle(
-                        alignment: Alignment.bottomRight,
-                        onDrag: (details) => resizeFromCorner(
-                          details,
-                          horizontalSign: 1,
-                          verticalSign: 1,
-                        ),
-                      ),
-                      if (showDebugBounds)
-                        PiPBoundsDebugOverlay(
-                          offset: offset,
-                          size: Size(boxWidth, boxHeight),
-                          viewport: media,
-                        ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          );
-        },
-      ),
-    );
-    _globalPictureInPictureVideo = entry;
-    overlay.insert(entry);
   }
 
   void _openImage(ChatMessage message) {
@@ -3540,6 +3451,7 @@ class _ChatViewState extends State<ChatView> {
       onButtonTap: _pressMessageButton,
       onBotCommandTap: _sendCommand,
       onHashtagTap: _openHashtagSearch,
+      onViewInChat: _scrollToMessage,
     );
   }
 
@@ -4339,7 +4251,7 @@ class _ChatViewState extends State<ChatView> {
         .l10n(context);
     final targetLanguageName = _translation.targetLanguageLabel.l10n(context);
     if (!settings.initialized) await settings.initialize();
-    if (!settings.isConfiguredForCurrentProvider) {
+    if (!settings.isConfiguredForFeature(AiFeature.translation)) {
       throw TranslationApiException(unavailableMessage);
     }
     final service = AiChatTranslationService.fromSettings(
@@ -4596,21 +4508,7 @@ class _ChatViewState extends State<ChatView> {
   }
 
   String _editableMessageText(ChatMessage message) {
-    final text = message.text.trim();
-    if (text.isEmpty || (text.startsWith('[') && text.endsWith(']'))) return '';
-    final placeholders = <String>{
-      telegramText(AppStringKeys.composerImagePreview),
-      telegramText(AppStringKeys.chatVideoPlaceholder),
-      telegramText(AppStringKeys.composerAnimatedEmojiPreview),
-      telegramText(AppStringKeys.tdMessageGif),
-      telegramText(AppStringKeys.tdMessageMusic),
-      telegramText(AppStringKeys.channelsFileAttachment),
-      if (message.document != null)
-        telegramText(AppStringKeys.tdMessageFileWithName, {
-          'value1': message.document!.fileName,
-        }),
-    };
-    return placeholders.contains(text) ? '' : message.text;
+    return message.text.trim().isEmpty ? '' : message.text;
   }
 
   String _mediaLabel(ChatMessage message) => switch (message.contentType) {
@@ -4833,13 +4731,20 @@ class _ChatViewState extends State<ChatView> {
   }
 
   Color? _effectiveOutgoingColor() {
+    if (!context.watch<ThemeController>().themingEnabled) {
+      return AppTheme.bubbleOutgoing;
+    }
     final chatColor = _resolvedChatThemeStyle?.outgoingColor;
     return chatColor ?? _resolvedCloudTheme?.outgoingColor;
   }
 
-  Color? _effectiveOutgoingTextColor() =>
-      _resolvedChatThemeStyle?.outgoingTextColor ??
-      _resolvedCloudTheme?.outgoingTextColor;
+  Color? _effectiveOutgoingTextColor() {
+    if (!context.watch<ThemeController>().themingEnabled) {
+      return AppTheme.bubbleOutgoingText;
+    }
+    return _resolvedChatThemeStyle?.outgoingTextColor ??
+        _resolvedCloudTheme?.outgoingTextColor;
+  }
 
   Color? _effectiveIncomingColor() =>
       _resolvedChatThemeStyle?.incomingColor ??
@@ -4874,6 +4779,9 @@ class _ChatViewState extends State<ChatView> {
         chatId: widget.chatId,
         title: widget.title,
       );
+    }
+    if (_vm.isMessageBubbleRepository) {
+      return MessageBubbleRepositoryView(viewModel: _vm, onBack: _handleBack);
     }
     final showPeerRestrictionBlock =
         _vm.isPeerRestricted && _vm.messages.isEmpty;
@@ -5076,38 +4984,6 @@ class _ChatViewState extends State<ChatView> {
           ),
         ),
         if (!transcriptReady) Positioned.fill(child: _transcriptSkeleton()),
-        if (transcriptReady && _vm.isLoadingOlder)
-          Positioned(
-            key: const ValueKey('chat-older-history-loading'),
-            top: showPinnedTodo ? 72 : 8,
-            left: 0,
-            right: 0,
-            child: IgnorePointer(
-              child: Center(
-                child: Container(
-                  width: 34,
-                  height: 34,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: context.colors.card.withValues(alpha: 0.94),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: context.colors.divider,
-                      width: 0.5,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.16),
-                        blurRadius: 10,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
-                  ),
-                  child: const AppActivityIndicator(size: 17),
-                ),
-              ),
-            ),
-          ),
         if (showPinnedTodo)
           Positioned(
             top: 12,
@@ -5249,8 +5125,9 @@ class _ChatViewState extends State<ChatView> {
   Widget _jumpToBottomButton() {
     final c = context.colors;
     return GestureDetector(
+      key: const ValueKey('chat-jump-to-bottom'),
       behavior: HitTestBehavior.opaque,
-      onTap: _returnToLatest,
+      onTap: _onReturnToLatestTapped,
       child: Container(
         width: 40,
         height: 40,
@@ -5267,11 +5144,9 @@ class _ChatViewState extends State<ChatView> {
             ),
           ],
         ),
-        child: AppIcon(
-          HeroAppIcons.angleDown,
-          size: 22,
-          color: c.textSecondary,
-        ),
+        child: _showReturnToLatestProgress
+            ? AppActivityIndicator(size: 18, color: c.textSecondary)
+            : AppIcon(HeroAppIcons.angleDown, size: 22, color: c.textSecondary),
       ),
     );
   }
@@ -5288,7 +5163,7 @@ class _ChatViewState extends State<ChatView> {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: pointsDown
-          ? _returnToLatest
+          ? _onReturnToLatestTapped
           : () => unawaited(_jumpToFirstUnread()),
       child: Container(
         padding: EdgeInsetsDirectional.fromSTEB(
@@ -5312,11 +5187,14 @@ class _ChatViewState extends State<ChatView> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            AppIcon(
-              pointsDown ? HeroAppIcons.arrowDown : HeroAppIcons.arrowUp,
-              size: 14,
-              color: AppTheme.brand,
-            ),
+            if (pointsDown && _showReturnToLatestProgress)
+              AppActivityIndicator(size: 14, color: AppTheme.brand)
+            else
+              AppIcon(
+                pointsDown ? HeroAppIcons.arrowDown : HeroAppIcons.arrowUp,
+                size: 14,
+                color: AppTheme.brand,
+              ),
             const SizedBox(width: 5),
             Text(
               AppStrings.t(
@@ -5362,7 +5240,7 @@ class _ChatViewState extends State<ChatView> {
         providerAvailable:
             settings?.initialized == true &&
             settings?.enabled == true &&
-            settings?.isConfiguredForCurrentProvider == true &&
+            settings?.isConfiguredForFeature(AiFeature.summary) == true &&
             _vm.unreadSummarySnapshot != null &&
             !_vm.isSecretChat &&
             !_vm.hasProtectedContent,
@@ -5419,17 +5297,29 @@ class _ChatViewState extends State<ChatView> {
     if (snapshot == null || !_canOfferUnreadSummary(settings)) return;
     setState(() => _openingUnreadSummary = true);
 
-    final providerMode = settings!.provider;
-    final endpoint = settings.openAiChatCompletionsUri;
-    final model = settings.model;
-    final apiKey = settings.apiKey;
-    final hostedContextSize = settings.activeModelProfile?.contextWindowTokens;
-    final pccContextSize = settings.pccCapabilities?.contextSize;
-    final onDeviceContextSize = settings.pccCapabilities?.onDeviceContextSize;
+    final configuration = settings!.configurationForFeature(AiFeature.summary);
+    final providerMode = configuration.providerMode;
+    final endpoint = configuration.endpoint;
+    final endpointStyle = configuration.endpointStyle;
+    final model = configuration.model;
+    final apiKey = configuration.apiKey;
+    final hostedContextSize =
+        configuration.candidate.kind == AiModelCandidateKind.server
+        ? configuration.contextWindowTokens
+        : null;
+    final pccContextSize =
+        configuration.candidate.kind == AiModelCandidateKind.applePcc
+        ? configuration.contextWindowTokens
+        : null;
+    final onDeviceContextSize =
+        configuration.candidate.kind == AiModelCandidateKind.appleOnDevice
+        ? configuration.contextWindowTokens
+        : null;
     final outputLanguage = Localizations.localeOf(context).toLanguageTag();
     final session = _createUnreadSummarySession(
       providerMode: providerMode,
       endpoint: endpoint,
+      endpointStyle: endpointStyle,
       model: model,
       apiKey: apiKey,
       hostedContextSize: hostedContextSize,
@@ -5462,6 +5352,7 @@ class _ChatViewState extends State<ChatView> {
   _UnreadSummarySession _createUnreadSummarySession({
     required AiProviderMode providerMode,
     required Uri? endpoint,
+    required AiEndpointStyle endpointStyle,
     required String model,
     required String apiKey,
     required int? hostedContextSize,
@@ -5565,6 +5456,7 @@ class _ChatViewState extends State<ChatView> {
           serverBaseUri: endpoint,
           model: model.trim(),
           apiKey: apiKey,
+          endpointStyle: endpointStyle,
         );
         return _UnreadSummarySession(
           UnreadChatSummaryService(
@@ -5576,7 +5468,7 @@ class _ChatViewState extends State<ChatView> {
             maxChunkTokenEstimate: tokenBudget.payloadTokens,
             maxChunkTimeGapSeconds: 0,
             trustedInstructions: unreadChatSummaryCompactTrustedInstructions,
-            providerCode: 'openai_compatible/$model',
+            providerCode: '${endpointStyle.storageValue}/$model',
             contextWindowTokens: contextWindow,
             outputLanguage: outputLanguage,
             initialPromptTokenEstimate: tokenBudget.initialPromptTokens,
@@ -6650,8 +6542,12 @@ class _ChatViewState extends State<ChatView> {
         );
     final firstContactBeforeCenter =
         firstContactInfo != null && !firstContactAtCenter;
+    final showOlderLoadingGap = _vm.isLoadingOlder;
+    final olderLoadingItemCount = showOlderLoadingGap ? 1 : 0;
     final olderChildCount =
-        olderEntries.length + (firstContactBeforeCenter ? 1 : 0);
+        olderEntries.length +
+        (firstContactBeforeCenter ? 1 : 0) +
+        olderLoadingItemCount;
     final newerLeadingItemCount = firstContactAtCenter ? 1 : 0;
     final olderIndexByKey = <Key, int>{
       for (var i = 0; i < olderEntries.length; i++) olderEntries[i].key: i,
@@ -6696,6 +6592,13 @@ class _ChatViewState extends State<ChatView> {
                         messages,
                       );
                     }
+                    if (firstContactBeforeCenter &&
+                        index == olderEntries.length) {
+                      return _buildFirstContactCard(firstContactInfo);
+                    }
+                    if (showOlderLoadingGap) {
+                      return _historyLoadingGap('chat-older-history-gap');
+                    }
                     return _buildFirstContactCard(firstContactInfo!);
                   },
                   childCount: olderChildCount,
@@ -6733,8 +6636,36 @@ class _ChatViewState extends State<ChatView> {
                   semanticIndexOffset: olderChildCount,
                 ),
               ),
+              if (_vm.isLoadingLatest)
+                SliverToBoxAdapter(
+                  child: _historyLoadingGap('chat-latest-history-gap'),
+                ),
               const SliverToBoxAdapter(child: SizedBox(height: 8)),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _historyLoadingGap(String key) {
+    return AnimatedSize(
+      key: ValueKey(key),
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      child: SizedBox(
+        height: 54,
+        child: Center(
+          child: Container(
+            width: 34,
+            height: 34,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: context.colors.card.withValues(alpha: 0.94),
+              shape: BoxShape.circle,
+              border: Border.all(color: context.colors.divider, width: 0.5),
+            ),
+            child: const AppActivityIndicator(size: 17),
           ),
         ),
       ),
@@ -6873,6 +6804,8 @@ class _ChatViewState extends State<ChatView> {
           _blockedMessagePlaceholder(context, entry)
         else if (entry.isImageGroup)
           _selectionEntry(entry, _imageGroupBubble(entry.messages))
+        else if (entry.isDocumentGroup)
+          _selectionEntry(entry, _documentGroupBubble(entry))
         else
           _selectionEntry(entry, _messageBubble(message, messageIndex)),
       ],
@@ -7133,7 +7066,7 @@ class _ChatViewState extends State<ChatView> {
         i = j;
         continue;
       }
-      if (!_canGroupImage(first)) {
+      if (chatMediaAlbumKind(first) == null || first.mediaAlbumId == 0) {
         entries.add(_TranscriptEntry([first], i));
         i++;
         continue;
@@ -7148,7 +7081,7 @@ class _ChatViewState extends State<ChatView> {
             _needsUnreadDivider(j, messages: messages)) {
           break;
         }
-        if (!_sameImageGroup(group.last, next)) break;
+        if (!areMessagesInSameMediaAlbum(group.last, next)) break;
         group.add(next);
         j++;
       }
@@ -7168,24 +7101,20 @@ class _ChatViewState extends State<ChatView> {
     );
   }
 
-  bool _canGroupImage(ChatMessage message) {
-    return !message.isService && message.isAlbumVisualMedia;
+  Widget _documentGroupBubble(_TranscriptEntry entry) {
+    final owner = _mediaAlbumInteractionOwner(entry.messages);
+    final ownerIndex = entry.startIndex + entry.messages.indexOf(owner);
+    return _messageBubble(owner, ownerIndex, groupedMedia: entry.messages);
   }
 
-  bool _sameImageGroup(ChatMessage previous, ChatMessage next) {
-    if (!_canGroupImage(next)) return false;
-    if (previous.isOutgoing != next.isOutgoing) return false;
-    if (previous.senderId != next.senderId) return false;
-    if (previous.mediaAlbumId != 0 || next.mediaAlbumId != 0) {
-      return previous.mediaAlbumId != 0 &&
-          previous.mediaAlbumId == next.mediaAlbumId;
-    }
-    return false;
+  ChatMessage _mediaAlbumInteractionOwner(List<ChatMessage> group) {
+    return selectMediaAlbumInteractionOwner(group);
   }
 
   Widget _imageGroupBubble(List<ChatMessage> group) {
     final c = context.colors;
     final first = group.first;
+    final interactionOwner = _mediaAlbumInteractionOwner(group);
     final outgoing = first.isOutgoing;
     final avatarTitle = outgoing
         ? (first.senderIsChat ? (first.senderName ?? _vm.meName) : _vm.meName)
@@ -7224,6 +7153,7 @@ class _ChatViewState extends State<ChatView> {
           group,
           outgoing,
           captionMessage,
+          interactionOwner,
           maxWidth: _messageMediaMaxWidth(chatWidth),
         );
         final Widget body = outgoing
@@ -7273,7 +7203,8 @@ class _ChatViewState extends State<ChatView> {
   Widget _imageGroupGallery(
     List<ChatMessage> group,
     bool outgoing,
-    ChatMessage? captionMessage, {
+    ChatMessage? captionMessage,
+    ChatMessage interactionOwner, {
     required double maxWidth,
   }) {
     final c = context.colors;
@@ -7288,6 +7219,12 @@ class _ChatViewState extends State<ChatView> {
     final incomingTextColor =
         _effectiveIncomingTextColor() ?? c.bubbleIncomingText;
     final visible = group.take(9).toList();
+    final showComments =
+        _vm.isChannel &&
+        !interactionOwner.isContentRestricted &&
+        (interactionOwner.hasCommentThread ||
+            interactionOwner.commentCount > 0 ||
+            (_vm.hasLinkedDiscussion && !interactionOwner.isService));
     const padding = 4.0;
     final layout = buildTelegramMediaAlbumLayout(
       items: [
@@ -7303,67 +7240,143 @@ class _ChatViewState extends State<ChatView> {
       minRowHeight: 82,
       maxRowHeight: 230,
     );
+    final width = layout.width + padding * 2;
     return Container(
-      constraints: BoxConstraints(maxWidth: layout.width + padding * 2),
-      padding: const EdgeInsets.all(padding),
+      constraints: BoxConstraints(maxWidth: width),
       decoration: BoxDecoration(
         color: outgoing ? outgoingColor : themedIncoming ?? c.bubbleIncoming,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(12),
         border: outgoing ? null : Border.all(color: c.divider, width: 0.5),
       ),
+      clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox(
-            width: layout.width,
-            height: layout.height,
-            child: Stack(
+          Padding(
+            padding: const EdgeInsets.all(padding),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                for (var i = 0; i < visible.length; i++)
-                  Positioned.fromRect(
-                    rect: layout.tiles[i],
-                    child: _imageGroupTile(
-                      visible[i],
-                      width: layout.tiles[i].width,
-                      height: layout.tiles[i].height,
-                      extraCount: i == visible.length - 1
-                          ? math.max(0, group.length - visible.length)
-                          : 0,
+                SizedBox(
+                  width: layout.width,
+                  height: layout.height,
+                  child: Stack(
+                    children: [
+                      for (var i = 0; i < visible.length; i++)
+                        Positioned.fromRect(
+                          rect: layout.tiles[i],
+                          child: _imageGroupTile(
+                            visible[i],
+                            width: layout.tiles[i].width,
+                            height: layout.tiles[i].height,
+                            extraCount: i == visible.length - 1
+                                ? math.max(0, group.length - visible.length)
+                                : 0,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                if (captionMessage != null)
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: outgoing
+                        ? () => unawaited(_editMessageText(captionMessage))
+                        : null,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(6, 7, 6, 3),
+                      child: TelegramRichText(
+                        text: _albumCaption(captionMessage),
+                        entities: captionMessage.textEntities,
+                        style: TextStyle(
+                          fontSize: 15,
+                          height: 1.25,
+                          color: outgoing
+                              ? outgoingTextColor
+                              : incomingTextColor,
+                        ),
+                        linkColor: outgoing ? outgoingTextColor : c.linkBlue,
+                        onBotCommandTap: _sendCommand,
+                        onHashtagTap: _openHashtagSearch,
+                        onMentionTap: _openUserProfile,
+                      ),
                     ),
                   ),
               ],
             ),
           ),
-          if (captionMessage != null)
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: outgoing
-                  ? () => unawaited(_editMessageText(captionMessage))
-                  : null,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(6, 7, 6, 3),
-                child: Text(
-                  _albumCaption(captionMessage),
-                  style: TextStyle(
-                    fontSize: 15,
-                    height: 1.25,
-                    color: outgoing ? outgoingTextColor : incomingTextColor,
-                  ),
-                ),
-              ),
+          if (showComments)
+            _imageAlbumCommentsAttachment(
+              interactionOwner,
+              outgoing: outgoing,
+              width: width,
+              outgoingTextColor: outgoingTextColor,
             ),
         ],
       ),
     );
   }
 
+  Widget _imageAlbumCommentsAttachment(
+    ChatMessage message, {
+    required bool outgoing,
+    required double width,
+    required Color outgoingTextColor,
+  }) {
+    final c = context.colors;
+    final count = message.commentCount;
+    final label = count == 0
+        ? AppStrings.t(AppStringKeys.messageLeaveAComment)
+        : AppStrings.t(AppStringKeys.momentsCommentCount, {'value1': count});
+    final foreground = outgoing ? outgoingTextColor : c.textPrimary;
+    final accent = outgoing
+        ? outgoingTextColor.withValues(alpha: 0.72)
+        : c.linkBlue;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _openMessageComments(message),
+      child: Container(
+        key: ValueKey('messageCommentsAttachment-${message.id}'),
+        width: width,
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+        decoration: BoxDecoration(
+          border: Border(
+            top: BorderSide(
+              color: outgoing
+                  ? outgoingTextColor.withValues(alpha: 0.16)
+                  : c.divider.withValues(alpha: 0.7),
+              width: 0.5,
+            ),
+          ),
+        ),
+        child: Row(
+          children: [
+            AppIcon(HeroAppIcons.comments, size: 18, color: accent),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: foreground,
+                ),
+              ),
+            ),
+            AppIcon(HeroAppIcons.chevronRight, size: 17, color: accent),
+          ],
+        ),
+      ),
+    );
+  }
+
   String _albumCaption(ChatMessage message) {
-    final text = message.text.trim();
-    if (text.isEmpty || (text.startsWith('[') && text.endsWith(']'))) return '';
-    final imagePlaceholder = telegramText(AppStringKeys.composerImagePreview);
-    final videoPlaceholder = telegramText(AppStringKeys.chatVideoPlaceholder);
-    return text == imagePlaceholder || text == videoPlaceholder ? '' : text;
+    final text = message.text;
+    return text.trim().isEmpty ? '' : text;
   }
 
   Widget _imageGroupTile(
@@ -8245,76 +8258,6 @@ class _TextSelectionAction extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-void _switchPiPSessionMode(
-  BuildContext context,
-  VoidCallback close,
-  VideoDisplayMode mode,
-  VideoSplitSession session,
-) {
-  if (mode == VideoDisplayMode.pictureInPicture) return;
-  final navigator = Navigator.of(context, rootNavigator: true);
-  close();
-  switch (mode) {
-    case VideoDisplayMode.pictureInPicture:
-      break;
-    case VideoDisplayMode.split:
-      VideoSplitController.instance.play(session);
-    case VideoDisplayMode.fullscreen:
-      navigator.push(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (routeContext) => VideoPlaylistPlayerView(
-            queue: session.queue,
-            onSwitchMode: (queue, nextMode) {
-              final currentSession = VideoSplitSession.fromQueue(queue);
-              switch (nextMode) {
-                case VideoDisplayMode.fullscreen:
-                  break;
-                case VideoDisplayMode.pictureInPicture:
-                  VideoPiPController.instance.play(currentSession);
-                  Navigator.of(routeContext).maybePop();
-                case VideoDisplayMode.split:
-                  VideoSplitController.instance.play(currentSession);
-                  Navigator.of(routeContext).maybePop();
-              }
-            },
-          ),
-        ),
-      );
-  }
-}
-
-double _sessionAspect(VideoSplitSession session) {
-  return (session.width != null &&
-          session.height != null &&
-          session.width! > 0 &&
-          session.height! > 0)
-      ? session.width! / session.height!
-      : 16 / 9;
-}
-
-class _PiPCornerHandle extends StatelessWidget {
-  const _PiPCornerHandle({required this.alignment, required this.onDrag});
-
-  final Alignment alignment;
-  final GestureDragUpdateCallback onDrag;
-
-  @override
-  Widget build(BuildContext context) {
-    return Positioned(
-      left: alignment.x < 0 ? -8 : null,
-      right: alignment.x > 0 ? -8 : null,
-      top: alignment.y < 0 ? -8 : null,
-      bottom: alignment.y > 0 ? -8 : null,
-      child: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onPanUpdate: onDrag,
-        child: const SizedBox(width: 44, height: 44),
       ),
     );
   }

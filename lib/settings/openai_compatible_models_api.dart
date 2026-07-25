@@ -3,6 +3,9 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'ai_endpoint_style.dart';
+import 'ai_stdout_logger.dart';
+
 class OpenAiCompatibleModelInfo {
   const OpenAiCompatibleModelInfo({required this.id, this.contextWindowTokens});
 
@@ -82,50 +85,37 @@ class OpenAiCompatibleModelsException implements Exception {
 class OpenAiCompatibleModelsApi {
   OpenAiCompatibleModelsApi({
     http.Client? httpClient,
+    AiStdoutLogger? aiLogger,
     this.requestTimeout = const Duration(seconds: 20),
   }) : _httpClient = httpClient ?? http.Client(),
+       _aiLogger = aiLogger ?? aiStdoutLogger,
        _ownsHttpClient = httpClient == null;
 
   final http.Client _httpClient;
+  final AiStdoutLogger _aiLogger;
   final bool _ownsHttpClient;
   final Duration requestTimeout;
 
-  static Uri modelsUriFor(Uri chatCompletionsUri) {
-    var path = chatCompletionsUri.path;
-    while (path.endsWith('/') && path.length > 1) {
-      path = path.substring(0, path.length - 1);
-    }
-    if (!path.endsWith('/v1/chat/completions')) {
-      throw const FormatException(
-        'The server endpoint path must end in /v1/chat/completions.',
-      );
-    }
-    final prefix = path.substring(
-      0,
-      path.length - '/v1/chat/completions'.length,
-    );
-    return chatCompletionsUri.replace(path: '$prefix/v1/models');
-  }
+  static Uri modelsUriFor(
+    Uri endpoint, {
+    AiEndpointStyle endpointStyle = AiEndpointStyle.openAiChatCompletions,
+  }) => endpointStyle.modelsUriFor(endpoint);
 
-  static Uri modelUriFor(Uri chatCompletionsUri, String modelId) {
-    final modelsUri = modelsUriFor(chatCompletionsUri);
-    return modelsUri.replace(
-      pathSegments: [...modelsUri.pathSegments, modelId.trim()],
-    );
-  }
+  static Uri? modelUriFor(
+    Uri endpoint,
+    String modelId, {
+    AiEndpointStyle endpointStyle = AiEndpointStyle.openAiChatCompletions,
+  }) => endpointStyle.modelUriFor(endpoint, modelId);
 
   Future<List<OpenAiCompatibleModelInfo>> listModels({
     required Uri chatCompletionsUri,
     String? apiKey,
+    AiEndpointStyle endpointStyle = AiEndpointStyle.openAiChatCompletions,
   }) async {
-    final key = apiKey?.trim();
     final response = await _httpClient
         .get(
-          modelsUriFor(chatCompletionsUri),
-          headers: {
-            'accept': 'application/json',
-            if (key != null && key.isNotEmpty) 'authorization': 'Bearer $key',
-          },
+          modelsUriFor(chatCompletionsUri, endpointStyle: endpointStyle),
+          headers: endpointStyle.requestHeaders(apiKey),
         )
         .timeout(requestTimeout);
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -143,14 +133,27 @@ class OpenAiCompatibleModelsApi {
         'The model list returned invalid JSON: $error',
       );
     }
-    if (decoded is! Map || decoded['data'] is! List) {
+    if (decoded is! Map) {
       throw const OpenAiCompatibleModelsException(
-        'The model list response has no data array.',
+        'The model list response is not an object.',
+      );
+    }
+    final rawModels = endpointStyle == AiEndpointStyle.ollamaChat
+        ? decoded['models']
+        : decoded['data'];
+    if (rawModels is! List) {
+      throw const OpenAiCompatibleModelsException(
+        'The model list response has no model array.',
       );
     }
     final byId = <String, OpenAiCompatibleModelInfo>{};
-    for (final raw in decoded['data'] as List) {
-      final model = OpenAiCompatibleModelInfo.fromJson(raw);
+    for (final raw in rawModels) {
+      final model = endpointStyle == AiEndpointStyle.ollamaChat && raw is Map
+          ? OpenAiCompatibleModelInfo.fromJson({
+              'id': raw['model'] ?? raw['name'],
+              ...raw,
+            })
+          : OpenAiCompatibleModelInfo.fromJson(raw);
       if (model != null) byId[model.id] = model;
     }
     final models = byId.values.toList()
@@ -165,18 +168,18 @@ class OpenAiCompatibleModelsApi {
     required Uri chatCompletionsUri,
     required String modelId,
     String? apiKey,
+    AiEndpointStyle endpointStyle = AiEndpointStyle.openAiChatCompletions,
   }) async {
     final normalizedModelId = modelId.trim();
     if (normalizedModelId.isEmpty) return null;
-    final key = apiKey?.trim();
+    final modelUri = modelUriFor(
+      chatCompletionsUri,
+      normalizedModelId,
+      endpointStyle: endpointStyle,
+    );
+    if (modelUri == null) return null;
     final response = await _httpClient
-        .get(
-          modelUriFor(chatCompletionsUri, normalizedModelId),
-          headers: {
-            'accept': 'application/json',
-            if (key != null && key.isNotEmpty) 'authorization': 'Bearer $key',
-          },
-        )
+        .get(modelUri, headers: endpointStyle.requestHeaders(apiKey))
         .timeout(requestTimeout);
     if (response.statusCode == 404 ||
         response.statusCode == 405 ||
@@ -208,6 +211,84 @@ class OpenAiCompatibleModelsApi {
     return model;
   }
 
+  Future<String> testModel({
+    required Uri chatCompletionsUri,
+    required String model,
+    required String prompt,
+    String? apiKey,
+    AiEndpointStyle endpointStyle = AiEndpointStyle.openAiChatCompletions,
+  }) async {
+    final normalizedModel = model.trim();
+    final normalizedPrompt = prompt.trim();
+    if (normalizedModel.isEmpty || normalizedPrompt.isEmpty) {
+      throw const FormatException('A model and test prompt are required.');
+    }
+    final uri = endpointStyle.requestUriFor(chatCompletionsUri);
+    final requestBody = endpointStyle.requestBody(
+      model: normalizedModel,
+      instructions: '',
+      input: normalizedPrompt,
+      stream: false,
+    );
+    final provider = '${endpointStyle.storageValue}/$normalizedModel';
+    const operation = 'model_test';
+    final correlationId = _aiLogger.newCorrelationId(provider);
+    final requestPayload = <String, Object?>{
+      'method': 'POST',
+      'endpoint': {
+        'scheme': uri.scheme,
+        'host': uri.host,
+        if (uri.hasPort) 'port': uri.port,
+        'path': uri.path,
+      },
+      'body': requestBody,
+    };
+    final secrets = <String>[?apiKey];
+    _aiLogger.request(
+      correlationId: correlationId,
+      provider: provider,
+      operation: operation,
+      payload: requestPayload,
+      secrets: secrets,
+    );
+    late final http.Response response;
+    try {
+      response = await _httpClient
+          .post(
+            uri,
+            headers: endpointStyle.requestHeaders(apiKey),
+            body: jsonEncode(requestBody),
+          )
+          .timeout(requestTimeout);
+    } catch (error, stackTrace) {
+      _aiLogger.error(
+        correlationId: correlationId,
+        provider: provider,
+        operation: operation,
+        error: error,
+        payload: requestPayload,
+        stackTrace: stackTrace,
+        secrets: secrets,
+      );
+      rethrow;
+    }
+    final body = utf8.decode(response.bodyBytes, allowMalformed: true);
+    _aiLogger.response(
+      correlationId: correlationId,
+      provider: provider,
+      operation: operation,
+      result: {'status_code': response.statusCode, 'body': body},
+      secrets: secrets,
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw OpenAiCompatibleModelsException(
+        _errorMessage(body),
+        statusCode: response.statusCode,
+      );
+    }
+    return _completionText(body, endpointStyle);
+  }
+
   void close() {
     if (_ownsHttpClient) _httpClient.close();
   }
@@ -230,5 +311,32 @@ class OpenAiCompatibleModelsApi {
     final compact = body.trim().replaceAll(RegExp(r'\s+'), ' ');
     if (compact.isEmpty) return 'The server rejected the model list request.';
     return compact.length <= 300 ? compact : '${compact.substring(0, 300)}…';
+  }
+
+  String _completionText(String body, AiEndpointStyle endpointStyle) {
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(body);
+    } on FormatException catch (error) {
+      throw OpenAiCompatibleModelsException(
+        'The model test returned invalid JSON: $error',
+      );
+    }
+    if (decoded is! Map) {
+      throw const OpenAiCompatibleModelsException(
+        'The model test response is not an object.',
+      );
+    }
+    final content = endpointStyle.responseText(decoded);
+    if (content != null && content.trim().isNotEmpty) return content.trim();
+    final refusal = endpointStyle.refusalText(decoded);
+    if (refusal != null) {
+      throw OpenAiCompatibleModelsException(
+        'The model refused the test prompt: ${refusal.trim()}',
+      );
+    }
+    throw const OpenAiCompatibleModelsException(
+      'The model test returned an empty response.',
+    );
   }
 }
