@@ -5,10 +5,9 @@ import 'package:provider/provider.dart';
 
 import '../chat/chat_view.dart';
 import '../chat/link_handler.dart';
+import '../chat/message_bubble_chat_preview.dart';
 import '../chat/message_bubble_repository_view.dart';
-import '../chat/stretchable_message_bubble_background.dart';
 import '../components/app_icons.dart';
-import '../components/photo_avatar.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../l10n/app_localizations.dart';
@@ -87,7 +86,14 @@ class _MessageBubbleSettingsViewState extends State<MessageBubbleSettingsView> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(14, 18, 14, 28),
               children: [
-                _preview(context, theme.messageBubbleBackgroundSpec),
+                MessageBubbleChatPreview(
+                  incomingBackground: theme
+                      .effectiveMessageBubbleBackgroundSpecFor(outgoing: false),
+                  outgoingBackground: theme
+                      .effectiveMessageBubbleBackgroundSpecFor(outgoing: true),
+                ),
+                const SizedBox(height: 16),
+                _applicationScopeCard(context, theme),
                 const SizedBox(height: 16),
                 Container(
                   padding: const EdgeInsets.all(16),
@@ -120,7 +126,7 @@ class _MessageBubbleSettingsViewState extends State<MessageBubbleSettingsView> {
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        'Browse the public channel as a bubble grid. Repository images are exactly 390 × 186 px and contain four compact text-color squares.',
+                        'Browse the public channel as a bubble grid. Repository images are exactly 360 × 180 px, with a 300 × 120 bubble box and 30 px transparent padding on every side.',
                         style: TextStyle(
                           color: c.textSecondary,
                           fontSize: 13.5,
@@ -195,77 +201,63 @@ class _MessageBubbleSettingsViewState extends State<MessageBubbleSettingsView> {
     );
   }
 
-  Widget _preview(
-    BuildContext context,
-    MessageBubbleBackgroundSpec background,
-  ) {
+  Widget _applicationScopeCard(BuildContext context, ThemeController theme) {
     final c = context.colors;
-    return Container(
-      height: 320,
-      padding: const EdgeInsets.fromLTRB(14, 24, 14, 20),
-      decoration: BoxDecoration(
-        color: c.chatBackground,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: c.divider.withValues(alpha: 0.7)),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const PhotoAvatar(title: 'M', size: 34),
-              const SizedBox(width: 8),
-              Flexible(
-                child: _previewBubble(
-                  context,
-                  background: background,
-                  outgoing: false,
-                  text: 'Repository bubble preview',
+    Widget choice(String label, MessageBubbleApplicationScope scope) {
+      final selected = theme.messageBubbleApplicationScope == scope;
+      return GestureDetector(
+        key: ValueKey('message-bubble-scope-${scope.name}'),
+        behavior: HitTestBehavior.opaque,
+        onTap: () => theme.messageBubbleApplicationScope = scope,
+        child: SizedBox(
+          height: 48,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(fontSize: 15, color: c.textPrimary),
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Align(
-            alignment: Alignment.centerRight,
-            child: _previewBubble(
-              context,
-              background: background,
-              outgoing: true,
-              text: 'The center stretches with longer messages.',
+                AppIcon(
+                  selected ? HeroAppIcons.circleCheck : HeroAppIcons.circle,
+                  size: 19,
+                  color: selected ? AppTheme.brand : c.textTertiary,
+                ),
+              ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _previewBubble(
-    BuildContext context, {
-    required MessageBubbleBackgroundSpec background,
-    required bool outgoing,
-    required String text,
-  }) {
-    final c = context.colors;
-    return StretchableMessageBubbleBackground(
-      background: background,
-      constraints: const BoxConstraints(maxWidth: 250),
-      fallbackColor: outgoing ? AppTheme.bubbleOutgoing : c.bubbleIncoming,
-      fallbackBorderRadius: BorderRadius.circular(12),
-      fallbackBorder: outgoing
-          ? null
-          : Border.all(color: c.divider, width: 0.5),
-      fallbackPadding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-      child: Text(
-        text,
-        style: TextStyle(
-          color:
-              background.foregroundColor ??
-              (outgoing ? AppTheme.bubbleOutgoingText : c.bubbleIncomingText),
-          fontSize: 15,
-          height: 1.25,
         ),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: c.card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: c.divider, width: 0.5),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 13, 14, 5),
+            child: Text(
+              'Apply bubble to',
+              style: TextStyle(
+                color: c.textSecondary,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          choice('My messages only', MessageBubbleApplicationScope.ownMessages),
+          Divider(height: 0.5, thickness: 0.5, color: c.divider),
+          choice('All messages', MessageBubbleApplicationScope.allMessages),
+        ],
       ),
     );
   }

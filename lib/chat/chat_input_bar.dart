@@ -25,6 +25,7 @@ import 'package:provider/provider.dart';
 
 import '../components/app_dialog.dart';
 import '../components/app_icons.dart';
+import '../components/app_interactive_surface.dart';
 import '../components/confirm_dialog.dart';
 import '../components/icon_grid.dart';
 import '../components/photo_avatar.dart';
@@ -42,6 +43,7 @@ import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_image_loader.dart';
 import '../tdlib/td_models.dart';
+import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import 'ai_reply_service.dart';
 import 'audio_search_view.dart';
@@ -107,6 +109,18 @@ class MentionQuery {
   final String query;
 }
 
+class BotCommandQuery {
+  const BotCommandQuery({
+    required this.start,
+    required this.end,
+    required this.query,
+  });
+
+  final int start;
+  final int end;
+  final String query;
+}
+
 MentionQuery? activeMentionQuery(String text, TextSelection selection) {
   if (!selection.isValid || !selection.isCollapsed) return null;
   final cursor = selection.extentOffset;
@@ -120,6 +134,34 @@ MentionQuery? activeMentionQuery(String text, TextSelection selection) {
     end: cursor,
     query: match.group(2) ?? '',
   );
+}
+
+BotCommandQuery? activeBotCommandQuery(String text, TextSelection selection) {
+  if (!selection.isValid ||
+      !selection.isCollapsed ||
+      selection.extentOffset != text.length) {
+    return null;
+  }
+  final match = RegExp(r'^/([A-Za-z0-9_]*)$').firstMatch(text);
+  if (match == null) return null;
+  return BotCommandQuery(
+    start: 0,
+    end: text.length,
+    query: match.group(1) ?? '',
+  );
+}
+
+List<BotCommandOption> matchingBotCommands(
+  Iterable<BotCommandOption> commands,
+  String query,
+) {
+  final normalizedQuery = query.toLowerCase();
+  return commands
+      .where(
+        (command) =>
+            command.normalizedCommand.toLowerCase().startsWith(normalizedQuery),
+      )
+      .toList(growable: false);
 }
 
 bool isTelegramAiDraftEligible(String text) =>
@@ -243,6 +285,7 @@ class ChatInputBar extends StatefulWidget {
     this.onPanelGeometryChanged,
     this.onMediaSendTapped,
     this.gifPreviewBuilder,
+    this.requestInitialFocus = false,
     this.quickRepliesEnabled = true,
     this.quickReplyLoader,
     this.quickReplySender,
@@ -258,6 +301,7 @@ class ChatInputBar extends StatefulWidget {
   final VoidCallback? onMediaSendTapped;
   @visibleForTesting
   final Widget Function(GifItem item)? gifPreviewBuilder;
+  final bool requestInitialFocus;
   final bool quickRepliesEnabled;
   @visibleForTesting
   final Future<List<BusinessQuickReplyShortcut>> Function()? quickReplyLoader;
@@ -326,6 +370,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
   MentionQuery? _mentionQuery;
   List<MentionCandidate> _mentionCandidates = const [];
   int _mentionSearchGeneration = 0;
+  BotCommandQuery? _botCommandQuery;
+  List<BotCommandOption> _botCommandCandidates = const [];
   OverlayEntry? _relayProgressEntry;
   RichMessageRelayProgress? _relayProgress;
   final BotPlatformService _botPlatform = BotPlatformService();
@@ -347,6 +393,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   int? _aiReplyWorkingTargetFingerprint;
   _AiReplyContextSnapshot? _aiReplyWorkingContextSnapshot;
   bool _applyingAiReplyDraft = false;
+  bool _initialFocusRequestConsumed = false;
   AiReplyProvider? _activeAiReplyProvider;
   List<AiReplyProgressPhase> _aiReplyProgressPhases = const [];
   bool _aiReplyProgressExpanded = false;
@@ -390,6 +437,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
       _adoptQuickReplyCache(rebuild: false);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _requestInitialFocusIfReady();
       if (mounted && _canUseQuickReplies) {
         unawaited(_loadQuickReplies(userInitiated: false));
       }
@@ -442,6 +490,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
     }
     if (applyingAiReplyDraft) return;
     _updateMentionSuggestions();
+    _updateBotCommandSuggestions();
     _queueInlineBotResults();
     final now = DateTime.now();
     if (_controller.text.isNotEmpty &&
@@ -502,6 +551,57 @@ class _ChatInputBarState extends State<ChatInputBar> {
       end: query.end,
       label: candidate.name,
       userId: candidate.userId,
+    );
+    _focus.requestFocus();
+  }
+
+  void _updateBotCommandSuggestions({bool force = false, bool rebuild = true}) {
+    final query = activeBotCommandQuery(
+      _controller.text,
+      _controller.selection,
+    );
+    if (query == null || !vm.isGroup || vm.isChannel) {
+      if (_botCommandQuery == null && _botCommandCandidates.isEmpty) return;
+      _botCommandQuery = null;
+      _botCommandCandidates = const [];
+      if (rebuild && mounted) setState(() {});
+      return;
+    }
+    if (!force &&
+        _botCommandQuery?.start == query.start &&
+        _botCommandQuery?.end == query.end &&
+        _botCommandQuery?.query == query.query) {
+      return;
+    }
+    _botCommandQuery = query;
+    _botCommandCandidates = matchingBotCommands(vm.botCommands, query.query);
+    if (rebuild && mounted) setState(() {});
+  }
+
+  void _sendBotCommandHint(BotCommandOption command) {
+    if (!vm.sendCommand(command.targetedCommand)) return;
+    _controller.clear();
+    _focus.requestFocus();
+    widget.onMessageSent();
+  }
+
+  void _insertBotCommandHint(BotCommandOption command) {
+    final query = activeBotCommandQuery(
+      _controller.text,
+      _controller.selection,
+    );
+    if (query == null) return;
+    final replacement = '${command.displayCommand} ';
+    final text = _controller.text.replaceRange(
+      query.start,
+      query.end,
+      replacement,
+    );
+    _controller.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(
+        offset: query.start + replacement.length,
+      ),
     );
     _focus.requestFocus();
   }
@@ -616,7 +716,27 @@ class _ChatInputBarState extends State<ChatInputBar> {
     _hasText = _controller.text.trim().isNotEmpty;
     _aiDraftEligible = isTelegramAiDraftEligible(_controller.text);
     if (_hasText) _quickReplyContextVisible = false;
+    _updateBotCommandSuggestions(force: true, rebuild: false);
+    _requestInitialFocusIfReady();
     if (mounted) setState(() {});
+  }
+
+  void _requestInitialFocusIfReady() {
+    if (_initialFocusRequestConsumed ||
+        !widget.requestInitialFocus ||
+        !vm.initialLoaded) {
+      return;
+    }
+    if (vm.draft != _controller.text) {
+      _controller.value = TextEditingValue(
+        text: vm.draft,
+        selection: TextSelection.collapsed(offset: vm.draft.length),
+      );
+    }
+    _initialFocusRequestConsumed = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focus.requestFocus();
+    });
   }
 
   void _syncQuickReplyCache() => _adoptQuickReplyCache(rebuild: true);
@@ -638,7 +758,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.vm, widget.vm)) {
       _invalidateAiReplyGeneration(discardGeneratedDraft: true);
+      _initialFocusRequestConsumed = false;
+    } else if (!oldWidget.requestInitialFocus && widget.requestInitialFocus) {
+      _initialFocusRequestConsumed = false;
     }
+    _requestInitialFocusIfReady();
     if (oldWidget.quickRepliesEnabled && !widget.quickRepliesEnabled) {
       _quickReplyContextVisible = false;
     } else if (!oldWidget.quickRepliesEnabled &&
@@ -1098,6 +1222,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
   Future<void> _sendCurrentText() async {
     if (_aiReplyWorkingTargetId != null) return;
     if (_controller.text.trim().isEmpty) return;
+    final canAttemptSend = await vm.prepareMessageSend();
+    if (!mounted || !canAttemptSend) return;
     final (text, entities) = _controller.toFormatted();
     final lengthTier = telegramMessageLengthTier(text);
     if (lengthTier == TelegramMessageLengthTier.exceeded) {
@@ -1134,7 +1260,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
       final ok = await _confirmPaidMessageSend();
       if (!mounted || !ok) return;
     }
-    vm.sendFormatted(text, entities);
+    final sent = await vm.sendFormatted(text, entities);
+    if (!mounted || !sent) return;
     widget.onMessageSent();
     _controller.clear();
     _focus.requestFocus();
@@ -1661,6 +1788,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
     );
     if (result == null || !mounted) return;
     if (result.text.trim().isEmpty && result.attachments.isEmpty) return;
+    final canAttemptSend = await vm.prepareMessageSend();
+    if (!mounted || !canAttemptSend) return;
     if (vm.requiresPaidMessage) {
       final ok = await _confirmPaidMessageSend();
       if (!mounted || !ok) return;
@@ -1808,39 +1937,60 @@ class _ChatInputBarState extends State<ChatInputBar> {
     final replyKeyboard = _activeReplyKeyboard();
     final replyKeyboardPanelVisible =
         replyKeyboard != null && _replyKeyboardVisible && !_hasText;
-    final bottomSurfaceColor =
-        _panel != _Panel.none || replyKeyboardPanelVisible
-        ? c.panelBackground
-        : c.inputBarBackground;
+    final panelSurfaceVisible =
+        _panel != _Panel.none || replyKeyboardPanelVisible;
+    final bottomSafeArea = MediaQuery.paddingOf(context).bottom;
     return ColoredBox(
       key: const ValueKey('chat-input-safe-area-background'),
-      color: bottomSurfaceColor,
-      child: SafeArea(
-        top: false,
-        child: ColoredBox(
-          color: c.inputBarBackground,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (vm.replyTo != null) _replyBanner(vm.replyTo!),
-              if (_inlineBotLoading || _inlineBotResults != null)
-                _inlineBotResultMenu()
-              else if (_mentionCandidates.isNotEmpty)
-                _mentionMenu()
-              else if (_quickReplyContextVisible && _quickReplies.isNotEmpty)
-                _quickReplyContextMenu(),
-              _inputRow(replyKeyboard, aiSettings: aiSettings),
-              if (replyKeyboardPanelVisible)
-                _replyKeyboardPanel(replyKeyboard)
-              else
-                _iconStrip(),
-              if (_panel == _Panel.function) _functionPanel(),
-              if (_panel == _Panel.emoji) _emojiPanel(),
-              if (_panel == _Panel.sticker) _stickerPanel(),
-              if (_panel == _Panel.voice) _voicePanel(),
-            ],
+      color: c.inputBarBackground,
+      child: Stack(
+        alignment: Alignment.bottomCenter,
+        children: [
+          SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (vm.replyTo != null) _replyBanner(vm.replyTo!),
+                if (_inlineBotLoading || _inlineBotResults != null)
+                  _inlineBotResultMenu()
+                else if (_botCommandCandidates.isNotEmpty)
+                  _botCommandMenu()
+                else if (_mentionCandidates.isNotEmpty)
+                  _mentionMenu()
+                else if (_quickReplyContextVisible && _quickReplies.isNotEmpty)
+                  _quickReplyContextMenu(),
+                _inputRow(replyKeyboard, aiSettings: aiSettings),
+                if (replyKeyboardPanelVisible)
+                  _replyKeyboardPanel(replyKeyboard)
+                else
+                  _iconStrip(),
+                if (_panel == _Panel.function) _functionPanel(),
+                if (_panel == _Panel.emoji) _emojiPanel(),
+                if (_panel == _Panel.sticker) _stickerPanel(),
+                if (_panel == _Panel.voice) _voicePanel(),
+              ],
+            ),
           ),
-        ),
+          // The base input surface is painted exactly once across the complete
+          // composer. When a media/reply panel is open, extend that panel's
+          // surface through the system inset with the same single overlay used
+          // by the visible panel. This keeps translucent cloud-theme colors
+          // identical above and below the home indicator.
+          if (panelSurfaceVisible && bottomSafeArea > 0)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: bottomSafeArea,
+              child: IgnorePointer(
+                child: ColoredBox(
+                  key: const ValueKey('chat-input-panel-safe-area-background'),
+                  color: c.panelBackground,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -1990,6 +2140,111 @@ class _ChatInputBarState extends State<ChatInputBar> {
     } catch (error) {
       _showBotPlatformFailure(error);
     }
+  }
+
+  Widget _botCommandMenu() {
+    final c = context.colors;
+    return Container(
+      key: const ValueKey('groupBotCommandHints'),
+      constraints: const BoxConstraints(maxHeight: 260),
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      decoration: BoxDecoration(
+        color: c.card,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: c.divider, width: 0.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 14,
+            offset: const Offset(0, -4),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: ListView.separated(
+        shrinkWrap: true,
+        padding: EdgeInsets.zero,
+        itemCount: _botCommandCandidates.length,
+        separatorBuilder: (_, _) => const InsetDivider(leadingInset: 54),
+        itemBuilder: (context, index) {
+          final command = _botCommandCandidates[index];
+          final stableKey = '${command.botUserId}-${command.normalizedCommand}';
+          return Semantics(
+            button: true,
+            label: '${command.botName}, ${command.displayCommand}',
+            value: command.description,
+            child: GestureDetector(
+              key: ValueKey('groupBotCommand-$stableKey'),
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _sendBotCommandHint(command),
+              child: SizedBox(
+                height: 46,
+                child: Row(
+                  children: [
+                    const SizedBox(width: 12),
+                    PhotoAvatar(
+                      title: command.botName,
+                      photo: command.botPhoto,
+                      size: 30,
+                      allowAnimation: false,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(
+                              text: command.displayCommand,
+                              style: TextStyle(
+                                color: c.textPrimary,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            if (command.description.trim().isNotEmpty)
+                              TextSpan(
+                                text: '  ${command.description.trim()}',
+                                style: TextStyle(
+                                  color: c.textSecondary,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w400,
+                                ),
+                              ),
+                          ],
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Semantics(
+                      button: true,
+                      label:
+                          '${AppStrings.t(AppStringKeys.richTextComposerInsert)} ${command.displayCommand}',
+                      child: GestureDetector(
+                        key: ValueKey('insertGroupBotCommand-$stableKey'),
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => _insertBotCommandHint(command),
+                        child: SizedBox(
+                          width: 42,
+                          height: 46,
+                          child: Center(
+                            child: AppIcon(
+                              HeroAppIcons.reply,
+                              size: 18,
+                              color: c.textTertiary,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   Widget _mentionMenu() {
@@ -2151,7 +2406,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   void _showSenderPicker() {
     final options = vm.availableMessageSenders;
     if (options.length <= 1) return;
-    showModalBottomSheet<void>(
+    showAppModalSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (context) {
@@ -2189,7 +2444,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
       unawaited(_openBotMenuWebApp(menu!));
       return;
     }
-    showModalBottomSheet<void>(
+    showAppModalSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (context) {
@@ -2347,7 +2602,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
     }
     if (!mounted) return;
 
-    await showModalBottomSheet<void>(
+    await showAppModalSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
@@ -2534,7 +2789,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   void _showGuestQueries() {
-    showModalBottomSheet<void>(
+    showAppModalSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
@@ -3788,37 +4043,64 @@ class _ChatInputBarState extends State<ChatInputBar> {
       child: Row(
         children: [
           _icon(
-            HeroAppIcons.microphone.data,
+            HeroAppIcons.microphone,
+            AppStrings.t(AppStringKeys.composerHoldToTalk),
             _panel == _Panel.voice,
             _toggleVoice,
           ),
-          _icon(HeroAppIcons.image.data, false, _pickPhotos),
-          _icon(HeroAppIcons.camera.data, false, _takePhoto),
-          _icon(HeroAppIcons.grip.data, _panel == _Panel.sticker, () {
-            _toggle(_Panel.sticker);
-            if (_panel == _Panel.sticker) {
-              StickerStore.shared.loadIfNeeded();
-              GifStore.shared.loadIfNeeded();
-              if (_isPanelSearchSelected &&
-                  _panelSearch.text.trim().isNotEmpty) {
-                _queuePanelSearch();
+          _icon(
+            HeroAppIcons.image,
+            AppStrings.t(AppStringKeys.composerImage),
+            false,
+            _pickPhotos,
+          ),
+          if (Platform.isAndroid || Platform.isIOS)
+            _icon(
+              HeroAppIcons.camera,
+              AppStrings.t(AppStringKeys.composerCamera),
+              false,
+              _takePhoto,
+            ),
+          _icon(
+            HeroAppIcons.grip,
+            AppStrings.t(AppStringKeys.composerStickers),
+            _panel == _Panel.sticker,
+            () {
+              _toggle(_Panel.sticker);
+              if (_panel == _Panel.sticker) {
+                StickerStore.shared.loadIfNeeded();
+                GifStore.shared.loadIfNeeded();
+                if (_isPanelSearchSelected &&
+                    _panelSearch.text.trim().isNotEmpty) {
+                  _queuePanelSearch();
+                }
               }
-            }
-          }),
-          _icon(HeroAppIcons.solidFaceSmile.data, _panel == _Panel.emoji, () {
-            _toggle(_Panel.emoji);
-            if (_panel == _Panel.emoji) {
-              EmojiStore.shared.loadIfNeeded();
-              if (_isPanelSearchSelected &&
-                  _panelSearch.text.trim().isNotEmpty) {
-                _queuePanelSearch();
+            },
+          ),
+          _icon(
+            HeroAppIcons.solidFaceSmile,
+            AppStrings.t(AppStringKeys.composerEmoji),
+            _panel == _Panel.emoji,
+            () {
+              _toggle(_Panel.emoji);
+              if (_panel == _Panel.emoji) {
+                EmojiStore.shared.loadIfNeeded();
+                if (_isPanelSearchSelected &&
+                    _panelSearch.text.trim().isNotEmpty) {
+                  _queuePanelSearch();
+                }
               }
-            }
-          }),
+            },
+          ),
           _icon(
             _panel != _Panel.none
-                ? HeroAppIcons.xmark.data
-                : HeroAppIcons.circlePlus.data,
+                ? HeroAppIcons.xmark
+                : HeroAppIcons.circlePlus,
+            AppStrings.t(
+              _panel != _Panel.none
+                  ? AppStringKeys.composerCloseMenu
+                  : AppStringKeys.composerOpenMenu,
+            ),
             _panel == _Panel.function,
             () => _toggle(_Panel.function),
           ),
@@ -3827,15 +4109,27 @@ class _ChatInputBarState extends State<ChatInputBar> {
     );
   }
 
-  Widget _icon(IconData name, bool active, VoidCallback onTap) {
+  Widget _icon(
+    AppIconData icon,
+    String semanticLabel,
+    bool active,
+    VoidCallback onTap,
+  ) {
     return Expanded(
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
+      child: AppInteractiveSurface(
+        semanticLabel: semanticLabel,
+        selected: active,
         onTap: onTap,
-        child: Icon(
-          name,
-          size: 24,
-          color: active ? AppTheme.brand : context.colors.textSecondary,
+        borderRadius: BorderRadius.circular(10),
+        child: SizedBox(
+          height: 40,
+          child: Center(
+            child: AppIcon(
+              icon,
+              size: 24,
+              color: active ? AppTheme.brand : context.colors.textSecondary,
+            ),
+          ),
         ),
       ),
     );
@@ -3846,6 +4140,10 @@ class _ChatInputBarState extends State<ChatInputBar> {
   /// 图片: pick one or more photos/videos and preserve their album order.
   Future<void> _pickPhotos() async {
     try {
+      if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
+        await _pickDesktopPhotos();
+        return;
+      }
       final sendMode = await showGallerySendModeSheet(context);
       if (!mounted || sendMode == null) return;
       final sendLivePhoto = sendMode == GallerySendMode.livePhoto;
@@ -3895,6 +4193,55 @@ class _ChatInputBarState extends State<ChatInputBar> {
       debugPrint('Failed to send selected media: $error\n$stackTrace');
       _pickFailed(AppStrings.t(AppStringKeys.composerImage));
     }
+  }
+
+  Future<void> _pickDesktopPhotos() async {
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      type: FileType.custom,
+      allowedExtensions: const [
+        'jpg',
+        'jpeg',
+        'png',
+        'gif',
+        'webp',
+        'heic',
+        'heif',
+        'mp4',
+        'mov',
+        'mkv',
+        'webm',
+      ],
+    );
+    final files = result?.files
+        .where((file) => file.path != null)
+        .toList(growable: false);
+    if (files == null || files.isEmpty || !mounted) return;
+    if (files.length > 10) {
+      showToast(
+        context,
+        AppStrings.t(AppStringKeys.composerMediaSelectionLimit, {'value1': 10}),
+      );
+      return;
+    }
+    final selected = files
+        .map((file) {
+          final path = file.path!;
+          final pickedFile = XFile(path, name: file.name);
+          return OutgoingAttachment(
+            path: path,
+            kind: galleryAttachmentKind(
+              sendAsFile: false,
+              isVideo: isPickedAssetVideo(pickedFile),
+              isAnimation: isPickedAssetGif(pickedFile),
+            ),
+            fileName: file.name,
+          );
+        })
+        .toList(growable: false);
+    final attachments = await resolveAttachmentListDimensions(selected);
+    if (!mounted) return;
+    await _previewAndSendAttachments(attachments);
   }
 
   /// 相机: capture a photo and send it.
@@ -4350,6 +4697,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
     );
     if (result == null || !mounted) return;
     if (result.text.trim().isEmpty && result.attachments.isEmpty) return;
+    final canAttemptSend = await vm.prepareMessageSend();
+    if (!mounted || !canAttemptSend) return;
     if (vm.requiresPaidMessage) {
       final ok = await _confirmPaidMessageSend();
       if (!mounted || !ok) return;
@@ -4658,7 +5007,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
     try {
       final limits = await loader.loadLimits();
       if (!mounted) return;
-      final draft = await showModalBottomSheet<SuggestedPostDraft>(
+      final draft = await showAppModalSheet<SuggestedPostDraft>(
         context: context,
         isScrollControlled: true,
         backgroundColor: Colors.transparent,

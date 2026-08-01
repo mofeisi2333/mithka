@@ -107,9 +107,12 @@ using namespace std;
     return CVPixelBufferRetain(pixbuf);
 }
 
-- (CVPixelBufferRef _Nullable)copyPixelBufferForPictureInPicture {
-    if (!pipPixelBufferPool || !pipTextureCache)
-        return nil;
+- (void)copyPixelBufferForPictureInPictureWithCompletion:
+    (void (^)(CVPixelBufferRef _Nullable pixelBuffer))completion {
+    if (!pipPixelBufferPool || !pipTextureCache) {
+        completion(nil);
+        return;
+    }
 
     CVPixelBufferRef output = nullptr;
     if (CVPixelBufferPoolCreatePixelBuffer(
@@ -117,7 +120,8 @@ using namespace std;
             pipPixelBufferPool,
             &output
         ) != kCVReturnSuccess || !output) {
-        return nil;
+        completion(nil);
+        return;
     }
 
     CVMetalTextureRef cvTexture = nullptr;
@@ -134,19 +138,22 @@ using namespace std;
     );
     if (status != kCVReturnSuccess || !cvTexture) {
         CVPixelBufferRelease(output);
-        return nil;
+        completion(nil);
+        return;
     }
 
     id<MTLTexture> outputTexture = CVMetalTextureGetTexture(cvTexture);
     if (!outputTexture) {
         CFRelease(cvTexture);
         CVPixelBufferRelease(output);
-        return nil;
+        completion(nil);
+        return;
     }
 
+    id<MTLCommandBuffer> commandBuffer;
     {
         scoped_lock lock(mtx);
-        auto commandBuffer = [cmdQueue commandBuffer];
+        commandBuffer = [cmdQueue commandBuffer];
         auto blit = [commandBuffer blitCommandEncoder];
         [blit copyFromTexture:texture
                   sourceSlice:0
@@ -158,12 +165,23 @@ using namespace std;
              destinationLevel:0
             destinationOrigin:MTLOriginMake(0, 0, 0)];
         [blit endEncoding];
-        [commandBuffer commit];
-        [commandBuffer waitUntilCompleted];
     }
-
-    CFRelease(cvTexture);
-    return output;
+    if (!commandBuffer) {
+        CFRelease(cvTexture);
+        CVPixelBufferRelease(output);
+        completion(nil);
+        return;
+    }
+    [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
+        @autoreleasepool {
+            const BOOL succeeded =
+                buffer.status == MTLCommandBufferStatusCompleted;
+            completion(succeeded ? output : nil);
+            CFRelease(cvTexture);
+            CVPixelBufferRelease(output);
+        }
+    }];
+    [commandBuffer commit];
 }
 @end
 
@@ -288,8 +306,8 @@ static UIViewController* _Nullable TopViewController(
 }
 
 static UIViewController* _Nullable PictureInPictureRootViewController() {
-    UIWindow* window = UIApplication.sharedApplication.keyWindow;
-    if (!window) {
+    UIWindow* window = nil;
+    if (@available(iOS 13.0, *)) {
         for (UIScene* scene in UIApplication.sharedApplication.connectedScenes) {
             if (![scene isKindOfClass:[UIWindowScene class]])
                 continue;
@@ -302,6 +320,8 @@ static UIViewController* _Nullable PictureInPictureRootViewController() {
             if (window)
                 break;
         }
+    } else {
+        window = UIApplication.sharedApplication.delegate.window;
     }
     return TopViewController(window.rootViewController);
 }
@@ -319,6 +339,7 @@ static UIViewController* _Nullable PictureInPictureRootViewController() {
     atomic_bool pictureInPictureFramePending;
     atomic_bool pictureInPictureFramesEnabled;
     atomic<int64_t> lastPictureInPicturePositionMs;
+    atomic<uint64_t> pictureInPictureGeneration;
     int64_t pictureInPictureTextureId;
 #endif
 }
@@ -332,6 +353,8 @@ static UIViewController* _Nullable PictureInPictureRootViewController() {
 @property(copy, nonatomic) FlutterResult pendingPictureInPictureResult;
 @property(assign, nonatomic) BOOL pictureInPictureStartRequested;
 @property(assign, nonatomic) double pictureInPictureRate;
+@property(assign, nonatomic) BOOL pictureInPictureRestoreAccepted;
+@property(assign, nonatomic) BOOL pictureInPictureMuted;
 #endif
 @end
 
@@ -363,8 +386,11 @@ static UIViewController* _Nullable PictureInPictureRootViewController() {
     pictureInPictureFramePending.store(false);
     pictureInPictureFramesEnabled.store(false);
     lastPictureInPicturePositionMs.store(-1);
+    pictureInPictureGeneration.store(0);
     pictureInPictureTextureId = -1;
     _pictureInPictureRate = 1.0;
+    _pictureInPictureRestoreAccepted = NO;
+    _pictureInPictureMuted = NO;
     _pictureInPictureChannel = [FlutterMethodChannel
         methodChannelWithName:@"mithka/fvp_picture_in_picture"
         binaryMessenger:[registrar messenger]
@@ -465,9 +491,11 @@ static UIViewController* _Nullable PictureInPictureRootViewController() {
         const BOOL replacingSession = self.pictureInPictureId != nil &&
             ![self.pictureInPictureId isEqualToString:sessionId];
         [self stopPictureInPictureAndNotifyFlutter:replacingSession];
+        const auto generation = pictureInPictureGeneration.fetch_add(1) + 1;
         pictureInPicturePlayer = playerIterator->second;
         pictureInPictureTextureId = textureId;
         self.pictureInPictureId = sessionId;
+        self.pictureInPictureRestoreAccepted = NO;
         self.pictureInPictureRate = [args[@"speed"] doubleValue] > 0.0
             ? [args[@"speed"] doubleValue]
             : 1.0;
@@ -537,16 +565,18 @@ static UIViewController* _Nullable PictureInPictureRootViewController() {
 
         __weak FvpPlugin* weakSelf = self;
         pictureInPicturePlayer->setPictureInPictureFrameCallback(
-            [weakSelf](MetalTexture* texture, int64_t positionMs) {
+            [weakSelf, generation](MetalTexture* texture, int64_t positionMs) {
                 FvpPlugin* strongSelf = weakSelf;
                 if (!strongSelf)
                     return;
                 [strongSelf enqueuePictureInPictureFrameFromTexture:texture
-                                                          position:positionMs];
+                                                          position:positionMs
+                                                        generation:generation];
             }
         );
         [self enqueuePictureInPictureFrameFromTexture:pictureInPicturePlayer->texture()
-                                             position:pictureInPicturePlayer->position()];
+                                             position:pictureInPicturePlayer->position()
+                                           generation:generation];
         [self applyPictureInPictureArguments:args allowSeek:NO];
         NSLog(@"Mithka FVP PiP prepared active player %lld", textureId);
         return YES;
@@ -555,46 +585,54 @@ static UIViewController* _Nullable PictureInPictureRootViewController() {
 }
 
 - (void)enqueuePictureInPictureFrameFromTexture:(MetalTexture*)texture
-                                        position:(int64_t)positionMs {
-    if (!self.pictureInPictureLayer || !pictureInPicturePlayer)
+                                        position:(int64_t)positionMs
+                                      generation:(uint64_t)generation {
+    if (generation != pictureInPictureGeneration.load())
         return;
     const auto previousPosition = lastPictureInPicturePositionMs.load();
     if (!pictureInPictureFramesEnabled.load() && previousPosition >= 0)
         return;
-    if (previousPosition >= 0 && llabs(positionMs - previousPosition) < 24)
+    if (previousPosition >= 0 && llabs(positionMs - previousPosition) < 33)
         return;
     if (pictureInPictureFramePending.exchange(true))
         return;
     lastPictureInPicturePositionMs.store(positionMs);
 
-    CVPixelBufferRef pixelBuffer = [texture copyPixelBufferForPictureInPicture];
-    if (!pixelBuffer) {
-        pictureInPictureFramePending.store(false);
-        return;
-    }
-    CMSampleBufferRef sampleBuffer = CreatePictureInPictureSampleBuffer(
-        pixelBuffer,
-        positionMs
-    );
-    CVPixelBufferRelease(pixelBuffer);
-    if (!sampleBuffer) {
-        pictureInPictureFramePending.store(false);
-        return;
-    }
-
     __weak FvpPlugin* weakSelf = self;
-    dispatch_async(dispatch_get_main_queue(), ^{
+    [texture copyPixelBufferForPictureInPictureWithCompletion:^(CVPixelBufferRef pixelBuffer) {
         FvpPlugin* strongSelf = weakSelf;
-        if (strongSelf) {
-            AVSampleBufferDisplayLayer* layer = strongSelf.pictureInPictureLayer;
-            if (layer.status == AVQueuedSampleBufferRenderingStatusFailed)
-                [layer flush];
-            if (layer.readyForMoreMediaData)
-                [layer enqueueSampleBuffer:sampleBuffer];
-            strongSelf->pictureInPictureFramePending.store(false);
+        if (!strongSelf ||
+            generation != strongSelf->pictureInPictureGeneration.load()) {
+            return;
         }
-        CFRelease(sampleBuffer);
-    });
+        if (!pixelBuffer) {
+            strongSelf->pictureInPictureFramePending.store(false);
+            return;
+        }
+        CMSampleBufferRef sampleBuffer = CreatePictureInPictureSampleBuffer(
+            pixelBuffer,
+            positionMs
+        );
+        if (!sampleBuffer) {
+            strongSelf->pictureInPictureFramePending.store(false);
+            return;
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            FvpPlugin* mainSelf = weakSelf;
+            if (mainSelf &&
+                generation == mainSelf->pictureInPictureGeneration.load()) {
+                if (@available(iOS 15.0, *)) {
+                    AVSampleBufferDisplayLayer* layer = mainSelf.pictureInPictureLayer;
+                    if (layer.status == AVQueuedSampleBufferRenderingStatusFailed)
+                        [layer flush];
+                    if (layer.readyForMoreMediaData)
+                        [layer enqueueSampleBuffer:sampleBuffer];
+                }
+                mainSelf->pictureInPictureFramePending.store(false);
+            }
+            CFRelease(sampleBuffer);
+        });
+    }];
 }
 
 - (void)applyPictureInPictureArguments:(NSDictionary*)args
@@ -602,8 +640,10 @@ static UIViewController* _Nullable PictureInPictureRootViewController() {
     if (!pictureInPicturePlayer)
         return;
     NSNumber* muted = args[@"muted"];
-    if ([muted isKindOfClass:[NSNumber class]])
+    if ([muted isKindOfClass:[NSNumber class]]) {
+        self.pictureInPictureMuted = muted.boolValue;
         pictureInPicturePlayer->setMute(muted.boolValue);
+    }
     NSNumber* speed = args[@"speed"];
     if ([speed isKindOfClass:[NSNumber class]] && speed.doubleValue > 0.0) {
         self.pictureInPictureRate = speed.doubleValue;
@@ -622,20 +662,22 @@ static UIViewController* _Nullable PictureInPictureRootViewController() {
             pictureInPicturePlayer->seek(requested, SeekFlag::FromStart);
     }
 
-    AVSampleBufferDisplayLayer* layer = self.pictureInPictureLayer;
-    if (layer.controlTimebase) {
-        CMTimebaseSetTime(
-            layer.controlTimebase,
-            CMTimeMake(pictureInPicturePlayer->position(), 1000)
-        );
-        CMTimebaseSetRate(
-            layer.controlTimebase,
-            pictureInPicturePlayer->state() == State::Playing
-                ? self.pictureInPictureRate
-                : 0.0
-        );
+    if (@available(iOS 15.0, *)) {
+        AVSampleBufferDisplayLayer* layer = self.pictureInPictureLayer;
+        if (layer.controlTimebase) {
+            CMTimebaseSetTime(
+                layer.controlTimebase,
+                CMTimeMake(pictureInPicturePlayer->position(), 1000)
+            );
+            CMTimebaseSetRate(
+                layer.controlTimebase,
+                pictureInPicturePlayer->state() == State::Playing
+                    ? self.pictureInPictureRate
+                    : 0.0
+            );
+        }
+        [self.pictureInPictureController invalidatePlaybackState];
     }
-    [self.pictureInPictureController invalidatePlaybackState];
 }
 
 - (void)startPreparedPictureInPicture:(id)arguments
@@ -721,7 +763,12 @@ static UIViewController* _Nullable PictureInPictureRootViewController() {
 }
 
 - (void)stopPictureInPictureAndNotifyFlutter:(BOOL)notifyFlutter {
+    pictureInPictureGeneration.fetch_add(1);
     NSString* stoppedId = self.pictureInPictureId;
+    const int64_t stoppedPositionMs = pictureInPicturePlayer
+        ? std::max<int64_t>(0, pictureInPicturePlayer->position())
+        : 0;
+    const BOOL wasRestored = self.pictureInPictureRestoreAccepted;
     if (pictureInPicturePlayer)
         pictureInPicturePlayer->setPictureInPictureFrameCallback(nullptr);
     pictureInPicturePlayer.reset();
@@ -740,18 +787,24 @@ static UIViewController* _Nullable PictureInPictureRootViewController() {
         if (self.pictureInPictureController.isPictureInPictureActive)
             [self.pictureInPictureController stopPictureInPicture];
         [self.pictureInPictureLayer flushAndRemoveImage];
+        self.pictureInPictureController = nil;
+        self.pictureInPictureLayer = nil;
     }
-    self.pictureInPictureController = nil;
-    self.pictureInPictureLayer = nil;
     [self.pictureInPictureHostView removeFromSuperview];
     self.pictureInPictureHostView = nil;
     self.pictureInPictureId = nil;
     self.pictureInPictureStartRequested = NO;
     self.pictureInPictureRate = 1.0;
+    self.pictureInPictureRestoreAccepted = NO;
+    self.pictureInPictureMuted = NO;
 
     if (notifyFlutter && stoppedId) {
         [self.pictureInPictureChannel invokeMethod:@"didStop"
-                                        arguments:@{@"id": stoppedId}];
+                                        arguments:@{
+                                            @"id": stoppedId,
+                                            @"positionMs": @(stoppedPositionMs),
+                                            @"restored": @(wasRestored),
+                                        }];
     }
 }
 
@@ -783,7 +836,51 @@ static UIViewController* _Nullable PictureInPictureRootViewController() {
             (AVPictureInPictureController*)pictureInPictureController
     restoreUserInterfaceForPictureInPictureStopWithCompletionHandler:
             (void (^)(BOOL restored))completionHandler API_AVAILABLE(ios(15.0)) {
-    completionHandler(NO);
+    NSString* sessionId = [self.pictureInPictureId copy];
+    if (!sessionId || !pictureInPicturePlayer) {
+        completionHandler(NO);
+        return;
+    }
+    const int64_t positionMs = std::max<int64_t>(
+        0,
+        pictureInPicturePlayer->position()
+    );
+    __block BOOL completed = NO;
+    __weak FvpPlugin* weakSelf = self;
+    void (^finish)(BOOL) = ^(BOOL restored) {
+        if (completed)
+            return;
+        completed = YES;
+        FvpPlugin* strongSelf = weakSelf;
+        const BOOL validSession =
+            [strongSelf.pictureInPictureId isEqualToString:sessionId];
+        const BOOL accepted = restored && validSession;
+        if (validSession)
+            strongSelf.pictureInPictureRestoreAccepted = accepted;
+        completionHandler(accepted);
+    };
+    dispatch_after(
+        dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
+        dispatch_get_main_queue(),
+        ^{ finish(NO); }
+    );
+    [self.pictureInPictureChannel
+        invokeMethod:@"restoreRequested"
+           arguments:@{
+               @"id": sessionId,
+               @"positionMs": @(positionMs),
+               @"playing": @(pictureInPicturePlayer->state() == State::Playing),
+               @"speed": @(self.pictureInPictureRate),
+               @"muted": @(self.pictureInPictureMuted),
+           }
+              result:^(id response) {
+                  dispatch_async(dispatch_get_main_queue(), ^{
+                      const BOOL restored =
+                          [response respondsToSelector:@selector(boolValue)] &&
+                          [response boolValue];
+                      finish(restored);
+                  });
+              }];
 }
 
 - (void)pictureInPictureController:(AVPictureInPictureController*)pictureInPictureController

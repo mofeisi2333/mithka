@@ -8,6 +8,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -115,6 +116,25 @@ enum ChatFolderDisplayMode {
   final AppIconData _icon;
 
   IconData get icon => _icon.data;
+}
+
+enum ChatListSwipeMode {
+  chatActions(
+    AppStringKeys.gesturesChatActions,
+    AppStringKeys.gesturesChatActionsModeDescription,
+    HeroAppIcons.message,
+  ),
+  switchFolders(
+    AppStringKeys.gesturesSwitchFolders,
+    AppStringKeys.gesturesSwitchFoldersModeDescription,
+    HeroAppIcons.folder,
+  );
+
+  const ChatListSwipeMode(this.label, this.description, this.icon);
+
+  final String label;
+  final String description;
+  final AppIconData icon;
 }
 
 enum NameColorAudience {
@@ -835,6 +855,8 @@ enum AppMonospaceFontChoice {
   }
 }
 
+enum MessageBubbleApplicationScope { ownMessages, allMessages }
+
 class ThemeController extends ChangeNotifier {
   ThemeController(
     this._prefs, {
@@ -896,6 +918,15 @@ class ThemeController extends ChangeNotifier {
     _messageBubbleBackground = MessageBubbleBackground.fromStorage(
       _prefs.getString(_scopedThemeKey(_messageBubbleBackgroundKey)),
     );
+    _messageBubbleApplicationScope = MessageBubbleApplicationScope.values
+        .firstWhere(
+          (scope) =>
+              scope.name ==
+              _prefs.getString(
+                _scopedThemeKey(_messageBubbleApplicationScopeKey),
+              ),
+          orElse: () => MessageBubbleApplicationScope.allMessages,
+        );
     _repairMissingCustomMessageBubble();
     if (hasCloudTheme &&
         (_prefs.containsKey(_preCloudThemeModeKey) ||
@@ -952,17 +983,32 @@ class ThemeController extends ChangeNotifier {
             : ChatFolderDisplayMode.hidden;
       },
     );
-    _showChatListSearch = _prefs.getBool(_chatListSearchKey) ?? true;
-    final storedSavedMessagesBookmarkView = _prefs.getBool(
-      _savedMessagesBookmarkViewKey,
+    final storedChatListSwipeMode = _prefs.getString(_chatListSwipeModeKey);
+    final hasStoredChatListSwipeMode = ChatListSwipeMode.values.any(
+      (mode) => mode.name == storedChatListSwipeMode,
     );
-    _savedMessagesBookmarkView =
-        storedSavedMessagesBookmarkView ??
-        _prefs.getBool(_legacyDisplayOwnChatAsFavoritesKey) ??
-        false;
-    if (storedSavedMessagesBookmarkView == null) {
-      _prefs.setBool(_savedMessagesBookmarkViewKey, _savedMessagesBookmarkView);
+    _chatListSwipeMode = ChatListSwipeMode.values.firstWhere(
+      (mode) => mode.name == storedChatListSwipeMode,
+      orElse: () {
+        final legacyBehavior = _prefs.getString(
+          _legacyChatListSwipeBehaviorKey,
+        );
+        final legacySwitchesFolders =
+            legacyBehavior == ChatListSwipeMode.switchFolders.name ||
+            (legacyBehavior == null &&
+                (_prefs.getBool(_legacyDisableChatListSwipeActionsKey) ??
+                    false) &&
+                (_prefs.getBool(_legacyChatListFolderSwipeSwitchingKey) ??
+                    false));
+        return legacySwitchesFolders
+            ? ChatListSwipeMode.switchFolders
+            : ChatListSwipeMode.chatActions;
+      },
+    );
+    if (!hasStoredChatListSwipeMode) {
+      _prefs.setString(_chatListSwipeModeKey, _chatListSwipeMode.name);
     }
+    _showChatListSearch = _prefs.getBool(_chatListSearchKey) ?? true;
     _hideSidebarPhone = _prefs.getBool(_hideSidebarPhoneKey) ?? false;
     _showMemberTags = _prefs.getBool(_memberTagsKey) ?? false;
     _showPlainMemberRoleTags = _prefs.getBool(_plainMemberRoleTagsKey) ?? false;
@@ -1063,6 +1109,8 @@ class ThemeController extends ChangeNotifier {
   static const _installedCloudThemesKey = 'installedTelegramCloudThemes';
   static const _legacyUseTelegramThemeForUiKey = 'useTelegramThemeForUi';
   static const _messageBubbleBackgroundKey = 'messageBubbleBackground.v1';
+  static const _messageBubbleApplicationScopeKey =
+      'messageBubbleApplicationScope.v1';
   static const _customMessageBubbleBackgroundKey =
       'customMessageBubbleBackground.v1';
   static const _usePerAccountThemingKey = 'usePerAccountTheming';
@@ -1084,12 +1132,15 @@ class ThemeController extends ChangeNotifier {
   static const _animateAvatarsKey = 'animateAvatars';
   static const _animateStatusEmojiKey = 'animateStatusEmoji';
   static const _chatFolderDisplayModeKey = 'chatFolderDisplayMode';
+  static const _chatListSwipeModeKey = 'chatListSwipeMode.v1';
+  static const _legacyChatListSwipeBehaviorKey = 'chatListSwipeBehavior';
+  static const _legacyDisableChatListSwipeActionsKey =
+      'disableChatListSwipeActions';
+  static const _legacyChatListFolderSwipeSwitchingKey =
+      'chatListFolderSwipeSwitching';
   // Retained only to migrate the former show/hide toggle.
   static const _chatFolderFilterKey = 'showChatFolderFilter';
   static const _chatListSearchKey = 'showChatListSearch';
-  static const _savedMessagesBookmarkViewKey = 'savedMessagesBookmarkView';
-  static const _legacyDisplayOwnChatAsFavoritesKey =
-      'displayOwnChatAsFavorites';
   static const _hideSidebarPhoneKey = 'hideSidebarPhone';
   static const _memberTagsKey = 'showMemberTags';
   static const _plainMemberRoleTagsKey = 'showPlainMemberRoleTags';
@@ -1124,8 +1175,8 @@ class ThemeController extends ChangeNotifier {
 
   static const double minFontScale = 0.8;
   static const double maxFontScale = 1.4;
-  static const double minInterfaceScale = 0.66;
-  static const double maxInterfaceScale = 1.50;
+  static const double minInterfaceScale = 0.66 * 0.66;
+  static const double maxInterfaceScale = 1.50 * 1.50;
 
   final SharedPreferences _prefs;
   int _activeAccountSlot;
@@ -1138,6 +1189,7 @@ class ThemeController extends ChangeNotifier {
   TelegramCloudTheme? _darkCloudTheme;
   late List<TelegramCloudTheme> _installedCloudThemes;
   late MessageBubbleBackground _messageBubbleBackground;
+  late MessageBubbleApplicationScope _messageBubbleApplicationScope;
   CustomMessageBubbleBackground? _customMessageBubbleBackground;
   late AppFontChoice _fontChoice;
   late AppFontChoice _cjkFontChoice;
@@ -1153,8 +1205,8 @@ class ThemeController extends ChangeNotifier {
   late bool _animateAvatars;
   late bool _animateStatusEmoji;
   late ChatFolderDisplayMode _chatFolderDisplayMode;
+  late ChatListSwipeMode _chatListSwipeMode;
   bool _showChatListSearch = true;
-  bool _savedMessagesBookmarkView = false;
   bool _hideSidebarPhone = false;
   bool _showMemberTags = false;
   bool _showPlainMemberRoleTags = false;
@@ -1220,6 +1272,20 @@ class ThemeController extends ChangeNotifier {
       _themingEnabled
       ? messageBubbleBackgroundSpec
       : MessageBubbleBackgroundSpec.standard;
+  MessageBubbleApplicationScope get messageBubbleApplicationScope =>
+      _messageBubbleApplicationScope;
+  MessageBubbleBackgroundSpec effectiveMessageBubbleBackgroundSpecFor({
+    required bool outgoing,
+  }) {
+    if (!_themingEnabled ||
+        (!outgoing &&
+            _messageBubbleApplicationScope ==
+                MessageBubbleApplicationScope.ownMessages)) {
+      return MessageBubbleBackgroundSpec.standard;
+    }
+    return messageBubbleBackgroundSpec;
+  }
+
   MessageBubbleBackgroundSpec messageBubbleBackgroundSpecFor(
     MessageBubbleBackground selection,
   ) => MessageBubbleBackgroundSpec.resolve(
@@ -1245,6 +1311,7 @@ class ThemeController extends ChangeNotifier {
       _darkCloudThemeKey,
       _legacyUseTelegramThemeForUiKey,
       _messageBubbleBackgroundKey,
+      _messageBubbleApplicationScopeKey,
       _customMessageBubbleBackgroundKey,
     ]) {
       final legacyKey = '$key.account.$slot';
@@ -1327,6 +1394,15 @@ class ThemeController extends ChangeNotifier {
     _messageBubbleBackground = MessageBubbleBackground.fromStorage(
       _prefs.getString(_scopedThemeKey(_messageBubbleBackgroundKey)),
     );
+    _messageBubbleApplicationScope = MessageBubbleApplicationScope.values
+        .firstWhere(
+          (scope) =>
+              scope.name ==
+              _prefs.getString(
+                _scopedThemeKey(_messageBubbleApplicationScopeKey),
+              ),
+          orElse: () => MessageBubbleApplicationScope.allMessages,
+        );
     _repairMissingCustomMessageBubble();
     AppTheme.applyBrand(_brandColor);
   }
@@ -1337,6 +1413,10 @@ class ThemeController extends ChangeNotifier {
     _prefs.setString(
       _scopedThemeKey(_messageBubbleBackgroundKey),
       _messageBubbleBackground.name,
+    );
+    _prefs.setString(
+      _scopedThemeKey(_messageBubbleApplicationScopeKey),
+      _messageBubbleApplicationScope.name,
     );
     final custom = _customMessageBubbleBackground;
     if (custom == null) {
@@ -1367,6 +1447,7 @@ class ThemeController extends ChangeNotifier {
     final light = _lightCloudTheme;
     final dark = _darkCloudTheme;
     final bubbleBackground = _messageBubbleBackground;
+    final bubbleApplicationScope = _messageBubbleApplicationScope;
     final customBubbleBackground = _customMessageBubbleBackground;
     _usePerAccountTheming = value;
     _prefs.setBool(_usePerAccountThemingKey, value);
@@ -1378,6 +1459,9 @@ class ThemeController extends ChangeNotifier {
           _prefs.containsKey(_scopedThemeKey(_darkCloudThemeKey)) ||
           _prefs.containsKey(_scopedThemeKey(_messageBubbleBackgroundKey)) ||
           _prefs.containsKey(
+            _scopedThemeKey(_messageBubbleApplicationScopeKey),
+          ) ||
+          _prefs.containsKey(
             _scopedThemeKey(_customMessageBubbleBackgroundKey),
           );
       if (!accountHasSelection) {
@@ -1386,6 +1470,7 @@ class ThemeController extends ChangeNotifier {
         _lightCloudTheme = light;
         _darkCloudTheme = dark;
         _messageBubbleBackground = bubbleBackground;
+        _messageBubbleApplicationScope = bubbleApplicationScope;
         _customMessageBubbleBackground = customBubbleBackground;
         _persistScopedThemeSettings();
       } else {
@@ -1453,8 +1538,8 @@ class ThemeController extends ChangeNotifier {
   bool get animateAvatars => _animateAvatars;
   bool get animateStatusEmoji => _animateStatusEmoji;
   ChatFolderDisplayMode get chatFolderDisplayMode => _chatFolderDisplayMode;
+  ChatListSwipeMode get chatListSwipeMode => _chatListSwipeMode;
   bool get showChatListSearch => _showChatListSearch;
-  bool get savedMessagesBookmarkView => _savedMessagesBookmarkView;
   bool get hideSidebarPhone => _hideSidebarPhone;
   bool get showMemberTags => _showMemberTags;
   bool get showPlainMemberRoleTags => _showPlainMemberRoleTags;
@@ -1526,9 +1611,15 @@ class ThemeController extends ChangeNotifier {
 
   /// App-wide text scale factor, applied at the root via MediaQuery.textScaler.
   double get fontScale => _fontScale;
-  double chatTextSize(double base) =>
-      base * _fontScale.clamp(minFontScale, maxFontScale).toDouble();
-  double get interfaceScale => _interfaceScale;
+  // Font scaling is applied once by the root MediaQuery. Returning an already
+  // scaled size here made chat typography grow twice while navigation text
+  // grew once.
+  double chatTextSize(double base) => base;
+
+  /// Squared value shown by the Interface Size control. For example, the
+  /// historical 1.5 render scale is presented as 225%.
+  double get interfaceScale => _interfaceScale * _interfaceScale;
+  double get renderedInterfaceScale => math.sqrt(interfaceScale);
   double get rowHeight => AppMetric.listRowHeight;
   double get avatarSize => AppMetric.avatarSize;
   double get navHeaderHeight => AppMetric.navHeaderHeight;
@@ -1664,6 +1755,16 @@ class ThemeController extends ChangeNotifier {
     if (_messageBubbleBackground == value) return;
     _messageBubbleBackground = value;
     _prefs.setString(_scopedThemeKey(_messageBubbleBackgroundKey), value.name);
+    notifyListeners();
+  }
+
+  set messageBubbleApplicationScope(MessageBubbleApplicationScope value) {
+    if (_messageBubbleApplicationScope == value) return;
+    _messageBubbleApplicationScope = value;
+    _prefs.setString(
+      _scopedThemeKey(_messageBubbleApplicationScopeKey),
+      value.name,
+    );
     notifyListeners();
   }
 
@@ -1943,7 +2044,8 @@ class ThemeController extends ChangeNotifier {
   }
 
   set interfaceScale(double value) {
-    _interfaceScale = value.clamp(minInterfaceScale, maxInterfaceScale);
+    final option = value.clamp(minInterfaceScale, maxInterfaceScale);
+    _interfaceScale = math.sqrt(option);
     _prefs.setDouble(_interfaceScaleKey, _interfaceScale);
     notifyListeners();
   }
@@ -1975,10 +2077,10 @@ class ThemeController extends ChangeNotifier {
     notifyListeners();
   }
 
-  set savedMessagesBookmarkView(bool value) {
-    if (_savedMessagesBookmarkView == value) return;
-    _savedMessagesBookmarkView = value;
-    _prefs.setBool(_savedMessagesBookmarkViewKey, value);
+  set chatListSwipeMode(ChatListSwipeMode value) {
+    if (_chatListSwipeMode == value) return;
+    _chatListSwipeMode = value;
+    _prefs.setString(_chatListSwipeModeKey, value.name);
     notifyListeners();
   }
 

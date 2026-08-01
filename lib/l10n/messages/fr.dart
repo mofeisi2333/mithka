@@ -1,4 +1,14 @@
 const frMessages = <String, String>{
+  'navigationBack': "Retour",
+  'appearanceArchivedChatsDesktopHint':
+      "Sur ordinateur, les archives accessibles par glissement restent visibles en haut pour être utilisables à la souris. Le choix enregistré continue de s’appliquer sur mobile.",
+  'callAlreadyInProgress': "Un autre appel est déjà en cours.",
+  'composerEmoji': "Emoji",
+  'composerMediaSelectionLimit':
+      "Sélectionnez jusqu’à {value1} photos ou vidéos.",
+  'composerStickers': "Autocollants",
+  'loginHidePassword': "Masquer le mot de passe",
+  'loginShowPassword': "Afficher le mot de passe",
   'aboutReportProblem': "Signaler un problème",
   'aboutReportProblemDetail': "Inclut des diagnostics sans données privées",
   'aboutTelegramChannel': "Chaîne Telegram",
@@ -188,6 +198,9 @@ const frMessages = <String, String>{
   'aiReplyUnavailable': "La réponse IA n’est pas disponible pour ce message.",
   'aiReplyUseReply': "Utiliser la réponse",
   'aiReplyUsing': "Répondre avec",
+  'aiReplyPrompts': "Prompts de réponse",
+  'aiTranslatePrompts': "Prompts de traduction",
+  'aiSummarizePrompts': "Prompts de résumé",
   'aiTestFailed': "Le test du modèle a échoué.",
   'aiTestModel': "Tester le modèle",
   'aiTestPrompt': "Message de test",
@@ -293,15 +306,17 @@ const frMessages = <String, String>{
   'appearanceClearTextFonts': "Effacer les polices de texte",
   'appearanceColor': "Couleur",
   'appearanceDisableChatListSwipeActions': "Désactiver les balayages",
-  'appearanceSavedMessagesBookmarkView':
-      "Vue des signets des Messages enregistrés",
   'appearanceGestures': "Gestes",
   'gesturesChatActions': "Actions du chat",
+  'gesturesChatActionsModeDescription':
+      "1 doigt : actions du chat · 2 doigts : dossiers · 3 doigts : comptes",
   'gesturesChatListSwipe': "Balayage de la liste des chats",
   'gesturesDoNothing': "Ne rien faire",
   'gesturesHoldSwipeActions': "Maintenir puis balayer pour les actions",
   'gesturesSwitchAccounts': "Changer de compte",
   'gesturesSwitchFolders': "Changer de dossier",
+  'gesturesSwitchFoldersModeDescription':
+      "1 doigt : dossiers · 3 doigts : comptes",
   'gesturesThreeFingerSwipe': "Balayage à trois doigts",
   'appearanceDownloadFailed': "Téléchargement échoué",
   'appearanceEmojiFont': "Police emoji",
@@ -376,10 +391,13 @@ const frMessages = <String, String>{
   'appearanceTotalSize': "Taille totale",
   'appearanceUnreadBadge': "Pastille de messages",
   'appIconBlueGradient': "Dégradé bleu",
+  'appIconAurora': "M boréal",
   'appIconChangeFailed': "Impossible de changer l’icône de l’app",
   'appIconDefault': "Par défaut",
   'appIconPixel': "Pixel 8-bit",
+  'appIconPrism': "M prisme",
   'appIconPurpleGradient': "Dégradé violet",
+  'appIconSignal': "M gras",
   'appIconTitle': "Icône de l’app",
   'appIconUnsupported':
       "Cette plateforme ou ce lanceur peut ne pas prendre en charge le changement d’icône.",
@@ -806,6 +824,27 @@ const frMessages = <String, String>{
   'chatWallpaperThemesSharedWithChat':
       "Les thèmes sont visibles par tout le monde dans la discussion",
   'chatWallpaperTitle': "Fond d’écran",
+  'chatSendFailedBlocked':
+      "Ce message ne peut pas être envoyé, car l’une des deux personnes a bloqué l’autre.",
+  'chatSendFailedGeneric': "Telegram a refusé le message : {value1}",
+  'chatSendFailedInsufficientStars':
+      "Vous n’avez pas assez d’étoiles Telegram pour envoyer ce message.",
+  'chatSendFailedMutualContact':
+      "Cette personne n’accepte que les messages de contacts mutuels.",
+  'chatSendFailedPaid':
+      "Ce chat n’accepte que les messages payants. Confirmez le coût en étoiles et réessayez.",
+  'chatSendFailedPaidCount':
+      "Ce chat facture {value1} étoiles par message. Confirmez le message payant et réessayez.",
+  'chatSendFailedPermission':
+      "Vous n’avez pas l’autorisation d’envoyer des messages dans ce chat, ou ce sujet est fermé.",
+  'chatSendFailedPremium':
+      "Cette personne n’accepte les nouveaux chats que de ses contacts ou des utilisateurs Telegram Premium. Ajoutez-la aux contacts ou utilisez Premium.",
+  'chatSendFailedPrivacy':
+      "Les paramètres de confidentialité du destinataire n’autorisent pas ce message.",
+  'chatSendFailedRateLimited':
+      "Telegram limite temporairement l’envoi de messages. Patientez un instant et réessayez.",
+  'chatSendFailedTitle': "Message non envoyé",
+  'chatSendFailedUnavailable': "Ce compte ou ce chat n’est plus disponible.",
   'chatYouAreMuted': "Vous ne pouvez pas envoyer de messages",
   'chatYouWereRemovedFromGroup': "Vous avez été retiré de ce groupe",
   'checklistComposerAddTask': "Ajouter une tâche",
@@ -872,6 +911,7 @@ const frMessages = <String, String>{
   'composerNoGifs': "Aucun GIF enregistré",
   'composerOpenAttachmentFailed': "Impossible d’ouvrir {value1}",
   'composerOpenMenu': "Ouvrir le menu",
+  'composerCloseMenu': "Fermer le menu",
   'composerPaidMessageCost': "L’envoi de ce message coûte {value1} étoiles.",
   'composerPastedImageReadFailed': "Impossible de lire l’image collée",
   'composerPoll': "Sondage",
@@ -1321,6 +1361,7 @@ const frMessages = <String, String>{
   'momentsLikeFailed': "Échec du J’aime : {value1}",
   'momentsLoadingPosts': "Chargement des moments…",
   'momentsMore': "Plus",
+  'momentsMusic': "Musique",
   'momentsNewPostsCount': "{value1} nouveaux moments",
   'momentsNoChannelContent': "Aucun contenu de chaîne",
   'momentsNoComments': "Aucun commentaire",
@@ -1470,6 +1511,7 @@ const frMessages = <String, String>{
   'pollComposerSingleChoiceLimitHint': "Choix unique · 10 options maximum",
   'premiumLabel': "Premium",
   'passkeysAdded': "Clé d’accès ajoutée",
+  'passkeysAdd': "Ajouter une clé d’accès",
   'passkeysCreatedOn': "Créée le {value1}",
   'passkeysDelete': "Supprimer",
   'passkeysDeleteMessage': "Supprimer « {value1} » ?",
@@ -1798,6 +1840,14 @@ const frMessages = <String, String>{
   'sensitiveContentUnblockMessage':
       "Cela active le réglage Telegram de contenu 18+ pour tout le compte. Vous pourrez le désactiver plus tard dans Confidentialité et sécurité.",
   'sensitiveContentUnblockTitle': "Afficher le contenu 18+ ?",
+  'searchTabChats': "Discussions",
+  'searchTabFiles': "Fichiers",
+  'searchTabLinks': "Liens",
+  'searchTabMedia': "Médias",
+  'searchTabMessages': "Messages",
+  'searchTabMiniApps': "Mini-apps",
+  'searchTabMusic': "Musique",
+  'searchTabVoiceMessages': "Messages vocaux",
   'settingsAboutMithka': "À propos de Mithka",
   'settingsLogOut': "Se déconnecter",
   'sharedMediaCacheDeleted': "Cache local supprimé",
@@ -2142,6 +2192,8 @@ const frMessages = <String, String>{
   'callsOutgoing': "Sortant",
   'callsRetry': "Réessayer",
   'callsTitle': "Appels",
+  'callsUnavailableOnDesktop':
+      "Les appels ne sont pas encore disponibles dans cette version pour ordinateur.",
   'callsUnknownConversation': "Conversation inconnue",
   'channelDirectMessages': "Channel Direct Messages",
   'channelDirectMessagesAllowAndRefund': "Allow and Refund",

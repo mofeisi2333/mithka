@@ -12,12 +12,14 @@ import 'dart:ui' as ui;
 
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:fvp/fvp.dart' as fvp;
 import 'package:google_fonts/google_fonts.dart';
+import 'package:mithka_video_player/mithka_video_player.dart';
+import 'package:mithka_video_player_fvp/mithka_video_player_fvp.dart';
 import 'package:provider/provider.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -27,6 +29,7 @@ import 'app/app_performance_controller.dart';
 import 'app/app_version.dart';
 import 'app/chat_deep_link_controller.dart';
 import 'app/content_view.dart';
+import 'app/desktop_video_window.dart';
 import 'app/global_video_split_host.dart';
 import 'app/telemetry_config.dart';
 import 'auth/account_store.dart';
@@ -61,10 +64,21 @@ import 'settings/safety_notice_controller.dart';
 import 'settings/sensitive_content_controller.dart';
 import 'settings/translation_controller.dart';
 import 'tdlib/td_client.dart';
+import 'theme/app_motion.dart';
 import 'theme/app_theme.dart';
 import 'theme/theme_controller.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> arguments) async {
+  if (supportsDesktopVideoWindows) {
+    final videoArguments = await MithkaDesktopVideoWindows.initialize(
+      arguments,
+    );
+    if (videoArguments != null) {
+      _initializeVideoBackend();
+      runApp(DesktopVideoWindowApp(arguments: videoArguments));
+      return;
+    }
+  }
   if (!sentryEnabled) {
     WidgetsFlutterBinding.ensureInitialized();
     configureAppImageCache();
@@ -85,17 +99,7 @@ Future<void> main() async {
 
 Future<void> _bootstrapAndRunApp() async {
   GoogleFonts.config.allowRuntimeFetching = true;
-  if (_shouldUseFvp()) {
-    // Route video_player through the MDK/FFmpeg backend so .webm (VP9 + alpha)
-    // video stickers decode + play (and stay transparent).
-    fvp.registerWith(
-      options: defaultTargetPlatform == TargetPlatform.android
-          ? {
-              'video.decoders': ['FFmpeg', 'dav1d'],
-            }
-          : null,
-    );
-  }
+  _initializeVideoBackend();
   // Let iPhone and iPad follow every physical orientation.
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
@@ -136,6 +140,20 @@ bool _shouldUseFvp() {
     return true;
   }
   return true;
+}
+
+void _initializeVideoBackend() {
+  if (!_shouldUseFvp()) return;
+  MithkaFvpBackend.ensureInitialized(
+    configuration: const MithkaFvpConfiguration(
+      platforms: {
+        MithkaFvpPlatform.ios,
+        MithkaFvpPlatform.linux,
+        MithkaFvpPlatform.macos,
+        MithkaFvpPlatform.windows,
+      },
+    ),
+  );
 }
 
 Future<void> _initTelemetry() async {
@@ -353,8 +371,12 @@ class _MithkaAppState extends State<MithkaApp> with WidgetsBindingObserver {
       ),
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
-          TargetPlatform.android: _NoRadiusPageTransitionsBuilder(),
-          TargetPlatform.fuchsia: _NoRadiusPageTransitionsBuilder(),
+          TargetPlatform.android: AppPageTransitionsBuilder(),
+          TargetPlatform.fuchsia: AppPageTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.linux: AppPageTransitionsBuilder(),
+          TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.windows: AppPageTransitionsBuilder(),
         },
       ),
       extensions: [colors],
@@ -418,6 +440,7 @@ class _MithkaAppState extends State<MithkaApp> with WidgetsBindingObserver {
               GlobalWidgetsLocalizations.delegate,
             ],
             navigatorObservers: _telemetryNavigatorObservers(),
+            scrollBehavior: const AppScrollBehavior(),
             theme: _themeData(Brightness.light, theme),
             darkTheme: _themeData(Brightness.dark, theme),
             themeMode: theme.themeMode,
@@ -479,7 +502,7 @@ class _MithkaAppState extends State<MithkaApp> with WidgetsBindingObserver {
                 value: systemUiOverlayStyleForSurface(context.colors.navBar),
                 child: _ScaledAppView(
                   fontScale: theme.fontScale,
-                  interfaceScale: theme.interfaceScale,
+                  interfaceScale: theme.renderedInterfaceScale,
                   child: DefaultTextStyle(
                     style: theme.applyAppTextStyle(
                       AppTextStyle.body(context.colors.textPrimary),
@@ -522,49 +545,6 @@ List<NavigatorObserver> _telemetryNavigatorObservers() {
   return observers;
 }
 
-class _NoRadiusPageTransitionsBuilder extends PageTransitionsBuilder {
-  const _NoRadiusPageTransitionsBuilder();
-
-  @override
-  Widget buildTransitions<T>(
-    PageRoute<T> route,
-    BuildContext context,
-    Animation<double> animation,
-    Animation<double> secondaryAnimation,
-    Widget child,
-  ) {
-    if (route.fullscreenDialog) {
-      final curved = CurvedAnimation(
-        parent: animation,
-        curve: Curves.easeOutCubic,
-        reverseCurve: Curves.easeOutCubic,
-      );
-      final offset = Tween<Offset>(
-        begin: const Offset(0, 0.08),
-        end: Offset.zero,
-      ).animate(curved);
-      return FadeTransition(
-        opacity: curved,
-        child: SlideTransition(position: offset, child: child),
-      );
-    }
-
-    final curved = CurvedAnimation(
-      parent: animation,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeOutCubic,
-    );
-    final offset = Tween<Offset>(
-      begin: const Offset(0.08, 0),
-      end: Offset.zero,
-    ).animate(curved);
-    return FadeTransition(
-      opacity: curved,
-      child: SlideTransition(position: offset, child: child),
-    );
-  }
-}
-
 class _ScaledAppView extends StatelessWidget {
   const _ScaledAppView({
     required this.fontScale,
@@ -590,7 +570,10 @@ class _ScaledAppView extends StatelessWidget {
       viewPadding: _unscaleInsets(media.viewPadding, scale),
       viewInsets: _unscaleInsets(media.viewInsets, scale),
       systemGestureInsets: _unscaleInsets(media.systemGestureInsets, scale),
-      textScaler: TextScaler.linear(fontScale / scale),
+      // The outer transform scales geometry and text together. Keep only the
+      // independent font preference here; dividing by interfaceScale caused
+      // normal Text widgets to stay small while noScaling text still grew.
+      textScaler: TextScaler.linear(fontScale),
     );
 
     return AppKeyboardDismissOnTap(

@@ -41,6 +41,7 @@ import '../tdlib/chat_membership.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
+import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import '../theme/date_text.dart';
 import '../theme/theme_controller.dart';
@@ -256,7 +257,7 @@ class _MomentsViewState extends State<MomentsView> {
   Future<void> _createStory() async {
     if (!_canPublishStories) return;
     final changed = await Navigator.of(context, rootNavigator: true).push<bool>(
-      PageRouteBuilder<bool>(
+      AppPageRoute<bool>(
         fullscreenDialog: true,
         pageBuilder: (_, _, _) => StoryAuthoringView(service: _storyService),
       ),
@@ -270,7 +271,7 @@ class _MomentsViewState extends State<MomentsView> {
       final chatId = await _storyService.savedMessagesChatId();
       if (!mounted) return;
       await Navigator.of(context).push(
-        PageRouteBuilder<void>(
+        AppPageRoute<void>(
           pageBuilder: (_, _, _) =>
               StoryManagementView(chatId: chatId, service: _storyService),
         ),
@@ -336,15 +337,13 @@ class _MomentsViewState extends State<MomentsView> {
                       _menuRow(
                         icon: HeroAppIcons.music.data,
                         iconColor: const Color(0xFFFF8A2A),
-                        title: AppStrings.t(AppStringKeys.profileDetailMusic),
+                        title: AppStrings.t(AppStringKeys.momentsMusic),
                         onTap: () => _openDetail(
                           SharedMediaView(
                             chatId: 0,
-                            title: AppStrings.t(
-                              AppStringKeys.profileDetailMusic,
-                            ),
+                            title: AppStrings.t(AppStringKeys.momentsMusic),
                             initialTab: 5,
-                            displayTitle: AppStringKeys.profileDetailMusic,
+                            displayTitle: AppStringKeys.momentsMusic,
                             lockedTab: true,
                           ),
                         ),
@@ -2153,7 +2152,7 @@ class _ChannelMomentsSearchViewState extends State<ChannelMomentsSearchView> {
 void openChannelPostOriginal(BuildContext context, ChannelPost post) {
   pushAppChatRoute(
     context,
-    MaterialPageRoute(
+    AppChatPageRoute<void>(
       builder: (_) => ChatView(
         chatId: post.channel.id,
         title: post.channel.title,
@@ -3347,7 +3346,7 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
       showToast(context, AppStringKeys.momentsNoPostableChannels);
       return;
     }
-    final selected = await showModalBottomSheet<ChatSummary>(
+    final selected = await showAppModalSheet<ChatSummary>(
       context: context,
       backgroundColor: context.colors.background,
       builder: (context) => SafeArea(
@@ -3388,14 +3387,17 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
   Future<void> _send() async {
     final channel = _channel;
     final text = _controller.text.trim();
-    final formatted = _richTextPayload?.text.trim() == text
-        ? _richTextPayload!
-        : parseTelegramMarkdown(text);
     if (channel == null || (text.isEmpty && _attachments.isEmpty) || _sending) {
       return;
     }
     setState(() => _sending = true);
     try {
+      final formatted = _richTextPayload?.text.trim() == text
+          ? _richTextPayload!
+          : await parseTelegramMarkdownWithTdLib(
+              text,
+              query: TdClient.shared.query,
+            );
       if (_attachments.isEmpty) {
         await _sendTextPost(channel, formatted);
       } else {
@@ -3743,7 +3745,7 @@ class _InlineComments extends StatelessWidget {
             behavior: HitTestBehavior.opaque,
             onTap: () => pushAppChatRoute(
               context,
-              MaterialPageRoute(
+              AppChatPageRoute<void>(
                 builder: (_) => ChatView(
                   chatId: comment.chatId,
                   title: post.channel.title,
@@ -4229,7 +4231,7 @@ class StoryShelf extends StatelessWidget {
 
   static void _openStory(BuildContext context, StoryGroup group) {
     Navigator.of(context).push(
-      PageRouteBuilder<void>(
+      AppPageRoute<void>(
         fullscreenDialog: true,
         pageBuilder: (_, _, _) =>
             StoryViewerView(chatId: group.chatId, storyIds: group.storyIds),
@@ -4452,7 +4454,7 @@ class _StoriesViewState extends State<StoriesView> {
   Future<void> _createStory() async {
     if (!_canPublish) return;
     final changed = await Navigator.of(context, rootNavigator: true).push<bool>(
-      PageRouteBuilder<bool>(
+      AppPageRoute<bool>(
         fullscreenDialog: true,
         pageBuilder: (_, _, _) => StoryAuthoringView(service: _service),
       ),
@@ -4922,7 +4924,7 @@ class _StoriesViewState extends State<StoriesView> {
 
   void _openGroup(StoryGroup group) {
     Navigator.of(context).push(
-      PageRouteBuilder<void>(
+      AppPageRoute<void>(
         fullscreenDialog: true,
         pageBuilder: (_, _, _) =>
             StoryViewerView(chatId: group.chatId, storyIds: group.storyIds),

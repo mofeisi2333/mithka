@@ -17,10 +17,13 @@ import 'package:flutter/services.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
+import '../app/app_navigator.dart';
+import '../app/desktop_video_window.dart';
 import '../app/video_split_controller.dart';
 import '../auth/telegram_country_names.dart';
 import '../call/call_manager.dart';
 import '../channels/topic_chat_view.dart';
+import '../components/app_dialog.dart';
 import '../components/app_icons.dart';
 import '../components/confirm_dialog.dart';
 import '../components/full_page_back_swipe.dart';
@@ -47,6 +50,7 @@ import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_image_loader.dart';
 import '../tdlib/td_models.dart';
+import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import '../theme/date_text.dart';
 import '../theme/telegram_cloud_theme.dart';
@@ -65,10 +69,12 @@ import 'chat_info_view.dart';
 import 'chat_input_bar.dart';
 import 'chat_media_drop_region.dart';
 import 'chat_message_merge.dart';
+import 'chat_open_performance.dart';
 import 'chat_picker_view.dart';
 import 'chat_return_to_latest_coordinator.dart';
 import 'chat_scroll_metrics.dart';
 import 'chat_search_view.dart';
+import 'chat_send_failure.dart';
 import 'chat_session_cache.dart';
 import 'chat_translation_panel.dart';
 import 'chat_unread_progress.dart';
@@ -98,6 +104,7 @@ import 'rich_text_composer_view.dart';
 import 'shared_contact_sheet.dart';
 import 'sticker_set_detail_view.dart';
 import 'sticker_viewer.dart';
+import 'telegram_cocoon_unread_summary_provider.dart';
 import 'telegram_mini_app_view.dart';
 import 'telegram_rich_text.dart';
 import 'transcript_pivot_partition.dart';
@@ -744,6 +751,7 @@ class ChatView extends StatefulWidget {
     this.showHeaderDivider = true,
     this.headerBottom,
     this.headerBottomHeight = 44,
+    this.requestComposerFocusOnReady = false,
     this.onOpenTopicMode,
     this.onBack,
   });
@@ -757,6 +765,7 @@ class ChatView extends StatefulWidget {
   final bool showHeaderDivider;
   final Widget? headerBottom;
   final double headerBottomHeight;
+  final bool requestComposerFocusOnReady;
   final ValueChanged<int?>? onOpenTopicMode;
   final VoidCallback? onBack;
 
@@ -801,6 +810,7 @@ class _ChatScrollSnapshot {
   const _ChatScrollSnapshot({
     required this.pixels,
     required this.wasAtLoadedBottom,
+    required this.knownLatestMessageId,
     this.pivotMessageId,
     this.anchorMessageId,
     this.anchorViewportOffset,
@@ -808,6 +818,7 @@ class _ChatScrollSnapshot {
 
   final double pixels;
   final bool wasAtLoadedBottom;
+  final int knownLatestMessageId;
   final int? pivotMessageId;
   final int? anchorMessageId;
   final double? anchorViewportOffset;
@@ -860,7 +871,7 @@ class _ChatViewState extends State<ChatView> {
       ? _liveNewMessageCount
       : _showEntryUnreadBanner
       ? _entryUnreadCount
-      : _unreadProgress.remaining(initialUnreadCount: _vm.unreadCount);
+      : _unreadProgress.remaining(entryUnreadCount: _entryUnreadCount);
   int _entryUnreadCount = 0;
   int _entryLastReadInboxId = 0;
   int? _entryFirstUnreadMessageId;
@@ -873,6 +884,13 @@ class _ChatViewState extends State<ChatView> {
   bool _showingFullyVisibleFirstContactHistory = false;
   bool _transcriptViewportClaimedByUser = false;
   late final ChatReturnToLatestCoordinator _returnToLatestCoordinator;
+  late final ChatRestoredPositionGuard _restoredPositionGuard;
+  final ChatSessionReopenNavigationGuard _sessionReopenNavigationGuard =
+      ChatSessionReopenNavigationGuard();
+  late bool _sessionReopenDispositionResolved;
+  bool _sessionReopenResolutionInFlight = false;
+  bool _prioritizingSessionUnread = false;
+  bool _preserveSnapshotAfterFailedSessionJump = false;
   bool _initialTranscriptReady = false;
   final Set<int> _transcriptPointersDown = <int>{};
   bool _bottomScrollScheduled = false;
@@ -913,6 +931,7 @@ class _ChatViewState extends State<ChatView> {
   bool _autoTranslationPassPending = false;
   final Set<int> _autoTranslationFailedMessageIds = <int>{};
   final Set<int> _autoTranslatedMessageIds = <int>{};
+  bool _sendFailureDialogVisible = false;
 
   /// Gap (seconds) between messages that triggers a fresh time separator.
   static const _separatorGap = 300;
@@ -1000,6 +1019,7 @@ class _ChatViewState extends State<ChatView> {
         _sessionScrollSnapshots[widget.chatId] = _ChatScrollSnapshot(
           pixels: snapshot.pixels,
           wasAtLoadedBottom: snapshot.wasAtLoadedBottom,
+          knownLatestMessageId: snapshot.knownLatestMessageId,
           anchorMessageId: snapshot.anchorMessageId,
           anchorViewportOffset: snapshot.anchorViewportOffset,
         );
@@ -1016,6 +1036,11 @@ class _ChatViewState extends State<ChatView> {
     _maintainSessionScrollAnchor =
         sessionScrollSnapshot?.anchorMessageId != null &&
         sessionScrollSnapshot?.anchorViewportOffset != null;
+    _sessionReopenDispositionResolved =
+        sessionScrollSnapshot == null || widget.initialMessageId != null;
+    _restoredPositionGuard = ChatRestoredPositionGuard(
+      sessionScrollSnapshot != null && !sessionScrollSnapshot.wasAtLoadedBottom,
+    );
     _autoScrollPolicy = ChatAutoScrollPolicy(
       preserveViewport:
           sessionScrollSnapshot != null &&
@@ -1040,7 +1065,10 @@ class _ChatViewState extends State<ChatView> {
     _returnToLatestCoordinator = ChatReturnToLatestCoordinator(
       loadLatest: _vm.loadLatestHistory,
       invalidateLatestLoad: _vm.invalidateLatestHistoryLoad,
-      needsLatestLoad: () => _vm.anchoredHistory,
+      needsLatestLoad: () => shouldLoadLatestChatHistory(
+        anchoredHistory: _vm.anchoredHistory,
+        historyReachesLatest: _vm.historyReachesLatest,
+      ),
       onChanged: _onReturnToLatestCoordinatorChanged,
       onReadyAvailable: _drainReturnToLatestIntent,
     );
@@ -1197,12 +1225,15 @@ class _ChatViewState extends State<ChatView> {
       final endedTowardLatest =
           _lastTranscriptUserScrollDirection == ScrollDirection.reverse;
       _lastTranscriptUserScrollDirection = ScrollDirection.idle;
+      final protectedRestoredPosition = _restoredPositionGuard
+          .finishUserScroll();
       _returnToLatestCoordinator.userDragEnded();
-      if (endedTowardLatest) {
+      if (endedTowardLatest && !protectedRestoredPosition) {
         _requestAutomaticReturnToLatestIfNearLatest();
       }
     } else if (_initialTranscriptReady) {
       _lastTranscriptUserScrollDirection = notification.direction;
+      _restoredPositionGuard.noteUserScroll();
       _claimTranscriptViewport();
     }
     return false;
@@ -1272,6 +1303,7 @@ class _ChatViewState extends State<ChatView> {
 
   void _onTranscriptPointerDown(PointerDownEvent event) {
     _transcriptPointersDown.add(event.pointer);
+    _cancelSessionReopenNavigation();
     // A hold cancels an in-flight driven scroll immediately. It does not claim
     // the viewport permanently unless it becomes an actual drag.
     _cancelBottomFollow();
@@ -1290,6 +1322,7 @@ class _ChatViewState extends State<ChatView> {
   }
 
   void _claimTranscriptViewport() {
+    _cancelSessionReopenNavigation(userClaimedViewport: true);
     _cancelBottomFollow();
     _returnToLatestCoordinator.cancelForUserDrag();
     ++_shortTranscriptFillGeneration;
@@ -1317,6 +1350,11 @@ class _ChatViewState extends State<ChatView> {
   void _saveSessionScrollSnapshot({bool captureAnchor = true}) {
     if (!_didInitialScroll ||
         !_initialTranscriptReady ||
+        !shouldSaveChatSessionScrollSnapshot(
+          sessionReopenPending: _sessionReopenPending,
+          preservingSnapshotAfterFailedJump:
+              _preserveSnapshotAfterFailedSessionJump,
+        ) ||
         _maintainSessionScrollAnchor ||
         !_scroll.hasClients ||
         widget.initialMessageId != null) {
@@ -1331,18 +1369,53 @@ class _ChatViewState extends State<ChatView> {
     _sessionScrollSnapshots[widget.chatId] = _ChatScrollSnapshot(
       pixels: clampScrollOffset(pos, pos.pixels),
       wasAtLoadedBottom: wasAtLoadedBottom,
+      knownLatestMessageId: math.max(
+        _vm.knownLatestMessageId,
+        _latestServerMessage(_vm.messages)?.id ?? 0,
+      ),
       pivotMessageId: _transcriptPivot?.cutoffMessageId,
       anchorMessageId: anchor?.messageId,
       anchorViewportOffset: anchor?.viewportOffset,
     );
   }
 
+  bool get _sessionReopenPending =>
+      !_sessionReopenDispositionResolved ||
+      _sessionReopenResolutionInFlight ||
+      _prioritizingSessionUnread;
+
+  void _cancelSessionReopenNavigation({bool userClaimedViewport = false}) {
+    final wasPending = _sessionReopenPending;
+    _sessionReopenNavigationGuard.cancel();
+    _sessionReopenResolutionInFlight = false;
+    _sessionReopenDispositionResolved = true;
+    if (_prioritizingSessionUnread) {
+      _prioritizingSessionUnread = false;
+      _scrollTargetId = null;
+    }
+    if (userClaimedViewport) {
+      _preserveSnapshotAfterFailedSessionJump = false;
+    } else if (wasPending) {
+      _preserveSnapshotAfterFailedSessionJump = true;
+    }
+  }
+
   void _prepareExitState() {
     if (_exitStatePrepared) return;
     _exitStatePrepared = true;
-    if (!_maintainSessionScrollAnchor) _saveSessionScrollSnapshot();
+    final sessionReopenPending = _sessionReopenPending;
+    _cancelSessionReopenNavigation();
+    if (!sessionReopenPending && !_maintainSessionScrollAnchor) {
+      _saveSessionScrollSnapshot();
+    }
     _cacheCurrentTranscript();
-    if (_isAtLoadedBottom(80)) {
+    if (shouldMarkChatReadOnExit(
+      isAtLoadedBottom: _isAtLoadedBottom(80),
+      sessionReopenPending: sessionReopenPending,
+      restoredPositionProtected: _restoredPositionGuard.blocksAutomaticReturn,
+      preservesViewport: _autoScrollPolicy.preservesViewport,
+      historyReachesLatest: _vm.historyReachesLatest,
+    )) {
       unawaited(_vm.markLoadedMessagesRead());
     }
   }
@@ -1381,6 +1454,7 @@ class _ChatViewState extends State<ChatView> {
     return FullPageBackSwipe(
       enabled: _canBackSwipe,
       onBack: () => unawaited(_popFromBackSwipe()),
+      beforeRoutePop: _prepareExitState,
       child: child,
     );
   }
@@ -1467,7 +1541,7 @@ class _ChatViewState extends State<ChatView> {
         changed =
             _unreadProgress.markVisible(
               messageId: message.id,
-              initialUnread: message.id > _vm.lastReadInboxId,
+              initialUnread: message.id > _entryLastReadInboxId,
             ) ||
             changed;
       }
@@ -1676,12 +1750,14 @@ class _ChatViewState extends State<ChatView> {
       });
     }
     _scheduleScrollToBottom();
-    unawaited(_vm.markLoadedMessagesRead());
+    _markReadAtBottomIfNeeded();
   }
 
   void _requestReturnToLatest({bool userInitiated = false}) {
     if (!userInitiated && _hasTranscriptPointerDown) return;
     if (userInitiated) {
+      _cancelSessionReopenNavigation(userClaimedViewport: true);
+      _restoredPositionGuard.cancel();
       _cancelSessionScrollAnchorMaintenance();
       _cancelBottomFollow();
       _stopActiveTranscriptScroll();
@@ -1695,18 +1771,31 @@ class _ChatViewState extends State<ChatView> {
   }
 
   void _requestAutomaticReturnToLatestIfNearLatest() {
-    if (!_vm.anchoredHistory ||
-        _hasTranscriptPointerDown ||
-        _scrollTargetId != null ||
-        !_scroll.hasClients ||
-        !isNearLatest(_scroll.position, threshold: 36)) {
+    if (!shouldRequestAutomaticReturnToLatest(
+      anchoredHistory: _vm.anchoredHistory,
+      restoredPositionProtected: _restoredPositionGuard.blocksAutomaticReturn,
+      pointerDown: _hasTranscriptPointerDown,
+      hasScrollTarget: _scrollTargetId != null,
+      hasScrollClients: _scroll.hasClients,
+      isNearLatestEdge:
+          _scroll.hasClients && isNearLatest(_scroll.position, threshold: 36),
+    )) {
       return;
     }
     _requestReturnToLatest();
   }
 
   void _markReadAtBottomIfNeeded() {
-    if (!_vm.initialLoaded || _vm.messages.isEmpty || _vm.anchoredHistory) {
+    if (!shouldAllowAutomaticChatRead(
+          sessionReopenPending: _sessionReopenPending,
+          restoredPositionProtected:
+              _restoredPositionGuard.blocksAutomaticReturn,
+          preservesViewport: _autoScrollPolicy.preservesViewport,
+          historyReachesLatest: _vm.historyReachesLatest,
+        ) ||
+        !_vm.initialLoaded ||
+        _vm.messages.isEmpty ||
+        _vm.anchoredHistory) {
       return;
     }
     unawaited(_vm.markLoadedMessagesRead());
@@ -1785,6 +1874,19 @@ class _ChatViewState extends State<ChatView> {
   /// boundary may already point at the newest message after the chat is marked
   /// read, so it cannot be used to resolve this button later.
   Future<void> _jumpToFirstUnread() async {
+    _cancelSessionReopenNavigation(userClaimedViewport: true);
+    await _jumpToFirstUnreadImpl();
+  }
+
+  Future<bool> _jumpToFirstUnreadForSession(int generation) =>
+      _jumpToFirstUnreadImpl(sessionReopenGeneration: generation);
+
+  Future<bool> _jumpToFirstUnreadImpl({int? sessionReopenGeneration}) async {
+    bool isCancelled() =>
+        sessionReopenGeneration != null &&
+        !_sessionReopenNavigationGuard.isCurrent(sessionReopenGeneration);
+
+    if (isCancelled()) return false;
     var targetMessageId = _entryFirstUnreadMessageId;
     final entryBoundaryId = _entryLastReadInboxId;
     _cancelSessionScrollAnchorMaintenance();
@@ -1801,10 +1903,14 @@ class _ChatViewState extends State<ChatView> {
 
     if (targetMessageId == null && entryBoundaryId > 0) {
       setState(() => _setScrollTarget(entryBoundaryId));
-      await _vm.loadAroundMessage(entryBoundaryId, scrollToTarget: false);
-      if (!mounted) return;
+      await _vm.loadAroundMessage(
+        entryBoundaryId,
+        scrollToTarget: false,
+        isCancelled: isCancelled,
+      );
+      if (!mounted || isCancelled()) return false;
       await WidgetsBinding.instance.endOfFrame;
-      if (!mounted) return;
+      if (!mounted || isCancelled()) return false;
       targetMessageId = _firstLoadedEntryUnreadMessageId();
       if (targetMessageId == null &&
           _vm.messages.any((message) => message.id == entryBoundaryId)) {
@@ -1818,14 +1924,191 @@ class _ChatViewState extends State<ChatView> {
     targetMessageId ??= _firstLoadedEntryUnreadMessageId();
     if (targetMessageId == null) {
       if (_scrollTargetId != null) setState(() => _setScrollTarget(null));
-      return;
+      return false;
     }
     _entryFirstUnreadMessageId = targetMessageId;
-    await _scrollToMessage(
+    final didReachTarget = await _scrollToMessageAndReport(
       targetMessageId,
       alignment: _initialUnreadAlignment,
       forceAlignment: true,
+      isCancelled: isCancelled,
     );
+    return didReachTarget && !isCancelled();
+  }
+
+  void _scheduleSendFailureDialog(ChatSendFailure failure) {
+    _sendFailureDialogVisible = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        _sendFailureDialogVisible = false;
+        return;
+      }
+      unawaited(_showSendFailureDialog(failure));
+    });
+  }
+
+  Future<void> _showSendFailureDialog(ChatSendFailure failure) async {
+    final message = switch (failure.kind) {
+      ChatSendFailureKind.paidMessageRequired
+          when failure.paidMessageStarCount > 0 =>
+        AppStrings.t(AppStringKeys.chatSendFailedPaidCount, {
+          'value1': failure.paidMessageStarCount,
+        }),
+      ChatSendFailureKind.paidMessageRequired => AppStrings.t(
+        AppStringKeys.chatSendFailedPaid,
+      ),
+      ChatSendFailureKind.insufficientStars => AppStrings.t(
+        AppStringKeys.chatSendFailedInsufficientStars,
+      ),
+      ChatSendFailureKind.premiumRequired => AppStrings.t(
+        AppStringKeys.chatSendFailedPremium,
+      ),
+      ChatSendFailureKind.mutualContactRequired => AppStrings.t(
+        AppStringKeys.chatSendFailedMutualContact,
+      ),
+      ChatSendFailureKind.privacyRestricted => AppStrings.t(
+        AppStringKeys.chatSendFailedPrivacy,
+      ),
+      ChatSendFailureKind.blocked => AppStrings.t(
+        AppStringKeys.chatSendFailedBlocked,
+      ),
+      ChatSendFailureKind.chatPermissionDenied => AppStrings.t(
+        AppStringKeys.chatSendFailedPermission,
+      ),
+      ChatSendFailureKind.recipientUnavailable => AppStrings.t(
+        AppStringKeys.chatSendFailedUnavailable,
+      ),
+      ChatSendFailureKind.rateLimited => AppStrings.t(
+        AppStringKeys.chatSendFailedRateLimited,
+      ),
+      ChatSendFailureKind.generic => AppStrings.t(
+        AppStringKeys.chatSendFailedGeneric,
+        {'value1': failure.technicalMessage},
+      ),
+    };
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: AppStrings.t(AppStringKeys.confirmOk),
+      barrierColor: Colors.black.withValues(alpha: 0.52),
+      transitionDuration: AppMotion.duration(context, AppMotion.responsive),
+      transitionBuilder: AppMotion.dialogTransition,
+      pageBuilder: (dialogContext, _, _) => AppDialogSurface(
+        title: AppStrings.t(AppStringKeys.chatSendFailedTitle),
+        content: Text(
+          message,
+          textAlign: TextAlign.center,
+          style: AppTextStyle.body(
+            dialogContext.colors.textSecondary,
+          ).copyWith(height: 1.4),
+        ),
+        actions: [
+          AppDialogAction(
+            label: AppStrings.t(AppStringKeys.confirmOk),
+            primary: true,
+            onTap: () => Navigator.of(dialogContext).pop(),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    _sendFailureDialogVisible = false;
+    final nextFailure = _vm.consumeSendFailure();
+    if (nextFailure != null) _scheduleSendFailureDialog(nextFailure);
+  }
+
+  void _resolveRestoredSessionEntry() {
+    if (_sessionReopenDispositionResolved ||
+        _sessionReopenResolutionInFlight ||
+        !_vm.chatReadStateLoaded) {
+      return;
+    }
+    final snapshot = _sessionScrollSnapshot;
+    if (snapshot == null) {
+      _sessionReopenDispositionResolved = true;
+      return;
+    }
+    _sessionReopenResolutionInFlight = true;
+    final generation = _sessionReopenNavigationGuard.begin();
+    final readStateRevision = _vm.chatReadStateRevision;
+    unawaited(
+      _resolveRestoredSessionEntryAsync(
+        snapshot: snapshot,
+        generation: generation,
+        readStateRevision: readStateRevision,
+      ),
+    );
+  }
+
+  Future<void> _resolveRestoredSessionEntryAsync({
+    required _ChatScrollSnapshot snapshot,
+    required int generation,
+    required int readStateRevision,
+  }) async {
+    // TDLib can deliver updateNewMessage and the paired unread-count update as
+    // separate events. Let the current event batch settle, then retry whenever
+    // either boundary changes during the read-only confirmation probe.
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted || !_sessionReopenNavigationGuard.isCurrent(generation)) {
+      return;
+    }
+    if (_vm.chatReadStateRevision != readStateRevision) {
+      _sessionReopenResolutionInFlight = false;
+      _resolveRestoredSessionEntry();
+      return;
+    }
+    final confirmedUnreadMessageId = await _vm
+        .confirmedNewIncomingUnreadSinceSession(
+          savedKnownLatestMessageId: snapshot.knownLatestMessageId,
+          expectedReadStateRevision: readStateRevision,
+        );
+    if (!mounted || !_sessionReopenNavigationGuard.isCurrent(generation)) {
+      return;
+    }
+    if (_vm.chatReadStateRevision != readStateRevision) {
+      _sessionReopenResolutionInFlight = false;
+      _resolveRestoredSessionEntry();
+      return;
+    }
+
+    _sessionReopenResolutionInFlight = false;
+    _sessionReopenDispositionResolved = true;
+    final disposition = resolveChatReopenDisposition(
+      hasExplicitTarget: widget.initialMessageId != null,
+      hasSavedPosition: true,
+      hasConfirmedNewUnread: confirmedUnreadMessageId != null,
+    );
+    if (disposition != ChatReopenDisposition.firstUnread) return;
+
+    _prioritizingSessionUnread = true;
+    _maintainRestoredBottom = false;
+    _restoredPositionGuard.cancel();
+    _cancelSessionScrollAnchorMaintenance();
+    _cancelBottomFollow();
+    _stopActiveTranscriptScroll();
+    _resetTranscriptPivot();
+    _entryUnreadCount = _vm.unreadCount;
+    _entryLastReadInboxId = _vm.lastReadInboxId;
+    _entryFirstUnreadMessageId = _entryLastReadInboxId == 0
+        ? confirmedUnreadMessageId
+        : _firstLoadedEntryUnreadMessageId();
+    var jumped = false;
+    try {
+      jumped = await _jumpToFirstUnreadForSession(generation);
+    } catch (_) {
+      jumped = false;
+    }
+    if (!mounted || !_sessionReopenNavigationGuard.isCurrent(generation)) {
+      return;
+    }
+    _prioritizingSessionUnread = false;
+    if (jumped) {
+      _preserveSnapshotAfterFailedSessionJump = false;
+      _sessionScrollSnapshots.remove(widget.chatId);
+      _saveSessionScrollSnapshot();
+    } else {
+      _preserveSnapshotAfterFailedSessionJump = true;
+    }
   }
 
   void _onModel() {
@@ -1835,6 +2118,11 @@ class _ChatViewState extends State<ChatView> {
       return;
     }
     _modelDirtyWhileInactive = false;
+    if (!_sendFailureDialogVisible) {
+      final failure = _vm.consumeSendFailure();
+      if (failure != null) _scheduleSendFailureDialog(failure);
+    }
+    _resolveRestoredSessionEntry();
     final olderLoadFinished = _wasLoadingOlder && !_vm.isLoadingOlder;
     _wasLoadingOlder = _vm.isLoadingOlder;
     final oldest = _oldestServerMessage(_vm.messages);
@@ -2062,6 +2350,7 @@ class _ChatViewState extends State<ChatView> {
 
   void _setScrollTarget(int? messageId) {
     if (messageId != null) {
+      _restoredPositionGuard.cancel();
       _returnToLatestCoordinator.cancel();
       _maintainRestoredBottom = false;
       _cancelSessionScrollAnchorMaintenance();
@@ -2285,7 +2574,7 @@ class _ChatViewState extends State<ChatView> {
     if (_vm.anchoredHistory) return true;
     if (_shouldOpenAtBottom) {
       _scrollToBottom();
-      unawaited(_vm.markLoadedMessagesRead());
+      _markReadAtBottomIfNeeded();
       return true;
     }
     final i = _firstUnreadIndex();
@@ -3261,7 +3550,7 @@ class _ChatViewState extends State<ChatView> {
           final chatId = chat.int64('id');
           if (!mounted || chatId == null) return;
           await Navigator.of(context).push(
-            MaterialPageRoute<void>(
+            AppChatPageRoute<void>(
               builder: (_) =>
                   ChatView(chatId: chatId, title: contact.displayName),
             ),
@@ -3273,7 +3562,18 @@ class _ChatViewState extends State<ChatView> {
         }
       case SharedContactAction.call:
         if (contact.userId > 0) {
-          context.read<CallManager>().startCall(contact.userId, false);
+          final started = context.read<CallManager>().startCall(
+            contact.userId,
+            false,
+          );
+          if (started != CallStartResult.started && mounted) {
+            showToast(
+              context,
+              started == CallStartResult.unsupported
+                  ? AppStringKeys.callsUnavailableOnDesktop
+                  : AppStringKeys.callAlreadyInProgress,
+            );
+          }
         }
       case SharedContactAction.copyNumber:
         await Clipboard.setData(ClipboardData(text: contact.phoneNumber));
@@ -3341,6 +3641,10 @@ class _ChatViewState extends State<ChatView> {
   void _playVideo(ChatMessage message, {bool muted = false}) {
     if (message.video == null) return;
     final session = _videoSession(message);
+    if (supportsDesktopVideoWindows) {
+      unawaited(_openDesktopVideoWindow(session, muted: muted));
+      return;
+    }
     if (VideoSplitController.instance.isOpen) {
       VideoSplitController.instance.play(session);
       return;
@@ -3356,6 +3660,19 @@ class _ChatViewState extends State<ChatView> {
         ),
       ),
     );
+  }
+
+  Future<void> _openDesktopVideoWindow(
+    VideoSplitSession session, {
+    required bool muted,
+  }) async {
+    final opened = await DesktopVideoWindowService.instance.open(
+      session,
+      muted: muted,
+    );
+    if (!opened && mounted) {
+      showToast(context, AppStringKeys.videoPlayerLoadFailed);
+    }
   }
 
   VideoSplitSession _videoSession(ChatMessage message) {
@@ -3719,7 +4036,7 @@ class _ChatViewState extends State<ChatView> {
       }
       final limits = await loader.loadLimits();
       if (!mounted) return;
-      final draft = await showModalBottomSheet<SuggestedPostDraft>(
+      final draft = await showAppModalSheet<SuggestedPostDraft>(
         context: context,
         isScrollControlled: true,
         backgroundColor: Colors.transparent,
@@ -4140,7 +4457,7 @@ class _ChatViewState extends State<ChatView> {
 
   Future<void> _showChatTranslationLanguagePicker() async {
     final c = context.colors;
-    await showModalBottomSheet<void>(
+    await showAppModalSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
@@ -4257,6 +4574,7 @@ class _ChatViewState extends State<ChatView> {
     final service = AiChatTranslationService.fromSettings(
       settings,
       instructions: _translation.aiTranslationPrompt,
+      telegramAi: _vm.telegramAi,
     );
     try {
       return await service.translate(
@@ -4613,12 +4931,15 @@ class _ChatViewState extends State<ChatView> {
       final senderTitle = (m.senderName ?? m.senderTitle ?? _vm.peerTitle)
           .trim();
       final title = senderTitle.isEmpty ? _vm.peerTitle : senderTitle;
-      final Widget destination = senderChatId == widget.chatId
-          ? ChatInfoView(chatId: senderChatId, title: title)
-          : ChatView(chatId: senderChatId, title: title);
-      Navigator.of(
-        context,
-      ).push(PageRouteBuilder<void>(pageBuilder: (_, _, _) => destination));
+      if (senderChatId == widget.chatId) {
+        unawaited(_openChatInfo(title: title, useAppPageRoute: true));
+        return;
+      }
+      Navigator.of(context).push(
+        AppChatPageRoute<void>(
+          builder: (_) => ChatView(chatId: senderChatId, title: title),
+        ),
+      );
       return;
     }
     final uid = m.isOutgoing
@@ -4629,6 +4950,25 @@ class _ChatViewState extends State<ChatView> {
       uid,
       m.isOutgoing ? _vm.meName : (m.senderName ?? _vm.peerTitle),
     );
+  }
+
+  Future<void> _openChatInfo({
+    String? title,
+    bool useAppPageRoute = false,
+  }) async {
+    final chatTitle = title ?? _vm.peerTitle;
+    final Route<int> route = useAppPageRoute
+        ? AppPageRoute<int>(
+            pageBuilder: (_, _, _) =>
+                ChatInfoView(chatId: widget.chatId, title: chatTitle),
+          )
+        : MaterialPageRoute<int>(
+            builder: (_) =>
+                ChatInfoView(chatId: widget.chatId, title: chatTitle),
+          );
+    final messageId = await Navigator.of(context).push<int>(route);
+    if (!mounted || messageId == null) return;
+    await _scrollToMessage(messageId);
   }
 
   void _openPeerProfile() {
@@ -4664,7 +5004,15 @@ class _ChatViewState extends State<ChatView> {
       showToast(context, AppStringKeys.chatContactCallsOnly);
       return;
     }
-    context.read<CallManager>().startCall(uid, isVideo);
+    final started = context.read<CallManager>().startCall(uid, isVideo);
+    if (started != CallStartResult.started && mounted) {
+      showToast(
+        context,
+        started == CallStartResult.unsupported
+            ? AppStringKeys.callsUnavailableOnDesktop
+            : AppStringKeys.callAlreadyInProgress,
+      );
+    }
   }
 
   Future<void> _forwardMessage(ChatMessage message) async {
@@ -4983,7 +5331,10 @@ class _ChatViewState extends State<ChatView> {
             ),
           ),
         ),
-        if (!transcriptReady) Positioned.fill(child: _transcriptSkeleton()),
+        if (shouldShowTranscriptSkeleton(
+          initialTranscriptReady: transcriptReady,
+        ))
+          Positioned.fill(child: _transcriptSkeleton()),
         if (showPinnedTodo)
           Positioned(
             top: 12,
@@ -5298,7 +5649,6 @@ class _ChatViewState extends State<ChatView> {
     setState(() => _openingUnreadSummary = true);
 
     final configuration = settings!.configurationForFeature(AiFeature.summary);
-    final providerMode = configuration.providerMode;
     final endpoint = configuration.endpoint;
     final endpointStyle = configuration.endpointStyle;
     final model = configuration.model;
@@ -5317,7 +5667,7 @@ class _ChatViewState extends State<ChatView> {
         : null;
     final outputLanguage = Localizations.localeOf(context).toLanguageTag();
     final session = _createUnreadSummarySession(
-      providerMode: providerMode,
+      candidateKind: configuration.candidate.kind,
       endpoint: endpoint,
       endpointStyle: endpointStyle,
       model: model,
@@ -5326,6 +5676,7 @@ class _ChatViewState extends State<ChatView> {
       pccContextSize: pccContextSize,
       onDeviceContextSize: onDeviceContextSize,
       outputLanguage: outputLanguage,
+      summaryGuidance: settings.aiSummaryPrompt,
     );
     int? messageId;
     try {
@@ -5350,7 +5701,7 @@ class _ChatViewState extends State<ChatView> {
   }
 
   _UnreadSummarySession _createUnreadSummarySession({
-    required AiProviderMode providerMode,
+    required AiModelCandidateKind candidateKind,
     required Uri? endpoint,
     required AiEndpointStyle endpointStyle,
     required String model,
@@ -5359,6 +5710,7 @@ class _ChatViewState extends State<ChatView> {
     required int? pccContextSize,
     required int? onDeviceContextSize,
     required String outputLanguage,
+    required String summaryGuidance,
   }) {
     final loader = UnreadChatHistoryLoader(
       query: (accountSlot, request) {
@@ -5369,9 +5721,45 @@ class _ChatViewState extends State<ChatView> {
         return TdClient.shared.queryTo(request, clientId);
       },
     );
+    final guidanceTokenEstimate = estimateUnreadSummaryPromptTokens({
+      'user_guidance': summaryGuidance,
+    });
+    int messagePayloadBudget(int totalPayloadTokens) =>
+        math.max(1, totalPayloadTokens - guidanceTokenEstimate);
 
-    switch (providerMode) {
-      case AiProviderMode.applePcc:
+    switch (candidateKind) {
+      case AiModelCandidateKind.telegramCocoon:
+        const contextWindow = 8192;
+        final tokenBudget = unreadSummaryTokenBudget(
+          contextWindow,
+          trustedInstructions: unreadChatSummaryCompactTrustedInstructions,
+          maximumResponseTokens: 1300,
+          maximumPayloadTokens: 5500,
+        );
+        return _UnreadSummarySession(
+          UnreadChatSummaryService(
+            historyLoader: loader,
+            maxChunkMessages: 180,
+            maxChunks: 5,
+            maxConcurrentRequests: 1,
+            maxChunkTokenEstimate: messagePayloadBudget(
+              tokenBudget.payloadTokens,
+            ),
+            mergeChunkSummariesLocally: true,
+            trustedInstructions: unreadChatSummaryCompactTrustedInstructions,
+            summaryGuidance: summaryGuidance,
+            providerCode: 'telegram_cocoon',
+            contextWindowTokens: contextWindow,
+            outputLanguage: outputLanguage,
+            initialPromptTokenEstimate: tokenBudget.initialPromptTokens,
+            reservedNonPayloadTokenEstimate:
+                tokenBudget.reservedNonPayloadTokens,
+            provider: TelegramCocoonUnreadSummaryProvider(
+              telegramAi: _vm.telegramAi,
+            ),
+          ),
+        );
+      case AiModelCandidateKind.applePcc:
         final contextWindow = math.min(
           pccContextSize ?? applePccContextTokenLimit,
           applePccContextTokenLimit,
@@ -5386,8 +5774,12 @@ class _ChatViewState extends State<ChatView> {
             historyLoader: loader,
             maxChunkMessages: 180,
             maxChunks: 5,
-            maxChunkTokenEstimate: math.min(7000, tokenBudget.payloadTokens),
+            maxChunkTokenEstimate: math.min(
+              7000,
+              messagePayloadBudget(tokenBudget.payloadTokens),
+            ),
             mergeChunkSummariesLocally: true,
+            summaryGuidance: summaryGuidance,
             providerCode: 'apple_pcc',
             contextWindowTokens: contextWindow,
             outputLanguage: outputLanguage,
@@ -5401,7 +5793,7 @@ class _ChatViewState extends State<ChatView> {
             ),
           ),
         );
-      case AiProviderMode.appleOnDevice:
+      case AiModelCandidateKind.appleOnDevice:
         final contextWindow = math.min(
           onDeviceContextSize ?? appleOnDeviceContextTokenLimit,
           appleOnDeviceContextTokenLimit,
@@ -5418,9 +5810,12 @@ class _ChatViewState extends State<ChatView> {
             maxChunkMessages: 70,
             maxChunks: 4,
             maxConcurrentRequests: 1,
-            maxChunkTokenEstimate: tokenBudget.payloadTokens,
+            maxChunkTokenEstimate: messagePayloadBudget(
+              tokenBudget.payloadTokens,
+            ),
             mergeChunkSummariesLocally: true,
             trustedInstructions: unreadChatSummaryCompactTrustedInstructions,
+            summaryGuidance: summaryGuidance,
             providerCode: 'apple_on_device',
             contextWindowTokens: contextWindow,
             outputLanguage: outputLanguage,
@@ -5436,7 +5831,7 @@ class _ChatViewState extends State<ChatView> {
             ),
           ),
         );
-      case AiProviderMode.openAiCompatible:
+      case AiModelCandidateKind.server:
         if (endpoint == null || model.trim().isEmpty) {
           throw StateError('The summary server is not configured.');
         }
@@ -5465,9 +5860,12 @@ class _ChatViewState extends State<ChatView> {
             maxChunkMessages: 1000000,
             maxChunks: 4,
             maxConcurrentRequests: 4,
-            maxChunkTokenEstimate: tokenBudget.payloadTokens,
+            maxChunkTokenEstimate: messagePayloadBudget(
+              tokenBudget.payloadTokens,
+            ),
             maxChunkTimeGapSeconds: 0,
             trustedInstructions: unreadChatSummaryCompactTrustedInstructions,
+            summaryGuidance: summaryGuidance,
             providerCode: '${endpointStyle.storageValue}/$model',
             contextWindowTokens: contextWindow,
             outputLanguage: outputLanguage,
@@ -5561,6 +5959,7 @@ class _ChatViewState extends State<ChatView> {
           if (_vm.businessBotUserId != 0) _businessBotManageBar(),
           ChatInputBar(
             vm: _vm,
+            requestInitialFocus: widget.requestComposerFocusOnReady,
             quickRepliesEnabled: context
                 .watch<ThemeController>()
                 .quickRepliesEnabled,
@@ -5632,7 +6031,7 @@ class _ChatViewState extends State<ChatView> {
   }
 
   Future<void> _showBusinessBotControls() async {
-    final changed = await showModalBottomSheet<bool>(
+    final changed = await showAppModalSheet<bool>(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (_) => BusinessBotChatControlSheet(
@@ -5901,14 +6300,7 @@ class _ChatViewState extends State<ChatView> {
                   Expanded(child: _headerTitleBlock(subtitle, actionActive)),
                   GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => ChatInfoView(
-                          chatId: widget.chatId,
-                          title: _vm.peerTitle,
-                        ),
-                      ),
-                    ),
+                    onTap: () => unawaited(_openChatInfo()),
                     child: AppIcon(
                       HeroAppIcons.bars,
                       size: 22,
@@ -6061,7 +6453,7 @@ class _ChatViewState extends State<ChatView> {
       return;
     }
     final c = context.colors;
-    await showModalBottomSheet<void>(
+    await showAppModalSheet<void>(
       context: context,
       backgroundColor: c.background,
       shape: const RoundedRectangleBorder(
@@ -6276,7 +6668,7 @@ class _ChatViewState extends State<ChatView> {
   Widget _pinnedBar(ChatMessage pinned) {
     final c = context.colors;
     final text = pinned.text.trim().isEmpty
-        ? AppStringKeys.chatSearchMessageResultLabel
+        ? telegramText(AppStringKeys.chatSearchMessageResultLabel)
         : pinned.text.replaceAll('\n', ' ');
     final canPrevious = _vm.hasPreviousPinnedMessage;
     final canNext = _vm.hasNextPinnedMessage;
@@ -6383,9 +6775,6 @@ class _ChatViewState extends State<ChatView> {
   }
 
   Future<void> _openPinnedFromBar(ChatMessage pinned) async {
-    if (_vm.pinnedMessage?.id == pinned.id && _isKeyMostlyVisible(_pinnedKey)) {
-      return;
-    }
     await _scrollToMessage(pinned.id, pinnedJump: true);
   }
 
@@ -6411,32 +6800,57 @@ class _ChatViewState extends State<ChatView> {
     double? alignment,
     bool forceAlignment = false,
   }) async {
-    if (mounted) {
-      setState(() => _setScrollTarget(messageId));
-    } else {
-      _setScrollTarget(messageId);
-    }
-    if (_vm.messages.any((m) => m.id == messageId)) {
-      await _ensureMessageVisible(
-        messageId,
-        pinnedJump: pinnedJump,
-        alignment: alignment,
-        forceAlignment: forceAlignment,
-      );
-      return;
-    }
-    final loaded = await _vm.loadAroundMessage(
-      messageId,
-      scrollToTarget: false,
-    );
-    if (!loaded || !mounted) return;
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted) return;
-    await _ensureMessageVisible(
+    _cancelSessionReopenNavigation(userClaimedViewport: true);
+    await _scrollToMessageAndReport(
       messageId,
       pinnedJump: pinnedJump,
       alignment: alignment,
       forceAlignment: forceAlignment,
+    );
+  }
+
+  Future<bool> _scrollToMessageAndReport(
+    int messageId, {
+    bool pinnedJump = false,
+    double? alignment,
+    bool forceAlignment = false,
+    bool Function()? isCancelled,
+  }) async {
+    if (isCancelled?.call() ?? false) return false;
+    if (mounted) {
+      setState(() => _setScrollTarget(messageId));
+      // The target key moves to the requested row during layout. Waiting for
+      // that frame prevents an already-loaded jump from reusing the previous
+      // pinned row's context.
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || (isCancelled?.call() ?? false)) return false;
+    } else {
+      return false;
+    }
+    if (isCancelled?.call() ?? false) return false;
+    if (_vm.messages.any((m) => m.id == messageId)) {
+      return _ensureMessageVisibleAndReport(
+        messageId,
+        pinnedJump: pinnedJump,
+        alignment: alignment,
+        forceAlignment: forceAlignment,
+        isCancelled: isCancelled,
+      );
+    }
+    final loaded = await _vm.loadAroundMessage(
+      messageId,
+      scrollToTarget: false,
+      isCancelled: isCancelled,
+    );
+    if (!loaded || !mounted || (isCancelled?.call() ?? false)) return false;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || (isCancelled?.call() ?? false)) return false;
+    return _ensureMessageVisibleAndReport(
+      messageId,
+      pinnedJump: pinnedJump,
+      alignment: alignment,
+      forceAlignment: forceAlignment,
+      isCancelled: isCancelled,
     );
   }
 
@@ -6463,11 +6877,60 @@ class _ChatViewState extends State<ChatView> {
     double? alignment,
     bool forceAlignment = false,
   }) async {
-    final targetAlignment = alignment ?? (pinnedJump ? 0.08 : 0.3);
+    await _ensureMessageVisibleAndReport(
+      messageId,
+      pinnedJump: pinnedJump,
+      instant: instant,
+      alignment: alignment,
+      forceAlignment: forceAlignment,
+    );
+  }
+
+  Future<bool> _ensureMessageVisibleAndReport(
+    int messageId, {
+    bool pinnedJump = false,
+    bool instant = false,
+    double? alignment,
+    bool forceAlignment = false,
+    bool Function()? isCancelled,
+  }) async {
+    final targetAlignment =
+        alignment ?? (pinnedJump ? pinnedMessageScrollAlignment : 0.3);
     for (var tries = 0; tries < 6; tries++) {
+      if (isCancelled?.call() ?? false) return false;
       final activeKey = _scrollTargetId == messageId ? _targetKey : _pinnedKey;
       final ctx = activeKey.currentContext;
       if (ctx != null && ctx.mounted) {
+        if (pinnedJump && alignment == null && _scroll.hasClients) {
+          final targetObject = ctx.findRenderObject();
+          final viewportObject = _transcriptViewportKey.currentContext
+              ?.findRenderObject();
+          if (targetObject is RenderBox &&
+              targetObject.attached &&
+              viewportObject is RenderBox &&
+              viewportObject.attached) {
+            final target = pinnedMessageTargetScrollOffset(
+              _scroll.position,
+              targetTop: targetObject.localToGlobal(Offset.zero).dy,
+              viewportTop: viewportObject.localToGlobal(Offset.zero).dy,
+            );
+            if ((target - _scroll.position.pixels).abs() > 0.5) {
+              if (instant) {
+                _scroll.jumpTo(target);
+              } else {
+                await _scroll.animateTo(
+                  target,
+                  duration: const Duration(milliseconds: 140),
+                  curve: Curves.easeOutCubic,
+                );
+              }
+            }
+            if (mounted && _scrollTargetId == messageId) {
+              setState(() => _setScrollTarget(null));
+            }
+            return !(isCancelled?.call() ?? false);
+          }
+        }
         // Do not realign a message that is already on screen. Reply, search,
         // and other linked-message jumps used to always force the row to 30%
         // of the viewport, which made an already-visible target bounce.
@@ -6475,7 +6938,7 @@ class _ChatViewState extends State<ChatView> {
           if (mounted && _scrollTargetId == messageId) {
             setState(() => _setScrollTarget(null));
           }
-          return;
+          return !(isCancelled?.call() ?? false);
         }
         await Scrollable.ensureVisible(
           ctx,
@@ -6486,24 +6949,22 @@ class _ChatViewState extends State<ChatView> {
               ? const Duration(milliseconds: 140)
               : const Duration(milliseconds: 220),
           curve: Curves.easeOutCubic,
-          alignmentPolicy: pinnedJump && alignment == null
-              ? ScrollPositionAlignmentPolicy.keepVisibleAtStart
-              : ScrollPositionAlignmentPolicy.explicit,
         );
         if (mounted && _scrollTargetId == messageId) {
           setState(() => _setScrollTarget(null));
         }
-        return;
+        return !(isCancelled?.call() ?? false);
       }
-      if (!_scroll.hasClients) return;
+      if (!_scroll.hasClients) return false;
       final estimate = _estimateMessageOffset(messageId, targetAlignment);
       if (estimate != null) _scroll.jumpTo(estimate);
       await Future<void>.delayed(const Duration(milliseconds: 120));
-      if (!mounted) return;
+      if (!mounted || (isCancelled?.call() ?? false)) return false;
     }
     if (mounted && _scrollTargetId == messageId) {
       setState(() => _setScrollTarget(null));
     }
+    return false;
   }
 
   bool _isKeyMostlyVisible(GlobalKey key) {
@@ -7386,6 +7847,20 @@ class _ChatViewState extends State<ChatView> {
     required int extraCount,
   }) {
     final tileKey = GlobalKey();
+    void showActions() {
+      final box = tileKey.currentContext?.findRenderObject() as RenderBox?;
+      final rect = box != null && box.hasSize
+          ? box.localToGlobal(Offset.zero) & box.size
+          : null;
+      _showActionMenuForMessage(
+        message,
+        rect,
+        message.video != null
+            ? MessageActionSource.video
+            : MessageActionSource.normal,
+      );
+    }
+
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {
@@ -7399,22 +7874,8 @@ class _ChatViewState extends State<ChatView> {
           _openImage(message);
         }
       },
-      onLongPress: _isSelecting
-          ? null
-          : () {
-              final box =
-                  tileKey.currentContext?.findRenderObject() as RenderBox?;
-              final rect = box != null && box.hasSize
-                  ? box.localToGlobal(Offset.zero) & box.size
-                  : null;
-              _showActionMenuForMessage(
-                message,
-                rect,
-                message.video != null
-                    ? MessageActionSource.video
-                    : MessageActionSource.normal,
-              );
-            },
+      onLongPress: _isSelecting ? null : showActions,
+      onSecondaryTap: _isSelecting ? null : showActions,
       child: SizedBox(
         key: tileKey,
         width: width,
@@ -7747,7 +8208,7 @@ class _ChatViewState extends State<ChatView> {
                 _reactionExpanded = false;
               });
               Navigator.of(context).push(
-                PageRouteBuilder<void>(
+                AppPageRoute<void>(
                   pageBuilder: (_, _, _) => const QuickReactionSettingsView(),
                 ),
               );

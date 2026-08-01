@@ -3,9 +3,11 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  fc_native_video_thumbnail
   file_selector_linux
   flutter_secure_storage_linux
   fvp
+  multi_window_manager
   sentry_flutter
   url_launcher_linux
 )

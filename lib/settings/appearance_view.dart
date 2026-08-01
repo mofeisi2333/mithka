@@ -23,12 +23,14 @@ import 'package:provider/provider.dart';
 import '../app/unread_badge_model.dart';
 import '../chat/chat_wallpaper_view.dart';
 import '../chat/message_bubble.dart';
-import '../chats/chat_row_view.dart';
 import '../components/app_icons.dart';
+import '../components/desktop_content_constraint.dart';
 import '../components/photo_avatar.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
+import '../platform/adaptive_platform.dart';
 import '../tdlib/td_models.dart';
+import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import '../theme/emoji_font_catalog.dart';
 import '../theme/global_theme_view.dart';
@@ -58,93 +60,114 @@ class AppearanceView extends StatelessWidget {
             onBack: () => Navigator.of(context).pop(),
           ),
           Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.xl,
-                AppSpacing.lg,
-                AppSpacing.section,
-              ),
-              children: [
-                _card(context, [
-                  KeyedSubtree(
-                    key: const ValueKey('appearance-theme-settings-row'),
-                    child: _navigationRow(
-                      context,
-                      AppStrings.t(AppStringKeys.appearanceTheme),
-                      AppStrings.t(theme.mode.label),
-                      () => Navigator.of(context).push(
-                        PageRouteBuilder<void>(
-                          pageBuilder: (_, _, _) => const ThemeSettingsView(),
+            child: DesktopContentConstraint(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg,
+                  AppSpacing.xl,
+                  AppSpacing.lg,
+                  AppSpacing.section,
+                ),
+                children: [
+                  _card(context, [
+                    KeyedSubtree(
+                      key: const ValueKey('appearance-theme-settings-row'),
+                      child: _navigationRow(
+                        context,
+                        AppStrings.t(AppStringKeys.appearanceTheme),
+                        AppStrings.t(theme.mode.label),
+                        () => Navigator.of(context).push(
+                          AppPageRoute<void>(
+                            pageBuilder: (_, _, _) => const ThemeSettingsView(),
+                          ),
                         ),
+                        icon: HeroAppIcons.palette.data,
                       ),
-                      icon: HeroAppIcons.palette.data,
                     ),
-                  ),
-                  KeyedSubtree(
-                    key: const ValueKey('appearance-interface-settings-row'),
-                    child: _navigationRow(
+                    KeyedSubtree(
+                      key: const ValueKey('appearance-interface-settings-row'),
+                      child: _navigationRow(
+                        context,
+                        AppStrings.t(AppStringKeys.appearanceSize),
+                        null,
+                        () => Navigator.of(context).push(
+                          AppPageRoute<void>(
+                            pageBuilder: (_, _, _) =>
+                                const DisplaySettingsView(),
+                          ),
+                        ),
+                        icon: HeroAppIcons.tableCells.data,
+                      ),
+                    ),
+                    KeyedSubtree(
+                      key: const ValueKey('appearance-scaling-settings-row'),
+                      child: _navigationRow(
+                        context,
+                        AppStrings.t(AppStringKeys.appearanceInterfaceSize),
+                        '${(theme.interfaceScale * 100).round()}%',
+                        () => Navigator.of(context).push(
+                          AppPageRoute<void>(
+                            pageBuilder: (_, _, _) =>
+                                const InterfaceSizeSettingsView(),
+                          ),
+                        ),
+                        icon: HeroAppIcons.expand.data,
+                      ),
+                    ),
+                    KeyedSubtree(
+                      key: const ValueKey('appearance-font-settings-row'),
+                      child: _navigationRow(
+                        context,
+                        AppStrings.t(AppStringKeys.appearanceFont),
+                        theme.effectiveFontChainLabel,
+                        () => Navigator.of(context).push(
+                          AppPageRoute<void>(
+                            pageBuilder: (_, _, _) => const FontSettingsView(),
+                          ),
+                        ),
+                        icon: HeroAppIcons.font.data,
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: AppSpacing.xl),
+                  _card(context, [
+                    KeyedSubtree(
+                      key: const ValueKey('appearance-message-bubbles-row'),
+                      child: _navigationRow(
+                        context,
+                        AppStrings.t(AppStringKeys.appearanceMessageBubbles),
+                        _messageBubbleBackgroundLabel(theme),
+                        () => Navigator.of(context).push(
+                          AppPageRoute<void>(
+                            pageBuilder: (_, _, _) =>
+                                const MessageBubbleSettingsView(),
+                          ),
+                        ),
+                        icon: HeroAppIcons.message.data,
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: AppSpacing.xl),
+                  _label(context, AppStrings.t(AppStringKeys.appIconTitle)),
+                  _card(context, [
+                    _navigationRow(
                       context,
-                      AppStrings.t(AppStringKeys.appearanceSize),
+                      AppStrings.t(AppStringKeys.appIconTitle),
                       null,
                       () => Navigator.of(context).push(
-                        PageRouteBuilder<void>(
-                          pageBuilder: (_, _, _) => const DisplaySettingsView(),
+                        AppPageRoute<void>(
+                          pageBuilder: (_, _, _) => const AppIconSettingsView(),
                         ),
                       ),
-                      icon: HeroAppIcons.tableCells.data,
-                    ),
-                  ),
-                  KeyedSubtree(
-                    key: const ValueKey('appearance-scaling-settings-row'),
-                    child: _navigationRow(
-                      context,
-                      AppStrings.t(AppStringKeys.appearanceInterfaceSize),
-                      '${(theme.interfaceScale * 100).round()}%',
-                      () => Navigator.of(context).push(
-                        PageRouteBuilder<void>(
-                          pageBuilder: (_, _, _) =>
-                              const InterfaceSizeSettingsView(),
-                        ),
-                      ),
-                      icon: HeroAppIcons.expand.data,
-                    ),
-                  ),
-                  KeyedSubtree(
-                    key: const ValueKey('appearance-font-settings-row'),
-                    child: _navigationRow(
-                      context,
-                      AppStrings.t(AppStringKeys.appearanceFont),
-                      theme.effectiveFontChainLabel,
-                      () => Navigator.of(context).push(
-                        PageRouteBuilder<void>(
-                          pageBuilder: (_, _, _) => const FontSettingsView(),
-                        ),
-                      ),
-                      icon: HeroAppIcons.font.data,
-                    ),
-                  ),
-                ]),
-                const SizedBox(height: AppSpacing.xl),
-                _label(context, AppStrings.t(AppStringKeys.appIconTitle)),
-                _card(context, [
-                  _navigationRow(
-                    context,
-                    AppStrings.t(AppStringKeys.appIconTitle),
-                    null,
-                    () => Navigator.of(context).push(
-                      PageRouteBuilder<void>(
-                        pageBuilder: (_, _, _) => const AppIconSettingsView(),
+                      preview: Image.asset(
+                        appIcons.variant.asset,
+                        width: AppIconSize.nav,
+                        height: AppIconSize.nav,
                       ),
                     ),
-                    preview: Image.asset(
-                      appIcons.variant.asset,
-                      width: AppIconSize.nav,
-                      height: AppIconSize.nav,
-                    ),
-                  ),
-                ]),
-              ],
+                  ]),
+                ],
+              ),
             ),
           ),
         ],
@@ -207,7 +230,7 @@ class ThemeSettingsView extends StatelessWidget {
                       theme.cloudTheme?.displayTitle ??
                           AppStrings.t(AppStringKeys.globalThemeDefault),
                       () => Navigator.of(context).push(
-                        PageRouteBuilder<void>(
+                        AppPageRoute<void>(
                           pageBuilder: (_, _, _) => const GlobalThemeView(),
                         ),
                       ),
@@ -218,7 +241,7 @@ class ThemeSettingsView extends StatelessWidget {
                       AppStrings.t(AppStringKeys.groupAppearanceWallpaper),
                       null,
                       () => Navigator.of(context).push(
-                        PageRouteBuilder<void>(
+                        AppPageRoute<void>(
                           pageBuilder: (_, _, _) => ChatWallpaperView.global(
                             chatTitle: AppStrings.t(
                               AppStringKeys.chatWallpaperGlobalPreview,
@@ -229,47 +252,6 @@ class ThemeSettingsView extends StatelessWidget {
                         ),
                       ),
                       icon: HeroAppIcons.image.data,
-                    ),
-                    appearance._navigationRow(
-                      context,
-                      AppStrings.t(AppStringKeys.appearanceMessageBubbles),
-                      AppStrings.t(switch (theme.messageBubbleBackground) {
-                        MessageBubbleBackground.standard =>
-                          AppStringKeys.messageBubbleDefault,
-                        MessageBubbleBackground.midnightAurora =>
-                          AppStringKeys.messageBubbleMidnightAurora,
-                        MessageBubbleBackground.solarPorcelain =>
-                          AppStringKeys.messageBubbleSolarPorcelain,
-                        MessageBubbleBackground.berryOrbit =>
-                          AppStringKeys.messageBubbleBerryOrbit,
-                        MessageBubbleBackground.arcticBlueprint =>
-                          AppStringKeys.messageBubbleArcticBlueprint,
-                        MessageBubbleBackground.emberArcade =>
-                          AppStringKeys.messageBubbleEmberArcade,
-                        MessageBubbleBackground.lilacConstellation =>
-                          AppStringKeys.messageBubbleLilacConstellation,
-                        MessageBubbleBackground.forestFamiliar =>
-                          AppStringKeys.messageBubbleForestFamiliar,
-                        MessageBubbleBackground.inkWanderer =>
-                          AppStringKeys.messageBubbleInkWanderer,
-                        MessageBubbleBackground.pixelCadet =>
-                          AppStringKeys.messageBubblePixelCadet,
-                        MessageBubbleBackground.cosmicMechanic =>
-                          AppStringKeys.messageBubbleCosmicMechanic,
-                        MessageBubbleBackground.pastryPal =>
-                          AppStringKeys.messageBubblePastryPal,
-                        MessageBubbleBackground.noirDetective =>
-                          AppStringKeys.messageBubbleNoirDetective,
-                        MessageBubbleBackground.custom =>
-                          AppStringKeys.messageBubbleCustom,
-                      }),
-                      () => Navigator.of(context).push(
-                        PageRouteBuilder<void>(
-                          pageBuilder: (_, _, _) =>
-                              const MessageBubbleSettingsView(),
-                        ),
-                      ),
-                      icon: HeroAppIcons.message.data,
                     ),
                   ]),
                 ],
@@ -602,7 +584,7 @@ class DisplaySettingsView extends StatelessWidget {
                       AppStrings.t(AppStringKeys.appearanceAvatarsAndSidebar),
                       null,
                       () => Navigator.of(context).push(
-                        PageRouteBuilder<void>(
+                        AppPageRoute<void>(
                           pageBuilder: (_, _, _) =>
                               const AvatarsAndSidebarSettingsView(),
                         ),
@@ -617,7 +599,7 @@ class DisplaySettingsView extends StatelessWidget {
                       AppStrings.t(AppStringKeys.appearanceChatView),
                       null,
                       () => Navigator.of(context).push(
-                        PageRouteBuilder<void>(
+                        AppPageRoute<void>(
                           pageBuilder: (_, _, _) =>
                               const ChatViewAppearanceSettingsView(),
                         ),
@@ -632,7 +614,7 @@ class DisplaySettingsView extends StatelessWidget {
                       AppStrings.t(AppStringKeys.appearanceChatList),
                       null,
                       () => Navigator.of(context).push(
-                        PageRouteBuilder<void>(
+                        AppPageRoute<void>(
                           pageBuilder: (_, _, _) =>
                               const ChatListAppearanceSettingsView(),
                         ),
@@ -647,7 +629,7 @@ class DisplaySettingsView extends StatelessWidget {
                       AppStrings.t(AppStringKeys.appearanceUnreadBadge),
                       null,
                       () => Navigator.of(context).push(
-                        PageRouteBuilder<void>(
+                        AppPageRoute<void>(
                           pageBuilder: (_, _, _) =>
                               const UnreadBadgeSettingsView(),
                         ),
@@ -744,7 +726,7 @@ class ChatViewAppearanceSettingsView extends StatelessWidget {
               AppStringKeys.appearanceSenderNameReadabilityNone,
           }),
           () => Navigator.of(context).push(
-            PageRouteBuilder<void>(
+            AppPageRoute<void>(
               pageBuilder: (_, _, _) =>
                   const SenderNameReadabilitySettingsView(),
             ),
@@ -759,7 +741,7 @@ class ChatViewAppearanceSettingsView extends StatelessWidget {
             theme.chatStatusEmojiMode,
           ),
           () => Navigator.of(context).push(
-            PageRouteBuilder<void>(
+            AppPageRoute<void>(
               pageBuilder: (_, _, _) => const NameColorSettingsView(
                 surface: NameColorSettingsSurface.chat,
               ),
@@ -781,7 +763,7 @@ class ChatViewAppearanceSettingsView extends StatelessWidget {
             'value1': theme.quickReactions.length,
           }),
           () => Navigator.of(context).push(
-            PageRouteBuilder<void>(
+            AppPageRoute<void>(
               pageBuilder: (_, _, _) => const QuickReactionSettingsView(),
             ),
           ),
@@ -815,6 +797,20 @@ class ChatListAppearanceSettingsView extends StatelessWidget {
           ),
           icon: HeroAppIcons.folder.data,
         ),
+        KeyedSubtree(
+          key: const ValueKey('chat-list-swipe-settings-row'),
+          child: appearance._navigationRow(
+            context,
+            AppStrings.t(AppStringKeys.gesturesChatListSwipe),
+            AppStrings.t(theme.chatListSwipeMode.label),
+            () => Navigator.of(context).push(
+              AppPageRoute<void>(
+                pageBuilder: (_, _, _) => const ChatListGestureSettingsView(),
+              ),
+            ),
+            icon: HeroAppIcons.arrowsRightLeft.data,
+          ),
+        ),
         appearance._navigationRow(
           context,
           telegramText(AppStringKeys.appearanceArchivedChats),
@@ -833,13 +829,6 @@ class ChatListAppearanceSettingsView extends StatelessWidget {
           theme.showChatListSearch,
           (value) => theme.showChatListSearch = value,
         ),
-        appearance._toggleRow(
-          context,
-          HeroAppIcons.thumbtack.data,
-          AppStrings.t(AppStringKeys.appearanceSavedMessagesBookmarkView),
-          theme.savedMessagesBookmarkView,
-          (value) => theme.savedMessagesBookmarkView = value,
-        ),
         appearance._navigationRow(
           context,
           AppStrings.t(AppStringKeys.appearanceShowNameColors),
@@ -848,7 +837,7 @@ class ChatListAppearanceSettingsView extends StatelessWidget {
             theme.chatListStatusEmojiMode,
           ),
           () => Navigator.of(context).push(
-            PageRouteBuilder<void>(
+            AppPageRoute<void>(
               pageBuilder: (_, _, _) => const NameColorSettingsView(
                 surface: NameColorSettingsSurface.chatList,
               ),
@@ -938,6 +927,32 @@ String _nameColorSummary(
   NameColorAudience audience,
   StatusEmojiDisplayMode status,
 ) => '${AppStrings.t(audience.label)} · ${AppStrings.t(status.label)}';
+
+String _messageBubbleBackgroundLabel(
+  ThemeController theme,
+) => AppStrings.t(switch (theme.messageBubbleBackground) {
+  MessageBubbleBackground.standard => AppStringKeys.messageBubbleDefault,
+  MessageBubbleBackground.midnightAurora =>
+    AppStringKeys.messageBubbleMidnightAurora,
+  MessageBubbleBackground.solarPorcelain =>
+    AppStringKeys.messageBubbleSolarPorcelain,
+  MessageBubbleBackground.berryOrbit => AppStringKeys.messageBubbleBerryOrbit,
+  MessageBubbleBackground.arcticBlueprint =>
+    AppStringKeys.messageBubbleArcticBlueprint,
+  MessageBubbleBackground.emberArcade => AppStringKeys.messageBubbleEmberArcade,
+  MessageBubbleBackground.lilacConstellation =>
+    AppStringKeys.messageBubbleLilacConstellation,
+  MessageBubbleBackground.forestFamiliar =>
+    AppStringKeys.messageBubbleForestFamiliar,
+  MessageBubbleBackground.inkWanderer => AppStringKeys.messageBubbleInkWanderer,
+  MessageBubbleBackground.pixelCadet => AppStringKeys.messageBubblePixelCadet,
+  MessageBubbleBackground.cosmicMechanic =>
+    AppStringKeys.messageBubbleCosmicMechanic,
+  MessageBubbleBackground.pastryPal => AppStringKeys.messageBubblePastryPal,
+  MessageBubbleBackground.noirDetective =>
+    AppStringKeys.messageBubbleNoirDetective,
+  MessageBubbleBackground.custom => AppStringKeys.messageBubbleCustom,
+});
 
 class _SurfacePreviewCard extends StatelessWidget {
   const _SurfacePreviewCard({required this.title, required this.child});
@@ -1250,34 +1265,153 @@ class _ChatListSettingsPreview extends StatelessWidget {
         border: Border.all(color: c.divider),
       ),
       clipBehavior: Clip.antiAlias,
-      child: _AppearanceSnapshotBuilder(
-        builder: (context, data) {
-          if (data.chatRows.isEmpty) {
-            return const _LivePreviewUnavailable();
-          }
-          return ExcludeSemantics(
-            child: IgnorePointer(
-              child: TickerMode(
-                enabled: false,
-                child: Column(
-                  children: [
-                    for (
-                      var index = 0;
-                      index < data.chatRows.length;
-                      index++
-                    ) ...[
-                      if (index > 0)
-                        InsetDivider(
-                          leadingInset: theme.avatarSize + AppSpacing.xxl,
-                        ),
-                      ChatRowView(chat: data.chatRows[index]),
-                    ],
-                  ],
+      child: ExcludeSemantics(
+        child: IgnorePointer(
+          child: _RepresentativeChatListRow(
+            key: const ValueKey('chat-list-representative-row'),
+            theme: theme,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RepresentativeChatListRow extends StatelessWidget {
+  const _RepresentativeChatListRow({super.key, required this.theme});
+
+  final ThemeController theme;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: Row(
+        children: [
+          Container(
+            width: theme.avatarSize,
+            height: theme.avatarSize,
+            decoration: BoxDecoration(
+              color: AppTheme.brand.withValues(alpha: 0.16),
+              shape: BoxShape.circle,
+            ),
+            alignment: Alignment.center,
+            child: AppIcon(
+              HeroAppIcons.solidMessage,
+              size: AppIconSize.xl,
+              color: AppTheme.brand,
+            ),
+          ),
+          const SizedBox(width: AppSpacing.lg),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Mithka Users',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppTextSize.bodyLarge,
+                    fontWeight: FontWeight.w600,
+                    color: c.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xxs),
+                Text(
+                  'Jennie: See you in the chat',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppTextSize.footnote,
+                    color: c.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '10:42',
+                style: TextStyle(
+                  fontSize: AppTextSize.caption,
+                  color: c.textTertiary,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              Container(
+                width: 18,
+                height: 18,
+                decoration: BoxDecoration(
+                  color: AppTheme.brand,
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: const Text(
+                  '2',
+                  style: TextStyle(
+                    color: Color(0xFFFFFFFF),
+                    fontSize: AppTextSize.caption,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RepresentativeMessageBubble extends StatelessWidget {
+  const _RepresentativeMessageBubble();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Align(
+      key: const ValueKey('font-size-chat-preview'),
+      alignment: Alignment.centerLeft,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 260),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.md,
+          AppSpacing.lg,
+          AppSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          color: c.bubbleIncoming,
+          borderRadius: BorderRadius.circular(AppRadius.card),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'This is how chat text will look.',
+              style: TextStyle(
+                fontSize: AppTextSize.bodyLarge,
+                color: c.bubbleIncomingText,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Text(
+                '10:42',
+                style: TextStyle(
+                  fontSize: AppTextSize.caption,
+                  color: c.textTertiary,
                 ),
               ),
             ),
-          );
-        },
+          ],
+        ),
       ),
     );
   }
@@ -1511,6 +1645,111 @@ class ChatFolderSettingsView extends StatelessWidget {
   }
 }
 
+class ChatListGestureSettingsView extends StatelessWidget {
+  const ChatListGestureSettingsView({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final theme = context.watch<ThemeController>();
+    const appearance = AppearanceView();
+    return Scaffold(
+      backgroundColor: c.groupedBackground,
+      body: Column(
+        children: [
+          NavHeader(
+            title: AppStrings.t(AppStringKeys.gesturesChatListSwipe),
+            onBack: () => Navigator.of(context).pop(),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.xl,
+                AppSpacing.lg,
+                AppSpacing.section,
+              ),
+              children: [
+                appearance._card(context, [
+                  for (final mode in ChatListSwipeMode.values)
+                    _modeRow(context, theme, mode),
+                ]),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _modeRow(
+    BuildContext context,
+    ThemeController theme,
+    ChatListSwipeMode mode,
+  ) {
+    final c = context.colors;
+    final selected = theme.chatListSwipeMode == mode;
+    final label = AppStrings.t(mode.label);
+    final description = AppStrings.t(mode.description);
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: '$label. $description',
+      child: GestureDetector(
+        key: ValueKey('chat-list-swipe-mode-${mode.name}'),
+        behavior: HitTestBehavior.opaque,
+        onTap: () => theme.chatListSwipeMode = mode,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 80),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.xxl,
+              vertical: AppSpacing.md,
+            ),
+            child: Row(
+              children: [
+                AppIcon(mode.icon, size: AppIconSize.xl, color: AppTheme.brand),
+                const SizedBox(width: AppSpacing.xl),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        style: TextStyle(
+                          fontSize: AppTextSize.bodyLarge,
+                          color: c.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.xxs),
+                      Text(
+                        description,
+                        style: TextStyle(
+                          fontSize: AppTextSize.footnote,
+                          height: 1.25,
+                          color: c.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                if (selected)
+                  AppIcon(
+                    HeroAppIcons.check,
+                    size: AppIconSize.lg,
+                    color: AppTheme.brand,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class ArchivedChatsSettingsView extends StatelessWidget {
   const ArchivedChatsSettingsView({super.key});
 
@@ -1527,25 +1766,41 @@ class ArchivedChatsSettingsView extends StatelessWidget {
             onBack: () => Navigator.of(context).pop(),
           ),
           Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.xl,
-                AppSpacing.lg,
-                AppSpacing.section,
-              ),
-              children: [
-                const AppearanceView()._card(context, [
-                  for (final mode in ArchivedChatsDisplayMode.values)
-                    const AppearanceView()._choiceRow(
-                      context,
-                      mode.icon,
-                      mode.label,
-                      theme.archivedChatsDisplayMode == mode,
-                      () => theme.archivedChatsDisplayMode = mode,
+            child: DesktopContentConstraint(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg,
+                  AppSpacing.xl,
+                  AppSpacing.lg,
+                  AppSpacing.section,
+                ),
+                children: [
+                  const AppearanceView()._card(context, [
+                    for (final mode in ArchivedChatsDisplayMode.values)
+                      const AppearanceView()._choiceRow(
+                        context,
+                        mode.icon,
+                        mode.label,
+                        theme.archivedChatsDisplayMode == mode,
+                        () => theme.archivedChatsDisplayMode = mode,
+                      ),
+                  ]),
+                  if (!kIsWeb && isDesktopTargetPlatform()) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.md,
+                      ),
+                      child: Text(
+                        AppStringKeys.appearanceArchivedChatsDesktopHint.l10n(
+                          context,
+                        ),
+                        style: AppTextStyle.footnote(c.textSecondary),
+                      ),
                     ),
-                ]),
-              ],
+                  ],
+                ],
+              ),
             ),
           ),
         ],
@@ -1622,48 +1877,41 @@ extension _DisplayAppearanceHelpers on AppearanceView {
   }
 
   Widget _fontSizePreview(BuildContext context, ThemeController theme) {
-    final c = context.colors;
-    Widget sample(String text, double size, FontWeight weight) => Row(
-      children: [
-        Expanded(
-          child: Text(
-            text,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: size,
-              fontWeight: weight,
-              color: c.textPrimary,
-            ),
-          ),
-        ),
-        const SizedBox(width: AppSpacing.lg),
-        Text(
-          '${size.round()}',
-          style: TextStyle(
-            fontSize: AppTextSize.caption,
-            color: c.textTertiary,
-            fontFeatures: const [FontFeature.tabularFigures()],
-          ),
-        ),
-      ],
-    );
-
     return _previewCard(
       context,
       title: AppStrings.t(AppStringKeys.appearanceFontSize),
       value: theme.fontScale,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          sample('Mithka', AppTextSize.title, FontWeight.w700),
-          const SizedBox(height: AppSpacing.lg),
-          sample(
-            AppStrings.t(AppStringKeys.savedMessages),
-            AppTextSize.bodyLarge,
-            FontWeight.w500,
+          Text(
+            AppStrings.t(AppStringKeys.appearanceChatView),
+            style: TextStyle(
+              fontSize: AppTextSize.caption,
+              color: context.colors.textTertiary,
+            ),
           ),
-          const SizedBox(height: AppSpacing.lg),
-          sample('10:42', AppTextSize.caption, FontWeight.w400),
+          const SizedBox(height: AppSpacing.md),
+          const _RepresentativeMessageBubble(),
+          const SizedBox(height: AppSpacing.xl),
+          Text(
+            AppStrings.t(AppStringKeys.appearanceChatList),
+            style: TextStyle(
+              fontSize: AppTextSize.caption,
+              color: context.colors.textTertiary,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Container(
+            key: const ValueKey('font-size-chat-list-preview'),
+            decoration: BoxDecoration(
+              color: context.colors.background,
+              borderRadius: BorderRadius.circular(AppRadius.control),
+              border: Border.all(color: context.colors.divider),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: _RepresentativeChatListRow(theme: theme),
+          ),
         ],
       ),
     );
@@ -2178,7 +2426,7 @@ class FontSettingsView extends StatelessWidget {
                       value: '${(theme.fontScale * 100).round()}%',
                       height: AppMetric.compactSettingsRowHeight,
                       onTap: () => Navigator.of(context).push(
-                        PageRouteBuilder<void>(
+                        AppPageRoute<void>(
                           pageBuilder: (_, _, _) =>
                               const _TextSizeSettingsView(),
                         ),

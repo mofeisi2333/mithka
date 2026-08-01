@@ -23,7 +23,9 @@
 #                      override the pinned official Telegram iOS group-call XCFramework
 #   TGVOIP_WEBRTC_XCFRAMEWORK_SHA256
 #                      SHA-256 for the TgVoip override
-#   REVIEW_RELAY             https://relay.example|sha256(normalized-phone-digits)
+#   REVIEW_RELAY             legacy real-phone OTP relay URL and phone hash:
+#                            https://relay.example|sha256(normalized-phone-digits)
+#                            Pseudo-account sessions use the built-in scoped dispenser.
 #   SENTRY_AUTH_TOKEN        upload iOS dSYMs to Sentry when set
 #   SENTRY_ORG               Sentry org slug for dSYM upload; defaults to nekoko
 #   SENTRY_PROJECT           Sentry project slug for dSYM upload; defaults to mithka
@@ -231,12 +233,14 @@ printf '%s  %s\n' "$TGVOIP_SHA256" /tmp/tgvoip.zip | shasum -a 256 -c -
 unzip -q -o /tmp/tgvoip.zip -d ios/LocalPods/tgvoip
 ls -d ios/LocalPods/tgvoip/TgVoipWebrtc.xcframework
 
-# --- Flutter iOS build inputs (Generated.xcconfig, plugin pods) --------------
-# Keep Swift Package Manager OFF: the project is CocoaPods-only on purpose (SPM
-# produced App Store IPAs missing the SwiftSupport folder → ITMS-90426). A fresh
-# runner defaults SPM on, so disable it before generating the project.
+# --- Flutter iOS build inputs (Generated.xcconfig, SPM plugins, plugin pods) --
+# Flutter's generated Swift package owns plugins that publish SPM manifests.
+# CocoaPods remains alongside it for the small set of plugins without SPM
+# support and the local TgVoipWebrtc pod. The exported IPA is still responsible
+# for carrying SwiftSupport; scripts/build-ios-appstore.sh validates that
+# distribution artifact explicitly to prevent a recurrence of ITMS-90426.
 echo "▸ generating Flutter iOS build inputs"
-flutter config --no-enable-swift-package-manager
+flutter config --enable-swift-package-manager
 flutter precache --ios
 flutter pub get
 flutter_build_ios_config_with_retry

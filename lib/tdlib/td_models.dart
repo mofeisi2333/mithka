@@ -121,6 +121,7 @@ class MessageTextEntity {
     this.userId,
     this.customEmojiId,
     this.language,
+    this.typeData = const {},
   });
 
   final int offset;
@@ -130,6 +131,10 @@ class MessageTextEntity {
   final int? userId;
   final int? customEmojiId;
   final String? language;
+
+  /// Full TDLib `TextEntityType` payload, including fields introduced after
+  /// this client was built. Known convenience fields above remain available.
+  final Map<String, dynamic> typeData;
 
   int get end => offset + length;
   bool get isCustomEmoji => type == 'textEntityTypeCustomEmoji';
@@ -144,7 +149,7 @@ class MessageTextEntity {
       type == 'textEntityTypeMathematicalExpression';
 
   Map<String, dynamic> toTdJson() {
-    final entityType = <String, dynamic>{'@type': type};
+    final entityType = <String, dynamic>{...typeData, '@type': type};
     if (url != null) entityType['url'] = url;
     if (userId != null) entityType['user_id'] = userId;
     if (customEmojiId != null) {
@@ -398,13 +403,6 @@ class _ParsedMarkdownText {
   final List<MessageTextEntity> entities;
 }
 
-class _MarkdownMarker {
-  const _MarkdownMarker(this.marker, this.type);
-
-  final String marker;
-  final String type;
-}
-
 class _RichTextBuilder {
   final buffer = StringBuffer();
   final entities = <MessageTextEntity>[];
@@ -438,6 +436,7 @@ class _RichTextBuilder {
     int? userId,
     int? customEmojiId,
     String? language,
+    Map<String, dynamic> typeData = const {},
   }) {
     final length = this.length - start;
     if (length <= 0) return;
@@ -450,6 +449,7 @@ class _RichTextBuilder {
         userId: userId,
         customEmojiId: customEmojiId,
         language: language,
+        typeData: typeData,
       ),
     );
   }
@@ -620,6 +620,7 @@ class ChatMessage {
     this.richMessageIsFull = true,
     this.isEdited = false,
     this.isSending = false,
+    this.isSendAcknowledged = false,
     this.viewCount = 0,
     this.forwardCount = 0,
     this.hasCommentThread = false,
@@ -722,6 +723,7 @@ class ChatMessage {
 
   bool isEdited; // shows a "已编辑" tag
   bool isSending;
+  bool isSendAcknowledged;
   int viewCount;
   int forwardCount;
   bool hasCommentThread;
@@ -799,6 +801,9 @@ class ChatMessage {
     if ((imageWidth ?? 0) <= 0 || (imageHeight ?? 0) <= 0) {
       imageWidth = previous.imageWidth;
       imageHeight = previous.imageHeight;
+    }
+    if ((videoDuration ?? 0) <= 0) {
+      videoDuration = previous.videoDuration;
     }
     video = video?.inheritLocalPathFrom(previous.video) ?? previous.video;
     animatedSticker =
@@ -1205,6 +1210,7 @@ class Contact {
     required this.id,
     required this.name,
     required this.username,
+    this.usernames = const [],
     required this.statusText,
     this.photo,
     this.isOnline = false,
@@ -1212,6 +1218,7 @@ class Contact {
   final int id;
   final String name;
   final String? username;
+  final List<String> usernames;
   final String statusText;
   TdFileRef? photo;
   bool isOnline;
@@ -1393,12 +1400,9 @@ abstract final class TDParse {
         : null;
 
     final parsedEntities = messageTextEntities(content);
-    final contentMarkdown = !rawService && parsedEntities.isEmpty
-        ? _markdownText(contentText)
-        : null;
     final replyInfo = message.obj('interaction_info')?.obj('reply_info');
-    var contentDisplayText = contentMarkdown?.text ?? contentText;
-    var contentDisplayEntities = contentMarkdown?.entities ?? parsedEntities;
+    var contentDisplayText = contentText;
+    var contentDisplayEntities = parsedEntities;
     final contentRichBlocks = <RichMessageBlock>[...richMessageBlocks(content)];
     if (content?.type == 'messageRichMessage' && contentRichBlocks.isNotEmpty) {
       contentDisplayText = '';
@@ -1871,6 +1875,7 @@ abstract final class TDParse {
           userId: type?.int64('user_id'),
           customEmojiId: type?.int64('custom_emoji_id'),
           language: type?.str('language'),
+          typeData: Map<String, dynamic>.of(type ?? const {}),
         ),
       );
     }
@@ -2308,6 +2313,7 @@ abstract final class TDParse {
           userId: entity.userId,
           customEmojiId: entity.customEmojiId,
           language: entity.language,
+          typeData: entity.typeData,
         ),
       );
     }
@@ -2459,7 +2465,21 @@ abstract final class TDParse {
       entityType,
       url: _richTextEntityUrl(type, value),
       userId: _richTextUserId(value),
+      typeData: _richTextEntityTypeData(entityType, value),
     );
+  }
+
+  static Map<String, dynamic> _richTextEntityTypeData(
+    String entityType,
+    Map<String, dynamic> value,
+  ) {
+    if (entityType != 'textEntityTypeDateTime') return const {};
+    final unixTime = value.integer('unix_time');
+    final formattingType = value.obj('formatting_type');
+    final copiedFormattingType = formattingType == null
+        ? null
+        : Map<String, dynamic>.of(formattingType);
+    return {'unix_time': ?unixTime, 'formatting_type': ?copiedFormattingType};
   }
 
   static String _normalizedRichTextType(String? type) {
@@ -2623,6 +2643,7 @@ abstract final class TDParse {
             userId: entity.userId,
             customEmojiId: entity.customEmojiId,
             language: entity.language,
+            typeData: entity.typeData,
           ),
         )
         .where((entity) => entity.length > 0)
@@ -2770,72 +2791,6 @@ abstract final class TDParse {
       final title = article.str('title') ?? article.str('url') ?? '';
       if (title.isNotEmpty) builder.write('- $title');
     }
-  }
-
-  static _ParsedMarkdownText? _markdownText(String text) {
-    if (!text.contains('*') &&
-        !text.contains('_') &&
-        !text.contains('~') &&
-        !text.contains('`')) {
-      return null;
-    }
-    const markers = [
-      _MarkdownMarker('```', 'textEntityTypePre'),
-      _MarkdownMarker('~~', 'textEntityTypeStrikethrough'),
-      _MarkdownMarker('**', 'textEntityTypeBold'),
-      _MarkdownMarker('__', 'textEntityTypeUnderline'),
-      _MarkdownMarker('`', 'textEntityTypeCode'),
-      _MarkdownMarker('*', 'textEntityTypeItalic'),
-      _MarkdownMarker('_', 'textEntityTypeItalic'),
-    ];
-    final buffer = StringBuffer();
-    final entities = <MessageTextEntity>[];
-    var i = 0;
-    var changed = false;
-    while (i < text.length) {
-      _MarkdownMarker? matched;
-      for (final marker in markers) {
-        if (text.startsWith(marker.marker, i)) {
-          matched = marker;
-          break;
-        }
-      }
-      if (matched == null) {
-        buffer.write(text[i]);
-        i += 1;
-        continue;
-      }
-
-      final contentStart = i + matched.marker.length;
-      final contentEnd = text.indexOf(matched.marker, contentStart);
-      if (contentEnd <= contentStart) {
-        buffer.write(text[i]);
-        i += 1;
-        continue;
-      }
-
-      final inner = text.substring(contentStart, contentEnd);
-      if (inner.trim().isEmpty) {
-        buffer.write(text[i]);
-        i += 1;
-        continue;
-      }
-
-      final offset = buffer.length;
-      buffer.write(inner);
-      entities.add(
-        MessageTextEntity(
-          offset: offset,
-          length: inner.length,
-          type: matched.type,
-        ),
-      );
-      i = contentEnd + matched.marker.length;
-      changed = true;
-    }
-
-    if (!changed || entities.isEmpty) return null;
-    return _ParsedMarkdownText(buffer.toString(), entities);
   }
 
   static MessageLocation? locationAttachment(Map<String, dynamic>? content) {
@@ -3853,11 +3808,37 @@ abstract final class TDParse {
     final last = user.str('last_name') ?? '';
     final full = [first, last].where((s) => s.isNotEmpty).join(' ');
     if (full.isNotEmpty) return full;
-    final username = user.obj('usernames')?.str('editable_username');
-    if (username != null && username.isNotEmpty) return '@$username';
+    final usernames = activeUsernames(user);
+    if (usernames.isNotEmpty) return '@${usernames.first}';
     return AppStrings.t(AppStringKeys.chatUserFallbackName, {
       'value1': user.int64('id') ?? 0,
     });
+  }
+
+  /// Enabled usernames in TDLib's display-priority order.
+  ///
+  /// `active_usernames` includes enabled collectible usernames and defines the
+  /// primary username as its first entry. Older/incomplete payloads may omit
+  /// that array, so only then do we fall back to `editable_username`.
+  static List<String> activeUsernames(Map<String, dynamic> user) {
+    final usernames = user.obj('usernames');
+    if (usernames == null) return const [];
+
+    final active = usernames['active_usernames'];
+    final candidates = active is List
+        ? active.whereType<String>()
+        : <String>[
+            if ((usernames.str('editable_username') ?? '').isNotEmpty)
+              usernames.str('editable_username')!,
+          ];
+    final result = <String>[];
+    final seen = <String>{};
+    for (final candidate in candidates) {
+      final normalized = candidate.trim().replaceFirst(RegExp(r'^@+'), '');
+      if (normalized.isEmpty || !seen.add(normalized.toLowerCase())) continue;
+      result.add(normalized);
+    }
+    return List.unmodifiable(result);
   }
 
   /// The custom emoji that represents a TDLib `emojiStatus` in compact UI.

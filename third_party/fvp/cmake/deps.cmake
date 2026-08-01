@@ -42,10 +42,12 @@ macro(fvp_setup_deps)
     endif()
   else()
   endif()
-  if("$ENV{FVP_DEPS_URL}" MATCHES "^http") # github release: https://github.com/wang-bin/mdk-sdk/releases/latest/download
+  if("$ENV{FVP_DEPS_URL}" MATCHES "^http") # optional mirror or version override
     set(FVP_DEPS_URL $ENV{FVP_DEPS_URL}) # TODO: md5
   else()
-    set(FVP_DEPS_URL https://sourceforge.net/projects/mdk-sdk/files/nightly)
+    # Match Mithka's release workflows so clean local builds do not silently
+    # consume a moving nightly native dependency.
+    set(FVP_DEPS_URL https://github.com/wang-bin/mdk-sdk/releases/download/v0.36.0)
   endif()
   set(MDK_SDK_URL ${FVP_DEPS_URL}/${MDK_SDK_PKG})
   set(MDK_SDK_SAVE "${CMAKE_CURRENT_SOURCE_DIR}/${MDK_SDK_PKG}")
@@ -76,9 +78,13 @@ macro(fvp_setup_deps)
       file(MD5 ${MDK_SDK_SAVE} MDK_SDK_MD5_SAVE)
       message("MDK_SDK_MD5_SAVE: ${MDK_SDK_MD5_SAVE}")
     endif()
+    # Flutter reaches plugins through a generated symlink. Newer CMake secure
+    # archive extraction refuses to write through that path, so extract through
+    # its canonical directory instead.
+    get_filename_component(MDK_SDK_EXTRACT_DIR "${CMAKE_CURRENT_SOURCE_DIR}" REALPATH)
     execute_process(
-      COMMAND ${CMAKE_COMMAND} -E tar "xvf" ${MDK_SDK_SAVE} # "--format=7zip"
-      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+      COMMAND ${CMAKE_COMMAND} -E tar "xvf" "${MDK_SDK_SAVE}" # "--format=7zip"
+      WORKING_DIRECTORY "${MDK_SDK_EXTRACT_DIR}"
       OUTPUT_STRIP_TRAILING_WHITESPACE
       RESULT_VARIABLE EXTRACT_RET
     )

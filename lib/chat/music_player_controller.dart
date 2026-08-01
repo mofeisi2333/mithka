@@ -16,6 +16,7 @@ import 'package:mithka/l10n/app_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../app/app_navigator.dart';
+import '../app/chat_deep_link_controller.dart';
 import '../components/app_icons.dart';
 import '../components/photo_avatar.dart';
 import '../components/toast.dart';
@@ -23,7 +24,6 @@ import '../tdlib/td_client.dart';
 import '../tdlib/td_image_loader.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
-import 'chat_view.dart';
 import 'music_history.dart';
 import 'music_playlist_service.dart';
 import 'voice_audio.dart';
@@ -1038,31 +1038,6 @@ Future<T?> _showMusicBottomSheet<T>(
         child: SlideTransition(
           position: Tween<Offset>(
             begin: const Offset(0, 0.08),
-            end: Offset.zero,
-          ).animate(curved),
-          child: child,
-        ),
-      );
-    },
-  );
-}
-
-Route<T> _musicPageRoute<T>({required WidgetBuilder builder}) {
-  return PageRouteBuilder<T>(
-    transitionDuration: const Duration(milliseconds: 220),
-    reverseTransitionDuration: const Duration(milliseconds: 180),
-    pageBuilder: (context, _, _) => builder(context),
-    transitionsBuilder: (context, animation, _, child) {
-      final curved = CurvedAnimation(
-        parent: animation,
-        curve: Curves.easeOutCubic,
-        reverseCurve: Curves.easeInCubic,
-      );
-      return FadeTransition(
-        opacity: curved,
-        child: SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(0.04, 0),
             end: Offset.zero,
           ).animate(curved),
           child: child,
@@ -2120,14 +2095,10 @@ class _SheetIcon extends StatelessWidget {
 void _openOriginal(ChatMessage message) {
   final chatId = message.chatId;
   if (chatId == null || chatId == 0 || message.id == 0) return;
-  appNavigatorKey.currentState?.push(
-    _musicPageRoute(
-      builder: (_) => ChatView(
-        chatId: chatId,
-        title: message.senderName ?? '',
-        initialMessageId: message.id,
-      ),
-    ),
+  ChatDeepLinkController.shared.openChat(
+    chatId: chatId,
+    title: message.senderName ?? '',
+    messageId: message.id,
   );
 }
 

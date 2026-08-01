@@ -34,9 +34,15 @@ Color _distinctPinnedRowColor({
   required Color accent,
   required bool isDark,
 }) {
+  // Several Telegram palettes expose `chats_pinnedOverlay` as a translucent
+  // tint, not as a complete row surface. Chat rows sit above the always-painted
+  // swipe actions, so passing that tint through unchanged lets every action
+  // bleed through a closed pinned row. Resolve the overlay against the list
+  // background before comparing or returning it.
+  final resolvedCandidate = Color.alphaBlend(candidate, background);
   int channel(int value, int shift) => (value >> shift) & 0xFF;
   final backgroundValue = background.toARGB32();
-  final candidateValue = candidate.toARGB32();
+  final candidateValue = resolvedCandidate.toARGB32();
   final difference = [16, 8, 0]
       .map(
         (shift) =>
@@ -44,7 +50,7 @@ Color _distinctPinnedRowColor({
                 .abs(),
       )
       .reduce((largest, value) => value > largest ? value : largest);
-  if (difference >= 6) return candidate;
+  if (difference >= 6) return resolvedCandidate;
 
   var tint = accent;
   final accentValue = accent.toARGB32();
@@ -61,6 +67,73 @@ Color _distinctPinnedRowColor({
   return Color.alphaBlend(
     tint.withValues(alpha: isDark ? 0.07 : 0.045),
     background,
+  );
+}
+
+Color _structuralDividerColor({
+  required Color background,
+  required Color surface,
+  required Color candidate,
+  required bool isDark,
+}) {
+  // Community themes occasionally use the Android `divider` token as a
+  // saturated decorative accent. That works for a handful of Telegram-owned
+  // surfaces, but Mithka's single structural token is also used for every
+  // list separator and panel border, where a vivid line becomes visual noise.
+  // Keep ordinary theme dividers intact and neutralize only a strongly
+  // chromatic, off-surface candidate. Resolve translucent imported surfaces
+  // first so the separator does not change with an unrelated ancestor.
+  final canvas = isDark ? const Color(0xFF000000) : const Color(0xFFFFFFFF);
+  final opaqueBackground = Color.alphaBlend(background, canvas);
+  final resolvedSurface = Color.alphaBlend(surface, opaqueBackground);
+  final resolved = Color.alphaBlend(candidate, resolvedSurface);
+  final resolvedHsl = HSLColor.fromColor(resolved);
+
+  int channel(Color color, int shift) => (color.toARGB32() >> shift) & 0xFF;
+  final channelDifference = <int>[16, 8, 0].map(
+    (shift) =>
+        (channel(resolved, shift) - channel(resolvedSurface, shift)).abs(),
+  );
+  final largestDifference = channelDifference.reduce(
+    (largest, value) => value > largest ? value : largest,
+  );
+  final isVividOffSurface =
+      resolvedHsl.saturation >= 0.36 && largestDifference >= 32;
+  if (!isVividOffSurface) return candidate;
+
+  final neutral = readableForeground(
+    resolvedSurface,
+  ).withValues(alpha: isDark ? 0.12 : 0.10);
+  return Color.alphaBlend(neutral, resolvedSurface);
+}
+
+Color _distinctGroupedBackgroundColor({
+  required Color card,
+  required Color candidate,
+  required bool isDark,
+}) {
+  final canvas = isDark ? const Color(0xFF000000) : const Color(0xFFFFFFFF);
+  final resolvedCard = Color.alphaBlend(card, canvas);
+  final resolvedCandidate = Color.alphaBlend(candidate, canvas);
+
+  int channel(Color color, int shift) => (color.toARGB32() >> shift) & 0xFF;
+  int difference(Color first, Color second) => <int>[16, 8, 0]
+      .map((shift) => (channel(first, shift) - channel(second, shift)).abs())
+      .reduce((largest, value) => value > largest ? value : largest);
+  if (difference(resolvedCard, resolvedCandidate) >= 6) return candidate;
+
+  // Grouped pages need a canvas distinct from their rounded cards. Telegram
+  // themes sometimes assign the same color to both Android tokens, erasing
+  // the card silhouette. Prefer the conventional darker canvas, then lift it
+  // only when the imported color is already too close to black to darken.
+  final darkened = Color.alphaBlend(
+    const Color(0xFF000000).withValues(alpha: isDark ? 0.12 : 0.045),
+    resolvedCandidate,
+  );
+  if (difference(resolvedCard, darkened) >= 6) return darkened;
+  return Color.alphaBlend(
+    const Color(0xFFFFFFFF).withValues(alpha: 0.07),
+    resolvedCandidate,
   );
 }
 
@@ -509,8 +582,8 @@ class TelegramCloudTheme {
     final base = isDark ? AppColors.dark : AppColors.light;
     Color value(TelegramThemeSemanticColor semantic, Color fallback) =>
         semanticColor(semantic) ?? fallback;
-    final background = value(
-      TelegramThemeSemanticColor.background,
+    final background = Color.alphaBlend(
+      value(TelegramThemeSemanticColor.background, base.background),
       base.background,
     );
     final card = value(TelegramThemeSemanticColor.card, base.card);
@@ -526,6 +599,20 @@ class TelegramCloudTheme {
         _wallpaperColor() ??
         value(TelegramThemeSemanticColor.chatBackground, base.chatBackground);
     final accent = value(TelegramThemeSemanticColor.accent, accentColor);
+    final groupedBackground = _distinctGroupedBackgroundColor(
+      card: card,
+      candidate: value(
+        TelegramThemeSemanticColor.groupedBackground,
+        base.groupedBackground,
+      ),
+      isDark: isDark,
+    );
+    final divider = _structuralDividerColor(
+      background: background,
+      surface: card,
+      candidate: value(TelegramThemeSemanticColor.divider, base.divider),
+      isDark: isDark,
+    );
     final pinnedRow = _distinctPinnedRowColor(
       background: background,
       candidate: value(TelegramThemeSemanticColor.pinnedRow, background),
@@ -541,10 +628,7 @@ class TelegramCloudTheme {
       ),
       card: card,
       navBar: value(TelegramThemeSemanticColor.navBar, card),
-      groupedBackground: value(
-        TelegramThemeSemanticColor.groupedBackground,
-        base.groupedBackground,
-      ),
+      groupedBackground: groupedBackground,
       chatBackground: chatBackground,
       searchFill: value(TelegramThemeSemanticColor.searchFill, base.searchFill),
       inputBarBackground: value(
@@ -569,7 +653,7 @@ class TelegramCloudTheme {
         TelegramThemeSemanticColor.tertiaryText,
         base.textTertiary,
       ),
-      divider: value(TelegramThemeSemanticColor.divider, base.divider),
+      divider: divider,
       linkBlue: accent,
       onAccent: readableForeground(accent),
     );

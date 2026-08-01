@@ -1,4 +1,13 @@
 const esMessages = <String, String>{
+  'navigationBack': "Atrás",
+  'appearanceArchivedChatsDesktopHint':
+      "En el escritorio, los chats archivados al deslizar permanecen visibles arriba para poder acceder con el ratón. La opción guardada sigue aplicándose en el móvil.",
+  'callAlreadyInProgress': "Ya hay otra llamada en curso.",
+  'composerEmoji': "Emoji",
+  'composerMediaSelectionLimit': "Selecciona hasta {value1} fotos o vídeos.",
+  'composerStickers': "Stickers",
+  'loginHidePassword': "Ocultar contraseña",
+  'loginShowPassword': "Mostrar contraseña",
   'aboutReportProblem': "Informar de un problema",
   'aboutReportProblemDetail': "Incluye diagnósticos sin datos privados",
   'aboutTelegramChannel': "Canal de Telegram",
@@ -188,6 +197,9 @@ const esMessages = <String, String>{
       "La respuesta con IA no está disponible para este mensaje.",
   'aiReplyUseReply': "Usar respuesta",
   'aiReplyUsing': "Responder con",
+  'aiReplyPrompts': "Prompts de respuesta",
+  'aiTranslatePrompts': "Prompts de traducción",
+  'aiSummarizePrompts': "Prompts de resumen",
   'aiTestFailed': "La prueba del modelo falló.",
   'aiTestModel': "Probar modelo",
   'aiTestPrompt': "Mensaje de prueba",
@@ -294,15 +306,16 @@ const esMessages = <String, String>{
   'appearanceClearTextFonts': "Borrar fuentes de texto",
   'appearanceColor': "Color",
   'appearanceDisableChatListSwipeActions': "Desactivar gestos laterales",
-  'appearanceSavedMessagesBookmarkView':
-      "Vista de marcadores de Mensajes guardados",
   'appearanceGestures': "Gestos",
   'gesturesChatActions': "Acciones del chat",
+  'gesturesChatActionsModeDescription':
+      "1 dedo: acciones del chat · 2 dedos: carpetas · 3 dedos: cuentas",
   'gesturesChatListSwipe': "Deslizar en la lista de chats",
   'gesturesDoNothing': "No hacer nada",
   'gesturesHoldSwipeActions': "Mantener y deslizar para ver acciones",
   'gesturesSwitchAccounts': "Cambiar de cuenta",
   'gesturesSwitchFolders': "Cambiar de carpeta",
+  'gesturesSwitchFoldersModeDescription': "1 dedo: carpetas · 3 dedos: cuentas",
   'gesturesThreeFingerSwipe': "Deslizar con tres dedos",
   'appearanceDownloadFailed': "Error al descargar",
   'appearanceEmojiFont': "Fuente de emoji",
@@ -375,10 +388,13 @@ const esMessages = <String, String>{
   'appearanceTotalSize': "Tamaño total",
   'appearanceUnreadBadge': "Indicador de mensajes",
   'appIconBlueGradient': "Degradado azul",
+  'appIconAurora': "M aurora",
   'appIconChangeFailed': "No se pudo cambiar el icono de la app",
   'appIconDefault': "Predeterminado",
   'appIconPixel': "Píxel 8-bit",
+  'appIconPrism': "M prisma",
   'appIconPurpleGradient': "Degradado morado",
+  'appIconSignal': "M gruesa",
   'appIconTitle': "Icono de la app",
   'appIconUnsupported':
       "Es posible que esta plataforma o launcher no admita cambiar el icono.",
@@ -802,6 +818,27 @@ const esMessages = <String, String>{
   'chatWallpaperThemesSharedWithChat':
       "Los temas son visibles para todos en el chat",
   'chatWallpaperTitle': "Fondo",
+  'chatSendFailedBlocked':
+      "No se puede enviar este mensaje porque una de las dos personas bloqueó a la otra.",
+  'chatSendFailedGeneric': "Telegram rechazó el mensaje: {value1}",
+  'chatSendFailedInsufficientStars':
+      "No tienes suficientes estrellas de Telegram para enviar este mensaje.",
+  'chatSendFailedMutualContact':
+      "Esta persona solo acepta mensajes de contactos mutuos.",
+  'chatSendFailedPaid':
+      "Este chat solo acepta mensajes de pago. Confirma el coste en estrellas e inténtalo de nuevo.",
+  'chatSendFailedPaidCount':
+      "Este chat cobra {value1} estrellas por mensaje. Confirma el mensaje de pago e inténtalo de nuevo.",
+  'chatSendFailedPermission':
+      "No tienes permiso para enviar mensajes en este chat o el tema está cerrado.",
+  'chatSendFailedPremium':
+      "Esta persona solo acepta chats nuevos de contactos o usuarios de Telegram Premium. Añádela a contactos o usa Premium.",
+  'chatSendFailedPrivacy':
+      "La configuración de privacidad del destinatario no permite este mensaje.",
+  'chatSendFailedRateLimited':
+      "Telegram está limitando temporalmente los envíos. Espera un momento e inténtalo de nuevo.",
+  'chatSendFailedTitle': "Mensaje no enviado",
+  'chatSendFailedUnavailable': "Esta cuenta o este chat ya no está disponible.",
   'chatYouAreMuted': "No puedes enviar mensajes",
   'chatYouWereRemovedFromGroup': "Te han expulsado de este grupo",
   'checklistComposerAddTask': "Añadir tarea",
@@ -867,6 +904,7 @@ const esMessages = <String, String>{
   'composerNoGifs': "No hay GIF guardados",
   'composerOpenAttachmentFailed': "No se puede abrir {value1}",
   'composerOpenMenu': "Abrir menú",
+  'composerCloseMenu': "Cerrar menú",
   'composerPaidMessageCost': "Enviar este mensaje cuesta {value1} estrellas.",
   'composerPastedImageReadFailed': "No se pudo leer la imagen pegada",
   'composerPoll': "Encuesta",
@@ -1316,6 +1354,7 @@ const esMessages = <String, String>{
   'momentsLikeFailed': "No se pudo dar Me gusta: {value1}",
   'momentsLoadingPosts': "Cargando actualizaciones…",
   'momentsMore': "Más",
+  'momentsMusic': "Música",
   'momentsNewPostsCount': "{value1} actualizaciones nuevas",
   'momentsNoChannelContent': "Aún no hay contenido del canal",
   'momentsNoComments': "Aún no hay comentarios",
@@ -1463,6 +1502,7 @@ const esMessages = <String, String>{
   'pollComposerSingleChoiceLimitHint': "Opción única · Máximo 10 opciones",
   'premiumLabel': "Premium",
   'passkeysAdded': "Llave de acceso añadida",
+  'passkeysAdd': "Añadir llave de acceso",
   'passkeysCreatedOn': "Creada el {value1}",
   'passkeysDelete': "Eliminar",
   'passkeysDeleteMessage': "¿Eliminar «{value1}»?",
@@ -1787,6 +1827,14 @@ const esMessages = <String, String>{
   'sensitiveContentUnblockMessage':
       "Esto activa el ajuste de Telegram para contenido 18+ en toda la cuenta. Puedes desactivarlo más tarde en Privacidad y seguridad.",
   'sensitiveContentUnblockTitle': "¿Mostrar contenido 18+?",
+  'searchTabChats': "Chats",
+  'searchTabFiles': "Archivos",
+  'searchTabLinks': "Enlaces",
+  'searchTabMedia': "Multimedia",
+  'searchTabMessages': "Mensajes",
+  'searchTabMiniApps': "Miniapps",
+  'searchTabMusic': "Música",
+  'searchTabVoiceMessages': "Mensajes de voz",
   'settingsAboutMithka': "Acerca de Mithka",
   'settingsLogOut': "Cerrar sesión",
   'sharedMediaCacheDeleted': "Caché local eliminada",
@@ -2131,6 +2179,8 @@ const esMessages = <String, String>{
   'callsOutgoing': "Saliente",
   'callsRetry': "Reintentar",
   'callsTitle': "Llamadas",
+  'callsUnavailableOnDesktop':
+      "Las llamadas aún no están disponibles en esta versión de escritorio.",
   'callsUnknownConversation': "Conversación desconocida",
   'channelDirectMessages': "Channel Direct Messages",
   'channelDirectMessagesAllowAndRefund': "Allow and Refund",

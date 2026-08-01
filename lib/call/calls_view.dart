@@ -3,9 +3,11 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
+import '../app/app_navigator.dart';
 import '../chat/chat_view.dart';
 import '../components/app_icons.dart';
 import '../components/photo_avatar.dart';
+import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../l10n/app_localizations.dart';
 import '../tdlib/json_helpers.dart';
@@ -128,9 +130,8 @@ class _CallsViewState extends State<CallsView> {
   void _openChat(CallHistoryEntry entry) {
     if (entry.chatId == 0) return;
     Navigator.of(context).push(
-      PageRouteBuilder<void>(
-        pageBuilder: (_, _, _) =>
-            ChatView(chatId: entry.chatId, title: entry.title),
+      AppChatPageRoute<void>(
+        builder: (_) => ChatView(chatId: entry.chatId, title: entry.title),
       ),
     );
   }
@@ -138,7 +139,15 @@ class _CallsViewState extends State<CallsView> {
   void _startCall(CallHistoryEntry entry, {required bool isVideo}) {
     final userId = entry.userId;
     if (userId == null || userId == 0) return;
-    context.read<CallManager>().startCall(userId, isVideo);
+    final started = context.read<CallManager>().startCall(userId, isVideo);
+    if (started != CallStartResult.started) {
+      showToast(
+        context,
+        started == CallStartResult.unsupported
+            ? AppStringKeys.callsUnavailableOnDesktop
+            : AppStringKeys.callAlreadyInProgress,
+      );
+    }
   }
 
   @override
@@ -195,10 +204,14 @@ class _CallsViewState extends State<CallsView> {
         return _CallRow(
           entry: entry,
           onTap: () => _openChat(entry),
-          onVoiceCall: entry.userId == null
+          onVoiceCall:
+              entry.userId == null ||
+                  !context.read<CallManager>().supportsMediaCalls
               ? null
               : () => _startCall(entry, isVideo: false),
-          onVideoCall: entry.userId == null
+          onVideoCall:
+              entry.userId == null ||
+                  !context.read<CallManager>().supportsMediaCalls
               ? null
               : () => _startCall(entry, isVideo: true),
         );

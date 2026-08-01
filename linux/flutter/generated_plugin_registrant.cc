@@ -6,13 +6,18 @@
 
 #include "generated_plugin_registrant.h"
 
+#include <fc_native_video_thumbnail/fc_native_video_thumbnail_plugin.h>
 #include <file_selector_linux/file_selector_plugin.h>
 #include <flutter_secure_storage_linux/flutter_secure_storage_linux_plugin.h>
 #include <fvp/fvp_plugin.h>
+#include <multi_window_manager/multi_window_manager_plugin.h>
 #include <sentry_flutter/sentry_flutter_plugin.h>
 #include <url_launcher_linux/url_launcher_plugin.h>
 
 void fl_register_plugins(FlPluginRegistry* registry) {
+  g_autoptr(FlPluginRegistrar) fc_native_video_thumbnail_registrar =
+      fl_plugin_registry_get_registrar_for_plugin(registry, "FcNativeVideoThumbnailPlugin");
+  fc_native_video_thumbnail_plugin_register_with_registrar(fc_native_video_thumbnail_registrar);
   g_autoptr(FlPluginRegistrar) file_selector_linux_registrar =
       fl_plugin_registry_get_registrar_for_plugin(registry, "FileSelectorPlugin");
   file_selector_plugin_register_with_registrar(file_selector_linux_registrar);
@@ -22,6 +27,9 @@ void fl_register_plugins(FlPluginRegistry* registry) {
   g_autoptr(FlPluginRegistrar) fvp_registrar =
       fl_plugin_registry_get_registrar_for_plugin(registry, "FvpPlugin");
   fvp_plugin_register_with_registrar(fvp_registrar);
+  g_autoptr(FlPluginRegistrar) multi_window_manager_registrar =
+      fl_plugin_registry_get_registrar_for_plugin(registry, "MultiWindowManagerPlugin");
+  multi_window_manager_plugin_register_with_registrar(multi_window_manager_registrar);
   g_autoptr(FlPluginRegistrar) sentry_flutter_registrar =
       fl_plugin_registry_get_registrar_for_plugin(registry, "SentryFlutterPlugin");
   sentry_flutter_plugin_register_with_registrar(sentry_flutter_registrar);

@@ -15,6 +15,11 @@ request directly. In groups, keep participant identities clear and avoid
 unnecessary replies.
 ''';
 
+const defaultAiSummaryPrompt = '''
+Keep the summary concise and practical. Prioritize unanswered questions,
+decisions, concrete next actions, and recent substantial topics.
+''';
+
 enum AiProviderMode {
   applePcc('apple_pcc'),
   appleOnDevice('apple_on_device'),
@@ -242,7 +247,7 @@ class AiModelCandidate {
     AiModelCandidateKind.appleOnDevice => AiProviderMode.appleOnDevice,
     AiModelCandidateKind.server => AiProviderMode.openAiCompatible,
     AiModelCandidateKind.telegramCocoon => throw UnsupportedError(
-      'Telegram Cocoon is a reply-only specialized provider.',
+      'Telegram Cocoon is a specialized TDLib provider.',
     ),
   };
 
@@ -315,6 +320,8 @@ class AiSettingsController extends ChangeNotifier {
       'ai.feature.reply.model_candidate.v1';
   static const replyPromptPreferenceKey = 'ai.feature.reply.prompt.v1';
   static const replyPromptMaximumCharacters = 1000;
+  static const summaryPromptPreferenceKey = 'ai.feature.summary.prompt.v1';
+  static const summaryPromptMaximumCharacters = 1000;
   static const applePccModelCandidateId = 'builtin:apple_pcc';
   static const appleOnDeviceModelCandidateId = 'builtin:apple_on_device';
   static const telegramCocoonModelCandidateId = 'builtin:telegram_cocoon';
@@ -343,6 +350,7 @@ class AiSettingsController extends ChangeNotifier {
   String _summaryModelCandidateId = applePccModelCandidateId;
   String _replyModelCandidateId = telegramCocoonModelCandidateId;
   String _replyPrompt = defaultAiReplyPrompt.trim();
+  String _summaryPrompt = defaultAiSummaryPrompt.trim();
   final Map<String, String> _profileApiKeys = {};
   ApplePccCapabilities? _pccCapabilities;
 
@@ -387,13 +395,10 @@ class AiSettingsController extends ChangeNotifier {
   ]);
 
   List<AiModelCandidate> modelCandidatesForFeature(AiFeature feature) =>
-      switch (feature) {
-        AiFeature.translation || AiFeature.summary => modelCandidates,
-        AiFeature.reply => List.unmodifiable([
-          const AiModelCandidate.telegramCocoon(),
-          ...modelCandidates,
-        ]),
-      };
+      List.unmodifiable([
+        const AiModelCandidate.telegramCocoon(),
+        ...modelCandidates,
+      ]);
 
   String get translationModelCandidateId => _translationModelCandidateId;
   String get summaryModelCandidateId => _summaryModelCandidateId;
@@ -401,11 +406,20 @@ class AiSettingsController extends ChangeNotifier {
   String get aiReplyPrompt => _replyPrompt;
   bool get hasCustomAiReplyPrompt =>
       _replyPrompt != defaultAiReplyPrompt.trim();
+  String get aiSummaryPrompt => _summaryPrompt;
+  bool get hasCustomAiSummaryPrompt =>
+      _summaryPrompt != defaultAiSummaryPrompt.trim();
   AiModelCandidate get translationModelCandidate =>
-      modelCandidateById(_translationModelCandidateId) ??
+      modelCandidateByIdForFeature(
+        AiFeature.translation,
+        _translationModelCandidateId,
+      ) ??
       const AiModelCandidate.applePcc();
   AiModelCandidate get summaryModelCandidate =>
-      modelCandidateById(_summaryModelCandidateId) ??
+      modelCandidateByIdForFeature(
+        AiFeature.summary,
+        _summaryModelCandidateId,
+      ) ??
       const AiModelCandidate.applePcc();
   AiModelCandidate get replyModelCandidate =>
       modelCandidateByIdForFeature(AiFeature.reply, _replyModelCandidateId) ??
@@ -551,6 +565,9 @@ class AiSettingsController extends ChangeNotifier {
     _replyPrompt = _normalizeReplyPrompt(
       _preferences.getString(replyPromptPreferenceKey),
     );
+    _summaryPrompt = _normalizeSummaryPrompt(
+      _preferences.getString(summaryPromptPreferenceKey),
+    );
     _serverProviders = _readStoredProviders();
     _modelProfiles = _readStoredModels();
     _activeServerProviderId = _preferences.getString(
@@ -626,9 +643,17 @@ class AiSettingsController extends ChangeNotifier {
       replyModelCandidatePreferenceKey,
     );
     _translationModelCandidateId =
-        modelCandidateById(storedTranslationCandidate)?.id ?? legacyCandidateId;
+        modelCandidateByIdForFeature(
+          AiFeature.translation,
+          storedTranslationCandidate,
+        )?.id ??
+        legacyCandidateId;
     _summaryModelCandidateId =
-        modelCandidateById(storedSummaryCandidate)?.id ?? legacyCandidateId;
+        modelCandidateByIdForFeature(
+          AiFeature.summary,
+          storedSummaryCandidate,
+        )?.id ??
+        legacyCandidateId;
     _replyModelCandidateId =
         modelCandidateByIdForFeature(
           AiFeature.reply,
@@ -728,6 +753,21 @@ class AiSettingsController extends ChangeNotifier {
   }
 
   Future<void> resetAiReplyPrompt() => setAiReplyPrompt(defaultAiReplyPrompt);
+
+  Future<void> setAiSummaryPrompt(String value) async {
+    final normalized = _normalizeSummaryPrompt(value);
+    if (_summaryPrompt == normalized) return;
+    _summaryPrompt = normalized;
+    if (normalized == defaultAiSummaryPrompt.trim()) {
+      await _preferences.remove(summaryPromptPreferenceKey);
+    } else {
+      await _preferences.setString(summaryPromptPreferenceKey, normalized);
+    }
+    notifyListeners();
+  }
+
+  Future<void> resetAiSummaryPrompt() =>
+      setAiSummaryPrompt(defaultAiSummaryPrompt);
 
   Future<List<OpenAiCompatibleModelInfo>> discoverModels({
     required String endpoint,
@@ -1376,10 +1416,18 @@ class AiSettingsController extends ChangeNotifier {
   }
 
   void _repairFeatureModelSelections() {
-    if (modelCandidateById(_translationModelCandidateId) == null) {
+    if (modelCandidateByIdForFeature(
+          AiFeature.translation,
+          _translationModelCandidateId,
+        ) ==
+        null) {
       _translationModelCandidateId = applePccModelCandidateId;
     }
-    if (modelCandidateById(_summaryModelCandidateId) == null) {
+    if (modelCandidateByIdForFeature(
+          AiFeature.summary,
+          _summaryModelCandidateId,
+        ) ==
+        null) {
       _summaryModelCandidateId = applePccModelCandidateId;
     }
     if (modelCandidateByIdForFeature(AiFeature.reply, _replyModelCandidateId) ==
@@ -1421,6 +1469,14 @@ class AiSettingsController extends ChangeNotifier {
     final runes = trimmed.runes.toList(growable: false);
     if (runes.length <= replyPromptMaximumCharacters) return trimmed;
     return String.fromCharCodes(runes.take(replyPromptMaximumCharacters));
+  }
+
+  static String _normalizeSummaryPrompt(String? value) {
+    final trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) return defaultAiSummaryPrompt.trim();
+    final runes = trimmed.runes.toList(growable: false);
+    if (runes.length <= summaryPromptMaximumCharacters) return trimmed;
+    return String.fromCharCodes(runes.take(summaryPromptMaximumCharacters));
   }
 
   static String _profileKey(String profileId) =>

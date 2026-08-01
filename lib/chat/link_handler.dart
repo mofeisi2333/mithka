@@ -47,6 +47,7 @@ import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../tdlib/td_requests.dart';
+import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import '../theme/telegram_cloud_theme.dart';
 import '../theme/telegram_cloud_theme_view.dart';
@@ -54,8 +55,6 @@ import '../theme/theme_controller.dart';
 import 'channel_direct_messages_view.dart';
 import 'chat_picker_view.dart';
 import 'chat_view.dart';
-import 'saved_messages_service.dart';
-import 'saved_messages_view.dart';
 import 'sticker_set_detail_view.dart';
 import 'telegram_ai_service.dart';
 import 'telegram_invoice_checkout_view.dart';
@@ -318,11 +317,9 @@ Future<void> _openCloudTheme(
     final theme = await TelegramCloudThemeService().load(link);
     if (!context.mounted || !nav.mounted) return;
     await nav.push(
-      PageRouteBuilder<void>(
+      AppFadePageRoute<void>(
         pageBuilder: (_, animation, secondaryAnimation) =>
             TelegramCloudThemePreviewView(theme: theme),
-        transitionsBuilder: (_, animation, secondaryAnimation, child) =>
-            FadeTransition(opacity: animation, child: child),
       ),
     );
   } catch (_) {
@@ -892,23 +889,27 @@ Future<void> _openSavedMessages(
   NavigatorState nav,
 ) async {
   if (!nav.mounted) return;
-  final bookmarkView = context
-      .read<ThemeController>()
-      .savedMessagesBookmarkView;
-  final Widget destination;
-  if (bookmarkView) {
-    destination = const SavedMessagesView();
-  } else {
-    final chatId = await SavedMessagesService().savedChatId();
-    if (!nav.mounted) return;
-    destination = ChatView(
+  final option = await TdClient.shared.query({
+    '@type': 'getOption',
+    'name': 'my_id',
+  });
+  final userId = option.int64('value');
+  if (userId == null) return;
+  final chat = await TdClient.shared.query({
+    '@type': 'createPrivateChat',
+    'user_id': userId,
+    'force': false,
+  });
+  final chatId = chat.int64('id');
+  if (chatId == null) return;
+  if (!nav.mounted) return;
+  final route = AppChatPageRoute<void>(
+    builder: (_) => ChatView(
       chatId: chatId,
       title: AppStrings.t(AppStringKeys.savedMessages),
-    );
-  }
-  unawaited(
-    nav.push(PageRouteBuilder<void>(pageBuilder: (_, _, _) => destination)),
+    ),
   );
+  unawaited(nav.push(route));
 }
 
 Future<void> _openStickerSet(NavigatorState nav, String name) async {
@@ -2121,7 +2122,7 @@ Future<void> _openChat(
   final chatNavigator = appNavigatorKey.currentState ?? nav;
   unawaited(
     chatNavigator.push(
-      MaterialPageRoute(
+      AppChatPageRoute<void>(
         builder: (_) => ChatView(
           chatId: chatId,
           title: title,

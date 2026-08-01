@@ -41,11 +41,11 @@ void main() {
       expect(controller.modelCandidates, hasLength(2));
       expect(
         controller.modelCandidatesForFeature(AiFeature.translation),
-        hasLength(2),
+        hasLength(3),
       );
       expect(
         controller.modelCandidatesForFeature(AiFeature.summary),
-        hasLength(2),
+        hasLength(3),
       );
       expect(
         controller.modelCandidatesForFeature(AiFeature.reply),
@@ -67,7 +67,7 @@ void main() {
     });
 
     test(
-      'scopes Telegram Cocoon to replies and persists a reply choice',
+      'offers Telegram Cocoon to every AI feature and persists each choice',
       () async {
         SharedPreferences.setMockInitialValues({});
         final preferences = await SharedPreferences.getInstance();
@@ -95,8 +95,8 @@ void main() {
                 (candidate) =>
                     candidate.kind == AiModelCandidateKind.telegramCocoon,
               )
-              .isEmpty,
-          isTrue,
+              .length,
+          1,
         );
         expect(
           controller
@@ -105,8 +105,8 @@ void main() {
                 (candidate) =>
                     candidate.kind == AiModelCandidateKind.telegramCocoon,
               )
-              .isEmpty,
-          isTrue,
+              .length,
+          1,
         );
         expect(
           controller.modelCandidatesForFeature(AiFeature.reply).first.kind,
@@ -123,11 +123,11 @@ void main() {
         );
         expect(
           controller.translationModelCandidate.kind,
-          AiModelCandidateKind.applePcc,
+          AiModelCandidateKind.telegramCocoon,
         );
         expect(
           controller.summaryModelCandidate.kind,
-          AiModelCandidateKind.applePcc,
+          AiModelCandidateKind.telegramCocoon,
         );
 
         await controller.setFeatureModelCandidate(
@@ -148,6 +148,14 @@ void main() {
           secureWrite: (_, _) async {},
         );
         await restored.initialize();
+        expect(
+          restored.translationModelCandidate.kind,
+          AiModelCandidateKind.telegramCocoon,
+        );
+        expect(
+          restored.summaryModelCandidate.kind,
+          AiModelCandidateKind.telegramCocoon,
+        );
         expect(
           restored.replyModelCandidate.kind,
           AiModelCandidateKind.appleOnDevice,
@@ -756,6 +764,77 @@ void main() {
       expect(restored.hasCustomAiReplyPrompt, isFalse);
       expect(
         preferences.containsKey(AiSettingsController.replyPromptPreferenceKey),
+        isFalse,
+      );
+    });
+
+    test('AI summary prompt persists, bounds Unicode, and resets', () async {
+      SharedPreferences.setMockInitialValues({});
+      final preferences = await SharedPreferences.getInstance();
+      final controller = AiSettingsController(
+        preferences,
+        pccApi: _pccApi(available: false),
+        secureRead: (_) async => null,
+        secureWrite: (_, _) async {},
+      );
+      await controller.initialize();
+
+      expect(controller.aiSummaryPrompt, defaultAiSummaryPrompt.trim());
+      expect(controller.hasCustomAiSummaryPrompt, isFalse);
+      expect(
+        preferences.containsKey(
+          AiSettingsController.summaryPromptPreferenceKey,
+        ),
+        isFalse,
+      );
+
+      const customPrompt =
+          '  Lead with decisions, unanswered questions, and next actions.  ';
+      await controller.setAiSummaryPrompt(customPrompt);
+      expect(
+        controller.aiSummaryPrompt,
+        'Lead with decisions, unanswered questions, and next actions.',
+      );
+      expect(controller.hasCustomAiSummaryPrompt, isTrue);
+      expect(
+        preferences.getString(AiSettingsController.summaryPromptPreferenceKey),
+        controller.aiSummaryPrompt,
+      );
+
+      final restored = AiSettingsController(
+        preferences,
+        pccApi: _pccApi(available: false),
+        secureRead: (_) async => null,
+        secureWrite: (_, _) async {},
+      );
+      await restored.initialize();
+      expect(restored.aiSummaryPrompt, controller.aiSummaryPrompt);
+      expect(restored.hasCustomAiSummaryPrompt, isTrue);
+
+      final oversized = List.filled(
+        AiSettingsController.summaryPromptMaximumCharacters + 1,
+        '🦊',
+      ).join();
+      await restored.setAiSummaryPrompt(oversized);
+      expect(
+        restored.aiSummaryPrompt.runes.length,
+        AiSettingsController.summaryPromptMaximumCharacters,
+      );
+      expect(
+        preferences
+            .getString(AiSettingsController.summaryPromptPreferenceKey)!
+            .runes
+            .length,
+        AiSettingsController.summaryPromptMaximumCharacters,
+      );
+
+      await restored.resetAiSummaryPrompt();
+      expect(restored.aiSummaryPrompt, defaultAiSummaryPrompt.trim());
+      expect(restored.hasCustomAiSummaryPrompt, isFalse);
+      expect(
+        preferences.containsKey(
+          AiSettingsController.summaryPromptPreferenceKey,
+        ),
         isFalse,
       );
     });

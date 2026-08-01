@@ -1,4 +1,13 @@
 const enMessages = <String, String>{
+  'navigationBack': "Back",
+  'appearanceArchivedChatsDesktopHint':
+      "On desktop, pull-down archives stay visible at the top so they remain mouse-accessible. The saved choice still applies on mobile.",
+  'callAlreadyInProgress': "Another call is already in progress.",
+  'composerEmoji': "Emoji",
+  'composerMediaSelectionLimit': "Select up to {value1} photos or videos.",
+  'composerStickers': "Stickers",
+  'loginHidePassword': "Hide password",
+  'loginShowPassword': "Show password",
   'aboutReportProblem': "Report a Problem",
   'aboutReportProblemDetail': "Includes privacy-safe diagnostics",
   'aboutTelegramChannel': "Telegram Channel",
@@ -250,6 +259,9 @@ const enMessages = <String, String>{
   'aiReplyUnavailable': "AI Reply is unavailable for this message.",
   'aiReplyUseReply': "Use Reply",
   'aiReplyUsing': "Reply using",
+  'aiReplyPrompts': "Reply Prompts",
+  'aiTranslatePrompts': "Translate Prompts",
+  'aiSummarizePrompts': "Summarize Prompts",
   'aiTestFailed': "Model test failed.",
   'aiTestModel': "Test Model",
   'aiTestPrompt': "Test prompt",
@@ -282,14 +294,17 @@ const enMessages = <String, String>{
   'appearanceClearTextFonts': "Clear Text Fonts",
   'appearanceColor': "Color",
   'appearanceDisableChatListSwipeActions': "Disable swipe actions",
-  'appearanceSavedMessagesBookmarkView': "Saved Messages bookmark view",
   'appearanceGestures': "Gestures",
   'gesturesChatActions': "Chat actions",
+  'gesturesChatActionsModeDescription':
+      "1 finger: chat actions · 2 fingers: folders · 3 fingers: accounts",
   'gesturesChatListSwipe': "Chat list swipe",
   'gesturesDoNothing': "Do nothing",
   'gesturesHoldSwipeActions': "Hold and swipe for chat actions",
   'gesturesSwitchAccounts': "Switch accounts",
   'gesturesSwitchFolders': "Switch folders",
+  'gesturesSwitchFoldersModeDescription':
+      "1 finger: folders · 3 fingers: accounts",
   'gesturesThreeFingerSwipe': "Three-finger swipe",
   'appearanceDownloadFailed': "Download failed",
   'appearanceEmojiFont': "Emoji Font",
@@ -360,10 +375,13 @@ const enMessages = <String, String>{
   'appearanceTotalSize': "Total Size",
   'appearanceUnreadBadge': "Unread Badge",
   'appIconBlueGradient': "Blue Gradient",
+  'appIconAurora': "Aurora M",
   'appIconChangeFailed': "Failed to change app icon",
   'appIconDefault': "Default",
   'appIconPixel': "8-bit Pixel",
+  'appIconPrism': "Prism M",
   'appIconPurpleGradient': "Purple Gradient",
+  'appIconSignal': "Bold M",
   'appIconTitle': "App Icon",
   'appIconUnsupported':
       "This platform or launcher may not support changing the app icon.",
@@ -528,6 +546,8 @@ const enMessages = <String, String>{
   'callsOutgoing': "Outgoing",
   'callsRetry': "Try again",
   'callsTitle': "Calls",
+  'callsUnavailableOnDesktop':
+      "Calls aren’t available in this desktop build yet.",
   'callsUnknownConversation': "Unknown conversation",
   'channelsFileAttachment': "[File]",
   'channelsLoading': "Loading channels…",
@@ -788,6 +808,27 @@ const enMessages = <String, String>{
   'chatWallpaperThemesSharedWithChat':
       "Themes are visible to everyone in the chat",
   'chatWallpaperTitle': "Wallpaper",
+  'chatSendFailedBlocked':
+      "This message can’t be sent because one side has blocked the other.",
+  'chatSendFailedGeneric': "Telegram rejected the message: {value1}",
+  'chatSendFailedInsufficientStars':
+      "You don’t have enough Telegram Stars to send this message.",
+  'chatSendFailedMutualContact':
+      "This person accepts messages only from mutual contacts.",
+  'chatSendFailedPaid':
+      "This chat only accepts paid messages. Confirm the Star charge and try again.",
+  'chatSendFailedPaidCount':
+      "This chat charges {value1} Stars per message. Confirm the paid message and try again.",
+  'chatSendFailedPermission':
+      "You don’t have permission to send messages in this chat, or this topic is closed.",
+  'chatSendFailedPremium':
+      "This person accepts new chats only from contacts or Telegram Premium users. Add them as a contact or use Premium.",
+  'chatSendFailedPrivacy':
+      "The recipient’s privacy settings don’t allow this message.",
+  'chatSendFailedRateLimited':
+      "Telegram is temporarily limiting message sends. Wait a moment and try again.",
+  'chatSendFailedTitle': "Message not sent",
+  'chatSendFailedUnavailable': "This account or chat is no longer available.",
   'chatYouAreMuted': "You are muted",
   'chatYouWereRemovedFromGroup': "You were removed from this group",
   'checklistComposerAddTask': "Add task",
@@ -852,6 +893,7 @@ const enMessages = <String, String>{
   'composerNoGifs': "No saved GIFs",
   'composerOpenAttachmentFailed': "Cannot open {value1}",
   'composerOpenMenu': "Open menu",
+  'composerCloseMenu': "Close menu",
   'composerPaidMessageCost': "Sending this message costs {value1} Stars.",
   'composerPastedImageReadFailed': "Could not read pasted image",
   'composerPoll': "Poll",
@@ -1356,6 +1398,7 @@ const enMessages = <String, String>{
   'momentsLikeFailed': "Like failed: {value1}",
   'momentsLoadingPosts': "Loading posts…",
   'momentsMore': "More",
+  'momentsMusic': "Music",
   'momentsNewPostsCount': "{value1} new posts",
   'momentsNoChannelContent': "No channel content yet",
   'momentsNoComments': "No comments yet",
@@ -1502,6 +1545,7 @@ const enMessages = <String, String>{
   'pollComposerSingleChoiceLimitHint': "Single choice · Up to 10 options",
   'premiumLabel': "Premium",
   'passkeysAdded': "Passkey added",
+  'passkeysAdd': "Add passkey",
   'passkeysCreatedOn': "Created {value1}",
   'passkeysDelete': "Delete",
   'passkeysDeleteMessage': "Delete “{value1}”?",
@@ -1815,6 +1859,14 @@ const enMessages = <String, String>{
   'sensitiveContentUnblockMessage':
       "This enables Telegram's account-wide 18+ content setting. You can switch it off later in Privacy & Security.",
   'sensitiveContentUnblockTitle': "Show 18+ content?",
+  'searchTabChats': "Chats",
+  'searchTabFiles': "Files",
+  'searchTabLinks': "Links",
+  'searchTabMedia': "Media",
+  'searchTabMessages': "Messages",
+  'searchTabMiniApps': "Mini Apps",
+  'searchTabMusic': "Music",
+  'searchTabVoiceMessages': "Voice Messages",
   'settingsAboutMithka': "About Mithka",
   'settingsLogOut': "Log Out",
   'sharedMediaCacheDeleted': "Local cache deleted",

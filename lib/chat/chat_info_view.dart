@@ -15,6 +15,7 @@ import 'package:mithka/l10n/app_localizations.dart';
 import 'package:mithka/notifications/scope_notification_settings.dart';
 import 'package:provider/provider.dart';
 
+import '../app/app_navigator.dart';
 import '../chats/chat_delete_policy.dart';
 import '../components/app_icons.dart';
 import '../components/confirm_dialog.dart';
@@ -29,6 +30,7 @@ import '../profile/qr_code_view.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
+import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import 'add_members_view.dart';
@@ -98,7 +100,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
 
   void _openChatFolders() {
     Navigator.of(context).push(
-      PageRouteBuilder<void>(
+      AppPageRoute<void>(
         pageBuilder: (_, _, _) =>
             ChatFolderMembershipView(chatId: widget.chatId, title: _vm.title),
       ),
@@ -107,7 +109,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
 
   void _openWallpaper() {
     Navigator.of(context).push(
-      PageRouteBuilder<void>(
+      AppPageRoute<void>(
         pageBuilder: (_, _, _) =>
             ChatWallpaperView(chatId: widget.chatId, chatTitle: _vm.title),
       ),
@@ -116,7 +118,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
 
   void _openTheme() {
     Navigator.of(context).push(
-      PageRouteBuilder<void>(
+      AppPageRoute<void>(
         pageBuilder: (_, _, _) =>
             ChatThemeView(chatId: widget.chatId, chatTitle: _vm.title),
       ),
@@ -126,13 +128,26 @@ class _ChatInfoViewState extends State<ChatInfoView> {
   void _openDirectMessages() {
     final chatId = _vm.directMessagesChatId;
     if (chatId == 0) return;
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => _vm.opensDirectMessagesAsTopics
-            ? ChannelDirectMessagesView(chatId: chatId, title: _vm.title)
-            : ChatView(chatId: chatId, title: _vm.title),
+    final route = _vm.opensDirectMessagesAsTopics
+        ? MaterialPageRoute<void>(
+            builder: (_) =>
+                ChannelDirectMessagesView(chatId: chatId, title: _vm.title),
+          )
+        : AppChatPageRoute<void>(
+            builder: (_) => ChatView(chatId: chatId, title: _vm.title),
+          );
+    Navigator.of(context).push(route);
+  }
+
+  Future<void> _openSearchHistory() async {
+    final messageId = await Navigator.of(context).push<int>(
+      MaterialPageRoute<int>(
+        builder: (_) =>
+            ChatSearchView(chatId: widget.chatId, title: widget.title),
       ),
     );
+    if (!mounted || messageId == null) return;
+    Navigator.of(context).pop(messageId);
   }
 
   @override
@@ -458,12 +473,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
         children: [
           _infoRow(
             AppStrings.t(AppStringKeys.chatInfoSearchHistory),
-            () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) =>
-                    ChatSearchView(chatId: widget.chatId, title: widget.title),
-              ),
-            ),
+            () => unawaited(_openSearchHistory()),
           ),
           const InsetDivider(leadingInset: 14),
           _infoRow(AppStrings.t(AppStringKeys.chatThemeTitle), _openTheme),
@@ -759,7 +769,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
       (AppStrings.t(AppStringKeys.chatInfoAutoDeleteSevenDays), 604800),
       (AppStrings.t(AppStringKeys.chatInfoAutoDeleteOneMonth), 2592000),
     ];
-    final selected = await showCupertinoModalPopup<int>(
+    final selected = await showAppCupertinoModalPopup<int>(
       context: context,
       builder: (context) => CupertinoActionSheet(
         title: Text(AppStrings.t(AppStringKeys.chatInfoAutoDeleteMessages)),

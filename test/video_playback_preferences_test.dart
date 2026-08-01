@@ -1,7 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mithka/chat/video_playback_preferences.dart';
-import 'package:mithka/chat/video_playback_queue.dart';
-import 'package:mithka/tdlib/td_models.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -12,7 +10,7 @@ void main() {
 
     expect(
       preferences.horizontalSwipeAction,
-      VideoHorizontalSwipeAction.adjustProgress,
+      VideoHorizontalSwipeAction.changeVideo,
     );
     expect(
       preferences.leftVerticalSwipeAction,
@@ -29,7 +27,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
 
     await VideoPlaybackPreferences.saveHorizontalSwipeAction(
-      VideoHorizontalSwipeAction.changeVideo,
+      VideoHorizontalSwipeAction.adjustProgress,
     );
     await VideoPlaybackPreferences.saveLeftVerticalSwipeAction(
       VideoVerticalSwipeAction.volume,
@@ -44,7 +42,7 @@ void main() {
     final preferences = await VideoPlaybackPreferences.load();
     expect(
       preferences.horizontalSwipeAction,
-      VideoHorizontalSwipeAction.changeVideo,
+      VideoHorizontalSwipeAction.adjustProgress,
     );
     expect(
       preferences.leftVerticalSwipeAction,
@@ -69,7 +67,7 @@ void main() {
 
     expect(
       preferences.horizontalSwipeAction,
-      VideoHorizontalSwipeAction.adjustProgress,
+      VideoHorizontalSwipeAction.changeVideo,
     );
     expect(
       preferences.leftVerticalSwipeAction,
@@ -80,24 +78,5 @@ void main() {
       VideoVerticalSwipeAction.volume,
     );
     expect(preferences.completionAction, VideoCompletionAction.prompt);
-  });
-
-  test('video playback queue moves without leaving its bounds', () {
-    final queue = VideoPlaybackQueue(
-      items: [
-        VideoPlaybackItem(video: TdFileRef(id: 1), title: 'One'),
-        VideoPlaybackItem(video: TdFileRef(id: 2), title: 'Two'),
-        VideoPlaybackItem(video: TdFileRef(id: 3), title: 'Three'),
-      ],
-      index: 1,
-    );
-
-    expect(queue.current.video.id, 2);
-    expect(queue.previous?.video.id, 1);
-    expect(queue.next?.video.id, 3);
-    expect(queue.moveBy(-1)?.current.video.id, 1);
-    expect(queue.moveBy(1)?.current.video.id, 3);
-    expect(queue.moveBy(-2), isNull);
-    expect(queue.moveBy(2), isNull);
   });
 }

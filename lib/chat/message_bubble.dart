@@ -25,6 +25,7 @@ import '../components/photo_avatar.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../l10n/telegram_language_controller.dart';
+import '../platform/adaptive_platform.dart';
 import '../profile/profile_detail_view.dart';
 import '../settings/sensitive_content_controller.dart';
 import '../tdlib/json_helpers.dart';
@@ -43,6 +44,7 @@ import 'file_detail_view.dart';
 import 'link_handler.dart';
 import 'location_detail_view.dart';
 import 'looping_video_view.dart';
+import 'media_preview_geometry.dart';
 import 'message_action_menu.dart';
 import 'message_special_content.dart';
 import 'music_player_controller.dart';
@@ -150,7 +152,7 @@ class MessageBubble extends StatefulWidget {
   final ValueChanged<ChatMessage>? onOpenStory;
   final ValueChanged<ChatMessage>? onTranscribeVoice;
   final ValueChanged<ChatMessage>? onSummarizeMessage;
-  final bool isRead; // outgoing message read by the peer (two delivery dots)
+  final bool isRead;
   final Color? outgoingBubbleColor;
   final Color? outgoingBubbleTextColor;
   final Color? incomingBubbleColor;
@@ -166,6 +168,7 @@ class _MessageBubbleState extends State<MessageBubble>
   static const double _replyRestingLimit = 72;
   static const double _replyHardLimit = 104;
   static const double _bubbleMaxWidthFraction = 0.75;
+  static const double _desktopBubbleMaxWidth = 720;
 
   final VoicePlayer _voice = VoicePlayer();
   final GlobalKey _bubbleKey = GlobalKey();
@@ -268,8 +271,11 @@ class _MessageBubbleState extends State<MessageBubble>
 
   ChatMessage get message => widget.message;
 
-  MessageBubbleBackgroundSpec get _bubbleBackgroundStyle =>
-      context.watch<ThemeController>().effectiveMessageBubbleBackgroundSpec;
+  MessageBubbleBackgroundSpec get _bubbleBackgroundStyle {
+    return context
+        .watch<ThemeController>()
+        .effectiveMessageBubbleBackgroundSpecFor(outgoing: message.isOutgoing);
+  }
 
   Color get _outgoingBubbleColor =>
       _bubbleBackgroundStyle.backgroundColor ??
@@ -346,10 +352,14 @@ class _MessageBubbleState extends State<MessageBubble>
 
   double _bubbleMaxWidth() {
     final width = _layoutWidth ?? MediaQuery.sizeOf(context).width;
-    return math.max(1.0, width * _bubbleMaxWidthFraction);
+    final proportional = math.max(1.0, width * _bubbleMaxWidthFraction);
+    return isDesktopTargetPlatform()
+        ? math.min(proportional, _desktopBubbleMaxWidth)
+        : proportional;
   }
 
-  double _mediaMaxWidth() => _bubbleMaxWidth();
+  double _mediaMaxWidth() =>
+      math.min(_bubbleMaxWidth(), telegramDesktopMediaPreviewMaxSide);
 
   double _chatFontSize(double base) =>
       context.watch<ThemeController>().chatTextSize(base);
@@ -474,6 +484,7 @@ class _MessageBubbleState extends State<MessageBubble>
       onTapDown: _handleTapDown,
       onTap: () => _handleTap(alwaysShowTime),
       onLongPress: _handleLongPress,
+      onSecondaryTap: _handleLongPress,
       onHorizontalDragStart: (_) => _swipeController.stop(),
       onHorizontalDragUpdate: _onDragUpdate,
       onHorizontalDragEnd: _onDragEnd,
@@ -1056,38 +1067,49 @@ class _MessageBubbleState extends State<MessageBubble>
       clipBehavior: Clip.none,
       children: [
         child,
-        Positioned(right: 5, bottom: 3, child: _floatingMeta(outgoing)),
+        Positioned(right: 2, bottom: 2, child: _floatingMeta(outgoing)),
       ],
     );
   }
 
   Widget _floatingMeta(bool outgoing) {
-    final c = context.colors;
     final faint = outgoing
         ? _outgoingTextColor.withValues(alpha: 0.72)
-        : c.textTertiary;
-    return IgnorePointer(
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: outgoing
-              ? Colors.black.withValues(alpha: 0.10)
-              : c.card.withValues(alpha: 0.72),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (message.isEdited)
-                AppIcon(HeroAppIcons.pen, size: 13, color: faint),
-              if (message.isEdited && outgoing) const SizedBox(width: 3),
-              if (outgoing)
-                _deliveryDots(diameter: 4, color: _outgoingTextColor),
-            ],
-          ),
-        ),
+        : context.colors.textTertiary;
+    final content = Padding(
+      padding: outgoing
+          ? EdgeInsets.zero
+          : const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (message.isEdited)
+            AppIcon(
+              HeroAppIcons.penToSquare,
+              key: const ValueKey('messageDeliveryEdited'),
+              size: 10,
+              color: faint,
+            )
+          else if (outgoing)
+            _MessageDeliveryIndicator(
+              isSending: message.isSending && !message.isSendAcknowledged,
+              isRead: widget.isRead,
+              pendingColor: _outgoingTextColor,
+              size: 10,
+            ),
+        ],
       ),
+    );
+    return IgnorePointer(
+      child: outgoing
+          ? content
+          : DecoratedBox(
+              decoration: BoxDecoration(
+                color: context.colors.card.withValues(alpha: 0.72),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: content,
+            ),
     );
   }
 
@@ -1317,7 +1339,11 @@ class _MessageBubbleState extends State<MessageBubble>
     );
   }
 
-  Widget _textBubble(String text, bool outgoing) {
+  Widget _textBubble(
+    String text,
+    bool outgoing, {
+    bool includeForwardHeader = true,
+  }) {
     final c = context.colors;
     final baseColor = outgoing ? _outgoingTextColor : _incomingTextColor;
     final linkColor = _bubbleBackgroundStyle.isDecorative
@@ -1331,19 +1357,31 @@ class _MessageBubbleState extends State<MessageBubble>
     _linkRecognizers.clear();
     final emojiOnly = _isEmojiOnlyText(text);
     final textFontSize = emojiOnly ? 34.0 : 15.0;
+    final bubblePadding = emojiOnly
+        ? const EdgeInsets.symmetric(horizontal: 10, vertical: 7)
+        : const EdgeInsets.symmetric(horizontal: 12, vertical: 9);
+    final effectivePadding = _bubbleBackgroundStyle.isDecorative
+        ? _bubbleBackgroundStyle.contentPadding
+        : bubblePadding;
+    // Preview geometry must use the bubble's content box, not its outer
+    // maximum. Otherwise the parent padding clamps only the width while the
+    // preview keeps a height calculated for the wider outer box.
+    final previewMaxWidth = math.max(
+      1.0,
+      _bubbleMaxWidth() - effectivePadding.horizontal,
+    );
     return _bubbleBackground(
       key: ValueKey('messageTextBubble-${message.id}'),
       outgoing: outgoing,
       constraints: BoxConstraints(maxWidth: _bubbleMaxWidth()),
-      padding: emojiOnly
-          ? const EdgeInsets.symmetric(horizontal: 10, vertical: 7)
-          : const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      padding: bubblePadding,
       borderRadius: _messageBorderRadius(6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if ((message.forwardOrigin ?? '').isNotEmpty) ...[
+          if (includeForwardHeader &&
+              (message.forwardOrigin ?? '').isNotEmpty) ...[
             _forwardHeader(outgoing),
             const SizedBox(height: 3),
           ],
@@ -1352,7 +1390,11 @@ class _MessageBubbleState extends State<MessageBubble>
             const SizedBox(height: 5),
           ],
           if (_activeLinkPreview?.showAboveText ?? false) ...[
-            _linkPreviewCard(_activeLinkPreview!, outgoing),
+            _linkPreviewCard(
+              _activeLinkPreview!,
+              outgoing,
+              maxWidth: previewMaxWidth,
+            ),
             if (text.isNotEmpty) const SizedBox(height: 6),
           ],
           ..._richTextWidgets(
@@ -1372,7 +1414,11 @@ class _MessageBubbleState extends State<MessageBubble>
               !_activeLinkPreview!.showAboveText) ...[
             if (text.isNotEmpty || _activeRichBlocks.isNotEmpty)
               const SizedBox(height: 7),
-            _linkPreviewCard(_activeLinkPreview!, outgoing),
+            _linkPreviewCard(
+              _activeLinkPreview!,
+              outgoing,
+              maxWidth: previewMaxWidth,
+            ),
           ],
           if (_showsTranslation) ...[
             const SizedBox(height: 7),
@@ -2480,15 +2526,22 @@ class _MessageBubbleState extends State<MessageBubble>
     );
   }
 
-  Widget _linkPreviewCard(MessageLinkPreview preview, bool outgoing) {
+  Widget _linkPreviewCard(
+    MessageLinkPreview preview,
+    bool outgoing, {
+    required double maxWidth,
+  }) {
     final c = context.colors;
     final base = outgoing ? _outgoingTextColor : c.textPrimary;
     final secondary = outgoing
         ? _outgoingTextColor.withValues(alpha: 0.75)
         : c.textSecondary;
     final link = outgoing ? _outgoingTextColor : c.linkBlue;
-    final maxWidth = _bubbleMaxWidth();
-    final media = _linkPreviewMedia(preview, maxWidth);
+    const accentWidth = 3.0;
+    final media = _linkPreviewMedia(
+      preview,
+      math.max(1.0, maxWidth - accentWidth),
+    );
     final textChildren = <Widget>[
       if (preview.siteName.isNotEmpty)
         Text(
@@ -2529,20 +2582,32 @@ class _MessageBubbleState extends State<MessageBubble>
         ),
     ];
 
+    final translucentBackground = outgoing
+        ? _outgoingTextColor.withValues(alpha: 0.10)
+        : c.searchFill.withValues(alpha: 0.85);
+    // Decorative bubbles may contain ornaments across their stretchable
+    // center. Precomposing the preview fill keeps those pixels from showing
+    // through the card while retaining the same tint.
+    final cardBackground = _bubbleBackgroundStyle.isDecorative
+        ? Color.alphaBlend(
+            translucentBackground,
+            outgoing ? _outgoingBubbleColor : _incomingBubbleColor,
+          )
+        : translucentBackground;
+
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: preview.url.isEmpty ? null : () => openLink(context, preview.url),
       child: Container(
+        key: ValueKey('messageLinkPreviewCard-${message.id}'),
         width: maxWidth,
         decoration: BoxDecoration(
-          color: outgoing
-              ? _outgoingTextColor.withValues(alpha: 0.10)
-              : c.searchFill.withValues(alpha: 0.85),
+          color: cardBackground,
           borderRadius: BorderRadius.circular(7),
           border: Border(
             left: BorderSide(
               color: outgoing ? _outgoingTextColor : link,
-              width: 3,
+              width: accentWidth,
             ),
           ),
         ),
@@ -2587,6 +2652,7 @@ class _MessageBubbleState extends State<MessageBubble>
       fallback: Size(width, large ? 140 : 96),
     );
     return SizedBox(
+      key: ValueKey('messageLinkPreviewMedia-${message.id}'),
       width: size.width,
       height: size.height,
       child: Stack(
@@ -2975,6 +3041,7 @@ class _MessageBubbleState extends State<MessageBubble>
     final c = context.colors;
     final accent = outgoing ? _outgoingTextColor : AppTheme.brand;
     return Row(
+      key: ValueKey('messageForwardHeader-${message.id}'),
       mainAxisSize: MainAxisSize.min,
       children: [
         AppIcon(
@@ -3101,7 +3168,7 @@ class _MessageBubbleState extends State<MessageBubble>
     unicode: true,
   );
 
-  /// Trailing inline meta after the text: time + edited pencil + delivery dots.
+  /// Trailing inline meta: delivery progress, replaced by edit status.
   InlineSpan _metaSpan(bool outgoing) {
     final faint = outgoing
         ? _outgoingTextColor.withValues(alpha: 0.65)
@@ -3113,30 +3180,22 @@ class _MessageBubbleState extends State<MessageBubble>
           mainAxisSize: MainAxisSize.min,
           children: [
             if (widget.message.isEdited)
-              AppIcon(HeroAppIcons.pen, size: 11, color: faint),
-            if (widget.message.isEdited && outgoing) const SizedBox(width: 4),
-            if (outgoing)
-              _deliveryDots(diameter: 3.5, color: _outgoingTextColor),
+              AppIcon(
+                HeroAppIcons.penToSquare,
+                key: const ValueKey('messageDeliveryEdited'),
+                size: 10,
+                color: faint,
+              )
+            else if (outgoing)
+              _MessageDeliveryIndicator(
+                isSending: message.isSending && !message.isSendAcknowledged,
+                isRead: widget.isRead,
+                pendingColor: _outgoingTextColor,
+                size: 10,
+              ),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _deliveryDots({required double diameter, required Color color}) {
-    Widget dot(int index) => Container(
-      key: ValueKey('messageDeliveryDot-$index'),
-      width: diameter,
-      height: diameter,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-    );
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        dot(0),
-        if (widget.isRead) ...[SizedBox(width: diameter * 0.75), dot(1)],
-      ],
     );
   }
 
@@ -3452,34 +3511,6 @@ class _MessageBubbleState extends State<MessageBubble>
     final spans = <InlineSpan>[];
     var cursor = start;
     while (cursor < end) {
-      MessageTextEntity? emoji;
-      for (final e in entities) {
-        if (e.isCustomEmoji &&
-            e.customEmojiId != null &&
-            e.offset == cursor &&
-            e.end <= end) {
-          emoji = e;
-          break;
-        }
-      }
-      if (emoji != null) {
-        spans.add(
-          WidgetSpan(
-            alignment: PlaceholderAlignment.middle,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 0.5),
-              child: CustomEmojiView(
-                id: emoji.customEmojiId!,
-                size: math.max(20, fontSize * 1.15),
-                color: base,
-              ),
-            ),
-          ),
-        );
-        cursor = emoji.end.clamp(cursor + 1, end).toInt();
-        continue;
-      }
-
       var next = end;
       for (final e in entities) {
         final eStart = e.offset.clamp(start, end).toInt();
@@ -3535,6 +3566,22 @@ class _MessageBubbleState extends State<MessageBubble>
               .where((e) => e.type != 'textEntityTypeSpoiler')
               .toList(growable: false);
     final style = _entityStyle(effectiveActive, base, link);
+    final customEmojiId = _customEmojiId(effectiveActive);
+    if (customEmojiId != null) {
+      return [
+        WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 0.5),
+            child: CustomEmojiView(
+              id: customEmojiId,
+              size: math.max(20, fontSize * 1.15),
+              color: style.color ?? base,
+            ),
+          ),
+        ),
+      ];
+    }
     if (_hasMath(effectiveActive)) {
       return [_inlineMathSpan(segment, style, fontSize)];
     }
@@ -3613,6 +3660,15 @@ class _MessageBubbleState extends State<MessageBubble>
 
   bool _hasInlineCode(List<MessageTextEntity> active) {
     return active.any((e) => e.type == 'textEntityTypeCode');
+  }
+
+  int? _customEmojiId(List<MessageTextEntity> active) {
+    for (final entity in active.reversed) {
+      if (entity.isCustomEmoji && entity.customEmojiId != null) {
+        return entity.customEmojiId;
+      }
+    }
+    return null;
   }
 
   bool _hasMath(List<MessageTextEntity> active) {
@@ -3806,13 +3862,18 @@ class _MessageBubbleState extends State<MessageBubble>
       (logical * MediaQuery.devicePixelRatioOf(context)).ceil();
 
   Widget _imageContent(TdFileRef image, bool outgoing) {
-    final imageSize = _imageDisplaySize();
+    final geometry = _imagePreviewGeometry();
+    final imageSize = geometry.contentSize;
     final caption = _caption();
-    final usesBlurredFrame =
+    final widensForCaption =
         caption != null && _usesBlurredImageFrame(imageSize);
-    final frameSize = usesBlurredFrame
-        ? Size(_mediaMaxWidth(), imageSize.height)
-        : imageSize;
+    final frameSize = widensForCaption
+        ? Size(
+            _mediaMaxWidth(),
+            math.max(imageSize.height, geometry.frameSize.height),
+          )
+        : geometry.frameSize;
+    final usesBlurredFrame = geometry.needsBlurredFill || widensForCaption;
     final grouped = _groupsMediaCaption(caption);
     final mediaRadius = grouped ? 0.0 : 10.0;
     final mediaBorderRadius = _messageBorderRadius(mediaRadius);
@@ -3900,8 +3961,12 @@ class _MessageBubbleState extends State<MessageBubble>
     Size frameSize,
     BorderRadius borderRadius,
   ) {
-    final frameCacheWidth = _cachePx(frameSize.width);
-    final frameCacheHeight = _cachePx(frameSize.height);
+    final blurredSource = image.thumbnail ?? image;
+    final blurredCacheWidth = math.min(_cachePx(frameSize.width), _cachePx(96));
+    final blurredCacheHeight = math.min(
+      _cachePx(frameSize.height),
+      _cachePx(96),
+    );
     return ClipRRect(
       borderRadius: borderRadius,
       child: Stack(
@@ -3912,10 +3977,10 @@ class _MessageBubbleState extends State<MessageBubble>
             child: Transform.scale(
               scale: 1.08,
               child: TDImage(
-                photo: image,
+                photo: blurredSource,
                 cornerRadius: 0,
-                cacheWidth: frameCacheWidth,
-                cacheHeight: frameCacheHeight,
+                cacheWidth: blurredCacheWidth,
+                cacheHeight: blurredCacheHeight,
               ),
             ),
           ),
@@ -3947,17 +4012,42 @@ class _MessageBubbleState extends State<MessageBubble>
     required String? caption,
     required bool outgoing,
   }) {
+    final hasForwardHeader = message.forwardOrigin?.trim().isNotEmpty ?? false;
     if (!_groupsMediaCaption(caption)) {
+      final attributedMedia = hasForwardHeader
+          ? _bubbleBackground(
+              key: ValueKey('messageForwardedMedia-${message.id}'),
+              outgoing: outgoing,
+              constraints: BoxConstraints(maxWidth: _mediaMaxWidth()),
+              padding: EdgeInsets.zero,
+              borderRadius: _messageBorderRadius(8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 7, 10, 6),
+                    child: _forwardHeader(outgoing),
+                  ),
+                  media,
+                ],
+              ),
+            )
+          : media;
       return Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: outgoing
             ? CrossAxisAlignment.end
             : CrossAxisAlignment.start,
         children: [
-          media,
+          attributedMedia,
           if (caption != null) ...[
             const SizedBox(height: 4),
-            _textBubble(caption, outgoing),
+            _textBubble(
+              caption,
+              outgoing,
+              includeForwardHeader: !hasForwardHeader,
+            ),
           ],
         ],
       );
@@ -3977,6 +4067,11 @@ class _MessageBubbleState extends State<MessageBubble>
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (hasForwardHeader)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 7, 10, 6),
+              child: _forwardHeader(outgoing),
+            ),
           media,
           Padding(
             padding: const EdgeInsets.fromLTRB(6, 7, 6, 3),
@@ -4030,6 +4125,7 @@ class _MessageBubbleState extends State<MessageBubble>
     final media = GestureDetector(
       onTap: () => widget.onPlayVideo?.call(message),
       onLongPress: () => _handleLongPress(MessageActionSource.video),
+      onSecondaryTap: () => _handleLongPress(MessageActionSource.video),
       child: SizedBox(
         width: size.width,
         height: size.height,
@@ -4106,6 +4202,7 @@ class _MessageBubbleState extends State<MessageBubble>
     final media = GestureDetector(
       onTap: () => widget.onPlayVideo?.call(message),
       onLongPress: () => _handleLongPress(MessageActionSource.video),
+      onSecondaryTap: () => _handleLongPress(MessageActionSource.video),
       child: ClipRRect(
         borderRadius: _messageBorderRadius(mediaRadius),
         child: SizedBox(
@@ -4133,13 +4230,14 @@ class _MessageBubbleState extends State<MessageBubble>
   }
 
   Size _imageDisplaySize() {
-    final maxWidth = _mediaMaxWidth();
-    return _fitSize(
-      width: message.imageWidth,
-      height: message.imageHeight,
-      maxWidth: maxWidth,
-      maxHeight: maxWidth,
-      fallback: Size(maxWidth, maxWidth),
+    return _imagePreviewGeometry().frameSize;
+  }
+
+  MediaPreviewGeometry _imagePreviewGeometry() {
+    return telegramDesktopMediaPreviewGeometry(
+      sourceWidth: message.imageWidth,
+      sourceHeight: message.imageHeight,
+      availableWidth: _mediaMaxWidth(),
     );
   }
 
@@ -4530,6 +4628,7 @@ class _MessageBubbleState extends State<MessageBubble>
         context,
       ).push(MaterialPageRoute(builder: (_) => FileDetailView(doc: doc))),
       onLongPress: () => _handleGroupedFileLongPress(source, itemKey),
+      onSecondaryTap: () => _handleGroupedFileLongPress(source, itemKey),
       child: isGif && doc.file != null
           ? SizedBox(
               key: itemKey,
@@ -4900,4 +4999,121 @@ class _LatexView extends StatelessWidget {
       return Text(expression, style: style);
     }
   }
+}
+
+class _MessageDeliveryIndicator extends StatefulWidget {
+  const _MessageDeliveryIndicator({
+    required this.isSending,
+    required this.isRead,
+    required this.pendingColor,
+    required this.size,
+  });
+
+  final bool isSending;
+  final bool isRead;
+  final Color pendingColor;
+  final double size;
+
+  @override
+  State<_MessageDeliveryIndicator> createState() =>
+      _MessageDeliveryIndicatorState();
+}
+
+class _MessageDeliveryIndicatorState extends State<_MessageDeliveryIndicator>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+    if (widget.isSending) _controller.repeat();
+  }
+
+  @override
+  void didUpdateWidget(_MessageDeliveryIndicator oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isSending == oldWidget.isSending) return;
+    if (widget.isSending) {
+      _controller.repeat();
+    } else {
+      _controller.stop();
+      _controller.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => SizedBox.square(
+    key: ValueKey(
+      widget.isSending
+          ? 'messageDeliverySending'
+          : widget.isRead
+          ? 'messageDeliveryRead'
+          : 'messageDeliverySent',
+    ),
+    dimension: widget.size,
+    child: CustomPaint(
+      painter: _MessageDeliveryPainter(
+        rotation: _controller,
+        isSending: widget.isSending,
+        color: widget.isSending
+            ? widget.pendingColor.withValues(alpha: 0.72)
+            : widget.isRead
+            ? const Color(0xFF34C759)
+            : const Color(0xFFFFFFFF),
+      ),
+    ),
+  );
+}
+
+class _MessageDeliveryPainter extends CustomPainter {
+  _MessageDeliveryPainter({
+    required Animation<double> rotation,
+    required this.isSending,
+    required this.color,
+  }) : _rotation = rotation,
+       super(repaint: rotation);
+
+  final Animation<double> _rotation;
+  final bool isSending;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final strokeWidth = math.max(1.25, size.shortestSide * 0.16);
+    final radius = (size.shortestSide - strokeWidth) / 2;
+    final rect = Rect.fromCircle(
+      center: size.center(Offset.zero),
+      radius: radius,
+    );
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round;
+    if (isSending) {
+      canvas.drawArc(
+        rect,
+        _rotation.value * math.pi * 2 - math.pi / 2,
+        math.pi * 1.35,
+        false,
+        paint,
+      );
+    } else {
+      canvas.drawCircle(size.center(Offset.zero), radius, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_MessageDeliveryPainter oldDelegate) =>
+      oldDelegate.isSending != isSending || oldDelegate.color != color;
 }

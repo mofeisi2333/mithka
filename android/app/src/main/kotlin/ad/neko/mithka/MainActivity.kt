@@ -385,6 +385,9 @@ class MainActivity : FlutterFragmentActivity() {
         "blue" to "$packageName.MainActivityBlue",
         "purple" to "$packageName.MainActivityPurple",
         "pixel" to "$packageName.MainActivityPixel",
+        "aurora" to "$packageName.MainActivityAurora",
+        "prism" to "$packageName.MainActivityPrism",
+        "signal" to "$packageName.MainActivitySignal",
     )
 
     private fun currentLauncherIcon(): String {
@@ -511,12 +514,14 @@ class MainActivity : FlutterFragmentActivity() {
             add("io.flutter.plugins.firebase.core.FlutterFirebaseCorePlugin")
             add("com.dexterous.flutterlocalnotifications.FlutterLocalNotificationsPlugin")
             add("io.flutter.plugins.flutter_plugin_android_lifecycle.FlutterAndroidLifecyclePlugin")
+            add("com.it_nomads.fluttersecurestorage.FlutterSecureStoragePlugin")
             add("xyz.canardoux.fluttersound.FlutterSound")
             add("com.mediadevkit.fvp.FvpPlugin")
             add("com.baseflow.geolocator.GeolocatorPlugin")
             add("io.flutter.plugins.imagepicker.ImagePickerPlugin")
             add("com.fluttercandies.photo_manager.PhotoManagerPlugin")
             add("com.github.dart_lang.jni.JniPlugin")
+            add("io.flutter.plugins.localauth.LocalAuthPlugin")
             add("com.crazecoder.openfile.OpenFilePlugin")
             add("dev.fluttercommunity.plus.packageinfo.PackageInfoPlugin")
             add("io.flutter.plugins.pathprovider.PathProviderPlugin")

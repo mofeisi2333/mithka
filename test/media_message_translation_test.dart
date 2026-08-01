@@ -1,7 +1,9 @@
 import 'dart:convert';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mithka/chat/custom_emoji.dart';
 import 'package:mithka/chat/message_bubble.dart';
 import 'package:mithka/chat/stretchable_message_bubble_background.dart';
 import 'package:mithka/l10n/app_localizations.dart';
@@ -66,6 +68,41 @@ void main() {
     return theme;
   }
 
+  testWidgets('secondary mouse click invokes message action callback', (
+    tester,
+  ) async {
+    final message = ChatMessage(
+      id: 100,
+      isOutgoing: false,
+      text: 'Open message actions',
+      date: 1,
+    );
+    ChatMessage? actionTarget;
+
+    await pumpBubble(
+      tester,
+      message,
+      onLongPress: (message) => actionTarget = message,
+    );
+
+    final contextGesture = find.descendant(
+      of: find.byType(MessageBubble),
+      matching: find.byWidgetPredicate(
+        (widget) => widget is GestureDetector && widget.onSecondaryTap != null,
+      ),
+    );
+    expect(contextGesture, findsOneWidget);
+
+    await tester.tap(
+      contextGesture,
+      buttons: kSecondaryMouseButton,
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pump();
+
+    expect(actionTarget, same(message));
+  });
+
   testWidgets('grouped photo captions render their translation', (
     tester,
   ) async {
@@ -94,6 +131,49 @@ void main() {
     expect(
       find.byKey(const ValueKey('messageTranslationBlock')),
       findsOneWidget,
+    );
+
+    // Expire the mocked TDLib image lookup timeout before test teardown.
+    await tester.pump(const Duration(minutes: 3, seconds: 1));
+  });
+
+  testWidgets('forwarded photos keep attribution above attached comments', (
+    tester,
+  ) async {
+    final message = ChatMessage(
+      id: 6,
+      isOutgoing: false,
+      text: '',
+      date: 1,
+      contentType: 'messagePhoto',
+      image: TdFileRef(
+        id: 106,
+        miniThumb: base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        ),
+      ),
+      imageWidth: 600,
+      imageHeight: 400,
+    )..forwardOrigin = 'Original Channel';
+
+    await pumpBubble(
+      tester,
+      message,
+      showCommentAttachment: true,
+      channelHasLinkedDiscussion: true,
+    );
+
+    final combined = find.byKey(const ValueKey('messageCombinedBubble-6'));
+    final header = find.byKey(const ValueKey('messageForwardHeader-6'));
+    final comments = find.byKey(const ValueKey('messageCommentsAttachment-6'));
+    expect(combined, findsOneWidget);
+    expect(header, findsOneWidget);
+    expect(find.text('Forwarded from Original Channel'), findsOneWidget);
+    expect(find.descendant(of: combined, matching: header), findsOneWidget);
+    expect(find.descendant(of: combined, matching: comments), findsOneWidget);
+    expect(
+      tester.getBottomLeft(header).dy,
+      lessThan(tester.getTopLeft(comments).dy),
     );
 
     // Expire the mocked TDLib image lookup timeout before test teardown.
@@ -201,6 +281,40 @@ void main() {
     expect(entityLink.style?.decoration, isNot(TextDecoration.underline));
     expect(autoLink.style?.decoration, isNot(TextDecoration.underline));
     expect(explicitUnderline.style?.decoration, TextDecoration.underline);
+  });
+
+  testWidgets('message custom emoji does not leak through a spoiler', (
+    tester,
+  ) async {
+    const text = '🙂';
+    final message = ChatMessage(
+      id: 41,
+      isOutgoing: false,
+      text: text,
+      date: 1,
+      contentType: 'messageText',
+      textEntities: const [
+        MessageTextEntity(offset: 0, length: 2, type: 'textEntityTypeSpoiler'),
+        MessageTextEntity(
+          offset: 0,
+          length: 2,
+          type: 'textEntityTypeCustomEmoji',
+          customEmojiId: 123,
+        ),
+      ],
+    );
+
+    await pumpBubble(tester, message);
+    expect(find.byType(CustomEmojiView), findsNothing);
+    final spoiler = tester
+        .widgetList<RichText>(find.byType(RichText))
+        .expand((widget) => _textSpans(widget.text))
+        .singleWhere((span) => span.text == text);
+    (spoiler.recognizer! as TapGestureRecognizer).onTap!();
+    await tester.pump();
+
+    expect(find.byType(CustomEmojiView), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 50));
   });
 
   testWidgets('document albums render as one bubble with one shared caption', (

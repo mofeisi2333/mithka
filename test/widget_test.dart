@@ -128,6 +128,12 @@ class _FocusTestChatViewModel extends ChatViewModel {
     ];
     notifyListeners();
   }
+
+  void completeInitialLoad({String remoteDraft = ''}) {
+    draft = remoteDraft;
+    initialLoaded = true;
+    notifyListeners();
+  }
 }
 
 class _ControlledMediaChatViewModel extends ChatViewModel {
@@ -997,6 +1003,49 @@ void main() {
 
       return (vm, target);
     }
+
+    testWidgets('quick reply focuses only after restoring the remote draft', (
+      tester,
+    ) async {
+      final vm = _FocusTestChatViewModel();
+      addTearDown(vm.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('en'),
+          localizationsDelegates: const [
+            AppLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.bottomCenter,
+              child: ChatInputBar(
+                vm: vm,
+                requestInitialFocus: true,
+                onStartCall: (_) {},
+                onMessageSent: () {},
+              ),
+            ),
+          ),
+        ),
+      );
+
+      var field = tester.widget<TextField>(find.byType(TextField));
+      expect(field.focusNode?.hasFocus, isFalse);
+      expect(field.controller?.text, isEmpty);
+
+      vm.completeInitialLoad(remoteDraft: 'Preserved Telegram draft');
+      await tester.pump();
+      await tester.pump();
+
+      field = tester.widget<TextField>(find.byType(TextField));
+      expect(field.controller?.text, 'Preserved Telegram draft');
+      expect(field.focusNode?.hasFocus, isTrue);
+    });
 
     testWidgets('shows AI Reply inside an empty input and inserts its draft', (
       tester,
@@ -2658,9 +2707,13 @@ void main() {
       expect(everySentCallbackSawClosedPanel, isTrue);
     });
 
-    testWidgets('more panel paints the bottom safe area with its background', (
+    testWidgets('composer and panel paint one continuous bottom surface', (
       tester,
     ) async {
+      final themedColors = AppColors.light.copyWith(
+        inputBarBackground: const Color(0xA0224466),
+        panelBackground: const Color(0x99664422),
+      );
       final vm = ChatViewModel(
         chatId: 1,
         title: 'Test chat',
@@ -2670,6 +2723,7 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
+          theme: ThemeData(extensions: [themedColors]),
           home: MediaQuery(
             data: const MediaQueryData(padding: EdgeInsets.only(bottom: 34)),
             child: Scaffold(
@@ -2689,17 +2743,25 @@ void main() {
       final safeAreaBackground = find.byKey(
         const ValueKey('chat-input-safe-area-background'),
       );
+      final panelSafeAreaBackground = find.byKey(
+        const ValueKey('chat-input-panel-safe-area-background'),
+      );
       final colors = tester.element(safeAreaBackground).colors;
       expect(
         tester.widget<ColoredBox>(safeAreaBackground).color,
         colors.inputBarBackground,
       );
+      expect(panelSafeAreaBackground, findsNothing);
 
       await tester.tap(find.byIcon(HeroAppIcons.circlePlus.data));
       await tester.pump();
 
       expect(
         tester.widget<ColoredBox>(safeAreaBackground).color,
+        colors.inputBarBackground,
+      );
+      expect(
+        tester.widget<ColoredBox>(panelSafeAreaBackground).color,
         colors.panelBackground,
       );
     });
@@ -3294,7 +3356,9 @@ void main() {
       expect(richTextContaining('Retained original text'), findsNothing);
     });
 
-    testWidgets('always shows one sent dot and two read dots', (tester) async {
+    testWidgets('shows distinct sending, sent, and read delivery states', (
+      tester,
+    ) async {
       SharedPreferences.setMockInitialValues({
         'showMessageMetaIndicators': false,
       });
@@ -3307,8 +3371,23 @@ void main() {
         text: 'sent',
         date: 1,
       );
+      var isRead = false;
 
-      Future<void> pumpBubble({required bool isRead}) {
+      ({Color color, bool isSending}) indicatorPaint(String statusKey) {
+        final customPaint = tester.widget<CustomPaint>(
+          find.descendant(
+            of: find.byKey(ValueKey(statusKey)),
+            matching: find.byType(CustomPaint),
+          ),
+        );
+        final dynamic painter = customPaint.painter;
+        return (
+          color: painter.color as Color,
+          isSending: painter.isSending as bool,
+        );
+      }
+
+      Future<void> pumpBubble() {
         return tester.pumpWidget(
           ChangeNotifierProvider<ThemeController>.value(
             value: theme,
@@ -3326,22 +3405,131 @@ void main() {
         );
       }
 
-      await pumpBubble(isRead: false);
+      message.isSending = true;
+      await pumpBubble();
       expect(
-        find.byKey(const ValueKey('messageDeliveryDot-0')),
+        find.byKey(const ValueKey('messageDeliverySending')),
         findsOneWidget,
       );
-      expect(find.byKey(const ValueKey('messageDeliveryDot-1')), findsNothing);
+      expect(indicatorPaint('messageDeliverySending').isSending, isTrue);
 
-      await pumpBubble(isRead: true);
+      message.isSendAcknowledged = true;
+      await pumpBubble();
+      expect(find.byKey(const ValueKey('messageDeliverySent')), findsOneWidget);
       expect(
-        find.byKey(const ValueKey('messageDeliveryDot-0')),
+        find.byKey(const ValueKey('messageDeliverySending')),
+        findsNothing,
+      );
+      expect(indicatorPaint('messageDeliverySent'), (
+        color: const Color(0xFFFFFFFF),
+        isSending: false,
+      ));
+
+      message.isSending = false;
+      await pumpBubble();
+      expect(find.byKey(const ValueKey('messageDeliverySent')), findsOneWidget);
+      expect(indicatorPaint('messageDeliverySent'), (
+        color: const Color(0xFFFFFFFF),
+        isSending: false,
+      ));
+
+      isRead = true;
+      await pumpBubble();
+      expect(find.byKey(const ValueKey('messageDeliveryRead')), findsOneWidget);
+      expect(find.byKey(const ValueKey('messageDeliverySent')), findsNothing);
+      expect(indicatorPaint('messageDeliveryRead'), (
+        color: const Color(0xFF34C759),
+        isSending: false,
+      ));
+
+      isRead = false;
+      await pumpBubble();
+      expect(find.byKey(const ValueKey('messageDeliverySent')), findsOneWidget);
+      expect(find.byKey(const ValueKey('messageDeliveryRead')), findsNothing);
+      expect(indicatorPaint('messageDeliverySent'), (
+        color: const Color(0xFFFFFFFF),
+        isSending: false,
+      ));
+
+      isRead = true;
+      message.isEdited = true;
+      await pumpBubble();
+      expect(
+        find.byKey(const ValueKey('messageDeliveryEdited')),
         findsOneWidget,
       );
-      expect(
-        find.byKey(const ValueKey('messageDeliveryDot-1')),
-        findsOneWidget,
+      expect(find.byKey(const ValueKey('messageDeliverySent')), findsNothing);
+      expect(find.byKey(const ValueKey('messageDeliveryRead')), findsNothing);
+      expect(find.byIcon(HeroAppIcons.penToSquare.data), findsOneWidget);
+    });
+
+    testWidgets('uses the same sent and read distinction on media bubbles', (
+      tester,
+    ) async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final theme = ThemeController(prefs);
+      addTearDown(theme.dispose);
+      final message = ChatMessage(
+        id: 2,
+        isOutgoing: true,
+        text: '',
+        date: 1,
+        contentType: 'messagePhoto',
+        image: TdFileRef(id: 22, miniThumb: Uint8List(0)),
+        imageWidth: 640,
+        imageHeight: 480,
       );
+      var isRead = false;
+
+      ({Color color, bool isSending}) indicatorPaint(String statusKey) {
+        final customPaint = tester.widget<CustomPaint>(
+          find.descendant(
+            of: find.byKey(ValueKey(statusKey)),
+            matching: find.byType(CustomPaint),
+          ),
+        );
+        final dynamic painter = customPaint.painter;
+        return (
+          color: painter.color as Color,
+          isSending: painter.isSending as bool,
+        );
+      }
+
+      Future<void> pumpBubble() => tester.pumpWidget(
+        ChangeNotifierProvider<ThemeController>.value(
+          value: theme,
+          child: MaterialApp(
+            home: Scaffold(
+              body: MessageBubble(
+                message: message,
+                peerTitle: 'Test',
+                isGroup: false,
+                isRead: isRead,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await pumpBubble();
+      expect(find.byKey(const ValueKey('messageDeliverySent')), findsOneWidget);
+      expect(indicatorPaint('messageDeliverySent'), (
+        color: const Color(0xFFFFFFFF),
+        isSending: false,
+      ));
+
+      isRead = true;
+      await pumpBubble();
+      expect(find.byKey(const ValueKey('messageDeliveryRead')), findsOneWidget);
+      expect(find.byKey(const ValueKey('messageDeliverySent')), findsNothing);
+      expect(indicatorPaint('messageDeliveryRead'), (
+        color: const Color(0xFF34C759),
+        isSending: false,
+      ));
+
+      // Expire the media lookup timeout scheduled by the image placeholder.
+      await tester.pump(const Duration(minutes: 3, seconds: 1));
     });
 
     testWidgets('keeps an outgoing photo repeat badge beside its bubble', (

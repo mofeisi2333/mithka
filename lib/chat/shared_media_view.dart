@@ -11,6 +11,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 
+import '../app/app_navigator.dart';
 import '../components/app_icons.dart';
 import '../components/photo_avatar.dart';
 import '../components/toast.dart';
@@ -925,7 +926,7 @@ class _SharedMediaViewState extends State<SharedMediaView> {
           style: TextStyle(
             fontSize: 13,
             fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-            color: selected ? Colors.white : c.textSecondary,
+            color: selected ? AppTheme.onBrand : c.textSecondary,
           ),
         ),
       ),
@@ -1614,7 +1615,11 @@ class _SharedMediaViewState extends State<SharedMediaView> {
                 shape: BoxShape.circle,
                 border: Border.all(color: c.background, width: 2),
               ),
-              child: const Icon(Icons.check, size: 11, color: Colors.white),
+              child: const AppIcon(
+                HeroAppIcons.check,
+                size: 11,
+                color: Colors.white,
+              ),
             ),
           ),
       ],
@@ -1659,7 +1664,11 @@ class _SharedMediaViewState extends State<SharedMediaView> {
     final c = context.colors;
     final state = _stateFor(message);
     return PopupMenuButton<_SharedMediaMenuAction>(
-      icon: Icon(Icons.more_vert, size: 18, color: c.textTertiary),
+      icon: AppIcon(
+        HeroAppIcons.ellipsisVertical,
+        size: 18,
+        color: c.textTertiary,
+      ),
       color: c.background,
       onSelected: (action) {
         switch (action) {
@@ -1704,7 +1713,11 @@ class _SharedMediaViewState extends State<SharedMediaView> {
       ),
       child: PopupMenuButton<_SharedMediaMenuAction>(
         padding: EdgeInsets.zero,
-        icon: const Icon(Icons.more_horiz, size: 18, color: Colors.white),
+        icon: const AppIcon(
+          HeroAppIcons.ellipsis,
+          size: 18,
+          color: Colors.white,
+        ),
         color: context.colors.background,
         onSelected: (action) {
           if (action == _SharedMediaMenuAction.openOriginal) {
@@ -1825,7 +1838,7 @@ class _SharedMediaViewState extends State<SharedMediaView> {
     if (!_canOpenSourceMessage(message)) return;
     final sourceChatId = _sourceChatIdFor(message);
     Navigator.of(context).push(
-      MaterialPageRoute(
+      AppChatPageRoute<void>(
         builder: (_) => ChatView(
           chatId: sourceChatId,
           title: _sourceTitleFor(message),

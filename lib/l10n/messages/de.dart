@@ -1,4 +1,13 @@
 const deMessages = <String, String>{
+  'navigationBack': "Zurück",
+  'appearanceArchivedChatsDesktopHint':
+      "Auf dem Desktop bleiben Archive zum Herunterziehen oben sichtbar, damit sie mit der Maus erreichbar sind. Die gespeicherte Auswahl gilt weiterhin auf Mobilgeräten.",
+  'callAlreadyInProgress': "Ein anderer Anruf läuft bereits.",
+  'composerEmoji': "Emoji",
+  'composerMediaSelectionLimit': "Wähle bis zu {value1} Fotos oder Videos aus.",
+  'composerStickers': "Sticker",
+  'loginHidePassword': "Passwort verbergen",
+  'loginShowPassword': "Passwort anzeigen",
   'aboutReportProblem': "Problem melden",
   'aboutReportProblemDetail': "Enthält datenschutzfreundliche Diagnosedaten",
   'aboutTelegramChannel': "Telegram-Kanal",
@@ -185,6 +194,9 @@ const deMessages = <String, String>{
   'aiReplyUnavailable': "KI-Antwort ist für diese Nachricht nicht verfügbar.",
   'aiReplyUseReply': "Antwort verwenden",
   'aiReplyUsing': "Antworten mit",
+  'aiReplyPrompts': "Antwort-Prompts",
+  'aiTranslatePrompts': "Übersetzungs-Prompts",
+  'aiSummarizePrompts': "Zusammenfassungs-Prompts",
   'aiTestFailed': "Modelltest fehlgeschlagen.",
   'aiTestModel': "Modell testen",
   'aiTestPrompt': "Testnachricht",
@@ -294,15 +306,16 @@ const deMessages = <String, String>{
   'appearanceClearTextFonts': "Textschriften löschen",
   'appearanceColor': "Farbe",
   'appearanceDisableChatListSwipeActions': "Wischaktionen deaktivieren",
-  'appearanceSavedMessagesBookmarkView':
-      "Lesezeichenansicht für gespeicherte Nachrichten",
   'appearanceGestures': "Gesten",
   'gesturesChatActions': "Chat-Aktionen",
+  'gesturesChatActionsModeDescription':
+      "1 Finger: Chat-Aktionen · 2 Finger: Ordner · 3 Finger: Konten",
   'gesturesChatListSwipe': "Wischen in der Chatliste",
   'gesturesDoNothing': "Nichts tun",
   'gesturesHoldSwipeActions': "Halten und wischen für Chat-Aktionen",
   'gesturesSwitchAccounts': "Konten wechseln",
   'gesturesSwitchFolders': "Ordner wechseln",
+  'gesturesSwitchFoldersModeDescription': "1 Finger: Ordner · 3 Finger: Konten",
   'gesturesThreeFingerSwipe': "Mit drei Fingern wischen",
   'appearanceDownloadFailed': "Download fehlgeschlagen",
   'appearanceEmojiFont': "Emoji-Schrift",
@@ -377,10 +390,13 @@ const deMessages = <String, String>{
   'appearanceTotalSize': "Gesamtgröße",
   'appearanceUnreadBadge': "Ungelesen-Markierung",
   'appIconBlueGradient': "Blauer Verlauf",
+  'appIconAurora': "Aurora M",
   'appIconChangeFailed': "App-Symbol konnte nicht geändert werden",
   'appIconDefault': "Standard",
   'appIconPixel': "8-Bit-Pixel",
+  'appIconPrism': "Prisma M",
   'appIconPurpleGradient': "Violetter Verlauf",
+  'appIconSignal': "Fettes M",
   'appIconTitle': "App-Symbol",
   'appIconUnsupported':
       "Diese Plattform oder dieser Launcher unterstützt das Ändern des App-Symbols möglicherweise nicht.",
@@ -808,6 +824,28 @@ const deMessages = <String, String>{
   'chatWallpaperThemesShared': "Themen gelten für beide Nutzer",
   'chatWallpaperThemesSharedWithChat': "Themen sind für alle im Chat sichtbar",
   'chatWallpaperTitle': "Hintergrund",
+  'chatSendFailedBlocked':
+      "Diese Nachricht kann nicht gesendet werden, weil eine Seite die andere blockiert hat.",
+  'chatSendFailedGeneric': "Telegram hat die Nachricht abgelehnt: {value1}",
+  'chatSendFailedInsufficientStars':
+      "Du hast nicht genug Telegram-Sterne, um diese Nachricht zu senden.",
+  'chatSendFailedMutualContact':
+      "Diese Person akzeptiert nur Nachrichten von gegenseitigen Kontakten.",
+  'chatSendFailedPaid':
+      "Dieser Chat akzeptiert nur kostenpflichtige Nachrichten. Bestätige die Stern-Kosten und versuche es erneut.",
+  'chatSendFailedPaidCount':
+      "Dieser Chat kostet {value1} Sterne pro Nachricht. Bestätige die kostenpflichtige Nachricht und versuche es erneut.",
+  'chatSendFailedPermission':
+      "Du darfst in diesem Chat keine Nachrichten senden oder das Thema ist geschlossen.",
+  'chatSendFailedPremium':
+      "Diese Person akzeptiert neue Chats nur von Kontakten oder Telegram-Premium-Nutzern. Füge sie als Kontakt hinzu oder nutze Premium.",
+  'chatSendFailedPrivacy':
+      "Die Privatsphäre-Einstellungen des Empfängers erlauben diese Nachricht nicht.",
+  'chatSendFailedRateLimited':
+      "Telegram begrenzt das Senden vorübergehend. Warte kurz und versuche es erneut.",
+  'chatSendFailedTitle': "Nachricht nicht gesendet",
+  'chatSendFailedUnavailable':
+      "Dieses Konto oder dieser Chat ist nicht mehr verfügbar.",
   'chatYouAreMuted': "Du bist stummgeschaltet",
   'chatYouWereRemovedFromGroup': "Du wurdest aus dieser Gruppe entfernt",
   'checklistComposerAddTask': "Aufgabe hinzufügen",
@@ -873,6 +911,7 @@ const deMessages = <String, String>{
   'composerNoGifs': "Keine gespeicherten GIFs",
   'composerOpenAttachmentFailed': "{value1} kann nicht geöffnet werden",
   'composerOpenMenu': "Menü öffnen",
+  'composerCloseMenu': "Menü schließen",
   'composerPaidMessageCost':
       "Das Senden dieser Nachricht kostet {value1} Sterne.",
   'composerPastedImageReadFailed': "Eingefügtes Bild kann nicht gelesen werden",
@@ -1324,6 +1363,7 @@ const deMessages = <String, String>{
   'momentsLikeFailed': "Gefällt mir fehlgeschlagen: {value1}",
   'momentsLoadingPosts': "Beiträge werden geladen…",
   'momentsMore': "Mehr",
+  'momentsMusic': "Musik",
   'momentsNewPostsCount': "{value1} neue Beiträge",
   'momentsNoChannelContent': "Noch keine Kanalinhalte",
   'momentsNoComments': "Noch keine Kommentare",
@@ -1475,6 +1515,7 @@ const deMessages = <String, String>{
   'pollComposerSingleChoiceLimitHint': "Einfachauswahl · Max. 10 Optionen",
   'premiumLabel': "Premium",
   'passkeysAdded': "Passkey hinzugefügt",
+  'passkeysAdd': "Passkey hinzufügen",
   'passkeysCreatedOn': "Erstellt am {value1}",
   'passkeysDelete': "Löschen",
   'passkeysDeleteMessage': "„{value1}“ löschen?",
@@ -1799,6 +1840,14 @@ const deMessages = <String, String>{
   'sensitiveContentUnblockMessage':
       "Dies aktiviert Telegrams kontoweite Einstellung für 18+ Inhalte. Du kannst sie später unter Datenschutz und Sicherheit ausschalten.",
   'sensitiveContentUnblockTitle': "18+ Inhalte anzeigen?",
+  'searchTabChats': "Chats",
+  'searchTabFiles': "Dateien",
+  'searchTabLinks': "Links",
+  'searchTabMedia': "Medien",
+  'searchTabMessages': "Nachrichten",
+  'searchTabMiniApps': "Mini-Apps",
+  'searchTabMusic': "Musik",
+  'searchTabVoiceMessages': "Sprachnachrichten",
   'settingsAboutMithka': "Über Mithka",
   'settingsLogOut': "Abmelden",
   'sharedMediaCacheDeleted': "Lokaler Cache gelöscht",
@@ -2142,6 +2191,8 @@ const deMessages = <String, String>{
   'callsOutgoing': "Ausgehend",
   'callsRetry': "Erneut versuchen",
   'callsTitle': "Anrufe",
+  'callsUnavailableOnDesktop':
+      "Anrufe sind in dieser Desktop-Version noch nicht verfügbar.",
   'callsUnknownConversation': "Unbekanntes Gespräch",
   'channelDirectMessages': "Channel Direct Messages",
   'channelDirectMessagesAllowAndRefund': "Allow and Refund",
