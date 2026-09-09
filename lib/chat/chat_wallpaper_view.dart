@@ -118,7 +118,7 @@ class _ChatWallpaperViewState extends State<ChatWallpaperView> {
     final dark = _targetDark;
     if (widget.isGlobal) {
       await _controller.loadGlobalChatThemes();
-      await _controller.loadDefaultWallpaper(dark: dark);
+      await _controller.loadDefaultWallpaper(dark: dark, refresh: true);
       try {
         _catalogBackgrounds = await _controller.installedBackgrounds(
           dark: dark,
@@ -243,7 +243,7 @@ class _ChatWallpaperViewState extends State<ChatWallpaperView> {
       padding: const EdgeInsets.all(2),
       decoration: BoxDecoration(
         color: c.panelBackground,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(AppRadius.control),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -316,47 +316,34 @@ class _ChatWallpaperViewState extends State<ChatWallpaperView> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    return ColoredBox(
-      color: c.groupedBackground,
-      child: Column(
-        children: [
-          NavHeader(
-            title: AppStringKeys.chatWallpaperTitle,
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: _loaded
-                ? SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 18),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (widget.isGlobal) ...[
-                          _brightnessPicker(),
-                          const SizedBox(height: 12),
-                        ],
-                        _preview(),
-                        const SizedBox(height: 12),
-                        _customizeBlock(),
-                        const SizedBox(height: 18),
-                        Text(
-                          AppStringKeys.chatWallpaperChoose.l10n(context),
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: c.textSecondary,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        _choices(),
-                      ],
-                    ),
-                  )
-                : const SizedBox.shrink(),
-          ),
-          _applyBar(),
-        ],
-      ),
+    return SettingsPageScaffold(
+      title: AppStringKeys.chatWallpaperTitle,
+      onBack: () => Navigator.of(context).pop(),
+      bottomNavigationBar: _applyBar(),
+      child: _loaded
+          ? SettingsListView(
+              children: [
+                if (widget.isGlobal) ...[
+                  _brightnessPicker(),
+                  const SizedBox(height: AppSpacing.lg),
+                ],
+                _preview(),
+                const SizedBox(height: AppSpacing.lg),
+                _customizeBlock(),
+                const SizedBox(height: AppSpacing.xxl),
+                Text(
+                  AppStringKeys.chatWallpaperChoose.l10n(context),
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: c.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                _choices(),
+              ],
+            )
+          : const SizedBox.shrink(),
     );
   }
 
@@ -370,7 +357,7 @@ class _ChatWallpaperViewState extends State<ChatWallpaperView> {
             ?.uiColors ??
         (dark ? AppColors.dark : AppColors.light);
     return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(AppRadius.lg),
       child: SizedBox(
         height: 270,
         child: ChatWallpaperBackground(
@@ -531,7 +518,7 @@ class _ChatWallpaperViewState extends State<ChatWallpaperView> {
               padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
               decoration: BoxDecoration(
                 color: c.card,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(AppRadius.card),
               ),
               child: Row(
                 children: [
@@ -1202,10 +1189,10 @@ class _ChatWallpaperViewState extends State<ChatWallpaperView> {
             color: selected ? c.linkBlue : c.divider,
             width: selected ? 3 : 1,
           ),
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(AppRadius.card),
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(11),
+          borderRadius: BorderRadius.circular(AppRadius.card),
           child: Stack(
             fit: StackFit.expand,
             children: [
@@ -1221,7 +1208,7 @@ class _ChatWallpaperViewState extends State<ChatWallpaperView> {
                       ),
                       decoration: BoxDecoration(
                         color: const Color(0xC57D4DE8),
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(AppRadius.control),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -1239,7 +1226,7 @@ class _ChatWallpaperViewState extends State<ChatWallpaperView> {
                             ),
                             style: const TextStyle(
                               fontSize: 10,
-                              fontWeight: FontWeight.w700,
+                              fontWeight: FontWeight.w600,
                               color: Color(0xFFFFFFFF),
                             ),
                           ),
@@ -1273,7 +1260,7 @@ class _ChatWallpaperViewState extends State<ChatWallpaperView> {
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: c.card,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppRadius.card),
       ),
       child: Column(
         children: [
@@ -1349,7 +1336,7 @@ class _ChatWallpaperViewState extends State<ChatWallpaperView> {
         decoration: BoxDecoration(
           color: active ? c.linkBlue.withValues(alpha: 0.14) : c.searchFill,
           border: Border.all(color: active ? c.linkBlue : c.divider),
-          borderRadius: BorderRadius.circular(11),
+          borderRadius: BorderRadius.circular(AppRadius.card),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1502,14 +1489,14 @@ class _ChatWallpaperViewState extends State<ChatWallpaperView> {
         decoration: BoxDecoration(
           color: enabled ? background : background.withValues(alpha: 0.45),
           border: primary ? null : Border.all(color: c.linkBlue),
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(AppRadius.card),
         ),
         child: Text(
           AppStrings.t(label),
           style: TextStyle(
             color: foreground,
             fontSize: 16,
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w600,
           ),
         ),
       ),

@@ -4,7 +4,10 @@ import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.ClipDescription
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.media.AudioManager
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
@@ -13,12 +16,16 @@ import android.media.MediaMuxer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.provider.Settings
 import android.util.Log
 import android.view.DragEvent
 import android.view.WindowManager
 import android.webkit.MimeTypeMap
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import com.iebb.f_videoplayer_pip.FVideoPictureInPicturePlugin
 import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.nl.languageid.LanguageIdentification
 import com.google.mlkit.nl.languageid.LanguageIdentifier
@@ -33,7 +40,10 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
+import java.io.IOException
 import java.nio.ByteBuffer
+import java.util.LinkedHashSet
+import kotlin.math.roundToInt
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 
@@ -43,7 +53,10 @@ class MainActivity : FlutterFragmentActivity() {
     private var accountBackup: AccountBackupPlugin? = null
     private var mithkaPro: MithkaProPlugin? = null
     private var mediaDropChannel: MethodChannel? = null
+    private var shareIntentChannel: MethodChannel? = null
+    private var pendingSharePayload: Map<String, Any?>? = null
     private var acceptingImageDrop = false
+    private var fullscreenSystemUi = false
     private val translators = mutableMapOf<String, Translator>()
     private val languageIdentifierDelegate = lazy<LanguageIdentifier> {
         LanguageIdentification.getClient()
@@ -54,10 +67,81 @@ class MainActivity : FlutterFragmentActivity() {
         // Let Flutter paint under the status bar and gesture/nav bar.
         WindowCompat.setDecorFitsSystemWindows(window, false)
         super.onCreate(savedInstanceState)
+        pendingSharePayload = parseIncomingShareIntent(intent)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        FVideoPictureInPicturePlugin.onActivityStarted(this)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        FVideoPictureInPicturePlugin.onActivityResumed(this)
+        if (fullscreenSystemUi) applyFullscreenSystemUi()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && fullscreenSystemUi) applyFullscreenSystemUi()
+    }
+
+    private fun applyFullscreenSystemUi() {
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (fullscreenSystemUi) {
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    override fun onPause() {
+        FVideoPictureInPicturePlugin.onActivityPaused(this)
+        super.onPause()
+    }
+
+    override fun onStop() {
+        FVideoPictureInPicturePlugin.onActivityStopped(this)
+        super.onStop()
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        FVideoPictureInPicturePlugin.onUserLeaveHint(this)
+    }
+
+    @android.annotation.TargetApi(Build.VERSION_CODES.R)
+    override fun onPictureInPictureRequested(): Boolean =
+        FVideoPictureInPicturePlugin.onPictureInPictureRequested(this) ||
+            super.onPictureInPictureRequested()
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration,
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        FVideoPictureInPicturePlugin.onPictureInPictureModeChanged(
+            this,
+            isInPictureInPictureMode,
+            newConfig,
+        )
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         registerPlugins(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "mithka/fullscreen_system_ui")
+            .setMethodCallHandler { call, result ->
+                if (call.method == "setFullscreen") {
+                    fullscreenSystemUi = call.arguments == true
+                    applyFullscreenSystemUi()
+                    result.success(null)
+                } else {
+                    result.notImplemented()
+                }
+            }
+        configureShareIntentChannel(flutterEngine)
         telegramPasskeys = TelegramPasskeyPlugin(
             this,
             flutterEngine.dartExecutor.binaryMessenger,
@@ -91,6 +175,9 @@ class MainActivity : FlutterFragmentActivity() {
                             "abis" to Build.SUPPORTED_ABIS.toList(),
                             "version" to (pkg.versionName ?: ""),
                             "sdkInt" to Build.VERSION.SDK_INT,
+                            "manufacturer" to Build.MANUFACTURER,
+                            "model" to Build.MODEL,
+                            "hardware" to Build.HARDWARE,
                         ),
                     )
                 } else {
@@ -180,6 +267,25 @@ class MainActivity : FlutterFragmentActivity() {
                 }
             }
 
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "mithka/app_lock_privacy",
+        ).setMethodCallHandler { call, result ->
+            if (call.method != "setPrivacyShieldVisible") {
+                result.notImplemented()
+                return@setMethodCallHandler
+            }
+            val visible = call.argument<Boolean>("visible") ?: false
+            runOnUiThread {
+                if (visible) {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                }
+            }
+            result.success(null)
+        }
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "mithka/player_brightness")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -205,6 +311,56 @@ class MainActivity : FlutterFragmentActivity() {
                                 window.attributes = attributes
                             }
                             result.success(null)
+                        }
+                    }
+                    "restore" -> {
+                        runOnUiThread {
+                            val attributes = window.attributes
+                            // -1 relinquishes the per-window override and lets
+                            // Android apply the user's system brightness.
+                            attributes.screenBrightness =
+                                WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                            window.attributes = attributes
+                        }
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "mithka/system_media_volume")
+            .setMethodCallHandler { call, result ->
+                val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                when (call.method) {
+                    "get" -> result.success(systemMediaVolumeState(audioManager))
+                    "set" -> {
+                        val requested = (call.arguments as? Number)?.toDouble()
+                        if (requested == null || !requested.isFinite()) {
+                            result.error("invalid_volume", "Expected a finite numeric value", null)
+                            return@setMethodCallHandler
+                        }
+                        if (audioManager.isVolumeFixed) {
+                            result.success(null)
+                            return@setMethodCallHandler
+                        }
+                        val maximum = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                        if (maximum <= 0) {
+                            result.success(null)
+                            return@setMethodCallHandler
+                        }
+                        val minimum = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            audioManager.getStreamMinVolume(AudioManager.STREAM_MUSIC)
+                        } else {
+                            0
+                        }
+                        val index = (requested.coerceIn(0.0, 1.0) * maximum)
+                            .roundToInt()
+                            .coerceIn(minimum, maximum)
+                        try {
+                            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, index, 0)
+                            result.success(systemMediaVolumeState(audioManager))
+                        } catch (error: SecurityException) {
+                            result.error("volume_change_denied", error.localizedMessage, null)
                         }
                     }
                     else -> result.notImplemented()
@@ -298,6 +454,173 @@ class MainActivity : FlutterFragmentActivity() {
             "mithka/media_drop",
         )
         window.decorView.setOnDragListener { _, event -> handleMediaDragEvent(event) }
+    }
+
+    /**
+     * Exposes Android's inbound share contract to Dart without handing Dart a
+     * provider URI that may stop being readable after the activity is resumed.
+     * Files are copied into the app cache on a worker thread and are deleted by
+     * Dart once the send flow finishes or is cancelled.
+     */
+    private fun configureShareIntentChannel(flutterEngine: FlutterEngine) {
+        shareIntentChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "mithka/share_intent",
+        )
+        shareIntentChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "initial" -> {
+                    val payload = pendingSharePayload
+                    pendingSharePayload = null
+                    result.success(payload)
+                }
+                "copyFiles" -> {
+                    val uris = (call.arguments as? List<*>)
+                        ?.filterIsInstance<String>()
+                        ?.filter { it.isNotBlank() }
+                        ?.take(MAX_SHARED_FILES)
+                        ?: emptyList()
+                    Thread {
+                        val files = copySharedFiles(uris)
+                        runOnUiThread { result.success(files) }
+                    }.start()
+                }
+                "deleteFiles" -> {
+                    val paths = (call.arguments as? List<*>)
+                        ?.filterIsInstance<String>()
+                        ?: emptyList()
+                    deleteSharedFiles(paths)
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val payload = parseIncomingShareIntent(intent) ?: return
+        // Keep a copy for the initial() handshake as well. The payload id lets
+        // Dart de-duplicate it if both paths race during a warm start.
+        pendingSharePayload = payload
+        runOnUiThread {
+            shareIntentChannel?.invokeMethod("share", payload)
+        }
+    }
+
+    private fun parseIncomingShareIntent(intent: Intent?): Map<String, Any?>? {
+        val action = intent?.action ?: return null
+        if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) {
+            return null
+        }
+        val uris = LinkedHashSet<Uri>()
+        intent.data
+            ?.takeIf { it.scheme == "content" || it.scheme == "file" }
+            ?.let(uris::add)
+        intent.clipData?.let { clip ->
+            for (index in 0 until minOf(clip.itemCount, MAX_SHARED_FILES)) {
+                clip.getItemAt(index).uri?.let(uris::add)
+            }
+        }
+        when (val stream = intent.extras?.get(Intent.EXTRA_STREAM)) {
+            is Uri -> uris.add(stream)
+            is ArrayList<*> -> stream.filterIsInstance<Uri>().forEach(uris::add)
+        }
+        val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)
+            ?.toString()
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        if (text == null && uris.isEmpty()) return null
+        return mapOf(
+            "id" to "share-${System.nanoTime()}",
+            "text" to text,
+            "mimeType" to intent.type,
+            "uris" to uris.take(MAX_SHARED_FILES).map(Uri::toString),
+        )
+    }
+
+    private fun copySharedFiles(uriStrings: List<String>): List<Map<String, Any?>> {
+        val copied = mutableListOf<Map<String, Any?>>()
+        for (uriString in uriStrings) {
+            val uri = runCatching { Uri.parse(uriString) }.getOrNull() ?: continue
+            val mimeType = contentResolver.getType(uri)
+                ?: "application/octet-stream"
+            val displayName = contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+            val fileName = sharedFileName(displayName, mimeType)
+            val destination = File(
+                cacheDir,
+                "mithka-share-${System.nanoTime()}-$fileName",
+            )
+            try {
+                val input = contentResolver.openInputStream(uri)
+                if (input == null) continue
+                input.use {
+                    destination.outputStream().use { output ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        var copiedBytes = 0L
+                        while (true) {
+                            val count = it.read(buffer)
+                            if (count < 0) break
+                            copiedBytes += count
+                            if (copiedBytes > MAX_SHARED_FILE_BYTES) {
+                                throw IOException("Shared file is too large")
+                            }
+                            output.write(buffer, 0, count)
+                        }
+                    }
+                }
+                copied += mapOf(
+                    "path" to destination.absolutePath,
+                    "fileName" to fileName,
+                    "mimeType" to mimeType,
+                )
+            } catch (error: Exception) {
+                destination.delete()
+                Log.w("Mithka", "Unable to copy shared file", error)
+            }
+        }
+        return copied
+    }
+
+    private fun sharedFileName(displayName: String?, mimeType: String): String {
+        val raw = displayName
+            ?.substringAfterLast('/')
+            ?.replace(Regex("[^A-Za-z0-9._ -]"), "_")
+            ?.trim()
+            ?.take(120)
+            ?.takeIf { it.isNotEmpty() }
+            ?: "shared-file"
+        if (raw.contains('.')) return raw
+        val extension = MimeTypeMap.getSingleton()
+            .getExtensionFromMimeType(mimeType)
+            ?.replace(Regex("[^A-Za-z0-9]"), "")
+            ?.take(8)
+            ?.takeIf { it.isNotEmpty() }
+        return if (extension == null) raw else "$raw.$extension"
+    }
+
+    private fun deleteSharedFiles(paths: List<String>) {
+        val cacheRoot = runCatching { cacheDir.canonicalFile }.getOrNull() ?: return
+        for (path in paths) {
+            val file = runCatching { File(path).canonicalFile }.getOrNull() ?: continue
+            if (file.parentFile == cacheRoot && file.name.startsWith("mithka-share-")) {
+                file.delete()
+            }
+        }
+    }
+
+    companion object {
+        private const val MAX_SHARED_FILES = 10
+        private const val MAX_SHARED_FILE_BYTES = 512L * 1024L * 1024L
     }
 
     private fun handleMediaDragEvent(event: DragEvent): Boolean {
@@ -528,6 +851,7 @@ class MainActivity : FlutterFragmentActivity() {
             add("com.baseflow.permissionhandler.PermissionHandlerPlugin")
             add("io.sentry.flutter.SentryFlutterPlugin")
             add("io.flutter.plugins.sharedpreferences.SharedPreferencesPlugin")
+            add("com.iebb.f_videoplayer_pip.FVideoPictureInPicturePlugin")
             add("io.flutter.plugins.urllauncher.UrlLauncherPlugin")
             add("io.flutter.plugins.videoplayer.VideoPlayerPlugin")
         }
@@ -732,6 +1056,21 @@ class MainActivity : FlutterFragmentActivity() {
         return lower.substringBefore('-')
     }
 
+    private fun systemMediaVolumeState(audioManager: AudioManager): Map<String, Any> {
+        val maximum = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        val minimum = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            audioManager.getStreamMinVolume(AudioManager.STREAM_MUSIC)
+        } else {
+            0
+        }
+        return mapOf(
+            "index" to audioManager.getStreamVolume(AudioManager.STREAM_MUSIC),
+            "minimum" to minimum,
+            "maximum" to maximum,
+            "fixed" to audioManager.isVolumeFixed,
+        )
+    }
+
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         translators.values.forEach { it.close() }
         translators.clear()
@@ -747,5 +1086,10 @@ class MainActivity : FlutterFragmentActivity() {
         callMedia?.dispose()
         callMedia = null
         super.cleanUpFlutterEngine(flutterEngine)
+    }
+
+    override fun onDestroy() {
+        FVideoPictureInPicturePlugin.onActivityDestroyed(this)
+        super.onDestroy()
     }
 }

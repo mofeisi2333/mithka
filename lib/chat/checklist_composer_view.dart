@@ -7,6 +7,8 @@
 //  Telegram Premium.)
 //
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 
@@ -35,12 +37,18 @@ class ChecklistComposerView extends StatefulWidget {
     this.initialTasks = const [],
     this.initialOthersCanAddTasks = false,
     this.initialOthersCanMarkTasksAsDone = true,
+    this.showBackButton = true,
+    this.onClose,
+    this.onSubmit,
   });
 
   final String initialTitle;
   final List<String> initialTasks;
   final bool initialOthersCanAddTasks;
   final bool initialOthersCanMarkTasksAsDone;
+  final bool showBackButton;
+  final FutureOr<void> Function()? onClose;
+  final FutureOr<void> Function(ChecklistComposerResult result)? onSubmit;
 
   @override
   State<ChecklistComposerView> createState() => _ChecklistComposerViewState();
@@ -103,14 +111,27 @@ class _ChecklistComposerViewState extends State<ChecklistComposerView> {
         .map((t) => t.text.trim())
         .where((t) => t.isNotEmpty)
         .toList();
-    Navigator.of(context).pop(
-      ChecklistComposerResult(
-        title: title,
-        tasks: tasks,
-        othersCanAddTasks: _othersCanAddTasks,
-        othersCanMarkTasksAsDone: _othersCanMarkTasksAsDone,
-      ),
+    final result = ChecklistComposerResult(
+      title: title,
+      tasks: tasks,
+      othersCanAddTasks: _othersCanAddTasks,
+      othersCanMarkTasksAsDone: _othersCanMarkTasksAsDone,
     );
+    final callback = widget.onSubmit;
+    if (callback != null) {
+      unawaited(Future<void>.sync(() => callback(result)));
+      return;
+    }
+    Navigator.of(context).pop(result);
+  }
+
+  void _close() {
+    final callback = widget.onClose;
+    if (callback != null) {
+      unawaited(Future<void>.sync(callback));
+      return;
+    }
+    Navigator.of(context).pop();
   }
 
   @override
@@ -124,7 +145,7 @@ class _ChecklistComposerViewState extends State<ChecklistComposerView> {
             title: AppStrings.t(
               AppStringKeys.checklistComposerNewChecklistTitle,
             ),
-            onBack: () => Navigator.of(context).pop(),
+            onBack: widget.showBackButton ? _close : null,
             trailing: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: _send,
@@ -178,8 +199,10 @@ class _ChecklistComposerViewState extends State<ChecklistComposerView> {
                     title: AppStrings.t(
                       AppStringKeys.checklistComposerAllowOthersToAddTasks,
                     ),
-                    subtitle:
-                        'Members can append new tasks after the checklist is sent.',
+                    subtitle: AppStrings.t(
+                      AppStringKeys
+                          .checklistComposerAllowOthersToAddTasksDetail,
+                    ),
                     value: _othersCanAddTasks,
                     onChanged: (value) =>
                         setState(() => _othersCanAddTasks = value),
@@ -189,8 +212,10 @@ class _ChecklistComposerViewState extends State<ChecklistComposerView> {
                     title: AppStrings.t(
                       AppStringKeys.checklistComposerAllowOthersToMarkTasks,
                     ),
-                    subtitle:
-                        'Members can complete tasks or mark them as not done.',
+                    subtitle: AppStrings.t(
+                      AppStringKeys
+                          .checklistComposerAllowOthersToMarkTasksDetail,
+                    ),
                     value: _othersCanMarkTasksAsDone,
                     onChanged: (value) =>
                         setState(() => _othersCanMarkTasksAsDone = value),

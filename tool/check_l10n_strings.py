@@ -14,32 +14,56 @@ ROOT = Path(__file__).resolve().parents[1]
 RANDOM_L10N_KEY = re.compile(r"^[A-Za-z][A-Za-z0-9]*Text\d{3}[A-Fa-f0-9]{5,6}$")
 COUNTRY_NAME_L10N_KEY = re.compile(r"^country(?!Picker)(?![A-Z]{2}$)[A-Z][A-Za-z0-9]*$")
 VISIBLE_NAMED_ARGS = {
+    "actionLabel",
+    "barrierLabel",
+    "cancelLabel",
     "cancelText",
+    "caption",
+    "channelDescription",
+    "confirmLabel",
     "confirmText",
+    "description",
+    "emptyError",
+    "errorText",
     "helperText",
+    "hint",
     "hintText",
     "label",
     "labelText",
+    "linkLabel",
+    "message",
+    "note",
     "placeholder",
     "semanticLabel",
     "submitText",
+    "subtitle",
     "title",
     "tooltip",
     "value",
+}
+NON_UI_CALLS = {
+    "AiFunctionToolDefinition",
+    "PlatformException",
+    "UnreadChatSummaryFailureCause",
 }
 ALLOWED_VISIBLE_VALUES = {
     "",
     "A",
     "AI",
     "GitHub",
+    "H",
+    "H$level",
     "LaTeX",
+    "M",
     "MM/YY",
     "Mini App",
     "Mithka",
+    "OCR",
     "RTMP URL",
     "Smart Glocal",
     "TEST",
     "business_bot",
+    "en",
     "· · ·",
     "\\u00B7 \\u00B7 \\u00B7",
     "github.com/iebb/mithka",
@@ -66,6 +90,17 @@ CONTENT_RENDER_EXPRESSIONS = {
     "_initial(widget.title)",
     "item.title",
     "m.senderName ?? widget.title",
+    # DesktopNavigationAction labels are localized at construction
+    # (AppStrings.t in main_tab_view), not at render.
+    "action.label",
+}
+
+# Files whose Han/kana/hangul content is classification DATA, not UI copy:
+# the unread-summary short-reply corpus and the AI editor's native language
+# names (each language written in itself, like the appLocale* keys).
+RAW_SCRIPT_EXEMPT_PATHS = {
+    "lib/chat/telegram_ai_editor_view.dart",
+    "lib/chat/unread_chat_summary_service.dart",
 }
 
 
@@ -87,6 +122,21 @@ def line_for(text: str, offset: int) -> int:
     return text.count("\n", 0, offset) + 1
 
 
+def in_non_ui_call(text: str, offset: int) -> bool:
+    # A named argument only counts as copy when the surrounding call renders it.
+    # These three carry machine-facing text: an LLM tool schema, and the two
+    # diagnostic payloads the summary sheet prints under "technical details".
+    prefix = text[max(0, offset - 2000) : offset]
+    opened = prefix.rfind("(")
+    while opened >= 0:
+        head = prefix[:opened]
+        name = re.search(r"([A-Za-z_][A-Za-z0-9_]*)\s*$", head)
+        if name and name.group(1) in NON_UI_CALLS:
+            return prefix.count("(", opened) > prefix.count(")", opened)
+        opened = prefix.rfind("(", 0, opened)
+    return False
+
+
 def is_visible_ui_literal(text: str, offset: int) -> bool:
     prefix = text[max(0, offset - 240) : offset]
     if re.search(r"\bText\s*\(\s*$", prefix):
@@ -94,7 +144,9 @@ def is_visible_ui_literal(text: str, offset: int) -> bool:
     if re.search(r"\bshowToast\s*\(\s*[^,\n]+,\s*$", prefix):
         return True
     named_arg = re.search(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*:\s*$", prefix)
-    return named_arg is not None and named_arg.group(1) in VISIBLE_NAMED_ARGS
+    if named_arg is None or named_arg.group(1) not in VISIBLE_NAMED_ARGS:
+        return False
+    return not in_non_ui_call(text, offset)
 
 
 def is_nonlocalized_token(value: str) -> bool:
@@ -110,6 +162,8 @@ def is_nonlocalized_token(value: str) -> bool:
         "",
         value,
     )
+    # `\n` and friends are two source characters; the `n` is not copy.
+    visible_value = re.sub(r"\\[nrtvbf0]|\\u\{?[0-9A-Fa-f]+\}?", "", visible_value)
     semantic_value = visible_value.replace("x", "").replace("X", "")
     if "$" in value and not any(ch.isalpha() for ch in semantic_value):
         return True
@@ -212,7 +266,7 @@ def direct_text_key_renders(text: str) -> list[int]:
             and ".l10n.t(" not in expression
             and "AppStrings.t(" not in expression
             and "AppLocalizations.of(" not in expression
-            and "telegramText(" not in expression
+            and "AppStrings.plural(" not in expression
         ):
             offsets.append(index)
         index = close_index + 1
@@ -249,7 +303,8 @@ def indirect_key_render_failures(text: str) -> list[tuple[int, str]]:
             if (
                 f"widget.{field}" not in expression
                 or ".l10n(" in expression
-                or "telegramText(" in expression
+                or "AppStrings.t(" in expression
+                or "AppStrings.plural(" in expression
             ):
                 continue
             if expression in CONTENT_RENDER_EXPRESSIONS:
@@ -259,7 +314,7 @@ def indirect_key_render_failures(text: str) -> list[tuple[int, str]]:
         if (
             ".l10n(" in expression
             or "AppStrings.t(" in expression
-            or "telegramText(" in expression
+            or "AppStrings.plural(" in expression
         ):
             continue
         if expression in CONTENT_RENDER_EXPRESSIONS:
@@ -301,13 +356,17 @@ def main() -> int:
                 continue
             text = path.read_text()
             comments = strip_comments_mask(text)
-            raw_localized_lines = {
-                line_for(text, i)
-                for i, ch in enumerate(text)
-                if not comments[i] and has_localized_script(ch)
-            }
-            for line in sorted(raw_localized_lines):
-                failures.append(f"{rel}:{line}: raw localized script outside lib/l10n")
+            script_exempt = str(rel) in RAW_SCRIPT_EXEMPT_PATHS
+            if not script_exempt:
+                raw_localized_lines = {
+                    line_for(text, i)
+                    for i, ch in enumerate(text)
+                    if not comments[i] and has_localized_script(ch)
+                }
+                for line in sorted(raw_localized_lines):
+                    failures.append(
+                        f"{rel}:{line}: raw localized script outside lib/l10n"
+                    )
             for offset in direct_text_key_renders(text):
                 failures.append(
                     f"{rel}:{line_for(text, offset)}: "
@@ -317,9 +376,11 @@ def main() -> int:
                 failures.append(f"{rel}:{line_for(text, offset)}: {reason}")
             for literal in parse_literals(text):
                 if has_localized_script(literal.value):
-                    failures.append(
-                        f"{rel}:{line_for(text, literal.start)}: localized literal: {literal.raw}"
-                    )
+                    if not script_exempt:
+                        failures.append(
+                            f"{rel}:{line_for(text, literal.start)}: "
+                            f"localized literal: {literal.raw}"
+                        )
                     continue
                 if is_visible_ui_literal(text, literal.start) and not is_nonlocalized_token(
                     literal.value

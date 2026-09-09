@@ -20,12 +20,16 @@ import 'package:latlong2/latlong.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 
 import '../components/app_icons.dart';
+import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
 
 const defaultLocationPickerCenter = LatLng(35.681236, 139.767125);
 
 Future<LatLng> resolveLocationPickerStart() async {
+  // The Mac App Store build intentionally has no location entitlement. macOS
+  // pickers remain useful as manual maps, starting from a deterministic point.
+  if (Platform.isMacOS) return defaultLocationPickerCenter;
   try {
     var permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
@@ -63,12 +67,18 @@ class LocationPickerView extends StatefulWidget {
     this.initialZoom = 16,
     this.returnCamera = false,
     this.returnShareResult = false,
+    this.onSend,
+    this.onClose,
+    this.showBackButton = true,
   });
 
   final LatLng initial;
   final double initialZoom;
   final bool returnCamera;
   final bool returnShareResult;
+  final Future<void> Function(LocationShareResult result)? onSend;
+  final Future<void> Function()? onClose;
+  final bool showBackButton;
 
   @override
   State<LocationPickerView> createState() => _LocationPickerViewState();
@@ -84,6 +94,7 @@ class _LocationPickerViewState extends State<LocationPickerView> {
   late double _zoom = widget.initialZoom;
   String _address = '';
   bool _geocoding = false;
+  bool _sending = false;
   Timer? _debounce;
 
   @override
@@ -140,6 +151,7 @@ class _LocationPickerViewState extends State<LocationPickerView> {
   }
 
   Future<void> _myLocation() async {
+    if (Platform.isMacOS) return;
     try {
       final p = await resolveLocationPickerStart();
       if (Platform.isIOS) {
@@ -178,13 +190,38 @@ class _LocationPickerViewState extends State<LocationPickerView> {
     }
   }
 
-  void _send() => Navigator.of(context).pop(
-    widget.returnCamera
-        ? LocationPickerResult(center: _center, zoom: _zoom)
-        : widget.returnShareResult
-        ? LocationShareResult(center: _center, address: _address)
-        : _center,
-  );
+  Future<void> _send() async {
+    final send = widget.onSend;
+    if (send == null) {
+      Navigator.of(context).pop(
+        widget.returnCamera
+            ? LocationPickerResult(center: _center, zoom: _zoom)
+            : widget.returnShareResult
+            ? LocationShareResult(center: _center, address: _address)
+            : _center,
+      );
+      return;
+    }
+    if (_sending) return;
+    setState(() => _sending = true);
+    try {
+      await send(LocationShareResult(center: _center, address: _address));
+      if (mounted) await _close();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _sending = false);
+      showToast(context, AppStringKeys.topicPostContentActionFailed);
+    }
+  }
+
+  Future<void> _close() async {
+    final close = widget.onClose;
+    if (close != null) {
+      await close();
+      return;
+    }
+    if (mounted) await Navigator.of(context).maybePop();
+  }
 
   /// Native Apple Maps (MapKit) on iOS; flutter_map + OSM tiles elsewhere.
   Widget _mapWidget() {
@@ -237,10 +274,10 @@ class _LocationPickerViewState extends State<LocationPickerView> {
         children: [
           NavHeader(
             title: AppStrings.t(AppStringKeys.composerLocation),
-            onBack: () => Navigator.of(context).pop(),
+            onBack: widget.showBackButton ? () => unawaited(_close()) : null,
             trailing: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: _send,
+              onTap: _sending ? null : _send,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
                 child: Container(
@@ -249,8 +286,10 @@ class _LocationPickerViewState extends State<LocationPickerView> {
                     vertical: 5,
                   ),
                   decoration: BoxDecoration(
-                    color: AppTheme.brand,
-                    borderRadius: BorderRadius.circular(6),
+                    color: _sending
+                        ? AppTheme.brand.withValues(alpha: 0.55)
+                        : AppTheme.brand,
+                    borderRadius: BorderRadius.circular(AppRadius.md),
                   ),
                   child: Text(
                     AppStrings.t(AppStringKeys.composerSend),
@@ -290,7 +329,9 @@ class _LocationPickerViewState extends State<LocationPickerView> {
                         width: 44,
                         decoration: BoxDecoration(
                           color: c.card,
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: BorderRadius.circular(
+                            AppRadius.control,
+                          ),
                           boxShadow: [
                             BoxShadow(
                               color: Colors.black.withValues(alpha: 0.18),
@@ -315,32 +356,34 @@ class _LocationPickerViewState extends State<LocationPickerView> {
                           ],
                         ),
                       ),
-                      const SizedBox(height: 10),
-                      GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: _myLocation,
-                        child: Container(
-                          width: 44,
-                          height: 44,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: c.card,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.18),
-                                blurRadius: 8,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: AppIcon(
-                            HeroAppIcons.locationDot,
-                            size: 20,
-                            color: AppTheme.brand,
+                      if (!Platform.isMacOS) ...[
+                        const SizedBox(height: 10),
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: _myLocation,
+                          child: Container(
+                            width: 44,
+                            height: 44,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: c.card,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.18),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: AppIcon(
+                              HeroAppIcons.locationDot,
+                              size: 20,
+                              color: AppTheme.brand,
+                            ),
                           ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                 ),

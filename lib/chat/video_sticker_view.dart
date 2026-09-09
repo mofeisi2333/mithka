@@ -1,9 +1,9 @@
 //
 //  video_sticker_view.dart
 //
-//  Plays a Telegram `.webm` (VP9 + alpha) video sticker, looping + muted when the
-//  MDK/FFmpeg backend is available. Android 14+ skips fvp because libmdk crashes
-//  during native load there, so those devices render TDLib's static thumbnail.
+//  Plays a Telegram `.webm` (VP9 + alpha) video sticker, looping + muted.
+//  Android 14+ renders the supplied static thumbnail instead of loading FVP's
+//  MDK decoder: native surface creation is unstable on those releases.
 //
 
 import 'dart:async';
@@ -19,6 +19,13 @@ import '../media/looping_media_playback.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_image_loader.dart';
 import '../tdlib/td_models.dart';
+
+/// FVP's Android MDK decoder can crash while creating a native video surface
+/// on Android 14 and later. Video stickers always include a static thumbnail,
+/// so prefer that safe representation there rather than risking the process.
+@visibleForTesting
+bool shouldUseStaticAndroidVideoStickerFallback(int? sdkInt) =>
+    sdkInt == null || sdkInt >= 34;
 
 class VideoStickerView extends StatefulWidget {
   const VideoStickerView({
@@ -193,7 +200,10 @@ class _VideoStickerViewState extends State<VideoStickerView>
       return;
     }
 
-    final c = VideoPlayerController.file(File(path));
+    final c = VideoPlayerController.file(
+      File(path),
+      videoPlayerOptions: mutedLoopingVideoPlayerOptions(),
+    );
     _initializingController = c;
     try {
       await c.initialize();
@@ -333,7 +343,7 @@ class _VideoStickerViewState extends State<VideoStickerView>
       return Future.value(false);
     }
     return _androidNeedsStaticFallback ??= _androidSdkInt().then(
-      (sdkInt) => sdkInt == null || sdkInt >= 34,
+      shouldUseStaticAndroidVideoStickerFallback,
     );
   }
 

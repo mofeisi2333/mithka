@@ -3,8 +3,10 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../components/photo_avatar.dart';
+import '../l10n/app_localizations.dart';
 import '../theme/app_theme.dart';
 import '../theme/message_bubble_background.dart';
+import 'chat_wallpaper.dart';
 import 'stretchable_message_bubble_background.dart';
 
 class MessageBubbleChatPreview extends StatelessWidget {
@@ -12,54 +14,106 @@ class MessageBubbleChatPreview extends StatelessWidget {
     super.key,
     required this.incomingBackground,
     required this.outgoingBackground,
+    this.wallpaper,
+    this.showIncomingSurface = true,
+    this.showOutgoingSurface = true,
+    this.incomingSurfaceColor,
+    this.outgoingSurfaceColor,
+    this.incomingTextColor,
+    this.outgoingTextColor,
   });
 
   final MessageBubbleBackgroundSpec incomingBackground;
   final MessageBubbleBackgroundSpec outgoingBackground;
 
+  /// Painted behind the sample messages so a theme and its background are
+  /// judged together, the way they are actually seen.
+  final ChatWallpaper? wallpaper;
+
+  final bool showIncomingSurface;
+  final bool showOutgoingSurface;
+  final Color? incomingSurfaceColor;
+  final Color? outgoingSurfaceColor;
+  final Color? incomingTextColor;
+  final Color? outgoingTextColor;
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final rowGap = math.max(
-      8.0,
-      incomingBackground.visualOverflow.bottom +
-          outgoingBackground.visualOverflow.top +
-          2,
-    );
+    final double rowGap = showIncomingSurface || showOutgoingSurface
+        ? math
+              .max(
+                8.0,
+                (showIncomingSurface
+                        ? incomingBackground.visualOverflow.bottom
+                        : 0.0) +
+                    (showOutgoingSurface
+                        ? outgoingBackground.visualOverflow.top
+                        : 0.0) +
+                    2,
+              )
+              .toDouble()
+        : 8.0;
     return Container(
       key: const ValueKey('message-bubble-chat-preview'),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: c.chatBackground,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
         border: Border.all(color: c.divider.withValues(alpha: 0.7)),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+      // The wallpaper fills behind the sample messages rather than wrapping
+      // them: it expands to its constraints, so the content has to be what
+      // decides the height.
+      child: Stack(
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const PhotoAvatar(title: 'M', size: 34),
-              const SizedBox(width: 8),
-              Flexible(
-                child: _PreviewBubble(
-                  key: const ValueKey('message-bubble-preview-incoming'),
-                  background: incomingBackground,
-                  outgoing: false,
-                  text: 'Repository bubble preview with a longer message.',
-                ),
-              ),
-            ],
+          Positioned.fill(
+            child: ChatWallpaperBackground(
+              wallpaper: wallpaper,
+              fallbackColor: c.chatBackground,
+              brightness: Theme.of(context).brightness,
+            ),
           ),
-          SizedBox(height: rowGap),
-          Align(
-            alignment: Alignment.centerRight,
-            child: _PreviewBubble(
-              key: const ValueKey('message-bubble-preview-outgoing'),
-              background: outgoingBackground,
-              outgoing: true,
-              text: 'The center stretches with longer messages.',
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const PhotoAvatar(title: 'M', size: 34),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: _PreviewBubble(
+                        key: const ValueKey('message-bubble-preview-incoming'),
+                        background: incomingBackground,
+                        outgoing: false,
+                        showSurface: showIncomingSurface,
+                        surfaceColor: incomingSurfaceColor,
+                        textColor: incomingTextColor,
+                        text: AppStrings.t(
+                          AppStringKeys.messageBubblePreviewRepositoryLong,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: rowGap),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: _PreviewBubble(
+                    key: const ValueKey('message-bubble-preview-outgoing'),
+                    background: outgoingBackground,
+                    outgoing: true,
+                    showSurface: showOutgoingSurface,
+                    surfaceColor: outgoingSurfaceColor,
+                    textColor: outgoingTextColor,
+                    text: AppStrings.t(
+                      AppStringKeys.messageBubblePreviewCenterStretch,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -73,21 +127,39 @@ class _PreviewBubble extends StatelessWidget {
     super.key,
     required this.background,
     required this.outgoing,
+    required this.showSurface,
+    this.surfaceColor,
+    this.textColor,
     required this.text,
   });
 
   final MessageBubbleBackgroundSpec background;
   final bool outgoing;
+  final bool showSurface;
+  final Color? surfaceColor;
+  final Color? textColor;
   final String text;
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    if (!showSurface) {
+      return Container(
+        constraints: const BoxConstraints(maxWidth: 250),
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+        child: Text(
+          text,
+          style: TextStyle(color: c.textPrimary, fontSize: 15, height: 1.25),
+        ),
+      );
+    }
     return StretchableMessageBubbleBackground(
       background: background,
       constraints: const BoxConstraints(maxWidth: 250),
-      fallbackColor: outgoing ? AppTheme.bubbleOutgoing : c.bubbleIncoming,
-      fallbackBorderRadius: BorderRadius.circular(12),
+      fallbackColor:
+          surfaceColor ??
+          (outgoing ? AppTheme.bubbleOutgoing : c.bubbleIncoming),
+      fallbackBorderRadius: BorderRadius.circular(AppRadius.card),
       fallbackBorder: outgoing
           ? null
           : Border.all(color: c.divider, width: 0.5),
@@ -95,9 +167,13 @@ class _PreviewBubble extends StatelessWidget {
       child: Text(
         text,
         style: TextStyle(
+          // Same chain the real bubble resolves (see MessageBubble's
+          // _outgoingTextColor): the last resort is the palette's own ink, so
+          // a preview never disagrees with the chat it is previewing.
           color:
               background.foregroundColor ??
-              (outgoing ? AppTheme.bubbleOutgoingText : c.bubbleIncomingText),
+              textColor ??
+              (outgoing ? c.bubbleOutgoingText : c.bubbleIncomingText),
           fontSize: 15,
           height: 1.25,
         ),

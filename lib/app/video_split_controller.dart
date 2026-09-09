@@ -15,16 +15,20 @@ class VideoSplitSession {
     required this.chatId,
     required this.title,
     required this.video,
+    this.accountSlot,
     this.thumb,
     this.width,
     this.height,
+    this.durationSeconds,
     this.messageId,
   }) : queue = VideoPlaybackQueue.single(
          VideoPlaybackItem(
            video: video,
+           accountSlot: accountSlot,
            thumb: thumb,
            width: width,
            height: height,
+           durationSeconds: durationSeconds,
            sourceChatId: chatId,
            messageId: messageId,
            title: title,
@@ -35,17 +39,21 @@ class VideoSplitSession {
     : chatId = queue.current.sourceChatId ?? 0,
       title = queue.current.title,
       video = queue.current.video,
+      accountSlot = queue.current.accountSlot,
       thumb = queue.current.thumb,
       width = queue.current.width,
       height = queue.current.height,
+      durationSeconds = queue.current.durationSeconds,
       messageId = queue.current.messageId;
 
   final int chatId;
   final String title;
   final TdFileRef video;
+  final int? accountSlot;
   final TdFileRef? thumb;
   final int? width;
   final int? height;
+  final int? durationSeconds;
   final int? messageId;
   final VideoPlaybackQueue queue;
 

@@ -16,21 +16,31 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../app/active_conversation.dart';
+import '../app/adaptive_split_layout.dart';
 import '../app/app_navigator.dart';
+import '../app/chat_pane.dart';
 import '../app/desktop_video_window.dart';
+import '../app/ipad_window_chrome.dart';
+import '../app/primary_chat_launcher.dart';
 import '../app/video_split_controller.dart';
 import '../auth/telegram_country_names.dart';
 import '../call/call_manager.dart';
 import '../channels/topic_chat_view.dart';
+import '../channels/topic_navigation.dart';
+import '../chats/search_token_views.dart';
+import '../communities/community_models.dart';
+import '../communities/community_view.dart';
 import '../components/app_dialog.dart';
 import '../components/app_icons.dart';
+import '../components/app_interactive_surface.dart';
 import '../components/confirm_dialog.dart';
 import '../components/full_page_back_swipe.dart';
 import '../components/photo_avatar.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
-import '../l10n/telegram_language_controller.dart';
 import '../media/app_asset_picker.dart';
 import '../moments/story_viewer_view.dart';
 import '../notifications/notification_controller.dart';
@@ -40,7 +50,6 @@ import '../settings/ai_settings_controller.dart';
 import '../settings/apple_pcc_api.dart';
 import '../settings/blocked_user_service.dart';
 import '../settings/business_tools_views.dart';
-import '../settings/keyword_blocker.dart';
 import '../settings/quick_reaction_settings_view.dart';
 import '../settings/sensitive_content_controller.dart';
 import '../settings/topic_group_display_mode.dart';
@@ -48,7 +57,6 @@ import '../settings/translation_api.dart';
 import '../settings/translation_controller.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
-import '../tdlib/td_image_loader.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
@@ -59,9 +67,12 @@ import 'ai_chat_translation_service.dart';
 import 'apple_pcc_unread_summary_provider.dart';
 import 'auto_translate_policy.dart';
 import 'blocked_message_runs.dart';
+import 'bot_api_access_warning.dart';
 import 'channel_direct_messages_service.dart';
 import 'channel_direct_messages_view.dart';
+import 'chat_appearance_message_preview.dart';
 import 'chat_auto_scroll_policy.dart';
+import 'chat_community_service_card.dart';
 import 'chat_first_contact_card.dart';
 import 'chat_first_contact_info.dart';
 import 'chat_frame_scheduler.dart';
@@ -69,11 +80,12 @@ import 'chat_info_view.dart';
 import 'chat_input_bar.dart';
 import 'chat_media_drop_region.dart';
 import 'chat_message_merge.dart';
+import 'chat_message_search_bar.dart';
+import 'chat_message_search_controller.dart';
 import 'chat_open_performance.dart';
 import 'chat_picker_view.dart';
 import 'chat_return_to_latest_coordinator.dart';
 import 'chat_scroll_metrics.dart';
-import 'chat_search_view.dart';
 import 'chat_send_failure.dart';
 import 'chat_session_cache.dart';
 import 'chat_translation_panel.dart';
@@ -83,31 +95,35 @@ import 'chat_wallpaper.dart';
 import 'checklist_composer_view.dart';
 import 'custom_emoji.dart';
 import 'emoji_store.dart';
-import 'emoji_text_controller.dart';
 import 'forward_options.dart';
-import 'full_image_viewer.dart';
-import 'image_edit_view.dart';
+import 'group_remark_controller.dart';
+import 'image_media_album_bubble.dart';
+import 'image_preview.dart';
+import 'internal_chat_link_router.dart';
 import 'link_handler.dart';
 import 'media_album_layout.dart';
+import 'media_download_service.dart';
 import 'media_library_saver.dart';
 import 'media_send_preview_view.dart';
 import 'message_action_menu.dart';
 import 'message_bubble.dart';
 import 'message_bubble_repository_view.dart';
+import 'message_reaction_availability.dart';
 import 'message_replies_sheet.dart';
+import 'message_translation_cache.dart';
 import 'music_player_controller.dart';
 import 'openai_compatible_unread_summary_provider.dart';
 import 'outgoing_attachment.dart';
 import 'poll_results_view.dart';
 import 'quick_reaction_choice.dart';
-import 'rich_text_composer_view.dart';
 import 'shared_contact_sheet.dart';
 import 'sticker_set_detail_view.dart';
 import 'sticker_viewer.dart';
+import 'telegram_ai_service.dart';
 import 'telegram_cocoon_unread_summary_provider.dart';
 import 'telegram_mini_app_view.dart';
-import 'telegram_rich_text.dart';
 import 'transcript_pivot_partition.dart';
+import 'translation_fallback.dart';
 import 'unread_chat_summary_models.dart';
 import 'unread_chat_summary_service.dart';
 import 'unread_chat_summary_view.dart';
@@ -115,14 +131,311 @@ import 'video_playback_queue.dart';
 import 'video_player_view.dart';
 
 @visibleForTesting
-ChatMessage selectMediaAlbumInteractionOwner(List<ChatMessage> group) {
-  for (final message in group) {
-    if (message.hasCommentThread || message.hasActualReplies) return message;
+bool chatTranscriptAllowsCommentAttachment({required bool isChannel}) =>
+    isChannel;
+
+@visibleForTesting
+bool chatViewRequiresFullSync({
+  required int previousRevision,
+  required int nextRevision,
+}) => previousRevision != nextRevision;
+
+/// Rebuilds a narrow chat fragment only while its route is active. Hidden
+/// split-view/tab routes deliberately detach from high-frequency TDLib bubble
+/// and header updates; their next TickerMode build reads the latest model.
+class _ActiveChatListenableBuilder extends StatefulWidget {
+  const _ActiveChatListenableBuilder({
+    required this.listenable,
+    required this.builder,
+  });
+
+  final Listenable listenable;
+  final WidgetBuilder builder;
+
+  @override
+  State<_ActiveChatListenableBuilder> createState() =>
+      _ActiveChatListenableBuilderState();
+}
+
+class _ActiveChatListenableBuilderState
+    extends State<_ActiveChatListenableBuilder> {
+  bool _listening = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _setListening(TickerMode.valuesOf(context).enabled);
   }
-  for (final message in group) {
-    if (message.reactions.isNotEmpty) return message;
+
+  @override
+  void didUpdateWidget(covariant _ActiveChatListenableBuilder oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_listening && !identical(oldWidget.listenable, widget.listenable)) {
+      oldWidget.listenable.removeListener(_handleChange);
+      widget.listenable.addListener(_handleChange);
+    }
   }
-  return group.first;
+
+  void _setListening(bool value) {
+    if (_listening == value) return;
+    _listening = value;
+    if (value) {
+      widget.listenable.addListener(_handleChange);
+    } else {
+      widget.listenable.removeListener(_handleChange);
+    }
+  }
+
+  void _handleChange() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context);
+
+  @override
+  void dispose() {
+    if (_listening) widget.listenable.removeListener(_handleChange);
+    super.dispose();
+  }
+}
+
+@visibleForTesting
+Future<T?> showReactionUsersModal<T>(
+  BuildContext context, {
+  required WidgetBuilder builder,
+}) {
+  return showAppAdaptiveSheetDialog<T>(
+    context: context,
+    builder: builder,
+    barrierLabel: AppStrings.t(AppStringKeys.musicPlayerClose),
+    barrierColor: Colors.black.withValues(alpha: 0.46),
+    transitionDuration: const Duration(milliseconds: 220),
+    centeredBackgroundColor: context.colors.card,
+    mobileTransitionBuilder: (context, animation, _, child) {
+      final offset = Tween<Offset>(
+        begin: const Offset(0, 1),
+        end: Offset.zero,
+      ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic));
+      return SlideTransition(position: offset, child: child);
+    },
+  );
+}
+
+@visibleForTesting
+const reactionUsersCenteredFrameKey = ValueKey<String>(
+  'reaction-users-centered-frame',
+);
+
+@visibleForTesting
+const reactionUsersTouchFrameKey = ValueKey<String>(
+  'reaction-users-touch-frame',
+);
+
+@visibleForTesting
+const reactionUsersDragHandleKey = ValueKey<String>(
+  'reaction-users-drag-handle',
+);
+
+@visibleForTesting
+class ReactionUsersSheetFrame extends StatelessWidget {
+  const ReactionUsersSheetFrame({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final centered = appModalUsesCenteredPresentation(
+      MediaQuery.sizeOf(context),
+    );
+    final height = math.min(MediaQuery.sizeOf(context).height * 0.62, 560.0);
+    final content = SizedBox(
+      height: height,
+      width: double.infinity,
+      child: Column(
+        children: [
+          if (centered)
+            const SizedBox(height: 8)
+          else ...[
+            const SizedBox(height: 10),
+            Container(
+              key: reactionUsersDragHandleKey,
+              width: 42,
+              height: 5,
+              decoration: BoxDecoration(
+                color: c.divider,
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+          Expanded(child: child),
+        ],
+      ),
+    );
+    if (centered) {
+      return ColoredBox(
+        key: reactionUsersCenteredFrameKey,
+        color: c.card,
+        child: content,
+      );
+    }
+    return SafeArea(
+      top: false,
+      child: Align(
+        key: reactionUsersTouchFrameKey,
+        alignment: Alignment.bottomCenter,
+        child: ClipRRect(
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+          child: ColoredBox(color: c.card, child: content),
+        ),
+      ),
+    );
+  }
+}
+
+@visibleForTesting
+bool protectedContentRequiresMobileSelectionClear({
+  required bool hasProtectedContent,
+  required bool hasSelectionKey,
+}) => hasProtectedContent && hasSelectionKey;
+
+@visibleForTesting
+bool selectionAreaContainsGlobalTextPosition({
+  required GlobalKey<SelectionAreaState> selectionAreaKey,
+  required Offset globalPosition,
+}) {
+  final root = selectionAreaKey.currentContext?.findRenderObject();
+  if (root is! RenderBox ||
+      !root.attached ||
+      !root.hasSize ||
+      !(Offset.zero & root.size).contains(root.globalToLocal(globalPosition))) {
+    return false;
+  }
+
+  bool visibleWithinSelectionArea(RenderParagraph paragraph) {
+    RenderObject? current = paragraph;
+    while (current != null) {
+      if (current case final RenderBox box when box.hasSize) {
+        final localPosition = box.globalToLocal(globalPosition);
+        if (!(Offset.zero & box.size).contains(localPosition)) return false;
+      }
+      if (identical(current, root)) return true;
+      current = current.parent;
+    }
+    return false;
+  }
+
+  var contains = false;
+  void visit(RenderObject child) {
+    if (contains || !child.attached) return;
+    if (child case final RenderParagraph paragraph
+        when paragraph.hasSize &&
+            paragraph.registrar != null &&
+            visibleWithinSelectionArea(paragraph)) {
+      final localPosition = paragraph.globalToLocal(globalPosition);
+      if ((Offset.zero & paragraph.size).contains(localPosition)) {
+        contains = true;
+        return;
+      }
+    }
+    child.visitChildren(visit);
+  }
+
+  if (root case final RenderParagraph paragraph
+      when paragraph.hasSize &&
+          paragraph.registrar != null &&
+          visibleWithinSelectionArea(paragraph)) {
+    final localPosition = paragraph.globalToLocal(globalPosition);
+    contains = (Offset.zero & paragraph.size).contains(localPosition);
+  }
+  if (!contains) root.visitChildren(visit);
+  return contains;
+}
+
+@visibleForTesting
+class ChatActionOverlayGestureLayer extends StatelessWidget {
+  const ChatActionOverlayGestureLayer({
+    super.key,
+    required this.selectionAreaKey,
+    required this.child,
+  });
+
+  final GlobalKey<SelectionAreaState>? selectionAreaKey;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => _MessageSelectionHitTestPassthrough(
+    key: const ValueKey('message-action-overlay-gesture-layer'),
+    selectionAreaKey: isDesktopTargetPlatform(Theme.of(context).platform)
+        ? null
+        : selectionAreaKey,
+    child: child,
+  );
+}
+
+class _MessageSelectionHitTestPassthrough
+    extends SingleChildRenderObjectWidget {
+  const _MessageSelectionHitTestPassthrough({
+    super.key,
+    required this.selectionAreaKey,
+    required super.child,
+  });
+
+  final GlobalKey<SelectionAreaState>? selectionAreaKey;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderMessageSelectionHitTestPassthrough(selectionAreaKey);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderMessageSelectionHitTestPassthrough renderObject,
+  ) {
+    renderObject.selectionAreaKey = selectionAreaKey;
+  }
+}
+
+class _RenderMessageSelectionHitTestPassthrough extends RenderProxyBox {
+  _RenderMessageSelectionHitTestPassthrough(this.selectionAreaKey);
+
+  GlobalKey<SelectionAreaState>? selectionAreaKey;
+
+  @override
+  bool hitTest(BoxHitTestResult result, {required Offset position}) {
+    final key = selectionAreaKey;
+    if (key != null &&
+        selectionAreaContainsGlobalTextPosition(
+          selectionAreaKey: key,
+          globalPosition: localToGlobal(position),
+        )) {
+      // Keep the visible overlay controls first, then add only the selected
+      // text region underneath. Letting the Stack hit-test the whole transcript
+      // would also admit its scroll and swipe-to-reply recognizers while the
+      // action menu is open.
+      final overlayHit = super.hitTest(result, position: position);
+      final selectionRoot = key.currentContext?.findRenderObject();
+      if (selectionRoot is RenderBox &&
+          selectionRoot.attached &&
+          selectionRoot.hasSize) {
+        final globalToOverlay = Matrix4.tryInvert(getTransformTo(null));
+        if (globalToOverlay == null) return overlayHit;
+        final selectionToOverlay = globalToOverlay
+          ..multiply(selectionRoot.getTransformTo(null));
+        final selectionHit = result.addWithPaintTransform(
+          transform: selectionToOverlay,
+          position: position,
+          hitTest: (result, localPosition) =>
+              selectionRoot.hitTest(result, position: localPosition),
+        );
+        return overlayHit || selectionHit;
+      }
+      return overlayHit;
+    }
+    return super.hitTest(result, position: position);
+  }
 }
 
 @visibleForTesting
@@ -251,7 +564,7 @@ class _MessageDeleteOptionsDialogState
           padding: const EdgeInsets.fromLTRB(24, 24, 24, 18),
           decoration: BoxDecoration(
             color: c.card,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(AppRadius.lg),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.2),
@@ -269,7 +582,7 @@ class _MessageDeleteOptionsDialogState
                 style: TextStyle(
                   fontSize: 19,
                   height: 1.28,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w600,
                   color: c.textPrimary,
                   decoration: TextDecoration.none,
                 ),
@@ -355,7 +668,7 @@ class _MessageDeleteOptionsDialogState
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: value ? AppTheme.brand : Colors.transparent,
-                borderRadius: BorderRadius.circular(5),
+                borderRadius: BorderRadius.circular(AppRadius.sm),
                 border: Border.all(
                   color: value ? AppTheme.brand : c.textTertiary,
                   width: 2,
@@ -401,7 +714,7 @@ class _MessageDeleteOptionsDialogState
           label,
           style: TextStyle(
             fontSize: 16,
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w600,
             color: color,
             decoration: TextDecoration.none,
           ),
@@ -412,15 +725,6 @@ class _MessageDeleteOptionsDialogState
 }
 
 enum _MediaEditAction { edit, replace, delete }
-
-enum _MessageEditorMode { plain, richText }
-
-class _PlainMessageEditResult {
-  const _PlainMessageEditResult(this.text, this.entities);
-
-  final String text;
-  final List<Map<String, dynamic>> entities;
-}
 
 class _MediaEditActionDialog extends StatelessWidget {
   const _MediaEditActionDialog({required this.mediaLabel});
@@ -455,31 +759,6 @@ class _MediaEditActionDialog extends StatelessWidget {
   }
 }
 
-class _MessageEditorModeDialog extends StatelessWidget {
-  const _MessageEditorModeDialog();
-
-  @override
-  Widget build(BuildContext context) {
-    return const _ChatEditChoiceDialog<_MessageEditorMode>(
-      title: AppStringKeys.chatEditMessageTitle,
-      choices: [
-        (
-          value: _MessageEditorMode.plain,
-          icon: HeroAppIcons.font,
-          label: AppStringKeys.chatEditPlainText,
-          destructive: false,
-        ),
-        (
-          value: _MessageEditorMode.richText,
-          icon: HeroAppIcons.wandMagicSparkles,
-          label: AppStringKeys.composerRichText,
-          destructive: false,
-        ),
-      ],
-    );
-  }
-}
-
 typedef _ChatEditChoice<T> = ({
   T value,
   AppIconData icon,
@@ -502,7 +781,7 @@ class _ChatEditChoiceDialog<T> extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
         decoration: BoxDecoration(
           color: c.card,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(AppRadius.card),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.22),
@@ -524,7 +803,7 @@ class _ChatEditChoiceDialog<T> extends StatelessWidget {
                 style: TextStyle(
                   color: c.textPrimary,
                   fontSize: 17,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w600,
                   decoration: TextDecoration.none,
                 ),
               ),
@@ -571,169 +850,76 @@ class _ChatEditChoiceDialog<T> extends StatelessWidget {
   }
 }
 
-class _PlainMessageEditDialog extends StatefulWidget {
-  const _PlainMessageEditDialog({
-    required this.initialText,
-    required this.initialEntities,
-  });
+/// Lets an adaptive parent save a chat's measured viewport before replacing
+/// its detail pane. Waiting for [State.dispose] is too late on desktop because
+/// the render tree has already detached, so message geometry is unavailable.
+class ChatViewExitController {
+  VoidCallback? _prepareExit;
 
-  final String initialText;
-  final List<Map<String, dynamic>> initialEntities;
+  /// Registers the currently visible chat and returns a matching detacher.
+  VoidCallback register(VoidCallback prepareExit) {
+    _prepareExit = prepareExit;
+    return () {
+      if (identical(_prepareExit, prepareExit)) _prepareExit = null;
+    };
+  }
 
-  @override
-  State<_PlainMessageEditDialog> createState() =>
-      _PlainMessageEditDialogState();
+  void prepareExit() => _prepareExit?.call();
 }
 
-class _PlainMessageEditDialogState extends State<_PlainMessageEditDialog> {
-  late final EmojiTextEditingController _controller;
-  final FocusNode _focusNode = FocusNode();
+/// Keeps the chat header full-width while reserving a trailing context pane
+/// only below it. This avoids the empty header gutter produced by placing the
+/// context pane beside the entire chat view.
+@visibleForTesting
+class ChatHeaderTrailingPaneLayout extends StatelessWidget {
+  const ChatHeaderTrailingPaneLayout({
+    super.key,
+    required this.header,
+    required this.body,
+    this.trailingPane,
+    this.trailingPaneWidth = 0,
+  });
 
-  @override
-  void initState() {
-    super.initState();
-    _controller = EmojiTextEditingController()
-      ..setFormattedText(widget.initialText, widget.initialEntities);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _focusNode.requestFocus();
-    });
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    _focusNode.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final (text, entities) = _controller.toFormatted();
-    Navigator.of(context).pop(_PlainMessageEditResult(text, entities));
-  }
+  final Widget header;
+  final Widget body;
+  final Widget? trailingPane;
+  final double trailingPaneWidth;
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
-    return AnimatedPadding(
-      duration: const Duration(milliseconds: 150),
-      curve: Curves.easeOutCubic,
-      padding: EdgeInsets.fromLTRB(
-        20,
-        20,
-        20,
-        MediaQuery.viewInsetsOf(context).bottom + 20,
-      ),
-      child: Center(
-        child: Container(
-          width: math.min(MediaQuery.sizeOf(context).width - 40, 480),
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
-          decoration: BoxDecoration(
-            color: c.card,
-            borderRadius: BorderRadius.circular(14),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.22),
-                blurRadius: 28,
-                offset: const Offset(0, 12),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                AppStringKeys.chatEditMessageTitle.l10n(context),
-                style: TextStyle(
-                  color: c.textPrimary,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  decoration: TextDecoration.none,
+    final pane = trailingPane;
+    return Column(
+      children: [
+        KeyedSubtree(key: const ValueKey('chatFullWidthHeader'), child: header),
+        Expanded(
+          child: pane == null || trailingPaneWidth <= 0
+              ? KeyedSubtree(
+                  key: const ValueKey('chatConversationContent'),
+                  child: body,
+                )
+              : Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: KeyedSubtree(
+                        key: const ValueKey('chatConversationContent'),
+                        child: body,
+                      ),
+                    ),
+                    VerticalDivider(
+                      width: 1,
+                      thickness: 1,
+                      color: context.colors.divider,
+                    ),
+                    SizedBox(
+                      key: const ValueKey('chatTrailingContextPane'),
+                      width: trailingPaneWidth,
+                      child: pane,
+                    ),
+                  ],
                 ),
-              ),
-              const SizedBox(height: 14),
-              Container(
-                constraints: const BoxConstraints(
-                  minHeight: 88,
-                  maxHeight: 220,
-                ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: c.searchFill,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: EditableText(
-                  controller: _controller,
-                  focusNode: _focusNode,
-                  style: TextStyle(
-                    color: c.textPrimary,
-                    fontSize: 16,
-                    height: 1.35,
-                  ),
-                  cursorColor: AppTheme.brand,
-                  backgroundCursorColor: c.textTertiary,
-                  keyboardType: TextInputType.multiline,
-                  maxLines: null,
-                  textInputAction: TextInputAction.newline,
-                  selectionColor: AppTheme.brand.withValues(alpha: 0.24),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  _PlainEditButton(
-                    label: AppStringKeys.countryPickerCancel,
-                    color: c.textSecondary,
-                    onTap: () => Navigator.of(context).pop(),
-                  ),
-                  const SizedBox(width: 8),
-                  _PlainEditButton(
-                    label: AppStringKeys.messageActionEdit,
-                    color: AppTheme.brand,
-                    onTap: _submit,
-                  ),
-                ],
-              ),
-            ],
-          ),
         ),
-      ),
-    );
-  }
-}
-
-class _PlainEditButton extends StatelessWidget {
-  const _PlainEditButton({
-    required this.label,
-    required this.color,
-    required this.onTap,
-  });
-
-  final String label;
-  final Color color;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Text(
-          label.l10n(context),
-          style: TextStyle(
-            color: color,
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-            decoration: TextDecoration.none,
-          ),
-        ),
-      ),
+      ],
     );
   }
 }
@@ -751,9 +937,16 @@ class ChatView extends StatefulWidget {
     this.showHeaderDivider = true,
     this.headerBottom,
     this.headerBottomHeight = 44,
+    this.trailingPane,
+    this.trailingPaneWidth = 0,
     this.requestComposerFocusOnReady = false,
     this.onOpenTopicMode,
+    this.onChatKindResolved,
+    this.onInfoPressed,
+    this.onOpenFullInfo,
+    this.onOpenUserProfile,
     this.onBack,
+    this.exitController,
   });
   final int chatId;
   final String title;
@@ -765,9 +958,16 @@ class ChatView extends StatefulWidget {
   final bool showHeaderDivider;
   final Widget? headerBottom;
   final double headerBottomHeight;
+  final Widget? trailingPane;
+  final double trailingPaneWidth;
   final bool requestComposerFocusOnReady;
   final ValueChanged<int?>? onOpenTopicMode;
+  final ValueChanged<ChatKind>? onChatKindResolved;
+  final VoidCallback? onInfoPressed;
+  final VoidCallback? onOpenFullInfo;
+  final void Function(int userId, String name)? onOpenUserProfile;
   final VoidCallback? onBack;
+  final ChatViewExitController? exitController;
 
   @override
   State<ChatView> createState() => _ChatViewState();
@@ -778,6 +978,97 @@ class ChatView extends StatefulWidget {
 void clearChatMemoryCaches() {
   _ChatViewState._sessionCache.clear();
   _ChatViewState._sessionScrollSnapshots.clear();
+}
+
+@visibleForTesting
+bool wideGroupHeaderActionsEnabled(
+  Size windowSize, {
+  required bool isGroup,
+  required bool hasContextPaneToggle,
+  TargetPlatform? platform,
+  bool isWeb = kIsWeb,
+}) =>
+    usesSplitSelectionLayout(windowSize, platform: platform, isWeb: isWeb) &&
+    (isGroup || hasContextPaneToggle);
+
+@visibleForTesting
+class WideGroupChatHeaderActions extends StatelessWidget {
+  const WideGroupChatHeaderActions({
+    super.key,
+    required this.onStartCall,
+    required this.onOpenFullInfo,
+    this.onToggleContext,
+    this.showCallActions = true,
+  });
+
+  final ValueChanged<bool> onStartCall;
+  final VoidCallback? onToggleContext;
+  final VoidCallback onOpenFullInfo;
+  final bool showCallActions;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      if (showCallActions) ...[
+        _ChatHeaderAction(
+          key: const ValueKey('chatHeaderGroupVoiceCall'),
+          label: AppStringKeys.composerGroupVoiceCall.l10n(context),
+          icon: HeroAppIcons.phone,
+          onTap: () => onStartCall(false),
+        ),
+        _ChatHeaderAction(
+          key: const ValueKey('chatHeaderGroupVideoCall'),
+          label: AppStringKeys.composerGroupVideoCall.l10n(context),
+          icon: HeroAppIcons.video,
+          onTap: () => onStartCall(true),
+        ),
+      ],
+      if (onToggleContext != null)
+        _ChatHeaderAction(
+          key: const ValueKey('chatHeaderGroupContextToggle'),
+          label: AppStringKeys.chatInfoGroupAnnouncement.l10n(context),
+          icon: HeroAppIcons.grip,
+          onTap: onToggleContext!,
+        ),
+      _ChatHeaderAction(
+        key: const ValueKey('chatHeaderFullInfo'),
+        label: AppStringKeys.chatInfoTitle.l10n(context),
+        icon: HeroAppIcons.gear,
+        onTap: onOpenFullInfo,
+      ),
+    ],
+  );
+}
+
+class _ChatHeaderAction extends StatelessWidget {
+  const _ChatHeaderAction({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final String label;
+  final AppIconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return AppInteractiveSurface(
+      semanticLabel: label,
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      child: SizedBox(
+        width: AppMetric.hitTarget,
+        height: AppMetric.hitTarget,
+        child: Center(
+          child: AppIcon(icon, size: AppIconSize.nav, color: c.textPrimary),
+        ),
+      ),
+    );
+  }
 }
 
 class _TranscriptEntry {
@@ -824,13 +1115,38 @@ class _ChatScrollSnapshot {
   final double? anchorViewportOffset;
 }
 
+/// Reads the keyboard inset in an element of its own.
+///
+/// The chat screen only uses the inset for scroll bookkeeping, but reading it
+/// from `build()` put `_ChatViewState` on the viewInsets aspect — which the
+/// keyboard animates every frame, rebuilding the header, composer and every
+/// materialized bubble. Rebuilding this wrapper hands back the very same child
+/// widget, so `Element.updateChild` short-circuits the whole subtree.
+class _KeyboardInsetProbe extends StatelessWidget {
+  const _KeyboardInsetProbe({required this.onInset, required this.child});
+
+  final ValueChanged<double> onInset;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    onInset(MediaQuery.viewInsetsOf(context).bottom);
+    return child;
+  }
+}
+
 class _ChatViewState extends State<ChatView> {
   late final bool _openAtLatest;
-  late final _ChatScrollSnapshot? _sessionScrollSnapshot;
+  late final ({int accountSlot, int chatId}) _sessionKey;
+  late _ChatScrollSnapshot? _sessionScrollSnapshot;
   late final ChatSessionRenderState? _sessionRenderState;
   late bool _olderHistoryExhaustedHint;
   late final ChatViewModel _vm;
+  ChatKind? _reportedChatKind;
   late final TranslationController _translation;
+  AiSettingsController? _ai;
+  Set<TranslationProvider> _nativeTranslationProviders = const {};
+  int? _dismissedBotApiWarningMask;
   late final ScrollController _scroll;
   final _pinnedKey = GlobalKey(); // the pinned message's row, for scroll-to
   final _targetKey = GlobalKey(); // arbitrary linked/anchored message row
@@ -838,45 +1154,79 @@ class _ChatViewState extends State<ChatView> {
   final _transcriptViewportKey = GlobalKey();
   final _newerTranscriptSliverKey = GlobalKey();
   final _firstContactLayoutKey = GlobalKey();
-  final Map<int, GlobalKey> _entryVisibilityKeys = <int, GlobalKey>{};
+  Map<int, GlobalKey> _entryVisibilityKeys = <int, GlobalKey>{};
   Map<int, _TranscriptEntry> _trackedTranscriptEntries = const {};
   TranscriptPivot? _transcriptPivot;
   bool _transcriptPivotFrozen = false;
   bool _transcriptPivotFreezeScheduled = false;
   late int _historyWindowRevision;
   late int _historyWindowInvalidationRevision;
-  final Set<int> _reportedVisibleMessageIds = <int>{};
+  late int _fullViewRevision;
   final Set<int> _expandedBlockedRunIds = <int>{};
+  final Set<int> _showOriginalTranslationMessageIds = <int>{};
+  int? _desktopStickerSetId;
   bool _unreadProgressUpdateScheduled = false;
   bool _viewTickerEnabled = true;
   bool _modelDirtyWhileInactive = false;
   bool _reactivationSyncScheduled = false;
   ChatMessage? _actionTarget;
-  Rect? _actionRect; // global bounds of the long-pressed bubble
+  Rect? _actionRect; // bounds in the action-overlay Stack's coordinate space
+  final GlobalKey _actionOverlayKey = GlobalKey();
+  GlobalKey<SelectionAreaState>? _mobileTextSelectionAreaKey;
+  int? _mobileTextSelectionMessageId;
+  bool _mobileTextSelectionActive = false;
+  Offset? _lastActionPointerGlobalPosition;
   MessageActionSource _actionSource = MessageActionSource.normal;
   bool _reactionExpanded = false; // full reaction picker vs. quick bar
   String _reactionTab = 'standard'; // 'standard' or a custom-emoji pack id
+  MessageReactionAvailability? _actionReactionAvailability;
+  int _actionReactionAvailabilityGeneration = 0;
   int _lastCount = 0;
   bool _didInitialScroll = false; // one-time entry positioning has run
   bool _showJumpDown = false; // scrolled up → show jump-to-bottom button
   bool _bannerDismissed = false; // "N条新消息" banner dismissed / caught up
   Timer? _bannerTimer; // auto-hides the banner a few seconds after it appears
   Timer? _readSyncTimer;
+  Timer? _handoffUpdateTimer;
+  Timer? _linkedMessageHighlightFadeTimer;
+  Timer? _linkedMessageHighlightClearTimer;
   int? _scrollTargetId;
+  int _scrollTargetGeneration = 0;
+  int _transcriptGestureGeneration = 0;
   int? _lastNewestMessageId;
   int? _lastOldestMessageId;
   final ChatUnreadProgress _unreadProgress = ChatUnreadProgress();
   int get _liveNewMessageCount => _unreadProgress.liveCount;
-  int get _remainingUnreadCount => _liveNewMessageCount > 0
-      ? _liveNewMessageCount
-      : _showEntryUnreadBanner
-      ? _entryUnreadCount
-      : _unreadProgress.remaining(entryUnreadCount: _entryUnreadCount);
+  int get _remainingUnreadCount =>
+      _unreadProgress.badgeCount(entryUnreadCount: _entryUnreadCount);
   int _entryUnreadCount = 0;
   int _entryLastReadInboxId = 0;
+  int _entryLatestMessageId = 0;
   int? _entryFirstUnreadMessageId;
   bool _showEntryUnreadBanner = false;
+  late final ChatMessageSearchController _search;
+
+  /// Mirrors `_search.isActive`, so the controller's per-keystroke
+  /// notifications only setState when the value this build reads changed.
+  bool _searchActive = false;
+
+  /// Whether the last layout had room for the results pane. Read by callbacks
+  /// that run outside build, where the constraints are no longer at hand.
+  bool _searchResultsPaneVisible = false;
+
+  /// The hit the search cursor is sitting on. Unlike [_scrollTargetId] this
+  /// survives the jump that put it there, so the bubble stays marked while the
+  /// user steps through the rest of the results.
+  int? _searchHighlightId;
+  int? _linkedMessageHighlightId;
+  bool _linkedMessageHighlightActive = false;
   double _keyboardInset = 0;
+  // Bumped once per ChatView build; the shell LayoutBuilder reuses its subtree
+  // whenever the generation and the available width are both unchanged.
+  int _shellLayoutGeneration = 0;
+  int _cachedShellLayoutGeneration = -1;
+  double _cachedShellLayoutWidth = double.nan;
+  Widget? _cachedShellLayout;
   bool _shortTranscriptFillScheduled = false;
   bool _isFillingShortTranscript = false;
   int _shortTranscriptFillGeneration = 0;
@@ -892,6 +1242,7 @@ class _ChatViewState extends State<ChatView> {
   bool _prioritizingSessionUnread = false;
   bool _preserveSnapshotAfterFailedSessionJump = false;
   bool _initialTranscriptReady = false;
+  bool _initialTranscriptPositionCancelled = false;
   final Set<int> _transcriptPointersDown = <int>{};
   bool _bottomScrollScheduled = false;
   bool _scheduledBottomAnimated = true;
@@ -909,16 +1260,19 @@ class _ChatViewState extends State<ChatView> {
   bool _revealLoadedOlderPage = false;
   bool _loadedOlderRevealPending = false;
   bool _loadedOlderRevealScheduled = false;
+  int _loadedOlderRevealGestureGeneration = 0;
   bool _parkedShortTranscriptRepairScheduled = false;
   bool _wasLoadingOlder = false;
   bool _maintainSessionScrollAnchor = false;
   ChatThemeStyle? _resolvedChatThemeStyle;
   TelegramCloudTheme? _resolvedCloudTheme;
   bool _themingEnabled = true;
+  bool _hasCustomChatTheme = false;
   bool _sessionAnchorMaintenanceScheduled = false;
   bool _maintainRestoredBottom = false;
   final _restoredBottomCorrection = ChatBottomCorrectionCoordinator();
   bool _openingUnreadMention = false;
+  bool _openingUnreadReaction = false;
   bool _openingUnreadSummary = false;
   bool _exitStatePrepared = false;
   bool _notificationVisibilityRegistered = false;
@@ -932,13 +1286,18 @@ class _ChatViewState extends State<ChatView> {
   final Set<int> _autoTranslationFailedMessageIds = <int>{};
   final Set<int> _autoTranslatedMessageIds = <int>{};
   bool _sendFailureDialogVisible = false;
+  VoidCallback? _detachExitController;
+  VoidCallback? _detachPaneBackHandler;
+  final ChatSessionCacheWriteGate _sessionCacheWriteGate =
+      ChatSessionCacheWriteGate();
 
   /// Gap (seconds) between messages that triggers a fresh time separator.
   static const _separatorGap = 300;
   static const _initialTargetAlignment = 0.30;
   static const _initialUnreadAlignment = 0.12;
   static const _pendingTranscriptOrderId = 0x7FFFFFFFFFFFFFFF;
-  static final Map<int, _ChatScrollSnapshot> _sessionScrollSnapshots = {};
+  static final Map<({int accountSlot, int chatId}), _ChatScrollSnapshot>
+  _sessionScrollSnapshots = {};
   static final ChatSessionCache _sessionCache = ChatSessionCache();
   late final ChatAutoScrollPolicy _autoScrollPolicy;
   final ChatWallpaperController _wallpaperController =
@@ -969,6 +1328,7 @@ class _ChatViewState extends State<ChatView> {
   @override
   void initState() {
     super.initState();
+    _detachExitController = widget.exitController?.register(_prepareExitState);
     _wallpaperController.addListener(_onWallpaperChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -978,13 +1338,20 @@ class _ChatViewState extends State<ChatView> {
       unawaited(_wallpaperController.loadGlobalChatThemes());
     });
     _openAtLatest = context.read<ThemeController>().openChatsAtLatest;
+    _sessionKey = (
+      accountSlot: TdClient.shared.activeSlot,
+      chatId: widget.chatId,
+    );
     _sessionRenderState = widget.initialMessageId == null
-        ? _sessionCache.read(widget.chatId)
+        ? _sessionCache.read(
+            accountSlot: _sessionKey.accountSlot,
+            chatId: _sessionKey.chatId,
+          )
         : null;
     _olderHistoryExhaustedHint =
         _sessionRenderState?.olderHistoryExhausted ?? false;
     _sessionScrollSnapshot = widget.initialMessageId == null
-        ? _sessionScrollSnapshots[widget.chatId]
+        ? _sessionScrollSnapshots[_sessionKey]
         : null;
     final sessionRenderState = _sessionRenderState;
     final hasCachedLatestTranscript =
@@ -1014,9 +1381,9 @@ class _ChatViewState extends State<ChatView> {
     } else if (savedPivotMessageId != null && !hasSessionTranscript) {
       // Drop the orphan pivot from the in-memory snapshot so a later reopen
       // with a fresh transcript cache does not reintroduce the thin after-arm.
-      final snapshot = _sessionScrollSnapshots[widget.chatId];
+      final snapshot = _sessionScrollSnapshots[_sessionKey];
       if (snapshot != null && snapshot.pivotMessageId != null) {
-        _sessionScrollSnapshots[widget.chatId] = _ChatScrollSnapshot(
+        _sessionScrollSnapshots[_sessionKey] = _ChatScrollSnapshot(
           pixels: snapshot.pixels,
           wasAtLoadedBottom: snapshot.wasAtLoadedBottom,
           knownLatestMessageId: snapshot.knownLatestMessageId,
@@ -1057,6 +1424,7 @@ class _ChatViewState extends State<ChatView> {
       sessionAnchorMessageId: _shouldRestoreSessionScroll
           ? _sessionScrollSnapshot?.anchorMessageId
           : null,
+      sessionFallbackOpenAtLatest: _openAtLatest,
       sessionMessages: _sessionRenderState?.messages,
       sessionAnchoredHistory: _sessionRenderState?.anchoredHistory ?? false,
       sessionFirstContactInfo: _sessionRenderState?.firstContactInfo,
@@ -1074,8 +1442,13 @@ class _ChatViewState extends State<ChatView> {
     );
     _translation = context.read<TranslationController>();
     _translation.addListener(_onTranslationSettingsChanged);
+    _ai = context.read<AiSettingsController?>();
+    _ai?.addListener(_onTranslationSettingsChanged);
+    unawaited(_loadNativeTranslationProviders());
+    unawaited(_loadBotApiWarningDismissal());
     _historyWindowRevision = _vm.historyWindowRevision;
     _historyWindowInvalidationRevision = _vm.historyWindowInvalidationRevision;
+    _fullViewRevision = _vm.fullViewRevision;
     unawaited(
       TelegramCountryNames.shared
           .load()
@@ -1100,6 +1473,10 @@ class _ChatViewState extends State<ChatView> {
       _lastNewestMessageId = _latestServerMessage(_vm.messages)?.id;
       _lastOldestMessageId = _oldestServerMessage(_vm.messages)?.id;
     }
+    _search = ChatMessageSearchController(
+      chatId: widget.chatId,
+      onActivateResult: _openSearchResult,
+    )..addListener(_onSearchChanged);
     _vm.addListener(_onModel);
     _setScrollTarget(widget.initialMessageId);
     _vm.onAppear();
@@ -1122,8 +1499,25 @@ class _ChatViewState extends State<ChatView> {
   }
 
   @override
+  void didUpdateWidget(covariant ChatView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.exitController, widget.exitController)) return;
+    _detachExitController?.call();
+    _detachExitController = widget.exitController?.register(_prepareExitState);
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _detachPaneBackHandler?.call();
+    _detachPaneBackHandler = ChatPane.registerBackHandler(context, () {
+      if (_search.isActive) {
+        _closeSearch();
+        return true;
+      }
+      _prepareExitState();
+      return false;
+    });
     final tickerEnabled = TickerMode.valuesOf(context).enabled;
     final reactivated = !_viewTickerEnabled && tickerEnabled;
     _viewTickerEnabled = tickerEnabled;
@@ -1141,15 +1535,49 @@ class _ChatViewState extends State<ChatView> {
     }
     if (!_notificationVisibilityRegistered) {
       _notificationVisibilityRegistered = true;
+      bool isVisible() =>
+          mounted &&
+          (ModalRoute.of(context)?.isCurrent ?? false) &&
+          TickerMode.valuesOf(context).enabled;
       NotificationController.shared.registerVisibleChat(
         this,
         widget.chatId,
-        () =>
-            mounted &&
-            (ModalRoute.of(context)?.isCurrent ?? false) &&
-            TickerMode.valuesOf(context).enabled,
+        isVisible,
+      );
+      // The desktop title-bar search scopes to whatever conversation is in
+      // front; the title is read lazily so it follows the loaded peer name
+      // rather than freezing the placeholder this route opened with.
+      ActiveConversation.shared.register(
+        this,
+        chatId: widget.chatId,
+        title: () => _vm.peerTitle.isEmpty ? widget.title : _vm.peerTitle,
+        isVisible: isVisible,
+        accountSlot: _sessionKey.accountSlot,
+        messageId: _handoffMessageId,
       );
     }
+    _scheduleHandoffRefresh();
+  }
+
+  int? _handoffMessageId() {
+    if (!_initialTranscriptReady || _vm.messages.isEmpty) {
+      final messageId = widget.initialMessageId;
+      return messageId != null && messageId > 0 ? messageId : null;
+    }
+    if (_scroll.hasClients && _isAtLoadedBottom(80)) {
+      final messageId = _latestServerMessage(_vm.messages)?.id;
+      return messageId != null && messageId > 0 ? messageId : null;
+    }
+    final messageId =
+        _captureSessionScrollAnchor()?.messageId ?? widget.initialMessageId;
+    return messageId != null && messageId > 0 ? messageId : null;
+  }
+
+  void _scheduleHandoffRefresh() {
+    _handoffUpdateTimer?.cancel();
+    _handoffUpdateTimer = Timer(const Duration(milliseconds: 400), () {
+      if (mounted) ActiveConversation.shared.refresh();
+    });
   }
 
   bool get _shouldRestoreSessionScroll {
@@ -1199,11 +1627,13 @@ class _ChatViewState extends State<ChatView> {
         isNearOldest(pos, threshold: 500)) {
       unawaited(_loadOlderFromScroll());
     }
-    if (pos.userScrollDirection == ScrollDirection.reverse) {
-      _requestAutomaticReturnToLatestIfNearLatest();
-    }
     final nearBottom = _isNearBottom(80);
-    if (_isAtLoadedBottom(1)) _autoScrollPolicy.returnToBottom();
+    if (_isAtLoadedBottom(1)) {
+      _autoScrollPolicy.returnToBottom();
+      if (!_hasTranscriptPointerDown) {
+        _transcriptViewportClaimedByUser = false;
+      }
+    }
     if (nearBottom &&
         (_liveNewMessageCount > 0 ||
             (!_openAtLatest && !_bannerDismissed && _vm.unreadCount > 0))) {
@@ -1232,6 +1662,14 @@ class _ChatViewState extends State<ChatView> {
         _requestAutomaticReturnToLatestIfNearLatest();
       }
     } else if (_initialTranscriptReady) {
+      // Once an older-page request is in flight, a turn toward the latest
+      // messages means the user has abandoned the pull. A later model frame
+      // must not reveal that page by jumping the viewport back to the oldest
+      // edge.
+      if (notification.direction == ScrollDirection.reverse) {
+        _revealLoadedOlderPage = false;
+        _loadedOlderRevealPending = false;
+      }
       _lastTranscriptUserScrollDirection = notification.direction;
       _restoredPositionGuard.noteUserScroll();
       _claimTranscriptViewport();
@@ -1261,6 +1699,7 @@ class _ChatViewState extends State<ChatView> {
       _olderHistoryPull.reset();
       _scheduleLoadedOlderReveal();
       _saveSessionScrollSnapshot();
+      _scheduleHandoffRefresh();
     }
     return false;
   }
@@ -1272,6 +1711,7 @@ class _ChatViewState extends State<ChatView> {
       return;
     }
     _revealLoadedOlderPage = true;
+    _loadedOlderRevealGestureGeneration = _transcriptGestureGeneration;
     _cancelBottomFollow();
     if (!_vm.isLoadingOlder && !_isFillingShortTranscript) {
       unawaited(_loadOlderFromScroll());
@@ -1283,11 +1723,23 @@ class _ChatViewState extends State<ChatView> {
     _loadedOlderRevealScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadedOlderRevealScheduled = false;
+      final supersededByUser =
+          _transcriptGestureGeneration != _loadedOlderRevealGestureGeneration;
+      final blockedByNavigation =
+          _scrollTargetId != null ||
+          _maintainSessionScrollAnchor ||
+          _maintainRestoredBottom;
       if (!mounted ||
           !_loadedOlderRevealPending ||
           !_scroll.hasClients ||
           _hasTranscriptPointerDown ||
-          _isUserScrolling) {
+          _isUserScrolling ||
+          supersededByUser ||
+          blockedByNavigation) {
+        if (_loadedOlderRevealPending &&
+            (supersededByUser || blockedByNavigation)) {
+          _loadedOlderRevealPending = false;
+        }
         return;
       }
       _loadedOlderRevealPending = false;
@@ -1301,9 +1753,31 @@ class _ChatViewState extends State<ChatView> {
 
   bool get _hasTranscriptPointerDown => _transcriptPointersDown.isNotEmpty;
 
+  bool get _initialTranscriptPositioningAborted =>
+      _initialTranscriptPositionCancelled ||
+      _hasTranscriptPointerDown ||
+      _transcriptViewportClaimedByUser;
+
   void _onTranscriptPointerDown(PointerDownEvent event) {
     _transcriptPointersDown.add(event.pointer);
+    ++_transcriptGestureGeneration;
+    if (!_initialTranscriptReady) {
+      _initialTranscriptPositionCancelled = true;
+      // Let the first real drag claim the viewport immediately, even if the
+      // opening unread correction has not completed its first frame yet.
+      _initialTranscriptReady = true;
+    }
+    // A delayed message jump must never win back the viewport after the user
+    // has touched the transcript. Clear the target before any subsequent
+    // history/layout await can reuse its key.
+    if (_scrollTargetId != null) {
+      setState(_invalidateScrollNavigation);
+    } else {
+      _invalidateScrollNavigation();
+    }
     _cancelSessionReopenNavigation();
+    _cancelSessionScrollAnchorMaintenance();
+    _maintainRestoredBottom = false;
     // A hold cancels an in-flight driven scroll immediately. It does not claim
     // the viewport permanently unless it becomes an actual drag.
     _cancelBottomFollow();
@@ -1318,10 +1792,19 @@ class _ChatViewState extends State<ChatView> {
     _scheduleShortTranscriptFill();
     _scheduleSessionScrollAnchorMaintenance();
     _scheduleRestoredBottomCorrection();
+    if (!_hasTranscriptPointerDown && _isAtLoadedBottom(1)) {
+      _transcriptViewportClaimedByUser = false;
+    }
     if (!_hasTranscriptPointerDown) _drainReturnToLatestIntent();
   }
 
   void _claimTranscriptViewport() {
+    ++_transcriptGestureGeneration;
+    if (_scrollTargetId != null) {
+      setState(_invalidateScrollNavigation);
+    } else {
+      _invalidateScrollNavigation();
+    }
     _cancelSessionReopenNavigation(userClaimedViewport: true);
     _cancelBottomFollow();
     _returnToLatestCoordinator.cancelForUserDrag();
@@ -1356,17 +1839,19 @@ class _ChatViewState extends State<ChatView> {
               _preserveSnapshotAfterFailedSessionJump,
         ) ||
         _maintainSessionScrollAnchor ||
-        !_scroll.hasClients ||
-        widget.initialMessageId != null) {
+        !_scroll.hasClients) {
       return;
     }
     final pos = _scroll.position;
     if (!pos.hasContentDimensions) return;
-    final wasAtLoadedBottom = _isAtLoadedBottom(80);
+    final wasAtLoadedBottom = isChatSessionAtLoadedBottom(
+      anchoredHistory: _vm.anchoredHistory,
+      distanceToLoadedBottom: (_loadedBottomOffset - pos.pixels).abs(),
+    );
     final anchor = wasAtLoadedBottom || !captureAnchor
         ? null
         : _captureSessionScrollAnchor();
-    _sessionScrollSnapshots[widget.chatId] = _ChatScrollSnapshot(
+    _sessionScrollSnapshots[_sessionKey] = _ChatScrollSnapshot(
       pixels: clampScrollOffset(pos, pos.pixels),
       wasAtLoadedBottom: wasAtLoadedBottom,
       knownLatestMessageId: math.max(
@@ -1391,7 +1876,7 @@ class _ChatViewState extends State<ChatView> {
     _sessionReopenDispositionResolved = true;
     if (_prioritizingSessionUnread) {
       _prioritizingSessionUnread = false;
-      _scrollTargetId = null;
+      _invalidateScrollNavigation();
     }
     if (userClaimedViewport) {
       _preserveSnapshotAfterFailedSessionJump = false;
@@ -1408,7 +1893,7 @@ class _ChatViewState extends State<ChatView> {
     if (!sessionReopenPending && !_maintainSessionScrollAnchor) {
       _saveSessionScrollSnapshot();
     }
-    _cacheCurrentTranscript();
+    _cacheCurrentTranscript(force: true);
     if (shouldMarkChatReadOnExit(
       isAtLoadedBottom: _isAtLoadedBottom(80),
       sessionReopenPending: sessionReopenPending,
@@ -1420,13 +1905,25 @@ class _ChatViewState extends State<ChatView> {
     }
   }
 
-  void _cacheCurrentTranscript() {
-    if (widget.initialMessageId != null || !_vm.initialLoaded) return;
+  void _cacheCurrentTranscript({bool force = false}) {
+    if (!_vm.initialLoaded || !_initialTranscriptReady) return;
+    final olderHistoryExhausted =
+        !_vm.hasOlderHistory || _olderHistoryExhaustedHint;
+    if (!_sessionCacheWriteGate.shouldStore(
+      messages: _vm.messages,
+      anchoredHistory: _vm.anchoredHistory,
+      olderHistoryExhausted: olderHistoryExhausted,
+      firstContactInfo: _vm.firstContactInfo,
+      force: force,
+    )) {
+      return;
+    }
     _sessionCache.store(
+      accountSlot: _sessionKey.accountSlot,
       chatId: widget.chatId,
       messages: _vm.messages,
       anchoredHistory: _vm.anchoredHistory,
-      olderHistoryExhausted: !_vm.hasOlderHistory || _olderHistoryExhaustedHint,
+      olderHistoryExhausted: olderHistoryExhausted,
       firstContactInfo: _vm.firstContactInfo,
     );
   }
@@ -1443,8 +1940,15 @@ class _ChatViewState extends State<ChatView> {
 
   Widget _withExitState(Widget child) {
     return PopScope(
+      // Back closes search before it closes the chat, so a hit list never
+      // takes the whole conversation with it.
+      canPop: !_search.isActive,
       onPopInvokedWithResult: (didPop, _) {
-        if (didPop) _prepareExitState();
+        if (didPop) {
+          _prepareExitState();
+          return;
+        }
+        if (_search.isActive) _closeSearch();
       },
       child: child,
     );
@@ -1465,8 +1969,10 @@ class _ChatViewState extends State<ChatView> {
     if (viewportRenderObject is! RenderBox || !viewportRenderObject.attached) {
       return null;
     }
-    final viewportTop = viewportRenderObject.localToGlobal(Offset.zero).dy;
-    final viewportBottom = viewportTop + viewportRenderObject.size.height;
+    // Viewport-local coordinates: the offset is already relative to the
+    // viewport top, and stopping the transform walk at the viewport avoids the
+    // full ancestor chain per row.
+    final viewportBottom = viewportRenderObject.size.height;
     int? visibleAnchorMessageId;
     double? visibleAnchorTop;
     int? partialAnchorMessageId;
@@ -1477,10 +1983,12 @@ class _ChatViewState extends State<ChatView> {
       if (itemRenderObject is! RenderBox || !itemRenderObject.attached) {
         continue;
       }
-      final itemTop = itemRenderObject.localToGlobal(Offset.zero).dy;
+      final itemTop = itemRenderObject
+          .localToGlobal(Offset.zero, ancestor: viewportRenderObject)
+          .dy;
       final itemBottom = itemTop + itemRenderObject.size.height;
-      if (itemBottom <= viewportTop || itemTop >= viewportBottom) continue;
-      if (itemTop >= viewportTop) {
+      if (itemBottom <= 0 || itemTop >= viewportBottom) continue;
+      if (itemTop >= 0) {
         if (visibleAnchorTop == null || itemTop < visibleAnchorTop) {
           visibleAnchorMessageId = entry.key;
           visibleAnchorTop = itemTop;
@@ -1493,10 +2001,7 @@ class _ChatViewState extends State<ChatView> {
     final anchorMessageId = visibleAnchorMessageId ?? partialAnchorMessageId;
     final anchorTop = visibleAnchorTop ?? partialAnchorTop;
     if (anchorMessageId == null || anchorTop == null) return null;
-    return (
-      messageId: anchorMessageId,
-      viewportOffset: anchorTop - viewportTop,
-    );
+    return (messageId: anchorMessageId, viewportOffset: anchorTop);
   }
 
   void _scheduleUnreadProgressUpdate() {
@@ -1518,8 +2023,10 @@ class _ChatViewState extends State<ChatView> {
     if (viewportRenderObject is! RenderBox || !viewportRenderObject.attached) {
       return;
     }
-    final viewportOrigin = viewportRenderObject.localToGlobal(Offset.zero);
-    final viewportRect = viewportOrigin & viewportRenderObject.size;
+    // Measured in the viewport's own space: a root-relative localToGlobal walks
+    // and multiplies the whole ancestor transform chain for every mounted row,
+    // once per scroll frame.
+    final viewportRect = Offset.zero & viewportRenderObject.size;
     var changed = false;
     final newlyVisible = <ChatMessage>[];
 
@@ -1529,22 +2036,31 @@ class _ChatViewState extends State<ChatView> {
       if (itemRenderObject is! RenderBox || !itemRenderObject.attached) {
         continue;
       }
-      final itemOrigin = itemRenderObject.localToGlobal(Offset.zero);
+      final itemOrigin = itemRenderObject.localToGlobal(
+        Offset.zero,
+        ancestor: viewportRenderObject,
+      );
       final itemRect = itemOrigin & itemRenderObject.size;
       if (!itemRect.overlaps(viewportRect)) continue;
 
       for (final message in entry.value.messages) {
         if (message.isOutgoing || message.isService) continue;
-        if (_reportedVisibleMessageIds.add(message.id)) {
+        final observation = _unreadProgress.observeVisibleIncoming(
+          messageId: message.id,
+          initialUnread: _isEntryUnreadMessage(message.id),
+        );
+        if (observation.shouldReportViewed) {
           newlyVisible.add(message);
         }
-        changed =
-            _unreadProgress.markVisible(
-              messageId: message.id,
-              initialUnread: message.id > _entryLastReadInboxId,
-            ) ||
-            changed;
+        changed = observation.unreadCountChanged || changed;
       }
+    }
+
+    if (_showEntryUnreadBanner &&
+        _unreadProgress.initialRemaining(entryUnreadCount: _entryUnreadCount) ==
+            0) {
+      _showEntryUnreadBanner = false;
+      changed = true;
     }
 
     if (newlyVisible.isNotEmpty) {
@@ -1628,9 +2144,19 @@ class _ChatViewState extends State<ChatView> {
         _scrollTargetId == null) {
       _scheduleScrollToBottom(animated: false);
     }
+    // The keyboard changes the viewport height without rebuilding the shell
+    // any more, so the viewport-measuring sweeps _transcript() used to schedule
+    // on every keyboard frame have to be asked for here instead.
+    _scheduleTranscriptPivotFreeze();
+    _scheduleUnreadProgressUpdate();
+    _scheduleShortFirstContactReveal();
   }
 
-  void _scheduleScrollToBottom({bool animated = true}) {
+  void _scheduleScrollToBottom({
+    bool animated = true,
+    bool userInitiated = false,
+  }) {
+    if (userInitiated) _transcriptViewportClaimedByUser = false;
     final generation = _bottomFollow.begin();
     _scheduledBottomGeneration = generation;
     if (_bottomScrollScheduled) {
@@ -1682,6 +2208,7 @@ class _ChatViewState extends State<ChatView> {
       mounted &&
       _scroll.hasClients &&
       !_hasTranscriptPointerDown &&
+      !_transcriptViewportClaimedByUser &&
       !_vm.anchoredHistory &&
       !_autoScrollPolicy.preservesViewport &&
       _scrollTargetId == null;
@@ -1749,6 +2276,7 @@ class _ChatViewState extends State<ChatView> {
         _bannerDismissed = _vm.unreadCount <= 0;
       });
     }
+    _transcriptViewportClaimedByUser = false;
     _scheduleScrollToBottom();
     _markReadAtBottomIfNeeded();
   }
@@ -1756,6 +2284,7 @@ class _ChatViewState extends State<ChatView> {
   void _requestReturnToLatest({bool userInitiated = false}) {
     if (!userInitiated && _hasTranscriptPointerDown) return;
     if (userInitiated) {
+      _transcriptViewportClaimedByUser = false;
       _cancelSessionReopenNavigation(userClaimedViewport: true);
       _restoredPositionGuard.cancel();
       _cancelSessionScrollAnchorMaintenance();
@@ -1812,7 +2341,7 @@ class _ChatViewState extends State<ChatView> {
       _requestReturnToLatest(userInitiated: true);
       return;
     }
-    _scheduleScrollToBottom();
+    _scheduleScrollToBottom(userInitiated: true);
   }
 
   void _onComposerPanelGeometryChanged() {
@@ -1835,7 +2364,7 @@ class _ChatViewState extends State<ChatView> {
       _requestReturnToLatest(userInitiated: true);
       return;
     }
-    _scheduleScrollToBottom(animated: false);
+    _scheduleScrollToBottom(animated: false, userInitiated: true);
   }
 
   void _playMusicMessage(ChatMessage message) {
@@ -1863,9 +2392,29 @@ class _ChatViewState extends State<ChatView> {
     _onComposerMessageSent();
   }
 
+  void _captureEntryUnreadState() {
+    _entryUnreadCount = _vm.unreadCount;
+    _entryLastReadInboxId = _vm.lastReadInboxId;
+    _entryLatestMessageId = resolveCapturedEntryLatestMessageId(
+      knownLatestMessageId: _vm.knownLatestMessageId,
+      loadedLatestMessageId: _latestServerMessage(_vm.messages)?.id ?? 0,
+    );
+  }
+
+  bool _isEntryUnreadMessage(int messageId) => isCapturedEntryUnreadMessage(
+    messageId: messageId,
+    lastReadInboxId: _entryLastReadInboxId,
+    latestMessageId: _entryLatestMessageId,
+  );
+
   int? _firstLoadedEntryUnreadMessageId() => firstUnreadMessageIdAfterBoundary(
     incomingMessageIds: _vm.messages
-        .where((message) => !message.isOutgoing && !message.isService)
+        .where(
+          (message) =>
+              !message.isOutgoing &&
+              !message.isService &&
+              _isEntryUnreadMessage(message.id),
+        )
         .map((message) => message.id),
     lastReadInboxId: _entryLastReadInboxId,
   );
@@ -1874,7 +2423,7 @@ class _ChatViewState extends State<ChatView> {
   /// boundary may already point at the newest message after the chat is marked
   /// read, so it cannot be used to resolve this button later.
   Future<void> _jumpToFirstUnread() async {
-    _cancelSessionReopenNavigation(userClaimedViewport: true);
+    _claimTranscriptViewport();
     await _jumpToFirstUnreadImpl();
   }
 
@@ -1882,9 +2431,12 @@ class _ChatViewState extends State<ChatView> {
       _jumpToFirstUnreadImpl(sessionReopenGeneration: generation);
 
   Future<bool> _jumpToFirstUnreadImpl({int? sessionReopenGeneration}) async {
+    final gestureGeneration = _transcriptGestureGeneration;
+
     bool isCancelled() =>
-        sessionReopenGeneration != null &&
-        !_sessionReopenNavigationGuard.isCurrent(sessionReopenGeneration);
+        _transcriptGestureGeneration != gestureGeneration ||
+        (sessionReopenGeneration != null &&
+            !_sessionReopenNavigationGuard.isCurrent(sessionReopenGeneration));
 
     if (isCancelled()) return false;
     var targetMessageId = _entryFirstUnreadMessageId;
@@ -2073,10 +2625,16 @@ class _ChatViewState extends State<ChatView> {
 
     _sessionReopenResolutionInFlight = false;
     _sessionReopenDispositionResolved = true;
+    final prioritizeUnread = shouldPrioritizeUnreadOnChatReopen(
+      currentUnreadCount: _vm.unreadCount,
+      currentLastReadInboxId: _vm.lastReadInboxId,
+      savedAnchorMessageId: snapshot.anchorMessageId,
+      hasConfirmedNewUnread: confirmedUnreadMessageId != null,
+    );
     final disposition = resolveChatReopenDisposition(
       hasExplicitTarget: widget.initialMessageId != null,
       hasSavedPosition: true,
-      hasConfirmedNewUnread: confirmedUnreadMessageId != null,
+      prioritizeUnread: prioritizeUnread,
     );
     if (disposition != ChatReopenDisposition.firstUnread) return;
 
@@ -2087,8 +2645,7 @@ class _ChatViewState extends State<ChatView> {
     _cancelBottomFollow();
     _stopActiveTranscriptScroll();
     _resetTranscriptPivot();
-    _entryUnreadCount = _vm.unreadCount;
-    _entryLastReadInboxId = _vm.lastReadInboxId;
+    _captureEntryUnreadState();
     _entryFirstUnreadMessageId = _entryLastReadInboxId == 0
         ? confirmedUnreadMessageId
         : _firstLoadedEntryUnreadMessageId();
@@ -2104,7 +2661,7 @@ class _ChatViewState extends State<ChatView> {
     _prioritizingSessionUnread = false;
     if (jumped) {
       _preserveSnapshotAfterFailedSessionJump = false;
-      _sessionScrollSnapshots.remove(widget.chatId);
+      _sessionScrollSnapshots.remove(_sessionKey);
       _saveSessionScrollSnapshot();
     } else {
       _preserveSnapshotAfterFailedSessionJump = true;
@@ -2113,11 +2670,21 @@ class _ChatViewState extends State<ChatView> {
 
   void _onModel() {
     if (!mounted) return;
+    final nextFullViewRevision = _vm.fullViewRevision;
+    final requiresFullViewSync = chatViewRequiresFullSync(
+      previousRevision: _fullViewRevision,
+      nextRevision: nextFullViewRevision,
+    );
     if (!_viewTickerEnabled) {
-      _modelDirtyWhileInactive = true;
+      if (requiresFullViewSync) _modelDirtyWhileInactive = true;
       return;
     }
+    if (!requiresFullViewSync) return;
+    _fullViewRevision = nextFullViewRevision;
+    _syncProtectedContentSelectionState();
+    _reportChatKindIfReady();
     _modelDirtyWhileInactive = false;
+    _scheduleHandoffRefresh();
     if (!_sendFailureDialogVisible) {
       final failure = _vm.consumeSendFailure();
       if (failure != null) _scheduleSendFailureDialog(failure);
@@ -2131,14 +2698,25 @@ class _ChatViewState extends State<ChatView> {
         oldest != null &&
         previousOldestId != null &&
         oldest.id < previousOldestId;
+    // _isTranscriptShort walks every cached entry; nothing below moves the
+    // scroll position or the pivot, so one measurement serves all three tests.
+    final latestArmIsShort = _isTranscriptShort();
+    final hasPendingMessageTarget =
+        _scrollTargetId != null ||
+        (_didInitialScroll && !_initialTranscriptReady);
     final hydratedShortTranscript = shouldRebaseForHydratedOlderPage(
       prependedOlder: prependedOlder,
-      latestArmWasShort: _isTranscriptShort(),
+      latestArmWasShort: latestArmIsShort,
       historyFillInFlight: _isFillingShortTranscript || _loadingOlderFromScroll,
       revealRequested: _revealLoadedOlderPage,
+      hasPendingMessageTarget: hasPendingMessageTarget,
     );
-    final followingLatest =
-        !_autoScrollPolicy.preservesViewport && !_maintainSessionScrollAnchor;
+    final followingLatest = transcriptFollowsLatestEdge(
+      preservesViewport: _autoScrollPolicy.preservesViewport,
+      maintainsSessionAnchor: _maintainSessionScrollAnchor,
+      viewportClaimedByUser: _transcriptViewportClaimedByUser,
+      hasPendingMessageTarget: hasPendingMessageTarget,
+    );
     final hasMessageOlderThanPivot =
         _transcriptPivot != null &&
         _vm.messages.any(
@@ -2147,20 +2725,23 @@ class _ChatViewState extends State<ChatView> {
         );
     final expandedInitialWindow = shouldRebaseForExpandedInitialWindow(
       transcriptChanged: !identical(_transcriptCacheMessages, _vm.messages),
-      latestArmIsShort: _isTranscriptShort(),
+      latestArmIsShort: latestArmIsShort,
       hasMessageOlderThanPivot: hasMessageOlderThanPivot,
       followingLatest: followingLatest,
+      viewportClaimedByUser: _transcriptViewportClaimedByUser,
     );
     final parkedShortArm = shouldRebaseParkedShortTranscriptPivot(
       pivotCutoffMessageId: _transcriptPivot?.cutoffMessageId,
-      latestArmIsShort: _isTranscriptShort(),
+      latestArmIsShort: latestArmIsShort,
       hasMessageOlderThanPivot: hasMessageOlderThanPivot,
       followingLatest: followingLatest,
+      viewportClaimedByUser: _transcriptViewportClaimedByUser,
     );
     final wasPinnedToLoadedBottom =
         _didInitialScroll &&
         !_hasTranscriptPointerDown &&
         !_isUserScrolling &&
+        !_transcriptViewportClaimedByUser &&
         !_autoScrollPolicy.preservesViewport &&
         _scrollTargetId == null &&
         _isAtLoadedBottom(2);
@@ -2188,18 +2769,21 @@ class _ChatViewState extends State<ChatView> {
         _transcriptViewportClaimedByUser = false;
         _showingFullyVisibleFirstContactHistory = false;
         _autoScrollPolicy.returnToBottom();
-        _sessionScrollSnapshots.remove(widget.chatId);
+        _sessionScrollSnapshots.remove(_sessionKey);
       } else if (!preservesSavedCoordinate) {
         _olderHistoryExhaustedHint = false;
       }
     }
-    if (shouldRebasePendingTranscriptPivot(
-      pivot: _transcriptPivot,
-      pendingOrderId: _pendingTranscriptOrderId,
-      hasServerMessage: _vm.messages.any(
-        (message) => !isPendingChatMessage(message) && message.id > 0,
-      ),
-    )) {
+    // The server-message scan only matters for a pending cutoff; as an argument
+    // it ran on every notification.
+    if (_transcriptPivot?.cutoffMessageId == _pendingTranscriptOrderId &&
+        shouldRebasePendingTranscriptPivot(
+          pivot: _transcriptPivot,
+          pendingOrderId: _pendingTranscriptOrderId,
+          hasServerMessage: _vm.messages.any(
+            (message) => !isPendingChatMessage(message) && message.id > 0,
+          ),
+        )) {
       _resetTranscriptPivot();
     }
     final shouldResetParkedPivot =
@@ -2244,8 +2828,11 @@ class _ChatViewState extends State<ChatView> {
       );
       if (prependedOlder && _revealLoadedOlderPage) {
         _revealLoadedOlderPage = false;
-        _loadedOlderRevealPending = true;
-        _scheduleLoadedOlderReveal();
+        if (_transcriptGestureGeneration ==
+            _loadedOlderRevealGestureGeneration) {
+          _loadedOlderRevealPending = true;
+          _scheduleLoadedOlderReveal();
+        }
       }
       _lastCount = _vm.messages.length;
       _lastNewestMessageId = newest?.id ?? _lastNewestMessageId;
@@ -2256,6 +2843,7 @@ class _ChatViewState extends State<ChatView> {
           !_vm.anchoredHistory &&
           appendedNewest &&
           !_hasTranscriptPointerDown &&
+          !_transcriptViewportClaimedByUser &&
           !_isUserScrolling &&
           _autoScrollPolicy.shouldFollowAppendedMessage(
             wasNearBottom: wasNearBottom,
@@ -2282,10 +2870,20 @@ class _ChatViewState extends State<ChatView> {
     }
     final target = _vm.consumePendingScrollToId();
     if (target != null) {
-      _setScrollTarget(target);
+      _setScrollTarget(target, forceNavigation: true);
+      final navigationGeneration = _scrollTargetGeneration;
       if (_didInitialScroll) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          _ensureMessageVisible(target);
+          if (!mounted ||
+              !_isCurrentScrollTarget(target, navigationGeneration)) {
+            return;
+          }
+          unawaited(
+            _ensureMessageVisible(
+              target,
+              navigationGeneration: navigationGeneration,
+            ),
+          );
         });
       }
     }
@@ -2293,15 +2891,14 @@ class _ChatViewState extends State<ChatView> {
     // boundary) is loaded, jump to the first unread message — or stay at the
     // bottom when caught up. Runs exactly once per chat open.
     if (!_didInitialScroll && _vm.initialLoaded) {
-      _entryUnreadCount = _vm.unreadCount;
-      _entryLastReadInboxId = _vm.lastReadInboxId;
+      _captureEntryUnreadState();
       final firstEntryUnreadMessageId = _firstLoadedEntryUnreadMessageId();
       final loadedIncomingUnreadCount = _vm.messages
           .where(
             (message) =>
                 !message.isOutgoing &&
                 !message.isService &&
-                message.id > _entryLastReadInboxId,
+                _isEntryUnreadMessage(message.id),
           )
           .length;
       final entryBoundaryIsLoaded =
@@ -2336,6 +2933,7 @@ class _ChatViewState extends State<ChatView> {
       });
     }
     if ((wasPinnedToLoadedBottom || rebasedParkedShortArm) &&
+        !_transcriptViewportClaimedByUser &&
         !_bottomScrollScheduled) {
       _scheduleScrollToBottom(animated: false);
     }
@@ -2348,7 +2946,33 @@ class _ChatViewState extends State<ChatView> {
     _scheduleParkedShortTranscriptRepair();
   }
 
-  void _setScrollTarget(int? messageId) {
+  void _reportChatKindIfReady() {
+    final kind = _vm.chatKind;
+    final callback = widget.onChatKindResolved;
+    if (kind == null || callback == null || kind == _reportedChatKind) return;
+    _reportedChatKind = kind;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _vm.chatKind != kind) return;
+      widget.onChatKindResolved?.call(kind);
+    });
+  }
+
+  bool _isCurrentScrollTarget(int messageId, int navigationGeneration) =>
+      _scrollTargetId == messageId &&
+      _scrollTargetGeneration == navigationGeneration;
+
+  void _invalidateScrollNavigation() {
+    if (_scrollTargetId != null) {
+      _setScrollTarget(null);
+    } else {
+      ++_scrollTargetGeneration;
+    }
+  }
+
+  void _setScrollTarget(int? messageId, {bool forceNavigation = false}) {
+    if (forceNavigation || _scrollTargetId != messageId) {
+      ++_scrollTargetGeneration;
+    }
     if (messageId != null) {
       _restoredPositionGuard.cancel();
       _returnToLatestCoordinator.cancel();
@@ -2358,6 +2982,35 @@ class _ChatViewState extends State<ChatView> {
       _stopActiveTranscriptScroll();
     }
     _scrollTargetId = messageId;
+  }
+
+  /// Makes an arbitrary loaded target the first child after the scroll view's
+  /// center sliver, so Flutter lays it out without depending on guessed row
+  /// heights. The transcript keeps the same chronological order on both sides
+  /// of the new pivot; only its zero scroll coordinate moves to the target.
+  bool _stageMessageAtTranscriptCenter(int messageId) {
+    if (!_scroll.hasClients) return false;
+    ChatMessage? target;
+    for (final message in _vm.messages) {
+      if (message.id == messageId) {
+        target = message;
+        break;
+      }
+    }
+    if (target == null) return false;
+
+    final cutoff = _transcriptOrderId(target);
+    if (_transcriptPivot?.cutoffMessageId != cutoff ||
+        !_transcriptPivotFrozen) {
+      setState(() {
+        _transcriptPivot = TranscriptPivot(cutoff);
+        // Async sender, preview, and media hydration must not reset the pivot
+        // before the target's final alignment passes have completed.
+        _transcriptPivotFrozen = true;
+      });
+    }
+    _scroll.jumpTo(clampScrollOffset(_scroll.position, 0));
+    return true;
   }
 
   void _cancelSessionScrollAnchorMaintenance() {
@@ -2379,6 +3032,7 @@ class _ChatViewState extends State<ChatView> {
           mounted &&
           _maintainRestoredBottom &&
           !_hasTranscriptPointerDown &&
+          !_transcriptViewportClaimedByUser &&
           !_vm.anchoredHistory &&
           _scrollTargetId == null &&
           _scroll.hasClients,
@@ -2397,7 +3051,11 @@ class _ChatViewState extends State<ChatView> {
     _sessionAnchorMaintenanceScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _sessionAnchorMaintenanceScheduled = false;
-      if (!mounted || !_maintainSessionScrollAnchor || !_scroll.hasClients) {
+      if (!mounted ||
+          !_maintainSessionScrollAnchor ||
+          !_scroll.hasClients ||
+          _transcriptViewportClaimedByUser ||
+          _scrollTargetId != null) {
         return;
       }
       if (_hasTranscriptPointerDown) return;
@@ -2406,7 +3064,7 @@ class _ChatViewState extends State<ChatView> {
   }
 
   int _firstUnreadIndex() => _vm.messages.indexWhere(
-    (m) => !m.isOutgoing && !m.isService && m.id > _vm.lastReadInboxId,
+    (m) => !m.isOutgoing && !m.isService && _isEntryUnreadMessage(m.id),
   );
 
   /// One-time positioning when a chat opens. This must never block painting:
@@ -2420,9 +3078,33 @@ class _ChatViewState extends State<ChatView> {
       await _positionInitialTranscript();
     }
     if (!mounted) return;
+    if (_initialTranscriptPositioningAborted) {
+      setState(() => _initialTranscriptReady = true);
+      return;
+    }
+    final shortUnreadTail =
+        _initialViewportTarget().kind ==
+            ChatInitialViewportTargetKind.firstUnread &&
+        _vm.historyReachesLatest &&
+        _isTranscriptShort();
     if (_repairParkedShortTranscriptPivot()) {
       await WidgetsBinding.instance.endOfFrame;
-      if (mounted && _scroll.hasClients) _scrollToBottom();
+      if (!mounted) return;
+      if (_initialTranscriptPositioningAborted) {
+        setState(() => _initialTranscriptReady = true);
+        return;
+      }
+      if (_canFollowLoadedBottom() || shortUnreadTail) _scrollToBottom();
+      if (shortUnreadTail) {
+        // Finish the short unread tail's bottom alignment before revealing it.
+        // Rebasing a one-row center otherwise exposes empty space, then the
+        // first gesture repairs it with a sudden jump to the newest message.
+        for (var pass = 0; pass < 3; pass++) {
+          await WidgetsBinding.instance.endOfFrame;
+          if (!mounted || _initialTranscriptPositioningAborted) return;
+          _scrollToBottom();
+        }
+      }
     }
     if (!mounted) return;
     setState(() => _initialTranscriptReady = true);
@@ -2432,42 +3114,101 @@ class _ChatViewState extends State<ChatView> {
 
   Future<void> _restoreSessionScrollPosition() async {
     final snapshot = _sessionScrollSnapshot;
-    if (snapshot == null || !_scroll.hasClients) return;
+    if (snapshot == null ||
+        !_scroll.hasClients ||
+        _initialTranscriptPositioningAborted) {
+      return;
+    }
     if (_hasSessionScrollAnchor) {
-      final estimate = _estimateMessageOffset(snapshot.anchorMessageId!, 0);
-      if (estimate != null) _scroll.jumpTo(estimate);
-      await WidgetsBinding.instance.endOfFrame;
-      if (!mounted || !_scroll.hasClients) return;
-      if (_restoreSessionScrollAnchor(snapshot)) {
-        await WidgetsBinding.instance.endOfFrame;
-        if (mounted && _scroll.hasClients) {
-          _restoreSessionScrollAnchor(snapshot);
+      final anchorMessageId = snapshot.anchorMessageId!;
+      for (var attempt = 0; attempt < 4; attempt++) {
+        if (_initialTranscriptPositioningAborted) return;
+        if (_restoreSessionScrollAnchor(snapshot)) {
+          await WidgetsBinding.instance.endOfFrame;
+          if (mounted &&
+              _scroll.hasClients &&
+              !_initialTranscriptPositioningAborted) {
+            _restoreSessionScrollAnchor(snapshot);
+          }
+          return;
         }
+        final estimate = _estimateMessageOffset(anchorMessageId, 0);
+        if (estimate != null) _scroll.jumpTo(estimate);
+        await WidgetsBinding.instance.endOfFrame;
+        if (!mounted ||
+            !_scroll.hasClients ||
+            _initialTranscriptPositioningAborted) {
+          return;
+        }
+      }
+      // A transcript can be evicted before its independently stored scroll
+      // anchor. Raw pixels belong to that old centered window, so never apply
+      // them to a new window (or one that no longer contains the anchor).
+      final hasMatchingCachedWindow = _sessionRenderState != null;
+      final anchorStillLoaded = _vm.messages.any(
+        (message) => message.id == anchorMessageId,
+      );
+      if (!hasMatchingCachedWindow || !anchorStillLoaded) {
+        await _invalidateSessionSnapshotAndPositionCold();
         return;
       }
     }
+    if (_sessionRenderState == null) {
+      await _invalidateSessionSnapshotAndPositionCold();
+      return;
+    }
+    if (_initialTranscriptPositioningAborted) return;
     _jumpToSessionScrollSnapshot(snapshot);
     await WidgetsBinding.instance.endOfFrame;
-    if (!mounted || !_scroll.hasClients) return;
+    if (!mounted ||
+        !_scroll.hasClients ||
+        _initialTranscriptPositioningAborted) {
+      return;
+    }
 
     var guard = 0;
     while (mounted &&
         _scroll.hasClients &&
+        !_initialTranscriptPositioningAborted &&
         _vm.canLoadOlder &&
         snapshot.pixels + 24 < _scroll.position.minScrollExtent &&
         guard < 6) {
       final loaded = await _vm.loadOlderLocal();
       if (!loaded) break;
       await WidgetsBinding.instance.endOfFrame;
+      if (_initialTranscriptPositioningAborted) return;
       guard++;
     }
 
-    if (!mounted || !_scroll.hasClients) return;
+    if (!mounted ||
+        !_scroll.hasClients ||
+        _initialTranscriptPositioningAborted) {
+      return;
+    }
     _jumpToSessionScrollSnapshot(snapshot);
     await WidgetsBinding.instance.endOfFrame;
-    if (!mounted || !_scroll.hasClients) return;
+    if (!mounted ||
+        !_scroll.hasClients ||
+        _initialTranscriptPositioningAborted) {
+      return;
+    }
     _jumpToSessionScrollSnapshot(snapshot);
     _saveSessionScrollSnapshot();
+  }
+
+  Future<void> _invalidateSessionSnapshotAndPositionCold() async {
+    _sessionScrollSnapshots.remove(_sessionKey);
+    _sessionScrollSnapshot = null;
+    _cancelSessionReopenNavigation(userClaimedViewport: true);
+    _maintainSessionScrollAnchor = false;
+    _restoredPositionGuard.cancel();
+    if (_openAtLatest) {
+      _autoScrollPolicy.returnToBottom();
+    } else {
+      _autoScrollPolicy.allowViewportPreservation();
+    }
+    _resetTranscriptPivot();
+    await _positionInitialTranscript();
   }
 
   bool _restoreSessionScrollAnchor(_ChatScrollSnapshot snapshot) {
@@ -2508,12 +3249,23 @@ class _ChatViewState extends State<ChatView> {
   }
 
   Future<void> _positionInitialTranscript() async {
-    if (!_scroll.hasClients) return;
-    _jumpToInitialEstimate();
+    if (!_scroll.hasClients || _initialTranscriptPositioningAborted) return;
+    // Build the resolved unread row before aligning it. Height estimates can
+    // skip it entirely in channels with long posts and mixed media.
+    final initialTarget = _initialViewportTarget().messageId;
+    if (initialTarget == null ||
+        !_stageMessageAtTranscriptCenter(initialTarget)) {
+      _jumpToInitialEstimate();
+    }
     for (var i = 0; i < 3; i++) {
       await WidgetsBinding.instance.endOfFrame;
-      if (!mounted || !_scroll.hasClients) return;
+      if (!mounted ||
+          !_scroll.hasClients ||
+          _initialTranscriptPositioningAborted) {
+        return;
+      }
       await _correctInitialPosition();
+      if (_initialTranscriptPositioningAborted) return;
     }
   }
 
@@ -2524,79 +3276,73 @@ class _ChatViewState extends State<ChatView> {
     _scroll.jumpTo(position);
   }
 
-  double? _initialPositionEstimate() {
-    if (!_scroll.hasClients || _vm.messages.isEmpty) return null;
-    final max = _scroll.position.maxScrollExtent;
-    final target = widget.initialMessageId ?? _scrollTargetId;
-    if (target != null) {
-      _setScrollTarget(target);
-      return _estimateMessageOffset(target, _initialTargetAlignment);
-    }
-    if (_vm.anchoredHistory) {
-      return null;
-    }
-    if (_shouldOpenAtBottom) {
-      return max;
-    }
+  ChatInitialViewportTarget _initialViewportTarget() {
     final i = _firstUnreadIndex();
     final boundaryLoaded = _isUnreadBoundaryLoaded();
-    if (_vm.unreadCount <= 0 || i < 0 || !boundaryLoaded) {
-      if (_vm.unreadCount > 0 && _vm.lastReadInboxId > 0) {
-        _setScrollTarget(_vm.lastReadInboxId);
-        return _estimateMessageOffset(
-          _vm.lastReadInboxId,
-          _initialTargetAlignment,
-        );
-      }
-      return max;
-    }
-    return _estimateMessageOffset(
-      _vm.messages[i].id,
-      _initialUnreadAlignment,
-      beforeUnreadDivider: true,
+    return resolveChatInitialViewportTarget(
+      explicitMessageId: widget.initialMessageId,
+      pendingMessageId: _scrollTargetId,
+      openAtBottom: _shouldOpenAtBottom,
+      anchoredHistory: _vm.anchoredHistory,
+      unreadCount: _entryUnreadCount,
+      firstUnreadMessageId: i < 0 ? null : _vm.messages[i].id,
+      unreadBoundaryLoaded: boundaryLoaded,
+      lastReadInboxId: _entryLastReadInboxId,
     );
   }
 
+  double? _initialPositionEstimate() {
+    if (!_scroll.hasClients || _vm.messages.isEmpty) return null;
+    final max = _scroll.position.maxScrollExtent;
+    final decision = _initialViewportTarget();
+    return switch (decision.kind) {
+      ChatInitialViewportTargetKind.message ||
+      ChatInitialViewportTargetKind.readBoundary => () {
+        final target = decision.messageId!;
+        _setScrollTarget(target);
+        return _estimateMessageOffset(target, _initialTargetAlignment);
+      }(),
+      ChatInitialViewportTargetKind.firstUnread => _estimateMessageOffset(
+        decision.messageId!,
+        _initialUnreadAlignment,
+        beforeUnreadDivider: true,
+      ),
+      ChatInitialViewportTargetKind.loadedBottom => max,
+      ChatInitialViewportTargetKind.preserveAnchoredHistory => null,
+    };
+  }
+
   Future<bool> _correctInitialPosition() async {
-    if (!_scroll.hasClients) return false;
-    final target = widget.initialMessageId ?? _scrollTargetId;
-    if (target != null) {
-      _setScrollTarget(target);
-      final corrected = await _ensureKeyVisible(
-        _targetKey,
-        alignment: _initialTargetAlignment,
-      );
-      if (corrected && mounted && _scrollTargetId == target) {
-        setState(() => _setScrollTarget(null));
-      }
-      return corrected;
-    }
-    if (_vm.anchoredHistory) return true;
-    if (_shouldOpenAtBottom) {
-      _scrollToBottom();
-      _markReadAtBottomIfNeeded();
-      return true;
-    }
-    final i = _firstUnreadIndex();
-    final boundaryLoaded = _isUnreadBoundaryLoaded();
-    if (_vm.unreadCount > 0 && i >= 0 && boundaryLoaded) {
-      final corrected = await _ensureKeyVisible(
-        _unreadKey,
-        alignment: _initialUnreadAlignment,
-      );
-      if (corrected) return true;
+    if (!_scroll.hasClients || _initialTranscriptPositioningAborted) {
       return false;
     }
-    if (_vm.unreadCount > 0 && _vm.lastReadInboxId > 0) {
-      _setScrollTarget(_vm.lastReadInboxId);
-      final corrected = await _ensureKeyVisible(
-        _targetKey,
-        alignment: _initialTargetAlignment,
-      );
-      if (corrected) return true;
+    final decision = _initialViewportTarget();
+    switch (decision.kind) {
+      case ChatInitialViewportTargetKind.message:
+      case ChatInitialViewportTargetKind.readBoundary:
+        final target = decision.messageId!;
+        _setScrollTarget(target);
+        final corrected = await _ensureKeyVisible(
+          _targetKey,
+          alignment: _initialTargetAlignment,
+        );
+        if (_initialTranscriptPositioningAborted) return false;
+        if (corrected && mounted && _scrollTargetId == target) {
+          setState(() => _setScrollTarget(null));
+        }
+        return corrected;
+      case ChatInitialViewportTargetKind.firstUnread:
+        return _ensureKeyVisible(
+          _unreadKey,
+          alignment: _initialUnreadAlignment,
+        );
+      case ChatInitialViewportTargetKind.loadedBottom:
+        _scrollToBottom();
+        _markReadAtBottomIfNeeded();
+        return true;
+      case ChatInitialViewportTargetKind.preserveAnchoredHistory:
+        return true;
     }
-    _scrollToBottom();
-    return true;
   }
 
   Future<bool> _ensureKeyVisible(
@@ -2626,17 +3372,42 @@ class _ChatViewState extends State<ChatView> {
       }
     }
     if (targetEntry == null) return null;
-    final partition = _partitionTranscript(entries);
+    // The visibility retry loop calls this up to six times in a row, so it
+    // reuses the partition and key indexes _transcript() already cached rather
+    // than repartitioning the whole entry list and rescanning it per attempt.
+    // `older` holds beforePivot reversed, which is why it is walked forwards.
+    final List<_TranscriptEntry> older;
+    final List<_TranscriptEntry> newer;
+    final int olderIndex;
+    final int newerIndex;
+    if (identical(entries, _sliverCacheEntries) &&
+        identical(_transcriptPivot, _sliverCachePivot) &&
+        _sliverCacheInitialLoaded == _vm.initialLoaded &&
+        _sliverCacheLeadingItemCount >= 0) {
+      older = _sliverCacheOlderEntries!;
+      newer = _sliverCacheNewerEntries!;
+      olderIndex = _sliverCacheOlderIndexByKey![targetEntry.key] ?? -1;
+      // The newer map is offset by the leading first-contact card, which is not
+      // an entry.
+      final mapped = olderIndex >= 0
+          ? null
+          : _sliverCacheNewerIndexByKey![targetEntry.key];
+      newerIndex = mapped == null ? -1 : mapped - _sliverCacheLeadingItemCount;
+    } else {
+      final partition = _partitionTranscript(entries);
+      older = partition.beforePivot.reversed.toList(growable: false);
+      newer = partition.pivotAndAfter;
+      olderIndex = older.indexOf(targetEntry);
+      newerIndex = olderIndex >= 0 ? -1 : newer.indexOf(targetEntry);
+    }
     final messages = _transcriptCacheMessages ?? _vm.messages;
     final position = _scroll.position;
     final viewport = _scroll.position.viewportDimension;
-    final targetIsBeforePivot = partition.beforePivot.contains(targetEntry);
 
-    if (targetIsBeforePivot) {
-      final targetIndex = partition.beforePivot.indexOf(targetEntry);
+    if (olderIndex >= 0) {
       var targetTop = 0.0;
-      for (var i = targetIndex; i < partition.beforePivot.length; i++) {
-        targetTop -= _estimatedEntryExtent(partition.beforePivot[i]);
+      for (var i = 0; i <= olderIndex; i++) {
+        targetTop -= _estimatedEntryExtent(older[i]);
       }
       if (!beforeUnreadDivider &&
           _needsUnreadDivider(targetEntry.startIndex, messages: messages)) {
@@ -2645,10 +3416,9 @@ class _ChatViewState extends State<ChatView> {
       return clampScrollOffset(position, targetTop - viewport * alignment);
     }
 
-    final targetIndex = partition.pivotAndAfter.indexOf(targetEntry);
     var targetTop = 0.0;
-    for (var i = 0; i < targetIndex; i++) {
-      targetTop += _estimatedEntryExtent(partition.pivotAndAfter[i]);
+    for (var i = 0; i < newerIndex; i++) {
+      targetTop += _estimatedEntryExtent(newer[i]);
     }
     if (!beforeUnreadDivider &&
         _needsUnreadDivider(targetEntry.startIndex, messages: messages)) {
@@ -2781,11 +3551,11 @@ class _ChatViewState extends State<ChatView> {
     _parkedShortTranscriptRepairScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _parkedShortTranscriptRepairScheduled = false;
-      if (!mounted) return;
+      if (!mounted || !_initialTranscriptReady) return;
       if (!_repairParkedShortTranscriptPivot()) return;
       setState(() {});
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _scroll.hasClients) _scrollToBottom();
+        if (mounted && _canFollowLoadedBottom()) _scrollToBottom();
       });
     });
   }
@@ -2797,7 +3567,9 @@ class _ChatViewState extends State<ChatView> {
         (_vm.anchoredHistory && !_isTranscriptShort()) ||
         _maintainSessionScrollAnchor ||
         _autoScrollPolicy.preservesViewport ||
-        _scrollTargetId != null) {
+        _scrollTargetId != null ||
+        _initialTranscriptPositionCancelled ||
+        _transcriptViewportClaimedByUser) {
       return false;
     }
     final pivot = _transcriptPivot;
@@ -2810,6 +3582,8 @@ class _ChatViewState extends State<ChatView> {
       latestArmIsShort: _isTranscriptShort(),
       hasMessageOlderThanPivot: hasOlder,
       followingLatest: true,
+      hasExplicitMessageTarget: widget.initialMessageId != null,
+      viewportClaimedByUser: _transcriptViewportClaimedByUser,
     )) {
       return false;
     }
@@ -2820,13 +3594,19 @@ class _ChatViewState extends State<ChatView> {
   }
 
   Future<void> _fillShortTranscript() async {
-    if (!mounted || !_scroll.hasClients || !_vm.initialLoaded) return;
+    if (!mounted ||
+        !_initialTranscriptReady ||
+        !_scroll.hasClients ||
+        !_vm.initialLoaded ||
+        _initialTranscriptPositionCancelled) {
+      return;
+    }
     // Repair does not need another network page: history may already sit in
     // before-center under a frozen pivot.
     if (_repairParkedShortTranscriptPivot()) {
       setState(() {});
       await WidgetsBinding.instance.endOfFrame;
-      if (mounted && _scroll.hasClients) _scrollToBottom();
+      if (mounted && _canFollowLoadedBottom()) _scrollToBottom();
     }
     if (!mounted ||
         !_scroll.hasClients ||
@@ -2834,6 +3614,8 @@ class _ChatViewState extends State<ChatView> {
         _maintainSessionScrollAnchor ||
         _autoScrollPolicy.preservesViewport ||
         _scrollTargetId != null ||
+        _initialTranscriptPositionCancelled ||
+        _transcriptViewportClaimedByUser ||
         !_vm.canLoadOlder) {
       return;
     }
@@ -2876,13 +3658,13 @@ class _ChatViewState extends State<ChatView> {
     if (_repairParkedShortTranscriptPivot()) {
       setState(() {});
       await WidgetsBinding.instance.endOfFrame;
-      if (mounted && _scroll.hasClients) {
+      if (mounted && _canFollowLoadedBottom()) {
         _scrollToBottom();
         return;
       }
     }
     if (_canContinueShortTranscriptFill(generation)) {
-      if (loadedAny) _positionAfterShortFill();
+      if (loadedAny) await _positionAfterShortFill(generation);
       // An empty older page flips canLoadOlder without a model notification.
       // Re-evaluate the first-contact card now that history is known complete.
       _scheduleShortFirstContactReveal();
@@ -2897,6 +3679,8 @@ class _ChatViewState extends State<ChatView> {
         generation == _shortTranscriptFillGeneration &&
         _scroll.hasClients &&
         !_hasTranscriptPointerDown &&
+        !_initialTranscriptPositionCancelled &&
+        !_transcriptViewportClaimedByUser &&
         !(_vm.anchoredHistory && !_isTranscriptShort()) &&
         !_maintainSessionScrollAnchor &&
         !_autoScrollPolicy.preservesViewport &&
@@ -2932,31 +3716,36 @@ class _ChatViewState extends State<ChatView> {
     return count;
   }
 
-  void _positionAfterShortFill() {
+  Future<void> _positionAfterShortFill(int generation) async {
+    if (!_canContinueShortTranscriptFill(generation)) return;
     if (_shouldOpenAtBottom) {
       _scrollToBottom();
       return;
     }
     final i = _firstUnreadIndex();
     final boundaryLoaded = _isUnreadBoundaryLoaded();
-    if (_vm.unreadCount > 0 && i >= 0 && boundaryLoaded) {
+    if (_entryUnreadCount > 0 && i >= 0 && boundaryLoaded) {
       final ctx = _unreadKey.currentContext;
       if (ctx != null) {
-        Scrollable.ensureVisible(ctx, alignment: 0.12);
+        await Scrollable.ensureVisible(ctx, alignment: 0.12);
+        if (!_canContinueShortTranscriptFill(generation)) return;
         return;
       }
     }
-    _scrollToBottom();
+    if (_canContinueShortTranscriptFill(generation)) _scrollToBottom();
   }
 
   bool _isUnreadBoundaryLoaded() {
     if (_vm.messages.isEmpty) return false;
-    return _vm.lastReadInboxId <= 0 ||
-        _vm.messages.first.id <= _vm.lastReadInboxId;
+    return _entryLastReadInboxId <= 0 ||
+        _vm.messages.first.id <= _entryLastReadInboxId;
   }
 
   bool get _canBackSwipe =>
-      widget.showBackButton && !_isSelecting && _actionTarget == null;
+      widget.showBackButton &&
+      !_isSelecting &&
+      !_search.isActive &&
+      _actionTarget == null;
 
   Future<void> _popFromBackSwipe() async {
     if (_backSwipePopping || !mounted) return;
@@ -2980,6 +3769,7 @@ class _ChatViewState extends State<ChatView> {
     setState(() {
       _actionTarget = null;
       _actionRect = null;
+      _clearMobileTextSelectionState();
       _actionSource = MessageActionSource.normal;
       _reactionExpanded = false;
       _selectionAnchorId = message.id;
@@ -3022,8 +3812,9 @@ class _ChatViewState extends State<ChatView> {
     final viewportContext = _transcriptViewportKey.currentContext;
     final viewportRenderObject = viewportContext?.findRenderObject();
     if (viewportRenderObject is RenderBox && viewportRenderObject.attached) {
-      final viewportTop = viewportRenderObject.localToGlobal(Offset.zero).dy;
-      final viewportBottom = viewportTop + viewportRenderObject.size.height;
+      // Viewport-local coordinates keep the transform walk off the ancestor
+      // chain above the scrollable.
+      final viewportBottom = viewportRenderObject.size.height;
       var bestDistance = double.infinity;
       int? bestIndex;
       for (final trackedEntry in _trackedTranscriptEntries.entries) {
@@ -3033,11 +3824,13 @@ class _ChatViewState extends State<ChatView> {
         if (itemRenderObject is! RenderBox || !itemRenderObject.attached) {
           continue;
         }
-        final itemTop = itemRenderObject.localToGlobal(Offset.zero).dy;
+        final itemTop = itemRenderObject
+            .localToGlobal(Offset.zero, ancestor: viewportRenderObject)
+            .dy;
         final itemBottom = itemTop + itemRenderObject.size.height;
-        if (itemBottom <= viewportTop || itemTop >= viewportBottom) continue;
+        if (itemBottom <= 0 || itemTop >= viewportBottom) continue;
         final distance = topEdge
-            ? (itemTop <= viewportTop ? 0.0 : itemTop - viewportTop)
+            ? (itemTop <= 0 ? 0.0 : itemTop)
             : (itemBottom >= viewportBottom
                   ? 0.0
                   : viewportBottom - itemBottom);
@@ -3167,11 +3960,21 @@ class _ChatViewState extends State<ChatView> {
   @override
   void dispose() {
     _prepareExitState();
+    _detachPaneBackHandler?.call();
+    _detachExitController?.call();
     NotificationController.shared.unregisterVisibleChat(this);
+    ActiveConversation.shared.unregister(this);
     _wallpaperController.removeListener(_onWallpaperChanged);
     _bannerTimer?.cancel();
     _readSyncTimer?.cancel();
+    _handoffUpdateTimer?.cancel();
+    _linkedMessageHighlightFadeTimer?.cancel();
+    _linkedMessageHighlightClearTimer?.cancel();
     _translation.removeListener(_onTranslationSettingsChanged);
+    _ai?.removeListener(_onTranslationSettingsChanged);
+    _search
+      ..removeListener(_onSearchChanged)
+      ..dispose();
     _vm.removeListener(_onModel);
     _vm.onDisappear();
     _vm.dispose();
@@ -3185,31 +3988,34 @@ class _ChatViewState extends State<ChatView> {
 
   bool _needsUnreadDivider(int index, {List<ChatMessage>? messages}) {
     messages ??= _vm.messages;
-    if (_vm.unreadCount <= 0) return false;
     if (index < 0 || index >= messages.length) return false;
     final m = messages[index];
-    if (m.isOutgoing || m.isService || m.id <= _vm.lastReadInboxId) {
-      return false;
-    }
-    if (index == 0) return true;
-    return messages[index - 1].id <= _vm.lastReadInboxId;
+    return isCapturedUnreadDividerMessage(
+      entryUnreadCount: _entryUnreadCount,
+      firstUnreadMessageId: _entryFirstUnreadMessageId,
+      messageId: m.id,
+      isIncoming: !m.isOutgoing,
+      isService: m.isService,
+      lastReadInboxId: _entryLastReadInboxId,
+      latestMessageId: _entryLatestMessageId,
+    );
   }
 
   Widget _unreadDivider() {
     final c = context.colors;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Row(
         children: [
-          Expanded(child: Divider(color: c.divider, height: 1)),
+          Expanded(child: Divider(color: c.linkBlue, height: 1, thickness: 1)),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10),
             child: Text(
               AppStringKeys.chatNewMessagesDivider.l10n(context),
-              style: TextStyle(fontSize: 12, color: c.textSecondary),
+              style: TextStyle(fontSize: 12, color: c.linkBlue),
             ),
           ),
-          Expanded(child: Divider(color: c.divider, height: 1)),
+          Expanded(child: Divider(color: c.linkBlue, height: 1, thickness: 1)),
         ],
       ),
     );
@@ -3247,7 +4053,7 @@ class _ChatViewState extends State<ChatView> {
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: c.card.withValues(alpha: 0.72),
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(AppRadius.lg),
               border: Border.all(
                 color: c.divider.withValues(alpha: 0.55),
                 width: 0.5,
@@ -3267,6 +4073,8 @@ class _ChatViewState extends State<ChatView> {
     ChatMessage message,
     int messageIndex, {
     List<ChatMessage> groupedMedia = const <ChatMessage>[],
+    int? targetMediaMessageId,
+    GlobalKey? targetMediaKey,
   }) {
     if (groupedMedia.isEmpty) {
       _vm.ensureMessageCapabilities(message);
@@ -3275,9 +4083,43 @@ class _ChatViewState extends State<ChatView> {
         _vm.ensureMessageCapabilities(member);
       }
     }
+    final revisionIds = groupedMedia.isEmpty
+        ? <int>[message.id]
+        : <int>[for (final member in groupedMedia) member.id];
+    return _ActiveChatListenableBuilder(
+      listenable: Listenable.merge([
+        for (final messageId in revisionIds)
+          _vm.messageRevisionListenable(messageId),
+      ]),
+      builder: (context) => _buildMessageBubble(
+        message,
+        messageIndex,
+        groupedMedia: groupedMedia,
+        targetMediaMessageId: targetMediaMessageId,
+        targetMediaKey: targetMediaKey,
+      ),
+    );
+  }
+
+  Widget _buildMessageBubble(
+    ChatMessage message,
+    int messageIndex, {
+    required List<ChatMessage> groupedMedia,
+    required int? targetMediaMessageId,
+    required GlobalKey? targetMediaKey,
+  }) {
+    final mobileSelectionKey =
+        !_vm.hasProtectedContent && _mobileTextSelectionMessageId == message.id
+        ? _mobileTextSelectionAreaKey
+        : null;
     return MessageBubble(
       message: message,
+      selected: _selectedMessageIds.contains(message.id),
       groupedMedia: groupedMedia,
+      targetMediaMessageId: targetMediaMessageId,
+      targetMediaKey: targetMediaKey,
+      translationDisplayStyle: _translation.displayStyle,
+      showOriginalTranslationMessageIds: _showOriginalTranslationMessageIds,
       peerTitle: _vm.peerTitle,
       peerPhoto: _vm.peerPhoto,
       isGroup: _vm.isGroup,
@@ -3287,9 +4129,14 @@ class _ChatViewState extends State<ChatView> {
       showRepeat: _vm.canForwardContent && _isRepeatTail(messageIndex),
       onRepeat: () => _vm.repeatMessage(message),
       onLongPress: _isSelecting ? null : _showActionMenuForMessage,
-      onDoubleTap: _isSelecting
+      mobileTextSelectionAreaKey: mobileSelectionKey,
+      onMobileTextSelectionChanged: _handleMobileTextSelectionChanged,
+      onMobileTextSelectionDisposed: mobileSelectionKey == null
           ? null
-          : (m) => unawaited(_showTextSelection(m)),
+          : () => _handleMobileTextSelectionDisposed(
+              message.id,
+              mobileSelectionKey,
+            ),
       onReply: (m) => _vm.setReply(m),
       onAvatarTap: _openSenderProfile,
       onAvatarLongPress: (m) {
@@ -3297,11 +4144,15 @@ class _ChatViewState extends State<ChatView> {
           _vm.insertMention(m);
         }
       },
-      onOpenReply: _scrollToMessage,
+      onOpenReply: _openReplyMessage,
+      onOpenForwarded: _openForwardedMessage,
       onOpenComments: _openMessageComments,
-      showCommentAttachment: _vm.isChannel,
+      showCommentAttachment: chatTranscriptAllowsCommentAttachment(
+        isChannel: _vm.isChannel,
+      ),
       channelHasLinkedDiscussion: _vm.hasLinkedDiscussion,
       onOpenImage: _openImage,
+      onOpenImageGallery: _openImageGallery,
       onApplyMessageBubble: offersMessageBubbleApplyAction(message)
           ? (message) => unawaited(
               applyMessageBubbleRepositoryPhoto(
@@ -3322,7 +4173,9 @@ class _ChatViewState extends State<ChatView> {
       outgoingBubbleTextColor: _effectiveOutgoingTextColor(),
       incomingBubbleColor: _effectiveIncomingColor(),
       incomingBubbleTextColor: _effectiveIncomingTextColor(),
-      onToggleReaction: (r) => _vm.toggleReaction(message, r),
+      messageColors: _effectiveMessageColors(),
+      hasCustomChatTheme: _hasCustomChatTheme,
+      onToggleReaction: (r) => unawaited(_toggleMessageReaction(message, r)),
       onShowReactionUsers: _showReactionUsers,
       onRedial: _startCall,
       onOpenContact: _openSharedContact,
@@ -3395,7 +4248,7 @@ class _ChatViewState extends State<ChatView> {
   Future<void> _addPollOption(ChatMessage message) async {
     final value = await _promptChecklistTask(
       title: AppStrings.t(AppStringKeys.chatAddPollOption),
-      hint: 'New option',
+      hint: AppStrings.t(AppStringKeys.chatAddPollOptionHint),
     );
     if (value == null || value.trim().isEmpty || !mounted) return;
     try {
@@ -3456,7 +4309,7 @@ class _ChatViewState extends State<ChatView> {
               padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
               decoration: BoxDecoration(
                 color: c.card,
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(AppRadius.lg),
                 boxShadow: const [
                   BoxShadow(
                     color: Color(0x33000000),
@@ -3491,7 +4344,7 @@ class _ChatViewState extends State<ChatView> {
                       filled: true,
                       fillColor: c.searchFill,
                       border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(AppRadius.control),
                         borderSide: BorderSide.none,
                       ),
                     ),
@@ -3532,7 +4385,11 @@ class _ChatViewState extends State<ChatView> {
   Future<void> _openSharedContact(ChatMessage message) async {
     final contact = message.contact;
     if (contact == null) return;
-    final action = await showSharedContactActions(context, contact);
+    final action = await showSharedContactActions(
+      context,
+      contact,
+      showCallAction: Theme.of(context).platform != TargetPlatform.macOS,
+    );
     if (action == null || !mounted) return;
     switch (action) {
       case SharedContactAction.viewProfile:
@@ -3549,11 +4406,10 @@ class _ChatViewState extends State<ChatView> {
           });
           final chatId = chat.int64('id');
           if (!mounted || chatId == null) return;
-          await Navigator.of(context).push(
-            AppChatPageRoute<void>(
-              builder: (_) =>
-                  ChatView(chatId: chatId, title: contact.displayName),
-            ),
+          await openChatFromCurrentWindow(
+            context,
+            chatId: chatId,
+            title: contact.displayName,
           );
         } catch (_) {
           if (mounted) {
@@ -3652,7 +4508,7 @@ class _ChatViewState extends State<ChatView> {
     Navigator.of(context).push(
       MaterialPageRoute(
         fullscreenDialog: true,
-        builder: (routeContext) => VideoPlaylistPlayerView(
+        builder: (routeContext) => VideoOnDemandPlayerView(
           queue: session.queue,
           initialMuted: muted,
           onSwitchMode: (queue, mode) =>
@@ -3686,9 +4542,11 @@ class _ChatViewState extends State<ChatView> {
       for (final candidate in videoMessages)
         VideoPlaybackItem(
           video: candidate.video!,
+          accountSlot: _sessionKey.accountSlot,
           thumb: candidate.image,
           width: candidate.imageWidth,
           height: candidate.imageHeight,
+          durationSeconds: candidate.videoDuration,
           sourceChatId: widget.chatId,
           messageId: candidate.id,
           title: _videoPlaybackTitle(candidate),
@@ -3735,20 +4593,43 @@ class _ChatViewState extends State<ChatView> {
         .toList();
     final items = pairs.map((m) => m.image!).toList();
     final start = pairs.indexWhere((m) => m.id == message.id);
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) =>
-            FullImageViewer(items: items, startIndex: start < 0 ? 0 : start),
+    unawaited(
+      openImagePreview(
+        context,
+        items: items,
+        startIndex: start < 0 ? 0 : start,
       ),
     );
   }
 
+  void _openImageGallery({
+    required List<TdFileRef> items,
+    required int startIndex,
+  }) {
+    unawaited(openImagePreview(context, items: items, startIndex: startIndex));
+  }
+
   void _openSticker(ChatMessage message) {
+    final desktop = isDesktopTargetPlatform(Theme.of(context).platform);
     Navigator.of(context).push(
       MaterialPageRoute(
         fullscreenDialog: true,
-        builder: (_) => StickerViewer(message: message),
+        builder: (_) => StickerViewer(
+          message: message,
+          onOpenSet: desktop ? _openStickerSet : null,
+        ),
+      ),
+    );
+  }
+
+  void _openStickerSet(int setId) {
+    if (isDesktopTargetPlatform(Theme.of(context).platform)) {
+      setState(() => _desktopStickerSetId = setId);
+      return;
+    }
+    unawaited(
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => StickerSetDetailView(setId: setId)),
       ),
     );
   }
@@ -3760,7 +4641,7 @@ class _ChatViewState extends State<ChatView> {
       message: message,
       peerTitle: _vm.peerTitle,
       onAvatarTap: _openSenderProfile,
-      onOpenReply: _scrollToMessage,
+      onOpenReply: _openReplyMessage,
       onOpenImage: _openImage,
       onOpenSticker: _openSticker,
       onPlayVideo: _playVideo,
@@ -3768,8 +4649,66 @@ class _ChatViewState extends State<ChatView> {
       onButtonTap: _pressMessageButton,
       onBotCommandTap: _sendCommand,
       onHashtagTap: _openHashtagSearch,
-      onViewInChat: _scrollToMessage,
+      onViewInChat: _viewMessageRepliesInChat,
     );
+  }
+
+  Future<void> _openForwardedMessage(ChatMessage message) async {
+    final chatId = message.forwardFromChatId;
+    final messageId = message.forwardFromMessageId;
+    if (chatId == null || chatId == 0 || messageId == null || messageId <= 0) {
+      return;
+    }
+    if (chatId == widget.chatId) {
+      await _scrollToMessage(messageId);
+      return;
+    }
+    if (!mounted) return;
+    await openChatFromCurrentWindow(
+      context,
+      chatId: chatId,
+      title: message.forwardDisplayName,
+      initialMessageId: messageId,
+    );
+  }
+
+  Future<void> _viewMessageRepliesInChat(
+    MessageRepliesViewTarget target,
+  ) async {
+    if (target.chatId == widget.chatId) {
+      await _scrollToMessage(target.messageId);
+      return;
+    }
+    if (!mounted) return;
+    await openChatFromCurrentWindow(
+      context,
+      chatId: target.chatId,
+      title: target.title,
+      initialMessageId: target.messageId,
+    );
+  }
+
+  /// Header-bar launcher for a bot's menu mini app (mirrors the composer's
+  /// former pill action).
+  Future<void> _openBotMenuApp(BotMenuInfo menu) async {
+    final botUserId = _vm.peerUserId;
+    if (botUserId == null) {
+      if (!menu.isLegacyMenuUrl && menu.webAppUrl.isNotEmpty) {
+        await openLink(context, menu.webAppUrl);
+      }
+      return;
+    }
+    final opened = await openTelegramMiniApp(
+      context,
+      chatId: _vm.chatId,
+      botUserId: botUserId,
+      url: menu.url,
+      title: menu.actionTitle,
+      menuWebApp: true,
+    );
+    if (!opened && mounted) {
+      showToast(context, AppStrings.t(AppStringKeys.miniAppCannotStart));
+    }
   }
 
   Future<void> _pressMessageButton(
@@ -3845,6 +4784,8 @@ class _ChatViewState extends State<ChatView> {
   Future<void> _perform(MessageAction action, ChatMessage message) async {
     setState(() {
       _actionTarget = null;
+      _actionRect = null;
+      _clearMobileTextSelectionState();
       _actionSource = MessageActionSource.normal;
     });
     switch (action) {
@@ -3856,6 +4797,10 @@ class _ChatViewState extends State<ChatView> {
         unawaited(_offerSuggestedPost(message));
       case MessageAction.translate:
         unawaited(_translateMessage(message));
+      case MessageAction.displayOriginal:
+        setState(() => _showOriginalTranslationMessageIds.add(message.id));
+      case MessageAction.displayTranslation:
+        setState(() => _showOriginalTranslationMessageIds.remove(message.id));
       case MessageAction.reply:
         _vm.setReply(message);
       case MessageAction.replies:
@@ -3922,6 +4867,8 @@ class _ChatViewState extends State<ChatView> {
         _playVideo(message, muted: true);
       case MessageAction.addToPlaylist:
         unawaited(showMusicPlaylists(context, addMessage: message));
+      case MessageAction.saveAs:
+        await _saveMediaToFolder(message);
       case MessageAction.saveToPhotos:
         DateTime? progressShownAt;
         final progressTimer = Timer(const Duration(milliseconds: 500), () {
@@ -3958,7 +4905,7 @@ class _ChatViewState extends State<ChatView> {
           if (!mounted) return;
           showToastOverlay(
             Overlay.of(context),
-            telegramText(AppStringKeys.chatTodoSetSuccess),
+            AppStrings.t(AppStringKeys.chatTodoSetSuccess),
           );
         } catch (e) {
           if (!mounted) return;
@@ -3973,7 +4920,7 @@ class _ChatViewState extends State<ChatView> {
           if (!mounted) return;
           showToastOverlay(
             Overlay.of(context),
-            telegramText(AppStringKeys.chatTodoUnsetSuccess),
+            AppStrings.t(AppStringKeys.chatTodoUnsetSuccess),
           );
         } catch (e) {
           if (!mounted) return;
@@ -4002,17 +4949,29 @@ class _ChatViewState extends State<ChatView> {
         }
       case MessageAction.viewStickerSet:
         final sid = message.stickerSetId;
-        if (sid != null) {
-          unawaited(
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => StickerSetDetailView(setId: sid),
-              ),
-            ),
-          );
-        }
+        if (sid != null) _openStickerSet(sid);
       case MessageAction.delete:
         await _performDeleteAction(message);
+    }
+  }
+
+  /// Desktop counterpart of 保存到相册: fetch the original if it is not local
+  /// yet, then copy it into a folder the user picks.
+  Future<void> _saveMediaToFolder(ChatMessage message) async {
+    final progressTimer = Timer(const Duration(milliseconds: 500), () {
+      if (!mounted) return;
+      showToast(
+        context,
+        AppStringKeys.chatSavingToPhotos,
+        visibleFor: const Duration(milliseconds: 900),
+      );
+    });
+    final outcome = await MediaDownloadService.saveMessageMedia(message);
+    progressTimer.cancel();
+    if (!mounted) return;
+    final feedback = MediaDownloadService.feedbackFor(outcome);
+    if (feedback != null) {
+      showToast(context, feedback, visibleFor: const Duration(seconds: 2));
     }
   }
 
@@ -4126,96 +5085,98 @@ class _ChatViewState extends State<ChatView> {
     return AppStrings.t(AppStringKeys.topicChatUsers);
   }
 
-  Future<void> _showTextSelection(ChatMessage message) async {
-    if (message.text.isEmpty || !mounted) return;
-    await showGeneralDialog<void>(
-      context: context,
-      barrierDismissible: true,
-      barrierLabel: AppStrings.t(AppStringKeys.musicPlayerClose),
-      barrierColor: Colors.black.withValues(alpha: 0.48),
-      transitionDuration: const Duration(milliseconds: 180),
-      pageBuilder: (context, _, _) => _MessageTextSelectionDialog(
-        text: message.text,
-        onTranslate: _translateSelectedText,
-        onAddToBlocklist: _addSelectionToBlocklist,
-      ),
-      transitionBuilder: (context, animation, _, child) {
-        final curved = CurvedAnimation(
-          parent: animation,
-          curve: Curves.easeOutCubic,
-          reverseCurve: Curves.easeInCubic,
-        );
-        return FadeTransition(
-          opacity: curved,
-          child: ScaleTransition(
-            scale: Tween<double>(begin: 0.96, end: 1).animate(curved),
-            child: child,
-          ),
-        );
-      },
-    );
-  }
+  bool _isTelegramTranslationOption(String option) =>
+      TranslationOptionIds.translationProvider(option) ==
+      TranslationProvider.tdlib;
 
-  void _addSelectionToBlocklist(String selectedText) {
-    final rule = _keywordCandidate(selectedText);
-    if (rule.isEmpty) return;
-    KeywordBlocker.shared.add(rule);
-    if (!mounted) return;
-    showToast(
-      context,
-      AppStrings.t(AppStringKeys.keywordBlockerRuleAdded, {'value1': rule}),
-    );
-  }
-
-  Future<String?> _translateSelectedText(String selectedText) async {
-    final sourceText = selectedText.trim();
-    if (sourceText.isEmpty || !mounted) return null;
-    final translation = context.read<TranslationController>();
-    final targetLanguage = _translationTargetLanguage(translation);
-    try {
-      if (translation.aiTranslationEnabled) {
-        return _translateTextWithAi(
-          text: sourceText,
-          sourceLanguageCode: 'autodetect',
-          targetLanguageCode: targetLanguage,
-        );
-      }
-      return switch (translation.provider) {
-        TranslationProvider.iosSystem ||
-        TranslationProvider.androidMlKit => NativeTranslationApi.translate(
-          text: sourceText,
-          sourceLanguageCode: 'autodetect',
-          targetLanguageCode: targetLanguage,
-        ),
-        TranslationProvider.tdlib => _vm.translateText(
-          sourceText,
-          targetLanguage,
-        ),
-        _ => ThirdPartyTranslationApi.translate(
-          provider: translation.provider,
-          text: sourceText,
-          sourceLanguageCode: 'autodetect',
-          targetLanguageCode: targetLanguage,
-          lingvaEndpoint: translation.lingvaEndpoint,
-          libreTranslateEndpoint: translation.libreTranslateEndpoint,
-          libreTranslateApiKey: translation.libreTranslateApiKey,
-        ),
-      };
-    } catch (e) {
-      if (mounted) {
-        showToast(
-          context,
-          AppStrings.t(AppStringKeys.chatTranslateFailed, {'value1': e}),
-        );
-      }
-      return null;
+  Future<String> _translateTextWithGoogleCloud(
+    String providerId, {
+    required String text,
+    required String sourceLanguageCode,
+    required String targetLanguageCode,
+  }) async {
+    final provider = _translation.googleCloudProviderById(providerId);
+    if (provider == null || !provider.hasApiKey) {
+      throw TranslationApiException(
+        AppStringKeys.translationAiProviderUnavailable.l10n(context),
+      );
     }
+    final apiKey = await _translation.googleCloudApiKeyForProvider(providerId);
+    if (apiKey.isEmpty) {
+      throw TranslationApiException(
+        AppStrings.t(AppStringKeys.translationGoogleCloudApiKeyRequired),
+      );
+    }
+    return ThirdPartyTranslationApi.translateGoogleCloud(
+      text: text,
+      sourceLanguageCode: sourceLanguageCode,
+      targetLanguageCode: targetLanguageCode,
+      apiKey: apiKey,
+    );
   }
 
-  String _keywordCandidate(String text) {
-    final normalized = text.replaceAll(RegExp(r'\s+'), ' ').trim();
-    if (normalized.length <= 80) return normalized;
-    return normalized.substring(0, 80).trim();
+  Future<String> _translateTextWithOption(
+    String option, {
+    required String text,
+    required String sourceLanguageCode,
+    required String targetLanguageCode,
+    List<String> priorMessages = const [],
+  }) {
+    final googleCloudProviderId = TranslationOptionIds.googleCloudProviderId(
+      option,
+    );
+    if (googleCloudProviderId != null) {
+      return _translateTextWithGoogleCloud(
+        googleCloudProviderId,
+        text: text,
+        sourceLanguageCode: sourceLanguageCode,
+        targetLanguageCode: targetLanguageCode,
+      );
+    }
+    final candidateId = TranslationOptionIds.aiCandidateId(option);
+    if (candidateId != null) {
+      final candidate = _ai?.modelCandidateByIdForFeature(
+        AiFeature.translation,
+        candidateId,
+      );
+      if (candidate == null) {
+        throw TranslationApiException(
+          AppStringKeys.translationAiProviderUnavailable.l10n(context),
+        );
+      }
+      return _translateTextWithAi(
+        candidate: candidate,
+        text: text,
+        sourceLanguageCode: sourceLanguageCode,
+        targetLanguageCode: targetLanguageCode,
+        priorMessages: priorMessages,
+      );
+    }
+    final provider = TranslationOptionIds.translationProvider(option);
+    return switch (provider) {
+      TranslationProvider.iosSystem ||
+      TranslationProvider.androidMlKit => NativeTranslationApi.translate(
+        text: text,
+        sourceLanguageCode: sourceLanguageCode,
+        targetLanguageCode: targetLanguageCode,
+      ),
+      TranslationProvider.tdlib => _vm.translateText(text, targetLanguageCode),
+      TranslationProvider.googleTranslate ||
+      TranslationProvider.myMemory ||
+      TranslationProvider.lingva ||
+      TranslationProvider.libreTranslate => ThirdPartyTranslationApi.translate(
+        provider: provider!,
+        text: text,
+        sourceLanguageCode: sourceLanguageCode,
+        targetLanguageCode: targetLanguageCode,
+        lingvaEndpoint: _translation.lingvaEndpoint,
+        libreTranslateEndpoint: _translation.libreTranslateEndpoint,
+        libreTranslateApiKey: _translation.libreTranslateApiKey,
+      ),
+      null => throw TranslationApiException(
+        AppStringKeys.translationAiProviderUnavailable.l10n(context),
+      ),
+    };
   }
 
   Future<void> _showReactionUsers(
@@ -4223,24 +5184,13 @@ class _ChatViewState extends State<ChatView> {
     MessageReaction reaction,
   ) async {
     if (!mounted || message.reactions.isEmpty) return;
-    await showGeneralDialog<void>(
-      context: context,
-      barrierDismissible: true,
-      barrierLabel: AppStrings.t(AppStringKeys.musicPlayerClose),
-      barrierColor: Colors.black.withValues(alpha: 0.46),
-      transitionDuration: const Duration(milliseconds: 220),
-      pageBuilder: (context, _, _) => _ReactionUsersSheet(
+    await showReactionUsersModal<void>(
+      context,
+      builder: (dialogContext) => _ReactionUsersSheet(
         viewModel: _vm,
         message: message,
         initialReaction: reaction,
       ),
-      transitionBuilder: (context, animation, _, child) {
-        final offset =
-            Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero).animate(
-              CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-            );
-        return SlideTransition(position: offset, child: child);
-      },
     );
   }
 
@@ -4257,46 +5207,64 @@ class _ChatViewState extends State<ChatView> {
     final sourceText = _translationSourceText(message);
     if (sourceText.trim().isEmpty) return true;
     final targetLanguage = _translationTargetLanguage(translation);
+    final noProviderMessage = AppStringKeys.translationAiProviderUnavailable
+        .l10n(context);
+    final ai = _ai;
+    if (ai != null && !ai.initialized) {
+      try {
+        await ai.initialize();
+      } catch (_) {
+        // Keep the non-AI providers in the fallback chain available.
+      }
+    }
+    final options = _effectiveTranslationOptions;
+    if (options.isEmpty) return false;
     try {
-      if (translation.aiTranslationEnabled) {
-        await _vm.translateMessageExternally(
-          message.id,
-          targetLanguage,
-          () => _translateTextWithAi(
-            text: sourceText,
-            sourceLanguageCode: sourceLanguageCode,
-            targetLanguageCode: targetLanguage,
-            priorMessages: _aiTranslationContextFor(message),
-          ),
-        );
-      } else if (translation.provider == TranslationProvider.iosSystem ||
-          translation.provider == TranslationProvider.androidMlKit) {
-        await _vm.translateMessageExternally(
-          message.id,
-          targetLanguage,
-          () => NativeTranslationApi.translate(
-            text: sourceText,
-            sourceLanguageCode: sourceLanguageCode,
-            targetLanguageCode: targetLanguage,
-          ),
-          showLoading: defaultTargetPlatform != TargetPlatform.iOS,
-        );
-      } else if (translation.provider == TranslationProvider.tdlib) {
-        await _vm.translateMessage(message.id, targetLanguage);
-      } else {
-        await _vm.translateMessageExternally(
-          message.id,
-          targetLanguage,
-          () => ThirdPartyTranslationApi.translate(
-            provider: translation.provider,
-            text: sourceText,
-            sourceLanguageCode: sourceLanguageCode,
-            targetLanguageCode: targetLanguage,
-            lingvaEndpoint: translation.lingvaEndpoint,
-            libreTranslateEndpoint: translation.libreTranslateEndpoint,
-            libreTranslateApiKey: translation.libreTranslateApiKey,
-          ),
-        );
+      final cached = await translation.messageCache.resolve(
+        MessageTranslationCacheKey(
+          accountSlot: _sessionKey.accountSlot,
+          chatId: widget.chatId,
+          messageId: message.id,
+          sourceText: sourceText,
+          targetLanguageCode: targetLanguage,
+        ),
+        () async {
+          Object? lastError;
+          MessageTranslationResult? result;
+          for (final option in options) {
+            try {
+              result = await _translateMessageWithOption(
+                option,
+                message: message,
+                sourceText: sourceText,
+                sourceLanguageCode: sourceLanguageCode,
+                targetLanguageCode: targetLanguage,
+              );
+              break;
+            } catch (error) {
+              lastError = error;
+              if (_isTelegramTranslationOption(option) &&
+                  isTelegramTranslationRateLimit(error)) {
+                translation.markTelegramTranslationUnavailable();
+              }
+            }
+          }
+          if (result == null) {
+            throw lastError ?? TranslationApiException(noProviderMessage);
+          }
+          return MessageTranslationValue(
+            text: result.text,
+            entities: result.entities,
+            languageCode: result.languageCode,
+          );
+        },
+      );
+      if (mounted) {
+        _vm.restoreMessageTranslation(message.id, (
+          text: cached.text,
+          entities: cached.entities,
+          languageCode: cached.languageCode,
+        ));
       }
       return true;
     } catch (e) {
@@ -4304,15 +5272,105 @@ class _ChatViewState extends State<ChatView> {
       if (showErrors) {
         showToast(
           context,
-          AppStrings.t(AppStringKeys.chatTranslateFailed, {'value1': e}),
+          _translationFailureMessage(e),
+          visibleFor: isTelegramAiPremiumFlood(e)
+              ? const Duration(seconds: 4)
+              : const Duration(milliseconds: 1400),
         );
       }
       return false;
     }
   }
 
+  Future<MessageTranslationResult> _translateMessageWithOption(
+    String option, {
+    required ChatMessage message,
+    required String sourceText,
+    required String sourceLanguageCode,
+    required String targetLanguageCode,
+  }) {
+    if (_isTelegramTranslationOption(option)) {
+      return _vm.translateMessage(message.id, targetLanguageCode);
+    }
+    final provider = TranslationOptionIds.translationProvider(option);
+    return _vm.translateMessageExternally(
+      message.id,
+      targetLanguageCode,
+      () => _translateTextWithOption(
+        option,
+        text: sourceText,
+        sourceLanguageCode: sourceLanguageCode,
+        targetLanguageCode: targetLanguageCode,
+        priorMessages: _aiTranslationContextFor(message),
+      ),
+      showLoading:
+          provider != TranslationProvider.iosSystem ||
+          defaultTargetPlatform != TargetPlatform.iOS,
+    );
+  }
+
+  String _translationFailureMessage(Object error) {
+    if (isTelegramAiPremiumFlood(error)) {
+      return '${AppStrings.t(AppStringKeys.telegramAiDailyLimitReached)}\n'
+          '${AppStrings.t(AppStringKeys.telegramAiDailyLimitMessage)}';
+    }
+    return AppStrings.t(AppStringKeys.chatTranslateFailed, {'value1': error});
+  }
+
+  List<String> get _effectiveTranslationOptions =>
+      effectiveTranslationOptionIds(
+        translation: _translation,
+        ai: _ai,
+        nativeProviders: _nativeTranslationProviders,
+        isBotApiAccount: _vm.isBotApiAccount,
+      );
+
+  bool get _hasAvailableTranslationOption =>
+      _effectiveTranslationOptions.isNotEmpty;
+
+  Future<void> _loadNativeTranslationProviders() async {
+    final providers = await NativeTranslationApi.availableProviders();
+    if (!mounted || setEquals(providers, _nativeTranslationProviders)) return;
+    setState(() => _nativeTranslationProviders = providers);
+    _scheduleChatLanguageDetection(force: true);
+    _scheduleAutomaticTranslations();
+  }
+
+  int get _botApiWarningMask =>
+      (_vm.showBotApiPrivacyWarning ? 1 : 0) |
+      (_vm.showBotApiBotToBotWarning ? 2 : 0);
+
+  String get _botApiWarningDismissalKey =>
+      'mithka.botApiAccessWarningDismissed.v1.${_sessionKey.accountSlot}';
+
+  bool get _showsBotApiAccessWarning {
+    final mask = _botApiWarningMask;
+    return mask != 0 && _dismissedBotApiWarningMask != mask;
+  }
+
+  Future<void> _loadBotApiWarningDismissal() async {
+    final prefs = await SharedPreferences.getInstance();
+    final mask = prefs.getInt(_botApiWarningDismissalKey);
+    if (!mounted || mask == _dismissedBotApiWarningMask) return;
+    setState(() => _dismissedBotApiWarningMask = mask);
+  }
+
+  void _dismissBotApiAccessWarning() {
+    final mask = _botApiWarningMask;
+    if (mask == 0) return;
+    setState(() => _dismissedBotApiWarningMask = mask);
+    unawaited(
+      SharedPreferences.getInstance().then(
+        (prefs) => prefs.setInt(_botApiWarningDismissalKey, mask),
+      ),
+    );
+  }
+
   void _onTranslationSettingsChanged() {
     if (!mounted) return;
+    if (_translation.displayStyle != TranslationDisplayStyle.translatedOnly) {
+      _showOriginalTranslationMessageIds.clear();
+    }
     _autoTranslationFailedMessageIds.clear();
     if (!_automaticTranslationEnabled && _autoTranslatedMessageIds.isNotEmpty) {
       _vm.clearTranslations(_autoTranslatedMessageIds);
@@ -4324,6 +5382,7 @@ class _ChatViewState extends State<ChatView> {
   }
 
   bool get _automaticTranslationEnabled =>
+      _hasAvailableTranslationOption &&
       _translation.translateChats &&
       _translation.autoTranslateEnabledFor(widget.chatId) &&
       _translation.shouldTranslateLanguage(_detectedChatLanguage);
@@ -4336,6 +5395,7 @@ class _ChatViewState extends State<ChatView> {
   );
 
   bool get _showsChatTranslationPanel {
+    if (!_hasAvailableTranslationOption) return false;
     if (_automaticTranslationEnabled) return true;
     if (!_translation.translateChats ||
         _translation.autoTranslateSuggestionDismissedFor(widget.chatId) ||
@@ -4347,7 +5407,19 @@ class _ChatViewState extends State<ChatView> {
   }
 
   void _scheduleChatLanguageDetection({bool force = false}) {
-    if (!_translation.translateChats || _chatLanguageDetectionRunning) return;
+    if (!_hasAvailableTranslationOption ||
+        !_translation.translateChats ||
+        _chatLanguageDetectionRunning) {
+      return;
+    }
+    if (!force && _chatLanguageDetectionComplete) {
+      final detectedAt = _chatLanguageDetectedAt;
+      if (_detectedChatLanguage != null &&
+          detectedAt != null &&
+          DateTime.now().difference(detectedAt) < const Duration(hours: 1)) {
+        return;
+      }
+    }
     final samples = automaticTranslationLanguageSamples(_vm.messages);
     if (samples.isEmpty) return;
     final newestId = _vm.messages.reversed
@@ -4360,12 +5432,6 @@ class _ChatViewState extends State<ChatView> {
         )
         .id;
     if (!force && _chatLanguageDetectionComplete) {
-      final detectedAt = _chatLanguageDetectedAt;
-      if (_detectedChatLanguage != null &&
-          detectedAt != null &&
-          DateTime.now().difference(detectedAt) < const Duration(hours: 1)) {
-        return;
-      }
       if (_chatLanguageDetectionNewestMessageId == newestId) return;
     }
     _chatLanguageDetectionRunning = true;
@@ -4469,7 +5535,7 @@ class _ChatViewState extends State<ChatView> {
           margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
           decoration: BoxDecoration(
             color: c.card,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(AppRadius.card),
           ),
           clipBehavior: Clip.antiAlias,
           child: ListView.separated(
@@ -4558,21 +5624,24 @@ class _ChatViewState extends State<ChatView> {
   }
 
   Future<String> _translateTextWithAi({
+    required AiModelCandidate candidate,
     required String text,
     required String sourceLanguageCode,
     required String targetLanguageCode,
     List<String> priorMessages = const [],
   }) async {
-    final settings = context.read<AiSettingsController>();
     final unavailableMessage = AppStringKeys.translationAiProviderUnavailable
         .l10n(context);
     final targetLanguageName = _translation.targetLanguageLabel.l10n(context);
-    if (!settings.initialized) await settings.initialize();
-    if (!settings.isConfiguredForFeature(AiFeature.translation)) {
+    final ai = _ai;
+    if (ai == null) throw TranslationApiException(unavailableMessage);
+    if (!ai.initialized) await ai.initialize();
+    if (!ai.isConfiguredCandidate(candidate)) {
       throw TranslationApiException(unavailableMessage);
     }
-    final service = AiChatTranslationService.fromSettings(
-      settings,
+    final service = AiChatTranslationService.fromCandidate(
+      ai,
+      candidate,
       instructions: _translation.aiTranslationPrompt,
       telegramAi: _vm.telegramAi,
     );
@@ -4645,11 +5714,7 @@ class _ChatViewState extends State<ChatView> {
       if (!mounted || action == null) return;
       switch (action) {
         case _MediaEditAction.edit:
-          if (message.contentType == 'messagePhoto') {
-            await _editPhotoInPlace(message);
-          } else {
-            await _editMessageText(message);
-          }
+          await _editMessageText(message);
         case _MediaEditAction.replace:
           await _replaceMessageMedia(message);
         case _MediaEditAction.delete:
@@ -4660,100 +5725,9 @@ class _ChatViewState extends State<ChatView> {
     await _editMessageText(message);
   }
 
-  Future<void> _editMessageText(ChatMessage message) async {
-    var premium = false;
-    try {
-      premium = await _vm.currentUserIsPremium();
-    } catch (_) {}
-    if (!mounted) return;
-    var mode = _MessageEditorMode.plain;
-    if (premium) {
-      final selected = await showGeneralDialog<_MessageEditorMode>(
-        context: context,
-        barrierDismissible: true,
-        barrierLabel: AppStringKeys.countryPickerCancel.l10n(context),
-        barrierColor: Colors.black.withValues(alpha: 0.38),
-        transitionDuration: const Duration(milliseconds: 170),
-        pageBuilder: (_, _, _) => const _MessageEditorModeDialog(),
-      );
-      if (!mounted || selected == null) return;
-      mode = selected;
-    }
-    if (mode == _MessageEditorMode.richText) {
-      await _editMessageWithRichText(message);
-    } else {
-      await _editMessagePlain(message);
-    }
-  }
-
-  Future<void> _editMessagePlain(ChatMessage message) async {
-    final result = await showGeneralDialog<_PlainMessageEditResult>(
-      context: context,
-      barrierDismissible: true,
-      barrierLabel: AppStringKeys.countryPickerCancel.l10n(context),
-      barrierColor: Colors.black.withValues(alpha: 0.38),
-      transitionDuration: const Duration(milliseconds: 170),
-      pageBuilder: (_, _, _) => _PlainMessageEditDialog(
-        initialText: _editableMessageText(message),
-        initialEntities: [
-          for (final entity in message.textEntities) entity.toTdJson(),
-        ],
-      ),
-    );
-    if (!mounted || result == null) return;
-    try {
-      if (_isEditableMediaMessage(message)) {
-        await _vm.editMessageCaption(
-          message.id,
-          result.text,
-          entities: result.entities,
-        );
-      } else {
-        if (result.text.trim().isEmpty) {
-          showToast(context, AppStringKeys.chatMessageRequired);
-          return;
-        }
-        await _vm.editMessageText(
-          message.id,
-          result.text,
-          entities: result.entities,
-        );
-      }
-    } catch (e) {
-      if (mounted) showToast(context, '$e');
-    }
-  }
-
-  Future<void> _editPhotoInPlace(ChatMessage message) async {
-    final image = message.image;
-    if (image == null) return;
-    final path = await TdFileCenter.shared.pathFor(image);
-    if (!mounted) return;
-    if (path == null || path.isEmpty) {
-      showToast(context, AppStringKeys.composerOpenAttachmentFailed);
-      return;
-    }
-    final result = await Navigator.of(context).push<ImageEditResult>(
-      MaterialPageRoute(
-        builder: (_) => ImageEditView(
-          sourcePath: path,
-          initialCaption: _editableMessageText(message),
-        ),
-      ),
-    );
-    if (!mounted || result == null) return;
-    try {
-      await _vm.editMessageMedia(
-        message.id,
-        OutgoingAttachment(
-          path: result.path,
-          kind: OutgoingAttachmentKind.photo,
-        ),
-        caption: result.caption,
-      );
-    } catch (e) {
-      if (mounted) showToast(context, '$e');
-    }
+  Future<void> _editMessageText(ChatMessage message) {
+    _vm.beginMessageEdit(message);
+    return Future.value();
   }
 
   Future<void> _replaceMessageMedia(ChatMessage message) async {
@@ -4830,99 +5804,12 @@ class _ChatViewState extends State<ChatView> {
   }
 
   String _mediaLabel(ChatMessage message) => switch (message.contentType) {
-    'messagePhoto' => telegramText(AppStringKeys.composerImagePreview),
-    'messageVideo' => telegramText(AppStringKeys.chatVideoPlaceholder),
-    'messageAnimation' => telegramText(AppStringKeys.tdMessageGif),
-    'messageAudio' => telegramText(AppStringKeys.tdMessageMusic),
-    _ => telegramText(AppStringKeys.topicPostContentFile),
+    'messagePhoto' => AppStrings.t(AppStringKeys.composerImagePreview),
+    'messageVideo' => AppStrings.t(AppStringKeys.chatVideoPlaceholder),
+    'messageAnimation' => AppStrings.t(AppStringKeys.tdMessageGif),
+    'messageAudio' => AppStrings.t(AppStringKeys.tdMessageMusic),
+    _ => AppStrings.t(AppStringKeys.topicPostContentFile),
   };
-
-  Future<void> _editMessageWithRichText(ChatMessage message) async {
-    final result = await showRichTextComposerSheet(
-      context,
-      initialText: message.text,
-      initialEntities: [
-        for (final entity in message.textEntities) entity.toTdJson(),
-      ],
-      title: AppStringKeys.chatEditMessageTitle,
-      submitText: AppStringKeys.messageActionEdit,
-      hintText: AppStringKeys.tabMessages,
-    );
-    if (!mounted || result == null) return;
-    if (result.text.trim().isEmpty && result.attachments.isEmpty) {
-      showToast(context, AppStringKeys.chatMessageRequired);
-      return;
-    }
-    try {
-      var mediaStart = 0;
-      if (result.attachments.isNotEmpty &&
-          (message.contentType == 'messagePhoto' ||
-              message.contentType == 'messageVideo')) {
-        final media = result.attachments.first;
-        final canReplaceMedia =
-            media.kind == OutgoingAttachmentKind.photo ||
-            media.kind == OutgoingAttachmentKind.video;
-        if (canReplaceMedia) {
-          await _vm.editMessageMedia(
-            message.id,
-            media,
-            caption: result.text,
-            entities: result.entities,
-          );
-          mediaStart = 1;
-        }
-      }
-      if (mediaStart == 0 &&
-          (result.text != message.text ||
-              !_sameFormattedEntities(result.entities, message.textEntities))) {
-        if (message.contentType == 'messagePhoto' ||
-            message.contentType == 'messageVideo') {
-          await _vm.editMessageCaption(
-            message.id,
-            result.text,
-            entities: result.entities,
-          );
-        } else {
-          await _vm.editMessageText(
-            message.id,
-            result.text,
-            entities: result.entities,
-          );
-        }
-      }
-      final extras = result.attachments.skip(mediaStart).toList();
-      if (extras.isNotEmpty) {
-        await _vm.sendAttachments(extras);
-        if (mounted) _onComposerMessageSent();
-      }
-    } catch (e) {
-      if (mounted) showToast(context, '$e');
-    }
-  }
-
-  bool _sameFormattedEntities(
-    List<Map<String, dynamic>> edited,
-    List<MessageTextEntity> original,
-  ) {
-    if (edited.length != original.length) return false;
-    for (var i = 0; i < edited.length; i++) {
-      final value = edited[i];
-      final expected = original[i];
-      final type = value['type'];
-      if (value['offset'] != expected.offset ||
-          value['length'] != expected.length ||
-          type is! Map ||
-          type['@type'] != expected.type ||
-          type['url'] != expected.url ||
-          type['user_id'] != expected.userId ||
-          '${type['custom_emoji_id'] ?? ''}' !=
-              '${expected.customEmojiId ?? ''}' ||
-          type['language'] != expected.language) {
-        return false;
-      }
-    }
-    return true;
-  }
 
   void _openSenderProfile(ChatMessage m) {
     if (m.senderIsChat) {
@@ -4935,10 +5822,8 @@ class _ChatViewState extends State<ChatView> {
         unawaited(_openChatInfo(title: title, useAppPageRoute: true));
         return;
       }
-      Navigator.of(context).push(
-        AppChatPageRoute<void>(
-          builder: (_) => ChatView(chatId: senderChatId, title: title),
-        ),
+      unawaited(
+        openChatFromCurrentWindow(context, chatId: senderChatId, title: title),
       );
       return;
     }
@@ -4971,6 +5856,24 @@ class _ChatViewState extends State<ChatView> {
     await _scrollToMessage(messageId);
   }
 
+  void _handleInfoPressed() {
+    final onInfoPressed = widget.onInfoPressed;
+    if (onInfoPressed != null) {
+      onInfoPressed();
+      return;
+    }
+    unawaited(_openChatInfo());
+  }
+
+  void _handleFullInfoPressed() {
+    final onOpenFullInfo = widget.onOpenFullInfo;
+    if (onOpenFullInfo != null) {
+      onOpenFullInfo();
+      return;
+    }
+    unawaited(_openChatInfo());
+  }
+
   void _openPeerProfile() {
     final uid = _vm.peerUserId;
     if (uid == null || uid <= 0) return;
@@ -4978,6 +5881,11 @@ class _ChatViewState extends State<ChatView> {
   }
 
   void _openUserProfile(int userId, String name) {
+    final onOpenUserProfile = widget.onOpenUserProfile;
+    if (onOpenUserProfile != null) {
+      onOpenUserProfile(userId, name);
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ProfileDetailView(userId: userId, name: name),
@@ -5078,8 +5986,10 @@ class _ChatViewState extends State<ChatView> {
         : _wallpaperController.resolvedWallpaper(globalChatWallpaper);
   }
 
+  // Both run once per bubble; build() already resolved themingEnabled into the
+  // field, so re-subscribing to ThemeController per row is pure overhead.
   Color? _effectiveOutgoingColor() {
-    if (!context.watch<ThemeController>().themingEnabled) {
+    if (!_themingEnabled) {
       return AppTheme.bubbleOutgoing;
     }
     final chatColor = _resolvedChatThemeStyle?.outgoingColor;
@@ -5087,7 +5997,7 @@ class _ChatViewState extends State<ChatView> {
   }
 
   Color? _effectiveOutgoingTextColor() {
-    if (!context.watch<ThemeController>().themingEnabled) {
+    if (!_themingEnabled) {
       return AppTheme.bubbleOutgoingText;
     }
     return _resolvedChatThemeStyle?.outgoingTextColor ??
@@ -5102,8 +6012,26 @@ class _ChatViewState extends State<ChatView> {
       _resolvedChatThemeStyle?.incomingTextColor ??
       _resolvedCloudTheme?.incomingTextColor;
 
+  TelegramMessageColors? _effectiveMessageColors() {
+    if (!_themingEnabled) return null;
+    final style = _resolvedChatThemeStyle;
+    return style == null
+        ? _resolvedCloudTheme?.messageColors
+        : TelegramMessageColors.fromChatThemeStyle(style);
+  }
+
   @override
   Widget build(BuildContext context) {
+    Widget withInternalLinkRouting(Widget child) => InternalChatLinkScope(
+      target: InternalChatLinkTarget(
+        chatId: widget.chatId,
+        accountSlot: _sessionKey.accountSlot,
+        openMessage: _scrollToMessage,
+      ),
+      child: child,
+    );
+
+    _shellLayoutGeneration++;
     final c = context.colors;
     final themeController = context.watch<ThemeController>();
     _themingEnabled = themeController.themingEnabled;
@@ -5114,6 +6042,13 @@ class _ChatViewState extends State<ChatView> {
     final chatThemeStyle = _themingEnabled
         ? _wallpaperController.themeStyleFor(widget.chatId, dark: dark)
         : null;
+    _hasCustomChatTheme =
+        _themingEnabled &&
+        (chatThemeStyle != null ||
+            (_resolvedCloudTheme == null &&
+                _wallpaperController.hasExplicitGlobalThemeSelection(
+                  dark: dark,
+                )));
     _resolvedChatThemeStyle = !_themingEnabled
         ? null
         : chatThemeStyle ??
@@ -5123,69 +6058,188 @@ class _ChatViewState extends State<ChatView> {
     // Keep blocked-user hiding toggle in sync with theme.
     BlockedUserService.shared.enabled = themeController.hideBlockedUserMessages;
     if (_vm.isAdministeredDirectMessagesGroup) {
-      return ChannelDirectMessagesView(
-        chatId: widget.chatId,
-        title: widget.title,
+      return withInternalLinkRouting(
+        ChannelDirectMessagesView(chatId: widget.chatId, title: widget.title),
       );
     }
     if (_vm.isMessageBubbleRepository) {
-      return MessageBubbleRepositoryView(viewModel: _vm, onBack: _handleBack);
+      return withInternalLinkRouting(
+        MessageBubbleRepositoryView(viewModel: _vm, onBack: _handleBack),
+      );
     }
     final showPeerRestrictionBlock =
         _vm.isPeerRestricted && _vm.messages.isEmpty;
-    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
-    _syncKeyboardInset(keyboardInset);
+    Widget withKeyboardInsetProbe(Widget child) =>
+        _KeyboardInsetProbe(onInset: _syncKeyboardInset, child: child);
     // Not a member, joinable, and nothing to preview → a custom join screen
     // (header + centered card) instead of the transcript + composer.
     if (!_vm.isMember && _vm.canJoin && _vm.messages.isEmpty) {
-      return _withExitState(
-        _withBackSwipe(
-          Scaffold(
-            backgroundColor: c.groupedBackground,
-            body: _joinScreenBody(),
+      return withKeyboardInsetProbe(
+        withInternalLinkRouting(
+          _withExitState(
+            _withBackSwipe(
+              Scaffold(
+                backgroundColor: c.groupedBackground,
+                body: _joinScreenBody(),
+              ),
+            ),
           ),
         ),
       );
     }
-    return _withExitState(
-      _withBackSwipe(
-        Scaffold(
-          backgroundColor: c.inputBarBackground,
-          resizeToAvoidBottomInset: true,
-          body: ChatWallpaperBackground(
-            wallpaper: _effectiveWallpaper(),
-            fallbackColor: c.chatBackground,
-            brightness: Theme.of(context).brightness,
-            child: ChatMediaDropRegion(
-              enabled:
-                  _vm.canSendMessages &&
-                  !_isSelecting &&
-                  !showPeerRestrictionBlock,
-              onImagesDropped: _previewAndSendDroppedImages,
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: Column(
+    return withKeyboardInsetProbe(
+      withInternalLinkRouting(
+        _withExitState(
+          _withBackSwipe(
+            Scaffold(
+              backgroundColor: c.inputBarBackground,
+              resizeToAvoidBottomInset: true,
+              body: ChatWallpaperBackground(
+                wallpaper: _effectiveWallpaper(),
+                fallbackColor: c.chatBackground,
+                brightness: Theme.of(context).brightness,
+                child: ChatMediaDropRegion(
+                  enabled:
+                      _vm.canSendMessages &&
+                      !_isSelecting &&
+                      !showPeerRestrictionBlock,
+                  onImagesDropped: _previewAndSendDroppedImages,
+                  child: Listener(
+                    onPointerDown: _handleChatPointerDown,
+                    child: Stack(
+                      key: _actionOverlayKey,
                       children: [
-                        showPeerRestrictionBlock
-                            ? _header()
-                            : (_isSelecting ? _selectionHeader() : _header()),
-                        if (showPeerRestrictionBlock)
-                          Expanded(child: _restrictedPeerBlockPage())
-                        else ...[
-                          Expanded(child: _transcriptLayer()),
-                          _chatMusicPlayer(),
-                          _isSelecting
-                              ? _selectionActionBar()
-                              : _composerArea(),
-                        ],
+                        Positioned.fill(
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              // Scaffold shrinks its body as the keyboard slides,
+                              // so this builder re-runs every animation frame
+                              // even though only the width matters. Handing back
+                              // the same widget lets Element.updateChild skip the
+                              // header, transcript and composer entirely.
+                              final width = constraints.maxWidth;
+                              final cached = _cachedShellLayout;
+                              if (cached != null &&
+                                  _cachedShellLayoutGeneration ==
+                                      _shellLayoutGeneration &&
+                                  _cachedShellLayoutWidth == width) {
+                                return cached;
+                              }
+                              final searchPane = _searchUsesResultsPane(width);
+                              _searchResultsPaneVisible = searchPane;
+                              final searching = _search.isActive;
+                              final shell = ChatHeaderTrailingPaneLayout(
+                                header: showPeerRestrictionBlock
+                                    ? _header()
+                                    : searching
+                                    ? _searchHeader(showSteppers: searchPane)
+                                    : (_isSelecting
+                                          ? _selectionHeader()
+                                          : _header()),
+                                body: showPeerRestrictionBlock
+                                    ? _restrictedPeerBlockPage()
+                                    : _withTopicNavigation(
+                                        Column(
+                                          children: [
+                                            Expanded(
+                                              child: _transcriptLayer(
+                                                searchPane: searchPane,
+                                              ),
+                                            ),
+                                            _chatMusicPlayer(),
+                                            // A narrow chat trades the composer
+                                            // for the hit navigator; a wide one
+                                            // keeps composing beside the results.
+                                            if (searching && !searchPane)
+                                              _searchNavigator()
+                                            else if (_isSelecting)
+                                              _selectionActionBar()
+                                            else
+                                              _composerArea(),
+                                          ],
+                                        ),
+                                      ),
+                                trailingPane: searchPane
+                                    ? _searchResultsPane()
+                                    : widget.trailingPane,
+                                trailingPaneWidth: searchPane
+                                    ? chatSearchResultsPaneWidth
+                                    : widget.trailingPaneWidth,
+                              );
+                              _cachedShellLayout = shell;
+                              _cachedShellLayoutGeneration =
+                                  _shellLayoutGeneration;
+                              _cachedShellLayoutWidth = width;
+                              return shell;
+                            },
+                          ),
+                        ),
+                        if (_desktopStickerSetId != null)
+                          _desktopStickerSetPanel(_desktopStickerSetId!),
+                        if (_actionTarget != null && !_isSelecting)
+                          _actionMenuOverlay(),
                       ],
                     ),
                   ),
-                  if (_actionTarget != null && !_isSelecting)
-                    _actionMenuOverlay(),
-                ],
+                ),
               ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _withTopicNavigation(Widget child) {
+    if (!_vm.supportsTopics ||
+        !usesSplitSelectionLayout(MediaQuery.sizeOf(context))) {
+      return child;
+    }
+    return TopicNavigationLayout(
+      topics: [
+        for (final topic in _vm.forumTopics)
+          TopicNavigationItem(
+            id: topic.id,
+            name: topic.name,
+            iconCustomEmojiId: topic.iconCustomEmojiId,
+            iconColor: topic.iconColor,
+          ),
+      ],
+      selectedTopicId: null,
+      hasForumTabs: _vm.hasForumTabs,
+      onSelected: (id) {
+        if (id != null) unawaited(_openTopicMode(id));
+      },
+      child: child,
+    );
+  }
+
+  Widget _desktopStickerSetPanel(int setId) {
+    final colors = context.colors;
+    return Positioned.fill(
+      child: LayoutBuilder(
+        builder: (context, constraints) => Align(
+          alignment: Alignment.centerRight,
+          child: Container(
+            key: const ValueKey('desktop-sticker-set-panel'),
+            width: constraints.maxWidth / 2,
+            height: constraints.maxHeight,
+            decoration: BoxDecoration(
+              color: colors.groupedBackground,
+              border: Border(left: BorderSide(color: colors.divider)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.18),
+                  blurRadius: 22,
+                  offset: const Offset(-6, 0),
+                ),
+              ],
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: StickerSetDetailView(
+              key: ValueKey('desktop-sticker-set-$setId'),
+              setId: setId,
+              onClose: () => setState(() => _desktopStickerSetId = null),
             ),
           ),
         ),
@@ -5239,7 +6293,7 @@ class _ChatViewState extends State<ChatView> {
         padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
         decoration: BoxDecoration(
           color: surface,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppRadius.card),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: isDark ? 0.24 : 0.12),
@@ -5302,7 +6356,7 @@ class _ChatViewState extends State<ChatView> {
     }
   }
 
-  Widget _transcriptLayer() {
+  Widget _transcriptLayer({required bool searchPane}) {
     final aiSettings = context.watch<AiSettingsController?>();
     final transcriptReady = _initialTranscriptReady;
     final newMessagesPlacement = chatNewMessagesControlPlacement(
@@ -5318,6 +6372,9 @@ class _ChatViewState extends State<ChatView> {
     final showPinnedTodo =
         transcriptReady &&
         !_isSelecting &&
+        // The pinned bar and the suggestion card want the same corner, and a
+        // pinned message is not what is being looked for mid-search.
+        !_search.isActive &&
         _vm.pinnedMessage != null &&
         !_vm.pinnedDismissed;
     return Stack(
@@ -5367,7 +6424,8 @@ class _ChatViewState extends State<ChatView> {
                   (_showEntryUnreadBanner || _vm.unreadCount > 0),
             ),
           ),
-        if (transcriptReady && _vm.unreadMentionCount > 0)
+        if (transcriptReady &&
+            (_vm.unreadMentionCount > 0 || _vm.unreadReactionCount > 0))
           Positioned(
             top:
                 (showPinnedTodo ? 72.0 : 8.0) +
@@ -5375,12 +6433,67 @@ class _ChatViewState extends State<ChatView> {
                     ? 52
                     : 0),
             right: 12,
-            child: _unreadMentionIndicator(),
+            child: _unreadActivityIndicators(),
           ),
         if (transcriptReady &&
             bottomIndicator == ChatBottomIndicator.jumpToBottom)
           Positioned(right: 16, bottom: 12, child: _jumpToBottomButton()),
+        // Without a pane to hold them, suggestions float over the transcript
+        // rather than replacing it — the conversation stays in view while a
+        // sender is picked. The AnimatedBuilder keeps a suggestion arriving
+        // from rebuilding every visible bubble underneath it.
+        if (!searchPane && _search.isActive)
+          Positioned(
+            top: AppSpacing.md,
+            left: AppSpacing.lg,
+            right: AppSpacing.lg,
+            child: AnimatedBuilder(
+              animation: _search,
+              builder: (_, _) => _searchOverlay ?? const SizedBox.shrink(),
+            ),
+          ),
       ],
+    );
+  }
+
+  /// The floating suggestion or hint card, or null when neither applies.
+  Widget? get _searchOverlay {
+    if (!_search.isActive) return null;
+    final showsSuggestions = _search.activeToken != null;
+    if (!showsSuggestions && !_search.showsTokenHints) return null;
+    final c = context.colors;
+    return Material(
+      type: MaterialType.transparency,
+      child: Container(
+        key: const ValueKey('chatSearchFloatingSuggestions'),
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.42,
+        ),
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: c.card,
+          borderRadius: BorderRadius.circular(AppRadius.card),
+          border: Border.all(color: c.divider, width: 0.75),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.18),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: showsSuggestions
+            ? SearchTokenSuggestionList(
+                suggestions: _search.suggestions,
+                onPick: _search.applySuggestion,
+              )
+            : SingleChildScrollView(
+                child: SearchTokenHints(
+                  hints: const [searchTokenFromHint, searchTokenHasHint],
+                  onPick: _search.startToken,
+                ),
+              ),
+      ),
     );
   }
 
@@ -5525,7 +6638,7 @@ class _ChatViewState extends State<ChatView> {
         ),
         decoration: BoxDecoration(
           color: c.navBar,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(AppRadius.lg),
           border: Border.all(color: c.divider, width: 0.5),
           boxShadow: [
             BoxShadow(
@@ -5632,7 +6745,7 @@ class _ChatViewState extends State<ChatView> {
               style: TextStyle(
                 color: c.textPrimary,
                 fontSize: 13,
-                fontWeight: FontWeight.w800,
+                fontWeight: FontWeight.w600,
                 letterSpacing: 0.2,
               ),
             ),
@@ -5878,34 +6991,83 @@ class _ChatViewState extends State<ChatView> {
     }
   }
 
-  Widget _unreadMentionIndicator() {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: _openingUnreadMention ? null : _openUnreadMention,
-      child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 120),
-        opacity: _openingUnreadMention ? 0.62 : 1,
-        child: Container(
-          width: 40,
-          height: 34,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: AppTheme.brand,
-            borderRadius: BorderRadius.circular(17),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.12),
-                blurRadius: 6,
-                offset: const Offset(0, 2),
-              ),
-            ],
+  Widget _unreadActivityIndicators() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        if (_vm.unreadMentionCount > 0)
+          _unreadActivityIndicator(
+            key: const ValueKey('unread-mention-indicator'),
+            icon: HeroAppIcons.at,
+            count: _vm.unreadMentionCount,
+            label: AppStrings.t(AppStringKeys.notificationMentions),
+            opening: _openingUnreadMention,
+            onTap: _openUnreadMention,
           ),
-          child: const Text(
-            '@',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
+        if (_vm.unreadMentionCount > 0 && _vm.unreadReactionCount > 0)
+          const SizedBox(height: AppSpacing.md),
+        if (_vm.unreadReactionCount > 0)
+          _unreadActivityIndicator(
+            key: const ValueKey('unread-reaction-indicator'),
+            icon: HeroAppIcons.heart,
+            count: _vm.unreadReactionCount,
+            label: AppStrings.t(AppStringKeys.notificationReactions),
+            opening: _openingUnreadReaction,
+            onTap: _openUnreadReaction,
+          ),
+      ],
+    );
+  }
+
+  Widget _unreadActivityIndicator({
+    required Key key,
+    required AppIconData icon,
+    required int count,
+    required String label,
+    required bool opening,
+    required VoidCallback onTap,
+  }) {
+    final countLabel = count > 999 ? '999+' : '$count';
+    return Semantics(
+      button: true,
+      label: '$label: $countLabel',
+      child: GestureDetector(
+        key: key,
+        behavior: HitTestBehavior.opaque,
+        onTap: opening ? null : onTap,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 120),
+          opacity: opening ? 0.62 : 1,
+          child: Container(
+            height: 34,
+            constraints: const BoxConstraints(minWidth: 40),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            decoration: BoxDecoration(
+              color: AppTheme.brand,
+              borderRadius: BorderRadius.circular(17),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.12),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                AppIcon(icon, size: AppIconSize.lg, color: Colors.white),
+                const SizedBox(width: AppSpacing.xs),
+                Text(
+                  countLabel,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: AppTextSize.caption,
+                    fontWeight: AppTextWeight.semibold,
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -5924,6 +7086,19 @@ class _ChatViewState extends State<ChatView> {
       }
     }
     if (mounted) setState(() => _openingUnreadMention = false);
+  }
+
+  Future<void> _openUnreadReaction() async {
+    if (_openingUnreadReaction || _vm.unreadReactionCount <= 0) return;
+    setState(() => _openingUnreadReaction = true);
+    final messageId = await _vm.openNextUnreadReaction();
+    if (messageId != null && mounted) {
+      await _scrollToMessage(messageId);
+      if (_vm.messages.any((message) => message.id == messageId)) {
+        await _vm.markUnreadReactionRead(messageId);
+      }
+    }
+    if (mounted) setState(() => _openingUnreadReaction = false);
   }
 
   // MARK: - Composer area (input bar / join bar / disabled bar)
@@ -5957,17 +7132,7 @@ class _ChatViewState extends State<ChatView> {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (_vm.businessBotUserId != 0) _businessBotManageBar(),
-          ChatInputBar(
-            vm: _vm,
-            requestInitialFocus: widget.requestComposerFocusOnReady,
-            quickRepliesEnabled: context
-                .watch<ThemeController>()
-                .quickRepliesEnabled,
-            onStartCall: _startCall,
-            onMessageSent: _onComposerMessageSent,
-            onPanelGeometryChanged: _onComposerPanelGeometryChanged,
-            onMediaSendTapped: _onComposerMediaSendTapped,
-          ),
+          _chatInputBar(),
         ],
       );
     }
@@ -5975,6 +7140,48 @@ class _ChatViewState extends State<ChatView> {
     // Subscribed to a channel you can't post in → mute/unmute (like official).
     if (_vm.isChannel && _vm.isMember) return _channelMuteBar();
     return _disabledComposer(_vm.sendDisabledReason);
+  }
+
+  // ChatInputBar subscribes to the view model itself, so the parent's
+  // notification-driven rebuilds only re-run its build for nothing. Every other
+  // constructor argument is either the (final) view model or a method tear-off,
+  // so these four flags are the whole input set.
+  Widget? _composerBarCache;
+  bool _composerBarRequestInitialFocus = false;
+  bool _composerBarEnterToSend = false;
+  bool _composerBarQuickRepliesEnabled = false;
+  bool _composerBarShowCallAction = false;
+
+  Widget _chatInputBar() {
+    final themeController = context.watch<ThemeController>();
+    final requestInitialFocus = widget.requestComposerFocusOnReady;
+    final enterToSend = themeController.enterToSend;
+    final quickRepliesEnabled = themeController.quickRepliesEnabled;
+    final showCallAction = !_usesWideGroupHeader;
+    final cached = _composerBarCache;
+    if (cached != null &&
+        _composerBarRequestInitialFocus == requestInitialFocus &&
+        _composerBarEnterToSend == enterToSend &&
+        _composerBarQuickRepliesEnabled == quickRepliesEnabled &&
+        _composerBarShowCallAction == showCallAction) {
+      return cached;
+    }
+    _composerBarRequestInitialFocus = requestInitialFocus;
+    _composerBarEnterToSend = enterToSend;
+    _composerBarQuickRepliesEnabled = quickRepliesEnabled;
+    _composerBarShowCallAction = showCallAction;
+    return _composerBarCache = ChatInputBar(
+      vm: _vm,
+      requestInitialFocus: requestInitialFocus,
+      enterToSend: enterToSend,
+      quickRepliesEnabled: quickRepliesEnabled,
+      showCallAction: showCallAction,
+      onStartCall: _startCall,
+      onMessageSent: _onComposerMessageSent,
+      onPanelGeometryChanged: _onComposerPanelGeometryChanged,
+      onMediaSendTapped: _onComposerMediaSendTapped,
+      onBotTopicCreated: _openTopicMode,
+    );
   }
 
   Widget _businessBotManageBar() {
@@ -6000,11 +7207,13 @@ class _ChatViewState extends State<ChatView> {
               behavior: HitTestBehavior.opaque,
               onTap: _showBusinessBotControls,
               child: Text(
-                paused
-                    ? 'Business bot paused in this chat'
-                    : _vm.businessBotCanReply
-                    ? 'Business bot can reply in this chat'
-                    : 'Business bot has read-only access',
+                AppStrings.t(
+                  paused
+                      ? AppStringKeys.chatBusinessBotPaused
+                      : _vm.businessBotCanReply
+                      ? AppStringKeys.chatBusinessBotCanReply
+                      : AppStringKeys.chatBusinessBotReadOnly,
+                ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: 13, color: c.textSecondary),
@@ -6036,7 +7245,7 @@ class _ChatViewState extends State<ChatView> {
       backgroundColor: Colors.transparent,
       builder: (_) => BusinessBotChatControlSheet(
         chatId: widget.chatId,
-        botName: 'Connected Business Bot',
+        botName: AppStrings.t(AppStringKeys.chatConnectedBusinessBot),
         paused: _vm.businessBotPaused,
       ),
     );
@@ -6050,7 +7259,7 @@ class _ChatViewState extends State<ChatView> {
         16,
         10,
         16,
-        10 + MediaQuery.of(context).padding.bottom,
+        10 + MediaQuery.paddingOf(context).bottom,
       ),
       decoration: BoxDecoration(
         color: c.navBar,
@@ -6091,7 +7300,7 @@ class _ChatViewState extends State<ChatView> {
           16,
           14,
           16,
-          14 + MediaQuery.of(context).padding.bottom,
+          14 + MediaQuery.paddingOf(context).bottom,
         ),
         decoration: BoxDecoration(
           color: c.navBar,
@@ -6129,7 +7338,7 @@ class _ChatViewState extends State<ChatView> {
         16,
         10,
         16,
-        10 + MediaQuery.of(context).padding.bottom,
+        10 + MediaQuery.paddingOf(context).bottom,
       ),
       decoration: BoxDecoration(
         color: c.navBar,
@@ -6146,7 +7355,7 @@ class _ChatViewState extends State<ChatView> {
             borderRadius: BorderRadius.circular(23),
           ),
           child: Text(
-            telegramText(label),
+            AppStrings.t(label),
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,
@@ -6167,7 +7376,7 @@ class _ChatViewState extends State<ChatView> {
         16,
         14,
         16,
-        14 + MediaQuery.of(context).padding.bottom,
+        14 + MediaQuery.paddingOf(context).bottom,
       ),
       decoration: BoxDecoration(
         color: c.navBar,
@@ -6192,81 +7401,92 @@ class _ChatViewState extends State<ChatView> {
         : (_vm.joinByRequest
               ? AppStringKeys.chatRequestToJoin
               : AppStringKeys.chatJoinGroup);
-    return Column(
-      children: [
-        _header(),
-        Expanded(
-          child: Center(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 40),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  PhotoAvatar(
-                    title: _vm.peerTitle,
-                    photo: _vm.peerPhoto,
-                    size: 88,
-                    square:
-                        _vm.isGroup &&
-                        !context.watch<ThemeController>().circularGroupAvatars,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    _vm.peerTitle,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w600,
-                      color: c.textPrimary,
-                    ),
-                  ),
-                  if (_vm.memberCount > 0) ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      AppStrings.t(AppStringKeys.chatMemberCount, {
-                        'value1': _vm.memberCount,
-                      }),
-                      style: TextStyle(fontSize: 14, color: c.textSecondary),
-                    ),
-                  ],
-                  const SizedBox(height: 28),
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: requested ? null : () => _vm.joinChat(),
-                    child: Container(
-                      height: 46,
-                      constraints: const BoxConstraints(minWidth: 200),
-                      alignment: Alignment.center,
-                      padding: const EdgeInsets.symmetric(horizontal: 28),
-                      decoration: BoxDecoration(
-                        color: requested ? c.searchFill : AppTheme.brand,
-                        borderRadius: BorderRadius.circular(23),
-                      ),
-                      child: Text(
-                        telegramText(label),
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: requested ? c.textSecondary : AppTheme.onBrand,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+    return ChatHeaderTrailingPaneLayout(
+      header: _header(),
+      trailingPane: widget.trailingPane,
+      trailingPaneWidth: widget.trailingPaneWidth,
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 40),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              PhotoAvatar(
+                title: _vm.peerTitle,
+                photo: _vm.peerPhoto,
+                size: 88,
+                square:
+                    _vm.isGroup &&
+                    !context.watch<ThemeController>().circularGroupAvatars,
               ),
-            ),
+              const SizedBox(height: 16),
+              Text(
+                _vm.peerTitle,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w600,
+                  color: c.textPrimary,
+                ),
+              ),
+              if (_vm.memberCount > 0) ...[
+                const SizedBox(height: 6),
+                Text(
+                  AppStrings.plural(
+                    AppStringKeys.chatMemberCount,
+                    _vm.memberCount,
+                  ),
+                  style: TextStyle(fontSize: 14, color: c.textSecondary),
+                ),
+              ],
+              const SizedBox(height: 28),
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: requested ? null : () => _vm.joinChat(),
+                child: Container(
+                  height: 46,
+                  constraints: const BoxConstraints(minWidth: 200),
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(horizontal: 28),
+                  decoration: BoxDecoration(
+                    color: requested ? c.searchFill : AppTheme.brand,
+                    borderRadius: BorderRadius.circular(AppRadius.xxl),
+                  ),
+                  child: Text(
+                    AppStrings.t(label),
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: requested ? c.textSecondary : AppTheme.onBrand,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
-      ],
+      ),
     );
   }
 
   Widget _header() {
+    return _ActiveChatListenableBuilder(
+      listenable: _vm.headerRevisionListenable,
+      builder: (context) => _buildHeader(),
+    );
+  }
+
+  Widget _buildHeader() {
     final c = context.colors;
     final subtitle = _vm.subtitle;
     final actionActive = _vm.hasActiveChatAction;
+    final wideGroupHeader = _usesWideGroupHeader;
     return Container(
-      padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
+      padding: EdgeInsets.only(
+        top:
+            MediaQuery.paddingOf(context).top +
+            iPadWindowChromeInsetOf(context),
+      ),
       decoration: BoxDecoration(
         color: widget.headerColor ?? c.navBar,
         border: widget.showHeaderDivider
@@ -6298,25 +7518,49 @@ class _ChatViewState extends State<ChatView> {
                   else
                     const SizedBox(width: 4),
                   Expanded(child: _headerTitleBlock(subtitle, actionActive)),
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => unawaited(_openChatInfo()),
-                    child: AppIcon(
-                      HeroAppIcons.bars,
-                      size: 22,
-                      color: c.textPrimary,
+                  // Bot mini-app launcher lives in the header (menu bar), not
+                  // on the message row.
+                  if (_vm.peerIsBot && _vm.botMenu?.isWebApp == true)
+                    _ChatHeaderAction(
+                      key: const ValueKey('chatHeaderBotApp'),
+                      label: _vm.botMenu!.actionTitle,
+                      icon: HeroAppIcons.tableCells,
+                      onTap: () => unawaited(_openBotMenuApp(_vm.botMenu!)),
                     ),
-                  ),
-                  if (_vm.isForum) ...[
-                    const SizedBox(width: 18),
-                    GestureDetector(
-                      behavior: HitTestBehavior.opaque,
+                  if (_canSearchMessages)
+                    _ChatHeaderAction(
+                      key: const ValueKey('chatHeaderSearch'),
+                      label: AppStringKeys.chatSearchInThisChat.l10n(context),
+                      icon: HeroAppIcons.magnifyingGlass,
+                      onTap: _openSearch,
+                    ),
+                  if (wideGroupHeader)
+                    WideGroupChatHeaderActions(
+                      onStartCall: (isVideo) => unawaited(_startCall(isVideo)),
+                      showCallActions:
+                          Theme.of(context).platform != TargetPlatform.macOS,
+                      onToggleContext: widget.onInfoPressed == null
+                          ? null
+                          : _handleInfoPressed,
+                      onOpenFullInfo: _handleFullInfoPressed,
+                    )
+                  else
+                    _ChatHeaderAction(
+                      key: const ValueKey('chatHeaderInfo'),
+                      label: AppStringKeys.chatInfoTitle.l10n(context),
+                      icon: widget.onOpenFullInfo == null
+                          ? HeroAppIcons.bars
+                          : HeroAppIcons.gear,
+                      onTap: widget.onOpenFullInfo == null
+                          ? _handleInfoPressed
+                          : _handleFullInfoPressed,
+                    ),
+                  if (_vm.supportsTopics) ...[
+                    _ChatHeaderAction(
+                      key: const ValueKey('chatHeaderTopics'),
+                      label: AppStringKeys.topicChatAllTopics.l10n(context),
+                      icon: HeroAppIcons.hashtag,
                       onTap: _openTopicMode,
-                      child: AppIcon(
-                        HeroAppIcons.hashtag,
-                        size: 22,
-                        color: c.textPrimary,
-                      ),
                     ),
                   ],
                 ],
@@ -6324,6 +7568,12 @@ class _ChatViewState extends State<ChatView> {
             ),
           ),
           if (_showsChatTranslationPanel) _chatTranslationPanel(),
+          if (_showsBotApiAccessWarning)
+            BotApiAccessWarning(
+              showPrivacyWarning: _vm.showBotApiPrivacyWarning,
+              showBotToBotWarning: _vm.showBotApiBotToBotWarning,
+              onDismiss: _dismissBotApiAccessWarning,
+            ),
           if (widget.headerBottom != null)
             SizedBox(
               height: widget.headerBottomHeight,
@@ -6334,10 +7584,35 @@ class _ChatViewState extends State<ChatView> {
     );
   }
 
+  /// The join screen and a restricted peer both render the chat header over a
+  /// page with no transcript behind it. Offering search there would open a
+  /// field that can only ever report nothing.
+  bool get _canSearchMessages =>
+      !_vm.isPeerRestricted && (_vm.isMember || _vm.messages.isNotEmpty);
+
+  bool get _usesWideGroupHeader {
+    return wideGroupHeaderActionsEnabled(
+      MediaQuery.sizeOf(context),
+      isGroup: _vm.isGroup,
+      hasContextPaneToggle: widget.onInfoPressed != null,
+    );
+  }
+
   Widget _headerTitleBlock(String subtitle, bool actionActive) {
     final c = context.colors;
+    final serverTitle = _vm.peerTitle;
+    final displayTitle = _vm.isGroup && !_vm.isChannel
+        ? context.watch<GroupRemarkController?>()?.displayTitleFor(
+                widget.chatId,
+                serverTitle,
+              ) ??
+              serverTitle
+        : serverTitle;
+    final headerTitle = _vm.isGroup && _vm.memberCount > 0
+        ? '$displayTitle(${_vm.memberCount})'
+        : displayTitle;
     final titleText = Text(
-      _vm.headerTitle,
+      headerTitle,
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       style: TextStyle(
@@ -6359,7 +7634,7 @@ class _ChatViewState extends State<ChatView> {
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (_vm.isForum)
+        if (_vm.supportsTopics)
           Row(
             children: [
               Expanded(child: title),
@@ -6385,7 +7660,7 @@ class _ChatViewState extends State<ChatView> {
           ),
       ],
     );
-    if (_vm.isForum) {
+    if (_vm.supportsTopics) {
       return GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: _showTopicSelector,
@@ -6411,9 +7686,14 @@ class _ChatViewState extends State<ChatView> {
     unreadCount: _vm.unreadCount,
     order: 0,
     isMuted: _vm.isMuted,
-    kind: _vm.isChannel ? ChatKind.channel : ChatKind.group,
+    kind: _vm.peerIsBot
+        ? ChatKind.bot
+        : _vm.isChannel
+        ? ChatKind.channel
+        : ChatKind.group,
     photo: _vm.peerPhoto,
-    isForum: true,
+    isForum: _vm.isForum,
+    supportsBotTopics: _vm.supportsBotTopics,
   );
 
   Future<void> _openTopicMode([int? threadId]) async {
@@ -6424,12 +7704,29 @@ class _ChatViewState extends State<ChatView> {
       onOpenTopicMode(threadId);
       return;
     }
+    final chat = _topicChatSummary();
+    _prepareExitState();
+    if (ChatPane.replace(
+      context,
+      (onBack) => TopicChatView(
+        chat: chat,
+        initialThreadId: threadId,
+        hasForumTabs: _vm.hasForumTabs,
+        headerHeight: widget.headerHeight,
+        headerColor: widget.headerColor,
+        onBack: onBack,
+      ),
+    )) {
+      return;
+    }
     unawaited(
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
+      replaceWithAppChatRoute<void, void>(
+        context,
+        AppChatPageRoute<void>(
           builder: (_) => TopicChatView(
-            chat: _topicChatSummary(),
+            chat: chat,
             initialThreadId: threadId,
+            hasForumTabs: _vm.hasForumTabs,
           ),
         ),
       ),
@@ -6437,7 +7734,7 @@ class _ChatViewState extends State<ChatView> {
   }
 
   Future<void> _showTopicSelector() async {
-    if (!_vm.isForum) return;
+    if (!_vm.supportsTopics) return;
     if (_vm.forumTopics.isEmpty && !_vm.forumTopicsLoading) {
       await _vm.loadForumTopics();
     }
@@ -6507,7 +7804,11 @@ class _ChatViewState extends State<ChatView> {
     final c = context.colors;
     final count = _selectedMessageIds.length;
     return Container(
-      padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
+      padding: EdgeInsets.only(
+        top:
+            MediaQuery.paddingOf(context).top +
+            iPadWindowChromeInsetOf(context),
+      ),
       decoration: BoxDecoration(
         color: c.navBar,
         border: Border(bottom: BorderSide(color: c.divider, width: 0.5)),
@@ -6633,7 +7934,7 @@ class _ChatViewState extends State<ChatView> {
     }
 
     return Container(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom),
+      padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
       decoration: BoxDecoration(
         color: c.navBar,
         border: Border(top: BorderSide(color: c.divider, width: 0.5)),
@@ -6644,7 +7945,7 @@ class _ChatViewState extends State<ChatView> {
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
             button(
-              HeroAppIcons.share.data,
+              HeroAppIcons.forward.data,
               _forwardSelected,
               actionEnabled: _vm.canForwardContent,
             ),
@@ -6668,7 +7969,7 @@ class _ChatViewState extends State<ChatView> {
   Widget _pinnedBar(ChatMessage pinned) {
     final c = context.colors;
     final text = pinned.text.trim().isEmpty
-        ? telegramText(AppStringKeys.chatSearchMessageResultLabel)
+        ? AppStrings.t(AppStringKeys.chatSearchMessageResultLabel)
         : pinned.text.replaceAll('\n', ' ');
     final canPrevious = _vm.hasPreviousPinnedMessage;
     final canNext = _vm.hasNextPinnedMessage;
@@ -6680,7 +7981,7 @@ class _ChatViewState extends State<ChatView> {
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           color: c.card.withValues(alpha: 0.86),
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(AppRadius.card),
           border: Border.all(
             color: c.divider.withValues(alpha: 0.55),
             width: 0.5,
@@ -6799,13 +8100,44 @@ class _ChatViewState extends State<ChatView> {
     bool pinnedJump = false,
     double? alignment,
     bool forceAlignment = false,
+    bool Function()? isCancelled,
   }) async {
-    _cancelSessionReopenNavigation(userClaimedViewport: true);
+    _claimTranscriptViewport();
     await _scrollToMessageAndReport(
       messageId,
       pinnedJump: pinnedJump,
       alignment: alignment,
       forceAlignment: forceAlignment,
+      isCancelled: isCancelled,
+    );
+  }
+
+  Future<void> _openReplyMessage(int messageId) async {
+    _claimTranscriptViewport();
+    final didReachTarget = await _scrollToMessageAndReport(messageId);
+    if (!didReachTarget || !mounted) return;
+    if (isDesktopTargetPlatform(Theme.of(context).platform)) {
+      _flashLinkedMessageHighlight(messageId);
+    }
+  }
+
+  void _flashLinkedMessageHighlight(int messageId) {
+    _linkedMessageHighlightFadeTimer?.cancel();
+    _linkedMessageHighlightClearTimer?.cancel();
+    setState(() {
+      _linkedMessageHighlightId = messageId;
+      _linkedMessageHighlightActive = true;
+    });
+    _linkedMessageHighlightFadeTimer = Timer(
+      const Duration(milliseconds: 650),
+      () {
+        if (!mounted || _linkedMessageHighlightId != messageId) return;
+        setState(() => _linkedMessageHighlightActive = false);
+        _linkedMessageHighlightClearTimer = Timer(AppMotion.deliberate, () {
+          if (!mounted || _linkedMessageHighlightId != messageId) return;
+          setState(() => _linkedMessageHighlightId = null);
+        });
+      },
     );
   }
 
@@ -6817,61 +8149,143 @@ class _ChatViewState extends State<ChatView> {
     bool Function()? isCancelled,
   }) async {
     if (isCancelled?.call() ?? false) return false;
-    if (mounted) {
-      setState(() => _setScrollTarget(messageId));
-      // The target key moves to the requested row during layout. Waiting for
-      // that frame prevents an already-loaded jump from reusing the previous
-      // pinned row's context.
-      await WidgetsBinding.instance.endOfFrame;
-      if (!mounted || (isCancelled?.call() ?? false)) return false;
-    } else {
-      return false;
-    }
-    if (isCancelled?.call() ?? false) return false;
+    if (!mounted) return false;
+    setState(() => _setScrollTarget(messageId, forceNavigation: true));
+    final navigationGeneration = _scrollTargetGeneration;
+    bool targetCancelled() =>
+        !_isCurrentScrollTarget(messageId, navigationGeneration) ||
+        (isCancelled?.call() ?? false);
+    // The target key moves to the requested row during layout. Waiting for
+    // that frame prevents an already-loaded jump from reusing the previous
+    // pinned row's context.
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || targetCancelled()) return false;
     if (_vm.messages.any((m) => m.id == messageId)) {
       return _ensureMessageVisibleAndReport(
         messageId,
+        navigationGeneration: navigationGeneration,
         pinnedJump: pinnedJump,
         alignment: alignment,
         forceAlignment: forceAlignment,
-        isCancelled: isCancelled,
+        isCancelled: targetCancelled,
       );
     }
     final loaded = await _vm.loadAroundMessage(
       messageId,
       scrollToTarget: false,
-      isCancelled: isCancelled,
+      isCancelled: targetCancelled,
     );
-    if (!loaded || !mounted || (isCancelled?.call() ?? false)) return false;
+    if (!loaded || !mounted || targetCancelled()) return false;
     await WidgetsBinding.instance.endOfFrame;
-    if (!mounted || (isCancelled?.call() ?? false)) return false;
+    if (!mounted || targetCancelled()) return false;
     return _ensureMessageVisibleAndReport(
       messageId,
+      navigationGeneration: navigationGeneration,
       pinnedJump: pinnedJump,
       alignment: alignment,
       forceAlignment: forceAlignment,
-      isCancelled: isCancelled,
+      isCancelled: targetCancelled,
     );
   }
 
-  Future<void> _openHashtagSearch(String hashtag) async {
+  /// A hashtag is already a query over the open chat, so it opens in-chat
+  /// search rather than pushing a screen over the transcript it refers to.
+  void _openHashtagSearch(String hashtag) {
     final tag = hashtag.trim();
     if (tag.isEmpty) return;
-    final result = await Navigator.of(context).push<int>(
-      MaterialPageRoute(
-        builder: (_) => ChatSearchView(
-          chatId: widget.chatId,
-          title: _vm.peerTitle,
-          initialQuery: tag.startsWith('#') ? tag : '#$tag',
-        ),
-      ),
-    );
-    if (!mounted || result == null) return;
-    await _scrollToMessage(result);
+    _openSearch(initialQuery: tag.startsWith('#') ? tag : '#$tag');
   }
+
+  // MARK: - In-chat search
+
+  /// The controller notifies per keystroke, per page and per resolved sender,
+  /// and every search surface already AnimatedBuilds on it. `isActive` is the
+  /// only value this build reads, so anything else would rebuild the whole
+  /// transcript for a repaint that happens elsewhere.
+  void _onSearchChanged() {
+    final active = _search.isActive;
+    if (active == _searchActive) return;
+    _searchActive = active;
+    if (mounted) setState(() {});
+  }
+
+  void _openSearch({String? initialQuery}) {
+    if (_isSelecting) _exitSelection();
+    _search.open(initialQuery: initialQuery);
+  }
+
+  void _closeSearch() {
+    if (!_search.isActive) return;
+    setState(() => _searchHighlightId = null);
+    _search.close();
+  }
+
+  /// Moves the transcript to a hit and leaves it marked.
+  ///
+  /// The alignment sits the message just above centre so the messages around
+  /// it — the reason the user searched — are on screen too.
+  Future<void> _openSearchResult(
+    ChatMessage result, {
+    required bool automatic,
+  }) async {
+    setState(() => _searchHighlightId = result.id);
+    // A phone gives up most of its height to the keyboard, so a deliberate
+    // jump puts it away — the message asked for should be the thing on screen.
+    // A query's own landing must not, or typing would close the keyboard on
+    // every pause.
+    if (!automatic && !_searchResultsPaneVisible) _search.focusNode.unfocus();
+    await _scrollToMessage(
+      result.id,
+      alignment: 0.38,
+      forceAlignment: true,
+      // A query's own landing can outlive the query: the history fetch it may
+      // need takes longer than the next keystroke. Aborting it beats racing it.
+      isCancelled: automatic
+          ? () => _search.activeMessageId != result.id
+          : null,
+    );
+  }
+
+  bool _searchUsesResultsPane(double conversationWidth) =>
+      _search.isActive &&
+      chatSearchUsesResultsPane(
+        windowSize: MediaQuery.sizeOf(context),
+        conversationWidth: conversationWidth,
+      );
+
+  /// [showSteppers] follows the results pane: a wide chat keeps the composer,
+  /// so the up/down controls ride in the header beside the field, while a
+  /// narrow one gets them in the navigator that replaces the composer.
+  Widget _searchHeader({required bool showSteppers}) => ChatSearchHeaderBar(
+    controller: _search,
+    height: widget.headerHeight,
+    backgroundColor: widget.headerColor,
+    showDivider: widget.showHeaderDivider,
+    showSteppers: showSteppers,
+    onClose: _closeSearch,
+  );
+
+  Widget _searchResultsPane() => ChatSearchResultsPane(
+    controller: _search,
+    peerTitle: _vm.peerTitle,
+    onSelect: _search.selectResult,
+  );
+
+  Widget _searchNavigator() => ChatSearchNavigator(
+    controller: _search,
+    onShowResults: () => unawaited(
+      showChatSearchResultsSheet(
+        context: context,
+        controller: _search,
+        peerTitle: _vm.peerTitle,
+        onSelect: _search.selectResult,
+      ),
+    ),
+  );
 
   Future<void> _ensureMessageVisible(
     int messageId, {
+    required int navigationGeneration,
     bool pinnedJump = false,
     bool instant = false,
     double? alignment,
@@ -6879,6 +8293,7 @@ class _ChatViewState extends State<ChatView> {
   }) async {
     await _ensureMessageVisibleAndReport(
       messageId,
+      navigationGeneration: navigationGeneration,
       pinnedJump: pinnedJump,
       instant: instant,
       alignment: alignment,
@@ -6888,83 +8303,189 @@ class _ChatViewState extends State<ChatView> {
 
   Future<bool> _ensureMessageVisibleAndReport(
     int messageId, {
+    required int navigationGeneration,
     bool pinnedJump = false,
     bool instant = false,
     double? alignment,
     bool forceAlignment = false,
     bool Function()? isCancelled,
   }) async {
+    bool targetCancelled() =>
+        !_isCurrentScrollTarget(messageId, navigationGeneration) ||
+        (isCancelled?.call() ?? false);
+
     final targetAlignment =
         alignment ?? (pinnedJump ? pinnedMessageScrollAlignment : 0.3);
+    var stagedAtTranscriptCenter = false;
     for (var tries = 0; tries < 6; tries++) {
-      if (isCancelled?.call() ?? false) return false;
-      final activeKey = _scrollTargetId == messageId ? _targetKey : _pinnedKey;
+      if (targetCancelled()) return false;
+      final activeKey = _targetKey;
       final ctx = activeKey.currentContext;
       if (ctx != null && ctx.mounted) {
         if (pinnedJump && alignment == null && _scroll.hasClients) {
-          final targetObject = ctx.findRenderObject();
-          final viewportObject = _transcriptViewportKey.currentContext
-              ?.findRenderObject();
-          if (targetObject is RenderBox &&
-              targetObject.attached &&
-              viewportObject is RenderBox &&
-              viewportObject.attached) {
-            final target = pinnedMessageTargetScrollOffset(
-              _scroll.position,
-              targetTop: targetObject.localToGlobal(Offset.zero).dy,
-              viewportTop: viewportObject.localToGlobal(Offset.zero).dy,
-            );
-            if ((target - _scroll.position.pixels).abs() > 0.5) {
-              if (instant) {
-                _scroll.jumpTo(target);
-              } else {
-                await _scroll.animateTo(
-                  target,
-                  duration: const Duration(milliseconds: 140),
-                  curve: Curves.easeOutCubic,
-                );
-              }
-            }
-            if (mounted && _scrollTargetId == messageId) {
+          final aligned = await _alignPinnedMessage(
+            messageId,
+            navigationGeneration: navigationGeneration,
+            instant: instant,
+            isCancelled: isCancelled,
+          );
+          if (aligned && targetCancelled()) {
+            return false;
+          }
+          if (aligned) {
+            if (mounted && !targetCancelled()) {
               setState(() => _setScrollTarget(null));
+              return true;
             }
-            return !(isCancelled?.call() ?? false);
+            return false;
           }
         }
         // Do not realign a message that is already on screen. Reply, search,
         // and other linked-message jumps used to always force the row to 30%
         // of the viewport, which made an already-visible target bounce.
         if (!forceAlignment && _isKeyMostlyVisible(activeKey)) {
-          if (mounted && _scrollTargetId == messageId) {
+          if (mounted && !targetCancelled()) {
             setState(() => _setScrollTarget(null));
+            return true;
           }
-          return !(isCancelled?.call() ?? false);
+          return false;
         }
-        await Scrollable.ensureVisible(
-          ctx,
+        if (!mounted || !ctx.mounted || targetCancelled()) return false;
+        final aligned = await _alignMessageTarget(
+          activeKey,
           alignment: targetAlignment,
-          duration: instant
-              ? Duration.zero
-              : pinnedJump
-              ? const Duration(milliseconds: 140)
-              : const Duration(milliseconds: 220),
-          curve: Curves.easeOutCubic,
+          instant: instant,
+          pinnedJump: pinnedJump,
+          isCancelled: targetCancelled,
         );
-        if (mounted && _scrollTargetId == messageId) {
-          setState(() => _setScrollTarget(null));
-        }
-        return !(isCancelled?.call() ?? false);
+        if (!mounted || targetCancelled()) return false;
+        // A correction pass can lose the row's context without the navigation
+        // being cancelled, and the jump is over either way. Holding the target
+        // past that point stalls new-message auto-scroll, short-transcript
+        // fill, and parked-pivot repair for as long as the chat stays open.
+        setState(() => _setScrollTarget(null));
+        return aligned;
       }
       if (!_scroll.hasClients) return false;
-      final estimate = _estimateMessageOffset(messageId, targetAlignment);
-      if (estimate != null) _scroll.jumpTo(estimate);
-      await Future<void>.delayed(const Duration(milliseconds: 120));
-      if (!mounted || (isCancelled?.call() ?? false)) return false;
+      // A loaded target can be arbitrarily far from the currently laid-out
+      // sliver children. Move the bidirectional transcript's center to that
+      // row once; unlike an absolute height estimate, this guarantees Flutter
+      // will build the target even when every preceding row was underestimated.
+      if (!stagedAtTranscriptCenter &&
+          _stageMessageAtTranscriptCenter(messageId)) {
+        stagedAtTranscriptCenter = true;
+      } else {
+        final estimate = _estimateMessageOffset(messageId, targetAlignment);
+        if (estimate != null) _scroll.jumpTo(estimate);
+      }
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || targetCancelled()) return false;
     }
-    if (mounted && _scrollTargetId == messageId) {
+    if (mounted && !targetCancelled()) {
       setState(() => _setScrollTarget(null));
     }
     return false;
+  }
+
+  /// Repeats ordinary target alignment while rich content finishes laying out.
+  /// The first pass carries the visible motion; the two short correction passes
+  /// absorb thumbnail, preview, reaction, and text reflow during that motion.
+  Future<bool> _alignMessageTarget(
+    GlobalKey targetKey, {
+    required double alignment,
+    required bool instant,
+    required bool pinnedJump,
+    required bool Function() isCancelled,
+  }) async {
+    for (var pass = 0; pass < 3; pass++) {
+      if (isCancelled()) return false;
+      final ctx = targetKey.currentContext;
+      if (ctx == null || !ctx.mounted) return false;
+      // Nothing reflowed during the previous pass, so the remaining correction
+      // animations would only spend their duration re-issuing the offset the
+      // row already sits at.
+      if (pass > 0 && _isTargetAtAlignment(targetKey, alignment)) return true;
+      await Scrollable.ensureVisible(
+        ctx,
+        alignment: alignment,
+        duration: instant
+            ? Duration.zero
+            : pass == 0
+            ? pinnedJump
+                  ? const Duration(milliseconds: 140)
+                  : const Duration(milliseconds: 220)
+            : const Duration(milliseconds: 80),
+        curve: Curves.easeOutCubic,
+      );
+      if (isCancelled()) return false;
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    return !isCancelled();
+  }
+
+  /// Whether the row already rests where `Scrollable.ensureVisible` would put
+  /// it, using the viewport's own reveal math so pinned slivers and oversized
+  /// rows are accounted for exactly as the real call accounts for them.
+  bool _isTargetAtAlignment(GlobalKey targetKey, double alignment) {
+    if (!_scroll.hasClients) return false;
+    final object = targetKey.currentContext?.findRenderObject();
+    if (object == null || !object.attached) return false;
+    final viewport = RenderAbstractViewport.maybeOf(object);
+    if (viewport == null) return false;
+    final target = clampScrollOffset(
+      _scroll.position,
+      viewport.getOffsetToReveal(object, alignment).offset,
+    );
+    return (target - _scroll.position.pixels).abs() <= 0.5;
+  }
+
+  /// Aligns a pinned target more than once because media rows can finish a
+  /// thumbnail decode while the first scroll animation is still laying out.
+  /// The old one-shot calculation consequently landed the containing album a
+  /// few pixels above or below the pinned banner, especially on Android.
+  Future<bool> _alignPinnedMessage(
+    int messageId, {
+    required int navigationGeneration,
+    required bool instant,
+    bool Function()? isCancelled,
+  }) async {
+    bool targetCancelled() =>
+        !_isCurrentScrollTarget(messageId, navigationGeneration) ||
+        (isCancelled?.call() ?? false);
+
+    for (var pass = 0; pass < 3; pass++) {
+      if (targetCancelled()) return false;
+      final activeKey = _targetKey;
+      final targetObject = activeKey.currentContext?.findRenderObject();
+      final viewportObject = _transcriptViewportKey.currentContext
+          ?.findRenderObject();
+      if (targetObject is! RenderBox ||
+          !targetObject.attached ||
+          viewportObject is! RenderBox ||
+          !viewportObject.attached ||
+          !_scroll.hasClients) {
+        return false;
+      }
+      final target = pinnedMessageTargetScrollOffset(
+        _scroll.position,
+        targetTop: targetObject.localToGlobal(Offset.zero).dy,
+        viewportTop: viewportObject.localToGlobal(Offset.zero).dy,
+      );
+      if ((target - _scroll.position.pixels).abs() <= 0.5) return true;
+      if (instant) {
+        _scroll.jumpTo(target);
+      } else {
+        await _scroll.animateTo(
+          target,
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+        );
+      }
+      if (targetCancelled()) return false;
+      await WidgetsBinding.instance.endOfFrame;
+      if (targetCancelled()) return false;
+    }
+    return !targetCancelled();
   }
 
   bool _isKeyMostlyVisible(GlobalKey key) {
@@ -6972,28 +8493,53 @@ class _ChatViewState extends State<ChatView> {
     if (ctx == null) return false;
     final renderObject = ctx.findRenderObject();
     if (renderObject is! RenderBox || !renderObject.attached) return false;
-    final media = MediaQuery.of(context);
-    final origin = renderObject.localToGlobal(Offset.zero);
-    final rect = origin & renderObject.size;
-    final viewportTop =
-        media.padding.top +
-        widget.headerHeight +
-        (widget.headerBottom == null ? 0 : widget.headerBottomHeight) +
-        (widget.showHeaderDivider ? 1 : 0);
-    final viewportBottom =
-        media.size.height - media.viewInsets.bottom - media.padding.bottom - 72;
-    return rect.top >= viewportTop - 24 && rect.bottom <= viewportBottom + 24;
+    final viewportObject = _transcriptViewportKey.currentContext
+        ?.findRenderObject();
+    if (viewportObject is! RenderBox || !viewportObject.attached) return false;
+    final targetTop = renderObject.localToGlobal(Offset.zero).dy;
+    final targetBottom = targetTop + renderObject.size.height;
+    final viewportTop = viewportObject.localToGlobal(Offset.zero).dy;
+    final viewportBottom = viewportTop + viewportObject.size.height;
+    final pinnedOverlayInset =
+        !_search.isActive && _vm.pinnedMessage != null && !_vm.pinnedDismissed
+        ? pinnedMessageTargetTopInset
+        : 0.0;
+    // The viewport already excludes the header, bottom composer, keyboard,
+    // and safe areas. Comparing against those widgets' assumed heights was the
+    // source of false "already visible" results after an Android resize.
+    return targetTop >= viewportTop + pinnedOverlayInset - 24 &&
+        targetBottom <= viewportBottom + 24;
   }
 
   Widget _transcript() {
     final groupImages = context.watch<ThemeController>().groupImageMessages;
     final entries = _transcriptEntries(groupImages);
-    final partition = _partitionTranscript(entries);
+    // Partitioning copies every entry three times over and the index maps hash
+    // every row; both are pure functions of the memoized entry list plus the
+    // pivot inputs, so they are cached beside it rather than redone per build.
+    List<_TranscriptEntry> olderEntries;
+    List<_TranscriptEntry> newerEntries;
+    if (identical(entries, _sliverCacheEntries) &&
+        identical(_transcriptPivot, _sliverCachePivot) &&
+        _sliverCacheInitialLoaded == _vm.initialLoaded) {
+      olderEntries = _sliverCacheOlderEntries!;
+      newerEntries = _sliverCacheNewerEntries!;
+    } else {
+      final partition = _partitionTranscript(entries);
+      // Slivers before `center` grow away from it. Delegate index zero is the
+      // child nearest the center, so the chronological older half is reversed.
+      olderEntries = partition.beforePivot.reversed.toList(growable: false);
+      newerEntries = partition.pivotAndAfter;
+      _sliverCacheEntries = entries;
+      _sliverCachePivot = _transcriptPivot;
+      _sliverCacheInitialLoaded = _vm.initialLoaded;
+      _sliverCacheOlderEntries = olderEntries;
+      _sliverCacheNewerEntries = newerEntries;
+      // No valid leading-item count can be negative, so this forces the index
+      // maps below to be rebuilt against the new arms.
+      _sliverCacheLeadingItemCount = -1;
+    }
     _scheduleTranscriptPivotFreeze();
-    // Slivers before `center` grow away from it. Delegate index zero is the
-    // child nearest the center, so the chronological older half is reversed.
-    final olderEntries = partition.beforePivot.reversed.toList(growable: false);
-    final newerEntries = partition.pivotAndAfter;
     final messages = _transcriptCacheMessages ?? _vm.messages;
     final firstContactInfo = _vm.firstContactInfo;
     final firstContactAtCenter =
@@ -7010,123 +8556,135 @@ class _ChatViewState extends State<ChatView> {
         (firstContactBeforeCenter ? 1 : 0) +
         olderLoadingItemCount;
     final newerLeadingItemCount = firstContactAtCenter ? 1 : 0;
-    final olderIndexByKey = <Key, int>{
-      for (var i = 0; i < olderEntries.length; i++) olderEntries[i].key: i,
-    };
-    final newerIndexByKey = <Key, int>{
-      for (var i = 0; i < newerEntries.length; i++)
-        newerEntries[i].key: i + newerLeadingItemCount,
-    };
+    if (_sliverCacheLeadingItemCount != newerLeadingItemCount) {
+      _sliverCacheLeadingItemCount = newerLeadingItemCount;
+      _sliverCacheOlderIndexByKey = <Key, int>{
+        for (var i = 0; i < olderEntries.length; i++) olderEntries[i].key: i,
+      };
+      _sliverCacheNewerIndexByKey = <Key, int>{
+        for (var i = 0; i < newerEntries.length; i++)
+          newerEntries[i].key: i + newerLeadingItemCount,
+      };
+    }
+    final olderIndexByKey = _sliverCacheOlderIndexByKey!;
+    final newerIndexByKey = _sliverCacheNewerIndexByKey!;
     _scheduleUnreadProgressUpdate();
     _scheduleShortFirstContactReveal();
-    return Container(
-      color: _effectiveWallpaper() == null
-          ? context.colors.chatBackground
-          : const Color(0x00000000),
-      child: NotificationListener<ScrollNotification>(
-        onNotification: _onTranscriptScrollNotification,
-        child: Listener(
-          behavior: HitTestBehavior.translucent,
-          onPointerDown: _onTranscriptPointerDown,
-          onPointerUp: _onTranscriptPointerEnd,
-          onPointerCancel: _onTranscriptPointerEnd,
-          child: CustomScrollView(
-            key: _transcriptViewportKey,
-            controller: _scroll,
-            center: _newerTranscriptSliverKey,
-            physics: const ClampingScrollPhysics(
-              parent: AlwaysScrollableScrollPhysics(),
-            ),
-            scrollCacheExtent: ScrollCacheExtent.pixels(
-              defaultTargetPlatform == TargetPlatform.android ? 260 : 420,
-            ),
-            semanticChildCount:
-                entries.length + (firstContactInfo == null ? 0 : 1),
-            slivers: [
-              const SliverToBoxAdapter(child: SizedBox(height: 8)),
-              SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    if (index < olderEntries.length) {
-                      return _buildTranscriptEntry(
-                        olderEntries[index],
-                        messages,
-                      );
-                    }
-                    if (firstContactBeforeCenter &&
-                        index == olderEntries.length) {
-                      return _buildFirstContactCard(firstContactInfo);
-                    }
-                    if (showOlderLoadingGap) {
-                      return _historyLoadingGap('chat-older-history-gap');
-                    }
-                    return _buildFirstContactCard(firstContactInfo!);
-                  },
-                  childCount: olderChildCount,
-                  findChildIndexCallback: (key) {
-                    if (key == const ValueKey('chat-first-contact-card')) {
-                      return firstContactBeforeCenter
-                          ? olderEntries.length
-                          : null;
-                    }
-                    return olderIndexByKey[key];
-                  },
-                  semanticIndexCallback: (_, localIndex) =>
-                      olderChildCount - localIndex - 1,
-                ),
-              ),
-              SliverList(
-                key: _newerTranscriptSliverKey,
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    if (firstContactAtCenter && index == 0) {
-                      return _buildFirstContactCard(firstContactInfo);
-                    }
-                    return _buildTranscriptEntry(
-                      newerEntries[index - newerLeadingItemCount],
-                      messages,
-                    );
-                  },
-                  childCount: newerEntries.length + newerLeadingItemCount,
-                  findChildIndexCallback: (key) {
-                    if (key == const ValueKey('chat-first-contact-card')) {
-                      return firstContactAtCenter ? 0 : null;
-                    }
-                    return newerIndexByKey[key];
-                  },
-                  semanticIndexOffset: olderChildCount,
-                ),
-              ),
-              if (_vm.isLoadingLatest)
-                SliverToBoxAdapter(
-                  child: _historyLoadingGap('chat-latest-history-gap'),
-                ),
-              const SliverToBoxAdapter(child: SizedBox(height: 8)),
-            ],
+    // No fill of its own: ChatWallpaperBackground already covers this region
+    // with the same chatBackground when no wallpaper is set, and a transparent
+    // ColoredBox still issues a full-viewport drawRect.
+    return NotificationListener<ScrollNotification>(
+      onNotification: _onTranscriptScrollNotification,
+      child: Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: _onTranscriptPointerDown,
+        onPointerUp: _onTranscriptPointerEnd,
+        onPointerCancel: _onTranscriptPointerEnd,
+        child: CustomScrollView(
+          key: _transcriptViewportKey,
+          controller: _scroll,
+          center: _newerTranscriptSliverKey,
+          physics: const ClampingScrollPhysics(
+            parent: AlwaysScrollableScrollPhysics(),
           ),
+          scrollCacheExtent: ScrollCacheExtent.pixels(
+            defaultTargetPlatform == TargetPlatform.android ? 260 : 420,
+          ),
+          semanticChildCount:
+              entries.length + (firstContactInfo == null ? 0 : 1),
+          slivers: [
+            const SliverToBoxAdapter(child: SizedBox(height: 8)),
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  if (index < olderEntries.length) {
+                    return _buildTranscriptEntry(olderEntries[index], messages);
+                  }
+                  if (firstContactBeforeCenter &&
+                      index == olderEntries.length) {
+                    return _buildFirstContactCard(firstContactInfo);
+                  }
+                  if (showOlderLoadingGap) {
+                    return _historyLoadingGap('chat-older-history-gap');
+                  }
+                  return _buildFirstContactCard(firstContactInfo!);
+                },
+                childCount: olderChildCount,
+                // Nothing in the transcript keeps itself alive and there is
+                // no SelectableRegion, so the two keep-alive wrappers are
+                // dead weight; every row already carries its own
+                // RepaintBoundary.
+                addAutomaticKeepAlives: false,
+                addRepaintBoundaries: false,
+                findChildIndexCallback: (key) {
+                  if (key == const ValueKey('chat-first-contact-card')) {
+                    return firstContactBeforeCenter
+                        ? olderEntries.length
+                        : null;
+                  }
+                  return olderIndexByKey[key];
+                },
+                semanticIndexCallback: (_, localIndex) =>
+                    olderChildCount - localIndex - 1,
+              ),
+            ),
+            SliverList(
+              key: _newerTranscriptSliverKey,
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  if (firstContactAtCenter && index == 0) {
+                    return _buildFirstContactCard(firstContactInfo);
+                  }
+                  return _buildTranscriptEntry(
+                    newerEntries[index - newerLeadingItemCount],
+                    messages,
+                  );
+                },
+                childCount: newerEntries.length + newerLeadingItemCount,
+                addAutomaticKeepAlives: false,
+                addRepaintBoundaries: false,
+                findChildIndexCallback: (key) {
+                  if (key == const ValueKey('chat-first-contact-card')) {
+                    return firstContactAtCenter ? 0 : null;
+                  }
+                  return newerIndexByKey[key];
+                },
+                semanticIndexOffset: olderChildCount,
+              ),
+            ),
+            if (_vm.isLoadingLatest)
+              SliverToBoxAdapter(
+                child: _historyLoadingGap('chat-latest-history-gap'),
+              ),
+            const SliverToBoxAdapter(child: SizedBox(height: 8)),
+          ],
         ),
       ),
     );
   }
 
   Widget _historyLoadingGap(String key) {
-    return AnimatedSize(
+    // The transcript slivers no longer add repaint boundaries, and the spinner
+    // repaints continuously — keep it off the sliver's layer.
+    return RepaintBoundary(
       key: ValueKey(key),
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOutCubic,
-      child: SizedBox(
-        height: 54,
-        child: Center(
-          child: Container(
-            width: 34,
-            height: 34,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: context.colors.card.withValues(alpha: 0.94),
-              shape: BoxShape.circle,
-              border: Border.all(color: context.colors.divider, width: 0.5),
+      child: AnimatedSize(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        child: SizedBox(
+          height: 54,
+          child: Center(
+            child: Container(
+              width: 34,
+              height: 34,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: context.colors.card.withValues(alpha: 0.94),
+                shape: BoxShape.circle,
+                border: Border.all(color: context.colors.divider, width: 0.5),
+              ),
+              child: const AppActivityIndicator(size: 17),
             ),
-            child: const AppActivityIndicator(size: 17),
           ),
         ),
       ),
@@ -7233,10 +8791,76 @@ class _ChatViewState extends State<ChatView> {
           !positioned &&
           !_showingFullyVisibleFirstContactHistory &&
           !_hasTranscriptPointerDown &&
+          !_transcriptViewportClaimedByUser &&
           !_autoScrollPolicy.preservesViewport) {
         _scheduleScrollToBottom(animated: false);
       }
     });
+  }
+
+  Future<void> _openCommunityPreview(MessageCommunityPreview preview) async {
+    if (preview.id == 0) return;
+    CommunitySummary? summary;
+    for (final update in TdClient.shared.latestCommunityUpdates) {
+      final raw = update.obj('community');
+      if (raw?.int64('id') != preview.id) continue;
+      summary = CommunitySummary.fromTd(raw!);
+      break;
+    }
+    summary ??= CommunitySummary(
+      id: preview.id,
+      name: preview.name,
+      haveAccess: true,
+      isAdministrator: false,
+      canEditChatList: false,
+      photo: preview.photo,
+    );
+    if (summary.name.isEmpty && preview.name.isNotEmpty) {
+      summary.name = preview.name;
+    }
+    summary.photo ??= preview.photo;
+
+    final chats = <ChatSummary>[];
+    final viewableChats = <ChatSummary>[];
+    try {
+      final fullInfo = await TdClient.shared.query(
+        communityFullInfoRequest(preview.id),
+      );
+      for (final peer in fullInfo.objects('peers') ?? const []) {
+        final chatId = peer.int64('chat_id');
+        if (chatId == null) continue;
+        try {
+          final chat = TDParse.chat(
+            await TdClient.shared.query({
+              '@type': 'getChat',
+              'chat_id': chatId,
+            }),
+          );
+          if (chat == null) continue;
+          if (peer.boolean('can_view_history') == true && chat.order == 0) {
+            viewableChats.add(chat);
+          } else {
+            chats.add(chat);
+          }
+        } catch (_) {
+          // A community peer can disappear while its directory is loading.
+        }
+      }
+    } catch (_) {
+      // Bot API accounts expose the event's id and name but no community
+      // catalogue endpoint, so their preview opens with the available header.
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      AppPageRoute<void>(
+        pageBuilder: (_, _, _) => CommunityView(
+          community: summary!,
+          chats: chats,
+          viewableChats: viewableChats,
+          onCollapsedChanged: (collapsed) => summary!.collapsed = collapsed,
+        ),
+      ),
+    );
   }
 
   Widget _buildTranscriptEntry(
@@ -7247,40 +8871,109 @@ class _ChatViewState extends State<ChatView> {
     final messageIndex = entry.startIndex;
     final isTarget = entry.messages.any((m) => m.id == _scrollTargetId);
     final isPinned = entry.messages.any((m) => m.id == _vm.pinnedMessage?.id);
+    final targetMessageId = isTarget
+        ? _scrollTargetId
+        : isPinned
+        ? _vm.pinnedMessage?.id
+        : null;
+    final targetKey = isTarget
+        ? _targetKey
+        : isPinned
+        ? _pinnedKey
+        : null;
+    final usesExactMediaTarget = entry.isImageGroup || entry.isDocumentGroup;
+    final Widget messageBody;
+    if (message.isService) {
+      messageBody = message.communityPreview != null
+          ? ChatCommunityServiceCard(
+              preview: message.communityPreview!,
+              label: message.text,
+              onView: () =>
+                  unawaited(_openCommunityPreview(message.communityPreview!)),
+            )
+          : message.appearancePreview == null
+          ? SystemBanner(text: message.text)
+          : ChatAppearanceMessagePreview(
+              preview: message.appearancePreview!,
+              label: message.text,
+              controller: _wallpaperController,
+              fallback: SystemBanner(text: message.text),
+            );
+    } else if (entry.isBlockedRun) {
+      messageBody = _blockedMessagePlaceholder(context, entry);
+    } else if (entry.isImageGroup) {
+      messageBody = _selectionEntry(
+        entry,
+        _imageGroupBubble(
+          entry.messages,
+          targetMessageId: targetMessageId,
+          targetKey: targetKey,
+        ),
+      );
+    } else if (entry.isDocumentGroup) {
+      messageBody = _selectionEntry(
+        entry,
+        _documentGroupBubble(
+          entry,
+          targetMessageId: targetMessageId,
+          targetKey: targetKey,
+        ),
+      );
+    } else {
+      messageBody = _selectionEntry(
+        entry,
+        _messageBubble(message, messageIndex),
+      );
+    }
+    final positionedMessageBody = usesExactMediaTarget || targetKey == null
+        ? messageBody
+        : KeyedSubtree(key: targetKey, child: messageBody);
     final content = Column(
-      key: isTarget
-          ? _targetKey
-          : isPinned
-          ? _pinnedKey
-          : null,
       mainAxisSize: MainAxisSize.min,
       children: [
         if (_needsUnreadDivider(messageIndex, messages: messages))
           KeyedSubtree(key: _unreadKey, child: _unreadDivider()),
         if (_needsSeparator(messageIndex, messages: messages))
           TimeSeparator(unix: message.date),
-        if (message.isService)
-          SystemBanner(text: message.text)
-        else if (entry.isBlockedRun)
-          _blockedMessagePlaceholder(context, entry)
-        else if (entry.isImageGroup)
-          _selectionEntry(entry, _imageGroupBubble(entry.messages))
-        else if (entry.isDocumentGroup)
-          _selectionEntry(entry, _documentGroupBubble(entry))
-        else
-          _selectionEntry(entry, _messageBubble(message, messageIndex)),
+        positionedMessageBody,
       ],
     );
     final visibilityKey = _entryVisibilityKeys.putIfAbsent(
       entry.last.id,
       GlobalKey.new,
     );
+    // The visibility key resolved to this RepaintBoundary's render object
+    // already; hanging it here drops one wrapper element per row.
     return KeyedSubtree(
       key: entry.key,
-      child: KeyedSubtree(
+      child: RepaintBoundary(
         key: visibilityKey,
-        child: RepaintBoundary(child: content),
+        child: _messageNavigationHighlight(entry, content),
       ),
+    );
+  }
+
+  /// Washes the row holding a search hit or a just-opened reply destination.
+  /// A full-width tint makes an album or document run read as one destination;
+  /// reply navigation holds the stronger tint for 650 ms, then fades it out.
+  Widget _messageNavigationHighlight(_TranscriptEntry entry, Widget content) {
+    final searchHighlighted =
+        _searchHighlightId != null &&
+        entry.messages.any((m) => m.id == _searchHighlightId);
+    final linkedHighlighted =
+        _linkedMessageHighlightId != null &&
+        entry.messages.any((m) => m.id == _linkedMessageHighlightId);
+    if (!searchHighlighted && !linkedHighlighted) return content;
+    final alpha = linkedHighlighted && _linkedMessageHighlightActive
+        ? 0.18
+        : searchHighlighted
+        ? 0.12
+        : 0.0;
+    return AnimatedContainer(
+      duration: AppMotion.duration(context, AppMotion.deliberate),
+      curve: AppMotion.standard,
+      color: AppTheme.brand.withValues(alpha: alpha),
+      child: content,
     );
   }
 
@@ -7359,6 +9052,18 @@ class _ChatViewState extends State<ChatView> {
   int _transcriptCacheUnreadCount = -1;
   int _transcriptCacheLastReadInboxId = -1;
 
+  // Downstream of the grouping memo: the pivot partition and the two sliver
+  // key→index maps. Keyed on the entry-list identity plus everything
+  // _partitionTranscript reads, so a cache hit leaves _transcriptPivot correct.
+  List<_TranscriptEntry>? _sliverCacheEntries;
+  TranscriptPivot? _sliverCachePivot;
+  bool _sliverCacheInitialLoaded = false;
+  List<_TranscriptEntry>? _sliverCacheOlderEntries;
+  List<_TranscriptEntry>? _sliverCacheNewerEntries;
+  int _sliverCacheLeadingItemCount = -1;
+  Map<Key, int>? _sliverCacheOlderIndexByKey;
+  Map<Key, int>? _sliverCacheNewerIndexByKey;
+
   List<_TranscriptEntry> _transcriptEntries(bool groupImages) {
     final messages = _vm.messages;
     // blockedByUser is only written inside _applyKeywordFilter, which always
@@ -7380,7 +9085,9 @@ class _ChatViewState extends State<ChatView> {
     _transcriptCacheGrouped = groupImages;
     _transcriptCacheUnreadCount = _vm.unreadCount;
     _transcriptCacheLastReadInboxId = _vm.lastReadInboxId;
-    final previousVisibilityKeys = Map<int, GlobalKey>.of(_entryVisibilityKeys);
+    // Read in place rather than copied: nothing mutates the map between here
+    // and the swap below, and the copy was n-sized on every incoming message.
+    final previousVisibilityKeys = _entryVisibilityKeys;
     final nextVisibilityKeys = <int, GlobalKey>{};
     final usedVisibilityKeys = <GlobalKey>{};
     for (final entry in entries) {
@@ -7398,9 +9105,7 @@ class _ChatViewState extends State<ChatView> {
         nextVisibilityKeys[message.id] = visibilityKey;
       }
     }
-    _entryVisibilityKeys
-      ..clear()
-      ..addAll(nextVisibilityKeys);
+    _entryVisibilityKeys = nextVisibilityKeys;
     _trackedTranscriptEntries = {
       for (final entry in entries) entry.last.id: entry,
     };
@@ -7470,13 +9175,158 @@ class _ChatViewState extends State<ChatView> {
     MessageActionSource source = MessageActionSource.normal,
   ]) {
     EmojiStore.shared.loadIfNeeded();
+    final reactionGeneration = ++_actionReactionAvailabilityGeneration;
+    final overlayBox =
+        _actionOverlayKey.currentContext?.findRenderObject() as RenderBox?;
+    final platform = Theme.of(context).platform;
+    final desktop = isDesktopTargetPlatform(platform);
+    final usePointer =
+        desktop ||
+        (!desktop &&
+            context.read<ThemeController>().mobileMessageActionMenuStyle ==
+                MobileMessageActionMenuStyle.dropdown);
+    final globalAnchor = MessageActionMenu.anchorRectForPresentation(
+      targetRect: rect,
+      pointer: _lastActionPointerGlobalPosition,
+      usePointer: usePointer,
+    );
+    _lastActionPointerGlobalPosition = null;
+    final overlayRect = globalAnchor != null && overlayBox?.hasSize == true
+        ? MessageActionMenu.rectInOverlay(
+            globalAnchor,
+            globalToLocal: overlayBox!.globalToLocal,
+          )
+        : globalAnchor;
+    final enableMobileTextSelection =
+        !isDesktopTargetPlatform(platform) && !_vm.hasProtectedContent;
+    final oldSelectionState = _mobileTextSelectionAreaKey?.currentState;
     setState(() {
       _actionTarget = message;
-      _actionRect = rect;
+      _actionRect = overlayRect;
+      _mobileTextSelectionAreaKey = enableMobileTextSelection
+          ? GlobalKey<SelectionAreaState>()
+          : null;
+      _mobileTextSelectionMessageId = enableMobileTextSelection
+          ? message.id
+          : null;
+      _mobileTextSelectionActive = false;
       _actionSource = source;
       _reactionExpanded = false;
       _reactionTab = 'standard';
+      _actionReactionAvailability = null;
     });
+    oldSelectionState?.selectableRegion.clearSelection();
+    if (!message.isCall) {
+      unawaited(
+        _loadActionReactionAvailability(message.id, reactionGeneration),
+      );
+    }
+  }
+
+  Future<void> _loadActionReactionAvailability(
+    int messageId,
+    int generation,
+  ) async {
+    MessageReactionAvailability? availability;
+    try {
+      availability = await _vm.messageReactionAvailability(messageId);
+    } catch (_) {
+      // Fail closed. Offering the global defaults after a failed availability
+      // query recreates the exact MESSAGE_REACTION_INVALID bug this gate fixes.
+    }
+    if (!mounted ||
+        !messageReactionAvailabilityResultIsCurrent(
+          requestGeneration: generation,
+          currentGeneration: _actionReactionAvailabilityGeneration,
+          messageId: messageId,
+          targetMessageId: _actionTarget?.id,
+        )) {
+      return;
+    }
+    setState(() => _actionReactionAvailability = availability);
+  }
+
+  void _clearMobileTextSelectionState() {
+    final selectionState = _mobileTextSelectionAreaKey?.currentState;
+    _mobileTextSelectionAreaKey = null;
+    _mobileTextSelectionMessageId = null;
+    _mobileTextSelectionActive = false;
+    selectionState?.selectableRegion.clearSelection();
+  }
+
+  void _syncProtectedContentSelectionState() {
+    final selectionState = _mobileTextSelectionAreaKey?.currentState;
+    if (!protectedContentRequiresMobileSelectionClear(
+      hasProtectedContent: _vm.hasProtectedContent,
+      hasSelectionKey: _mobileTextSelectionAreaKey != null,
+    )) {
+      return;
+    }
+    _mobileTextSelectionAreaKey = null;
+    _mobileTextSelectionMessageId = null;
+    _mobileTextSelectionActive = false;
+    _actionTarget = null;
+    _actionRect = null;
+    _lastActionPointerGlobalPosition = null;
+    _actionSource = MessageActionSource.normal;
+    _reactionExpanded = false;
+    selectionState?.selectableRegion.clearSelection();
+  }
+
+  void _handleMobileTextSelectionChanged(SelectedContent? content) {
+    if (content != null && content.plainText.isNotEmpty) {
+      if (_actionTarget != null) {
+        setState(() {
+          _mobileTextSelectionActive = true;
+          _actionTarget = null;
+          _actionRect = null;
+          _lastActionPointerGlobalPosition = null;
+          _actionSource = MessageActionSource.normal;
+          _reactionExpanded = false;
+        });
+      } else {
+        _mobileTextSelectionActive = true;
+      }
+      return;
+    }
+    if (!_mobileTextSelectionActive) return;
+    _mobileTextSelectionActive = false;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _actionTarget != null) return;
+      if (_mobileTextSelectionMessageId != null) {
+        setState(() => _mobileTextSelectionMessageId = null);
+      }
+    });
+  }
+
+  void _handleMobileTextSelectionDisposed(
+    int messageId,
+    GlobalKey<SelectionAreaState> selectionAreaKey,
+  ) {
+    if (!mounted ||
+        _mobileTextSelectionMessageId != messageId ||
+        !identical(_mobileTextSelectionAreaKey, selectionAreaKey)) {
+      return;
+    }
+    setState(() {
+      _mobileTextSelectionAreaKey = null;
+      _mobileTextSelectionMessageId = null;
+      _mobileTextSelectionActive = false;
+    });
+  }
+
+  void _handleChatPointerDown(PointerDownEvent event) {
+    _lastActionPointerGlobalPosition = event.position;
+    final selectionAreaKey = _mobileTextSelectionAreaKey;
+    if (!_mobileTextSelectionActive ||
+        selectionAreaKey == null ||
+        selectionAreaContainsGlobalTextPosition(
+          selectionAreaKey: selectionAreaKey,
+          globalPosition: event.position,
+        )) {
+      return;
+    }
+    selectionAreaKey.currentState?.selectableRegion.clearSelection();
   }
 
   List<_TranscriptEntry> _plainTranscript() {
@@ -7562,414 +9412,136 @@ class _ChatViewState extends State<ChatView> {
     );
   }
 
-  Widget _documentGroupBubble(_TranscriptEntry entry) {
-    final owner = _mediaAlbumInteractionOwner(entry.messages);
-    final ownerIndex = entry.startIndex + entry.messages.indexOf(owner);
-    return _messageBubble(owner, ownerIndex, groupedMedia: entry.messages);
+  Widget _documentGroupBubble(
+    _TranscriptEntry entry, {
+    int? targetMessageId,
+    GlobalKey? targetKey,
+  }) {
+    for (final member in entry.messages) {
+      _vm.ensureMessageCapabilities(member);
+    }
+    return _ActiveChatListenableBuilder(
+      listenable: Listenable.merge([
+        for (final message in entry.messages)
+          _vm.messageRevisionListenable(message.id),
+      ]),
+      builder: (context) {
+        // Replies/reactions can move album interaction ownership to another
+        // member, so reselect the owner inside the localized rebuild.
+        final owner = _mediaAlbumInteractionOwner(entry.messages);
+        final ownerIndex = entry.startIndex + entry.messages.indexOf(owner);
+        return _buildMessageBubble(
+          owner,
+          ownerIndex,
+          groupedMedia: entry.messages,
+          targetMediaMessageId: targetMessageId,
+          targetMediaKey: targetKey,
+        );
+      },
+    );
   }
 
   ChatMessage _mediaAlbumInteractionOwner(List<ChatMessage> group) {
     return selectMediaAlbumInteractionOwner(group);
   }
 
-  Widget _imageGroupBubble(List<ChatMessage> group) {
-    final c = context.colors;
-    final first = group.first;
-    final interactionOwner = _mediaAlbumInteractionOwner(group);
-    final outgoing = first.isOutgoing;
-    final avatarTitle = outgoing
-        ? (first.senderIsChat ? (first.senderName ?? _vm.meName) : _vm.meName)
-        : (_vm.isGroup && (first.senderName?.isNotEmpty ?? false))
-        ? first.senderName!
-        : _vm.peerTitle;
-    final avatarPhoto = outgoing
-        ? (first.senderIsChat ? first.senderPhoto : _vm.mePhoto)
-        : (_vm.isGroup ? first.senderPhoto : _vm.peerPhoto);
+  Widget _imageGroupBubble(
+    List<ChatMessage> group, {
+    int? targetMessageId,
+    GlobalKey? targetKey,
+  }) {
+    return _ActiveChatListenableBuilder(
+      listenable: Listenable.merge([
+        for (final message in group) _vm.messageRevisionListenable(message.id),
+      ]),
+      builder: (context) => _buildImageGroupBubble(
+        group,
+        targetMessageId: targetMessageId,
+        targetKey: targetKey,
+      ),
+    );
+  }
+
+  Widget _buildImageGroupBubble(
+    List<ChatMessage> group, {
+    required int? targetMessageId,
+    required GlobalKey? targetKey,
+  }) {
     ChatMessage? captionMessage;
     for (final message in group) {
-      if (_albumCaption(message).isNotEmpty) {
+      if (message.text.trim().isNotEmpty) {
         captionMessage = message;
         break;
       }
     }
-    Widget avatar() => GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () => _openSenderProfile(first),
-      onLongPress: outgoing
+    final mobileSelectionKey =
+        !_vm.hasProtectedContent &&
+            _mobileTextSelectionMessageId == captionMessage?.id
+        ? _mobileTextSelectionAreaKey
+        : null;
+    return ImageMediaAlbumBubble(
+      messages: group,
+      peerTitle: _vm.peerTitle,
+      peerPhoto: _vm.peerPhoto,
+      isGroup: _vm.isGroup,
+      meName: _vm.meName,
+      mePhoto: _vm.mePhoto,
+      hasCustomChatTheme: _hasCustomChatTheme,
+      showCommentAttachment: chatTranscriptAllowsCommentAttachment(
+        isChannel: _vm.isChannel,
+      ),
+      channelHasLinkedDiscussion: _vm.hasLinkedDiscussion,
+      selecting: _isSelecting,
+      selectedMessageIds: _selectedMessageIds,
+      outgoingBubbleColor: _effectiveOutgoingColor(),
+      outgoingBubbleTextColor: _effectiveOutgoingTextColor(),
+      incomingBubbleColor: _effectiveIncomingColor(),
+      incomingBubbleTextColor: _effectiveIncomingTextColor(),
+      messageColors: _effectiveMessageColors(),
+      translationDisplayStyle: _translation.displayStyle,
+      showOriginalTranslationMessageIds: _showOriginalTranslationMessageIds,
+      onAvatarTap: _openSenderProfile,
+      onAvatarLongPress: (message) {
+        if (_vm.isGroup && (message.senderName?.isNotEmpty ?? false)) {
+          _vm.insertMention(message);
+        }
+      },
+      onOpenForwarded: _openForwardedMessage,
+      onOpenImage: _openImage,
+      onPlayVideo: _playVideo,
+      onEditCaption: (message) => unawaited(_editMessageText(message)),
+      onOpenComments: _openMessageComments,
+      onLongPress: _showActionMenuForMessage,
+      mobileTextSelectionAreaKey: mobileSelectionKey,
+      onMobileTextSelectionChanged: _handleMobileTextSelectionChanged,
+      onMobileTextSelectionDisposed:
+          captionMessage == null || mobileSelectionKey == null
           ? null
-          : () {
-              if (_vm.isGroup && (first.senderName?.isNotEmpty ?? false)) {
-                _vm.insertMention(first);
-              }
-            },
-      child: PhotoAvatar(title: avatarTitle, photo: avatarPhoto, size: 38),
-    );
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final chatWidth = constraints.maxWidth.isFinite
-            ? constraints.maxWidth
-            : MediaQuery.sizeOf(context).width;
-        final gallery = _imageGroupGallery(
-          group,
-          outgoing,
-          captionMessage,
-          interactionOwner,
-          maxWidth: _messageMediaMaxWidth(chatWidth),
-        );
-        final Widget body = outgoing
-            ? gallery
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (_vm.isGroup && (first.senderName?.isNotEmpty ?? false))
-                    Padding(
-                      padding: const EdgeInsets.only(left: 2, bottom: 4),
-                      child: Text(
-                        first.senderName!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 12, color: c.textSecondary),
-                      ),
-                    ),
-                  gallery,
-                ],
-              );
-
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            mainAxisAlignment: outgoing
-                ? MainAxisAlignment.end
-                : MainAxisAlignment.start,
-            children: outgoing
-                ? [
-                    Flexible(
-                      child: Align(
-                        alignment: Alignment.centerRight,
-                        child: body,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    avatar(),
-                  ]
-                : [avatar(), const SizedBox(width: 8), Flexible(child: body)],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _imageGroupGallery(
-    List<ChatMessage> group,
-    bool outgoing,
-    ChatMessage? captionMessage,
-    ChatMessage interactionOwner, {
-    required double maxWidth,
-  }) {
-    final c = context.colors;
-    final themedOutgoing = _effectiveOutgoingColor();
-    final themedIncoming = _effectiveIncomingColor();
-    final outgoingColor = themedOutgoing ?? AppTheme.bubbleOutgoing;
-    final outgoingTextColor =
-        _effectiveOutgoingTextColor() ??
-        (outgoingColor.computeLuminance() > 0.64
-            ? const Color(0xFF171717)
-            : AppTheme.bubbleOutgoingText);
-    final incomingTextColor =
-        _effectiveIncomingTextColor() ?? c.bubbleIncomingText;
-    final visible = group.take(9).toList();
-    final showComments =
-        _vm.isChannel &&
-        !interactionOwner.isContentRestricted &&
-        (interactionOwner.hasCommentThread ||
-            interactionOwner.commentCount > 0 ||
-            (_vm.hasLinkedDiscussion && !interactionOwner.isService));
-    const padding = 4.0;
-    final layout = buildTelegramMediaAlbumLayout(
-      items: [
-        for (final message in visible)
-          MediaAlbumItem(
-            width: message.imageWidth,
-            height: message.imageHeight,
-          ),
-      ],
-      maxWidth: maxWidth - padding * 2,
-      gap: 4,
-      maxSingleHeight: 300,
-      minRowHeight: 82,
-      maxRowHeight: 230,
-    );
-    final width = layout.width + padding * 2;
-    return Container(
-      constraints: BoxConstraints(maxWidth: width),
-      decoration: BoxDecoration(
-        color: outgoing ? outgoingColor : themedIncoming ?? c.bubbleIncoming,
-        borderRadius: BorderRadius.circular(12),
-        border: outgoing ? null : Border.all(color: c.divider, width: 0.5),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(padding),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(
-                  width: layout.width,
-                  height: layout.height,
-                  child: Stack(
-                    children: [
-                      for (var i = 0; i < visible.length; i++)
-                        Positioned.fromRect(
-                          rect: layout.tiles[i],
-                          child: _imageGroupTile(
-                            visible[i],
-                            width: layout.tiles[i].width,
-                            height: layout.tiles[i].height,
-                            extraCount: i == visible.length - 1
-                                ? math.max(0, group.length - visible.length)
-                                : 0,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                if (captionMessage != null)
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: outgoing
-                        ? () => unawaited(_editMessageText(captionMessage))
-                        : null,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(6, 7, 6, 3),
-                      child: TelegramRichText(
-                        text: _albumCaption(captionMessage),
-                        entities: captionMessage.textEntities,
-                        style: TextStyle(
-                          fontSize: 15,
-                          height: 1.25,
-                          color: outgoing
-                              ? outgoingTextColor
-                              : incomingTextColor,
-                        ),
-                        linkColor: outgoing ? outgoingTextColor : c.linkBlue,
-                        onBotCommandTap: _sendCommand,
-                        onHashtagTap: _openHashtagSearch,
-                        onMentionTap: _openUserProfile,
-                      ),
-                    ),
-                  ),
-              ],
+          : () => _handleMobileTextSelectionDisposed(
+              captionMessage!.id,
+              mobileSelectionKey,
             ),
-          ),
-          if (showComments)
-            _imageAlbumCommentsAttachment(
-              interactionOwner,
-              outgoing: outgoing,
-              width: width,
-              outgoingTextColor: outgoingTextColor,
-            ),
-        ],
-      ),
+      onToggleSelection: (message) => _toggleSelection([message]),
+      onBotCommandTap: _sendCommand,
+      onHashtagTap: _openHashtagSearch,
+      onMentionTap: _openUserProfile,
+      targetMessageId: targetMessageId,
+      targetKey: targetKey,
     );
   }
-
-  Widget _imageAlbumCommentsAttachment(
-    ChatMessage message, {
-    required bool outgoing,
-    required double width,
-    required Color outgoingTextColor,
-  }) {
-    final c = context.colors;
-    final count = message.commentCount;
-    final label = count == 0
-        ? AppStrings.t(AppStringKeys.messageLeaveAComment)
-        : AppStrings.t(AppStringKeys.momentsCommentCount, {'value1': count});
-    final foreground = outgoing ? outgoingTextColor : c.textPrimary;
-    final accent = outgoing
-        ? outgoingTextColor.withValues(alpha: 0.72)
-        : c.linkBlue;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () => _openMessageComments(message),
-      child: Container(
-        key: ValueKey('messageCommentsAttachment-${message.id}'),
-        width: width,
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
-        decoration: BoxDecoration(
-          border: Border(
-            top: BorderSide(
-              color: outgoing
-                  ? outgoingTextColor.withValues(alpha: 0.16)
-                  : c.divider.withValues(alpha: 0.7),
-              width: 0.5,
-            ),
-          ),
-        ),
-        child: Row(
-          children: [
-            AppIcon(HeroAppIcons.comments, size: 18, color: accent),
-            const SizedBox(width: 7),
-            Expanded(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: foreground,
-                ),
-              ),
-            ),
-            AppIcon(HeroAppIcons.chevronRight, size: 17, color: accent),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _albumCaption(ChatMessage message) {
-    final text = message.text;
-    return text.trim().isEmpty ? '' : text;
-  }
-
-  Widget _imageGroupTile(
-    ChatMessage message, {
-    required double width,
-    required double height,
-    required int extraCount,
-  }) {
-    final tileKey = GlobalKey();
-    void showActions() {
-      final box = tileKey.currentContext?.findRenderObject() as RenderBox?;
-      final rect = box != null && box.hasSize
-          ? box.localToGlobal(Offset.zero) & box.size
-          : null;
-      _showActionMenuForMessage(
-        message,
-        rect,
-        message.video != null
-            ? MessageActionSource.video
-            : MessageActionSource.normal,
-      );
-    }
-
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () {
-        if (_isSelecting) {
-          _toggleSelection([message]);
-          return;
-        }
-        if (message.video != null) {
-          _playVideo(message);
-        } else {
-          _openImage(message);
-        }
-      },
-      onLongPress: _isSelecting ? null : showActions,
-      onSecondaryTap: _isSelecting ? null : showActions,
-      child: SizedBox(
-        key: tileKey,
-        width: width,
-        height: height,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            TDImage(
-              photo: message.image,
-              cornerRadius: 5,
-              cacheWidth: _cachePx(width),
-              cacheHeight: _cachePx(height),
-              showProgress: true,
-            ),
-            if (message.video != null)
-              Center(
-                child: Container(
-                  width: 42,
-                  height: 42,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.45),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const AppIcon(
-                    HeroAppIcons.play,
-                    color: Colors.white,
-                    size: 21,
-                  ),
-                ),
-              ),
-            if (extraCount > 0)
-              Container(
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.45),
-                  borderRadius: BorderRadius.circular(5),
-                ),
-                child: Text(
-                  '+$extraCount',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            if (_isSelecting)
-              Positioned(
-                top: 6,
-                right: 6,
-                child: IgnorePointer(child: _mediaSelectionIndicator(message)),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _mediaSelectionIndicator(ChatMessage message) {
-    final selected = _selectedMessageIds.contains(message.id);
-    return Container(
-      key: ValueKey('media-selection-${message.id}'),
-      width: 24,
-      height: 24,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: selected ? AppTheme.brand : Colors.black.withValues(alpha: 0.28),
-        border: Border.all(
-          color: selected ? AppTheme.brand : Colors.white,
-          width: selected ? 0 : 1.4,
-        ),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 4),
-        ],
-      ),
-      child: selected
-          ? const AppIcon(HeroAppIcons.check, size: 17, color: Colors.white)
-          : null,
-    );
-  }
-
-  int _cachePx(double logical) =>
-      (logical * MediaQuery.devicePixelRatioOf(context)).ceil();
 
   void _react(String emoji) {
     final target = _actionTarget;
     setState(() {
       _actionTarget = null;
+      _actionRect = null;
+      _clearMobileTextSelectionState();
       _actionSource = MessageActionSource.normal;
       _reactionExpanded = false;
     });
-    if (target != null) _vm.addReaction(target.id, emoji);
+    if (target != null) {
+      unawaited(_sendReaction(() => _vm.addReaction(target.id, emoji)));
+    }
   }
 
   void _reactQuick(QuickReactionChoice reaction) {
@@ -7984,23 +9556,100 @@ class _ChatViewState extends State<ChatView> {
     final target = _actionTarget;
     setState(() {
       _actionTarget = null;
+      _actionRect = null;
+      _clearMobileTextSelectionState();
       _actionSource = MessageActionSource.normal;
       _reactionExpanded = false;
     });
-    if (target != null) _vm.addCustomReaction(target.id, customEmojiId);
+    if (target != null) {
+      unawaited(
+        _sendReaction(() => _vm.addCustomReaction(target.id, customEmojiId)),
+      );
+    }
   }
 
+  Future<void> _sendReaction(Future<void> Function() send) async {
+    try {
+      await send();
+    } catch (_) {
+      if (mounted) {
+        showToast(context, AppStringKeys.topicPostContentActionFailed);
+      }
+    }
+  }
+
+  Future<void> _toggleMessageReaction(
+    ChatMessage message,
+    MessageReaction reaction,
+  ) => _sendReaction(() => _vm.toggleReaction(message, reaction));
+
   Widget _actionMenuOverlay() {
-    final media = MediaQuery.of(context);
-    final screenH = media.size.height;
-    final topSafe = media.padding.top + 8;
-    final bottomSafe = screenH - media.padding.bottom - 8;
+    final overlayBox =
+        _actionOverlayKey.currentContext?.findRenderObject() as RenderBox?;
+    final screenSize = overlayBox?.hasSize == true
+        ? overlayBox!.size
+        : MediaQuery.sizeOf(context);
+    final safeArea = MediaQuery.paddingOf(context);
+    final screenW = screenSize.width;
+    final screenH = screenSize.height;
+    final topSafe = safeArea.top + 8;
+    final bottomSafe = screenH - safeArea.bottom - 8;
     final outgoing = _actionTarget!.isOutgoing;
     final rect = _actionRect;
     final showActionMenu = !_reactionExpanded;
+    final desktopMenu = isDesktopTargetPlatform(Theme.of(context).platform);
+    final mobileDropdown =
+        !desktopMenu &&
+        context.watch<ThemeController>().mobileMessageActionMenuStyle ==
+            MobileMessageActionMenuStyle.dropdown;
+    final verticalMenu = desktopMenu || mobileDropdown;
+    final pointerAnchored =
+        verticalMenu && rect != null && rect.width == 0 && rect.height == 0;
+    final reactionAvailability = _actionReactionAvailability;
+    final showReactions = messageActionShowsReactionControls(
+      isCall: _actionTarget!.isCall,
+      availability: reactionAvailability,
+    );
+    final actionMenu = MessageActionMenu(
+      message: _actionTarget!,
+      isPinned: _vm.pinnedMessage?.id == _actionTarget!.id,
+      allowForwarding: _vm.canForwardContent,
+      allowTranslation: _hasAvailableTranslationOption,
+      allowSuggestedPostOffer:
+          _vm.isDirectMessagesGroup && !_vm.isAdministeredDirectMessagesGroup,
+      source: _actionSource,
+      showingOriginalTranslation: _showOriginalTranslationMessageIds.contains(
+        _actionTarget!.id,
+      ),
+      layout: verticalMenu
+          ? MessageActionMenuLayout.vertical
+          : MessageActionMenuLayout.grid,
+      onSelect: (action) => _perform(action, _actionTarget!),
+    );
 
-    final reactionH = _reactionExpanded ? 268.0 : 48.0;
-    final menuH = showActionMenu ? MessageActionMenu.preferredHeight : 0.0;
+    // Desktop treats the strip as the menu's upper storey and places the pair
+    // as one block. Its row is reserved the moment the menu opens and only
+    // collapses if the server comes back with nothing to offer, so the menu
+    // does not jump out from under a settled pointer when the answer lands.
+    final desktopStrip =
+        desktopMenu &&
+        !_reactionExpanded &&
+        !_actionTarget!.isCall &&
+        (reactionAvailability == null || reactionAvailability.canAdd);
+    final desktopStripH = desktopStrip
+        ? MenuReactionBar.height + _menuReactionGap
+        : 0.0;
+    final reactionH = !showReactions
+        ? 0.0
+        : _reactionExpanded
+        ? _expandedPickerSize.height
+        : 48.0;
+    final menuH = showActionMenu
+        ? math.min(
+            actionMenu.preferredHeightFor(context),
+            math.max(0.0, bottomSafe - topSafe - desktopStripH),
+          )
+        : 0.0;
     const gap = 8.0;
     final menuGap = showActionMenu ? gap : 0.0;
 
@@ -8012,93 +9661,158 @@ class _ChatViewState extends State<ChatView> {
         topSafe,
         bottomSafe - reactionH,
       );
-      menuTop = (rect.bottom + gap).clamp(topSafe, bottomSafe - menuH);
+      menuTop = (verticalMenu ? rect.top : rect.bottom + gap).clamp(
+        topSafe,
+        bottomSafe - menuH,
+      );
     } else {
       reactionTop = (screenH - reactionH - menuH - menuGap) / 2;
       menuTop = reactionTop + reactionH + menuGap;
     }
     final align = outgoing ? Alignment.centerRight : Alignment.centerLeft;
+    final verticalMenuWidth = math.min(
+      MessageActionMenu.desktopPreferredWidth,
+      math.max(0.0, screenW - 20),
+    );
+    final pointerMenuOrigin = pointerAnchored
+        ? MessageActionMenu.verticalOriginForPointer(
+            pointer: rect.topLeft,
+            viewport: screenSize,
+            menuSize: Size(verticalMenuWidth, menuH),
+            topSafe: topSafe,
+            bottomSafe: bottomSafe,
+          )
+        : const Offset(10, 0);
+    final boundedActionMenu = verticalMenu
+        ? SizedBox(width: verticalMenuWidth, height: menuH, child: actionMenu)
+        : actionMenu;
+    final desktopOrigin = desktopMenu
+        ? MessageActionMenu.verticalOriginForPointer(
+            pointer: rect?.topLeft ?? Offset(10, topSafe),
+            viewport: screenSize,
+            menuSize: _reactionExpanded
+                ? _expandedPickerSize
+                : Size(verticalMenuWidth, desktopStripH + menuH),
+            topSafe: topSafe,
+            bottomSafe: bottomSafe,
+          )
+        : Offset.zero;
 
     void dismiss() => setState(() {
       _actionTarget = null;
       _actionRect = null;
+      _lastActionPointerGlobalPosition = null;
+      _clearMobileTextSelectionState();
       _actionSource = MessageActionSource.normal;
       _reactionExpanded = false;
     });
 
     return Positioned.fill(
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: dismiss,
-              child: Container(color: Colors.black.withValues(alpha: 0.25)),
+      child: ChatActionOverlayGestureLayer(
+        selectionAreaKey: _mobileTextSelectionMessageId == null
+            ? null
+            : _mobileTextSelectionAreaKey,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                key: const ValueKey('message-action-dismiss-layer'),
+                behavior: HitTestBehavior.opaque,
+                onTap: dismiss,
+                child: const SizedBox.expand(),
+              ),
             ),
-          ),
-          // Call logs and other special messages aren't reactable — no +1 bar.
-          if (!_actionTarget!.isCall)
-            Positioned(
-              top: reactionTop,
-              left: 10,
-              right: 10,
-              child: AnimatedBuilder(
-                animation: EmojiStore.shared,
-                builder: (context, _) {
-                  if (_reactionExpanded) {
+            // Call logs and other special messages aren't reactable — no strip.
+            if (showReactions)
+              Positioned(
+                top: desktopMenu ? desktopOrigin.dy : reactionTop,
+                left: desktopMenu ? desktopOrigin.dx : 10,
+                right: desktopMenu ? null : 10,
+                child: AnimatedBuilder(
+                  animation: EmojiStore.shared,
+                  builder: (context, _) {
+                    final availability = reactionAvailability!;
+                    if (_reactionExpanded) {
+                      final picker = _expandedReactionPicker(availability);
+                      return desktopMenu
+                          ? picker
+                          : Align(alignment: align, child: picker);
+                    }
+                    final reactions = _quickReactionChoices(availability);
+                    if (desktopMenu) {
+                      return SizedBox(
+                        width: verticalMenuWidth,
+                        child: MenuReactionBar(
+                          reactions: reactions,
+                          onReaction: _reactQuick,
+                          onExpand: () =>
+                              setState(() => _reactionExpanded = true),
+                        ),
+                      );
+                    }
                     return Align(
                       alignment: align,
-                      child: _expandedReactionPicker(),
+                      child: QuickReactionBar(
+                        reactions: reactions,
+                        onReaction: _reactQuick,
+                        onExpand: () =>
+                            setState(() => _reactionExpanded = true),
+                      ),
                     );
-                  }
-                  final reactions = effectiveQuickReactions(
-                    context.watch<ThemeController>().quickReactions,
-                    allowCustomEmoji: EmojiStore.shared.isPremium,
-                  );
-                  return Align(
-                    alignment: align,
-                    child: QuickReactionBar(
-                      reactions: reactions,
-                      onReaction: _reactQuick,
-                      onExpand: () => setState(() => _reactionExpanded = true),
-                    ),
-                  );
-                },
-              ),
-            ),
-          if (showActionMenu)
-            Positioned(
-              top: menuTop,
-              left: 10,
-              right: 10,
-              child: Align(
-                alignment: align,
-                child: MessageActionMenu(
-                  message: _actionTarget!,
-                  isPinned: _vm.pinnedMessage?.id == _actionTarget!.id,
-                  allowForwarding: _vm.canForwardContent,
-                  allowSuggestedPostOffer:
-                      _vm.isDirectMessagesGroup &&
-                      !_vm.isAdministeredDirectMessagesGroup,
-                  source: _actionSource,
-                  onSelect: (action) => _perform(action, _actionTarget!),
+                  },
                 ),
               ),
-            ),
-        ],
+            if (showActionMenu)
+              Positioned(
+                top: desktopMenu
+                    ? desktopOrigin.dy + desktopStripH
+                    : pointerAnchored
+                    ? pointerMenuOrigin.dy
+                    : menuTop,
+                left: desktopMenu
+                    ? desktopOrigin.dx
+                    : pointerAnchored
+                    ? pointerMenuOrigin.dx
+                    : 10,
+                right: desktopMenu || pointerAnchored ? null : 10,
+                child: desktopMenu || pointerAnchored
+                    ? boundedActionMenu
+                    : Align(alignment: align, child: boundedActionMenu),
+              ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _expandedReactionPicker() {
+  /// The gap between the strip and the menu it rides on — tight enough that
+  /// the pair reads as one stack, wide enough to keep both borders visible.
+  static const _menuReactionGap = 4.0;
+  static const _expandedPickerSize = Size(300, 268);
+
+  List<QuickReactionChoice> _quickReactionChoices(
+    MessageReactionAvailability availability,
+  ) {
+    final configured = effectiveQuickReactions(
+      context.watch<ThemeController>().quickReactions,
+      allowCustomEmoji:
+          availability.allowArbitraryCustom ||
+          availability.choices.any((choice) => choice.isCustom),
+    );
+    return availability.quickChoices(configured);
+  }
+
+  Widget _expandedReactionPicker(MessageReactionAvailability availability) {
     final store = EmojiStore.shared;
-    final packs = store.isPremium ? store.customPacks : const [];
+    final packs = availability.allowArbitraryCustom
+        ? store.customPacks
+        : const <CustomEmojiPack>[];
     return Container(
-      width: 300,
-      height: 268,
+      width: _expandedPickerSize.width,
+      height: _expandedPickerSize.height,
       decoration: BoxDecoration(
         color: const Color(0xFF2C2C2E),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
         boxShadow: [
           BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 12),
         ],
@@ -8106,14 +9820,17 @@ class _ChatViewState extends State<ChatView> {
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
-          Expanded(child: _reactionContent(packs)),
+          Expanded(child: _reactionContent(packs, availability)),
           _reactionTabStrip(packs),
         ],
       ),
     );
   }
 
-  Widget _reactionContent(List packs) {
+  Widget _reactionContent(
+    List<CustomEmojiPack> packs,
+    MessageReactionAvailability availability,
+  ) {
     const reactionEmojiSize = 26.0;
     if (_reactionTab != 'standard') {
       final id = int.tryParse(_reactionTab);
@@ -8150,15 +9867,22 @@ class _ChatViewState extends State<ChatView> {
       crossAxisCount: 7,
       padding: const EdgeInsets.all(10),
       children: [
-        for (final e in availableStandardReactions)
+        for (final reaction in availability.choices)
           GestureDetector(
+            key: ValueKey('expanded-reaction-${reaction.storageValue}'),
             behavior: HitTestBehavior.opaque,
-            onTap: () => _react(e),
+            onTap: () => _reactQuick(reaction),
             child: Center(
-              child: Text(
-                e,
-                style: const TextStyle(fontSize: reactionEmojiSize),
-              ),
+              child: reaction.isCustom
+                  ? CustomEmojiView(
+                      id: reaction.customEmojiId,
+                      size: reactionEmojiSize,
+                      color: Colors.white,
+                    )
+                  : Text(
+                      reaction.emoji,
+                      style: const TextStyle(fontSize: reactionEmojiSize),
+                    ),
             ),
           ),
       ],
@@ -8205,6 +9929,7 @@ class _ChatViewState extends State<ChatView> {
               setState(() {
                 _actionTarget = null;
                 _actionRect = null;
+                _clearMobileTextSelectionState();
                 _reactionExpanded = false;
               });
               Navigator.of(context).push(
@@ -8241,7 +9966,7 @@ class _ChatViewState extends State<ChatView> {
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: selected ? const Color(0xFF4A4A4E) : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(AppRadius.control),
         ),
         child: SizedBox(width: 28, height: 28, child: Center(child: child)),
       ),
@@ -8249,6 +9974,9 @@ class _ChatViewState extends State<ChatView> {
   }
 }
 
+// Retained as a keyboard-accessible fallback surface for future non-message
+// text sources. Mobile messages now use the in-place SelectionArea flow.
+// ignore: unused_element
 class _MessageTextSelectionDialog extends StatefulWidget {
   const _MessageTextSelectionDialog({
     required this.text,
@@ -8257,7 +9985,7 @@ class _MessageTextSelectionDialog extends StatefulWidget {
   });
 
   final String text;
-  final Future<String?> Function(String text) onTranslate;
+  final Future<String?> Function(String text)? onTranslate;
   final ValueChanged<String> onAddToBlocklist;
 
   @override
@@ -8309,38 +10037,13 @@ class _ReactionUsersSheetState extends State<_ReactionUsersSheet> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final height = math.min(MediaQuery.sizeOf(context).height * 0.62, 560.0);
-    return SafeArea(
-      top: false,
-      child: Align(
-        alignment: Alignment.bottomCenter,
-        child: ClipRRect(
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
-          child: ColoredBox(
-            color: c.card,
-            child: SizedBox(
-              height: height,
-              width: double.infinity,
-              child: Column(
-                children: [
-                  const SizedBox(height: 10),
-                  Container(
-                    width: 42,
-                    height: 5,
-                    decoration: BoxDecoration(
-                      color: c.divider,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  _reactionTabs(c),
-                  Divider(height: 1, thickness: 0.5, color: c.divider),
-                  Expanded(child: _reactionUsers(c)),
-                ],
-              ),
-            ),
-          ),
-        ),
+    return ReactionUsersSheetFrame(
+      child: Column(
+        children: [
+          _reactionTabs(c),
+          Divider(height: 1, thickness: 0.5, color: c.divider),
+          Expanded(child: _reactionUsers(c)),
+        ],
       ),
     );
   }
@@ -8377,7 +10080,7 @@ class _ReactionUsersSheetState extends State<_ReactionUsersSheet> {
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           color: selected ? AppTheme.brand : c.searchFill,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(AppRadius.control),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -8511,9 +10214,10 @@ class _MessageTextSelectionDialogState
 
   Future<void> _translateSelection() async {
     final selected = _selectedText;
-    if (selected.isEmpty || _translating) return;
+    final translate = widget.onTranslate;
+    if (selected.isEmpty || _translating || translate == null) return;
     setState(() => _translating = true);
-    final translated = await widget.onTranslate(selected);
+    final translated = await translate(selected);
     if (!mounted) return;
     setState(() {
       final isEmpty = translated == null || translated.trim().isEmpty;
@@ -8547,7 +10251,7 @@ class _MessageTextSelectionDialogState
                 width: double.infinity,
                 decoration: BoxDecoration(
                   color: c.card,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadius.card),
                   border: Border.all(color: c.divider, width: 0.5),
                   boxShadow: [
                     BoxShadow(
@@ -8573,7 +10277,7 @@ class _MessageTextSelectionDialogState
                               style: TextStyle(
                                 color: c.textPrimary,
                                 fontSize: 17,
-                                fontWeight: FontWeight.w700,
+                                fontWeight: FontWeight.w600,
                                 decoration: TextDecoration.none,
                               ),
                             ),
@@ -8656,13 +10360,16 @@ class _MessageTextSelectionDialogState
                               onTap: _copySelection,
                             ),
                           ),
-                          Expanded(
-                            child: _TextSelectionAction(
-                              icon: HeroAppIcons.language,
-                              label: AppStringKeys.messageActionTranslate,
-                              onTap: _translating ? null : _translateSelection,
+                          if (widget.onTranslate != null)
+                            Expanded(
+                              child: _TextSelectionAction(
+                                icon: HeroAppIcons.language,
+                                label: AppStringKeys.messageActionTranslate,
+                                onTap: _translating
+                                    ? null
+                                    : _translateSelection,
+                              ),
                             ),
-                          ),
                           Expanded(
                             child: _TextSelectionAction(
                               icon: HeroAppIcons.filter,

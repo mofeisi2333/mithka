@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/widgets.dart';
 import 'package:heroicons_flutter/heroicons_flutter.dart';
 
@@ -18,6 +20,242 @@ class AppIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     return Icon(icon.data, size: size, color: color);
   }
+}
+
+/// Owned ten-second seek glyph used by video transport controls.
+///
+/// The bundled Heroicons set has generic U-turn and fast-forward symbols but
+/// no ten-second seek icon. Drawing the arc and numeral here keeps the control
+/// visually precise without falling back to a platform icon set.
+class AppSeekTenIcon extends StatelessWidget {
+  const AppSeekTenIcon({
+    super.key,
+    required this.backwards,
+    this.size = 32,
+    this.color,
+  });
+
+  final bool backwards;
+  final double size;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final resolvedColor =
+        color ?? IconTheme.of(context).color ?? const Color(0xFF000000);
+    return SizedBox.square(
+      dimension: size,
+      child: CustomPaint(
+        painter: _AppSeekTenIconPainter(
+          backwards: backwards,
+          color: resolvedColor,
+        ),
+      ),
+    );
+  }
+}
+
+class _AppSeekTenIconPainter extends CustomPainter {
+  const _AppSeekTenIconPainter({required this.backwards, required this.color});
+
+  final bool backwards;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final extent = size.shortestSide;
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = extent * 0.37;
+    final strokeWidth = (extent * 0.075).clamp(1.5, 3.4);
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    canvas.save();
+    if (backwards) {
+      canvas.translate(size.width, 0);
+      canvas.scale(-1, 1);
+    }
+    final arcBounds = Rect.fromCircle(center: center, radius: radius);
+    const startAngle = math.pi * 0.22;
+    const sweepAngle = math.pi * 1.48;
+    canvas.drawArc(arcBounds, startAngle, sweepAngle, false, paint);
+
+    const endAngle = startAngle + sweepAngle;
+    final tip = Offset(
+      center.dx + math.cos(endAngle) * radius,
+      center.dy + math.sin(endAngle) * radius,
+    );
+    final tangent = Offset(-math.sin(endAngle), math.cos(endAngle));
+    final perpendicular = Offset(-tangent.dy, tangent.dx);
+    final arrowLength = extent * 0.17;
+    final arrowWidth = extent * 0.095;
+    final arrowBase = tip - tangent * arrowLength;
+    canvas.drawPath(
+      Path()
+        ..moveTo(
+          arrowBase.dx + perpendicular.dx * arrowWidth,
+          arrowBase.dy + perpendicular.dy * arrowWidth,
+        )
+        ..lineTo(tip.dx, tip.dy)
+        ..lineTo(
+          arrowBase.dx - perpendicular.dx * arrowWidth,
+          arrowBase.dy - perpendicular.dy * arrowWidth,
+        ),
+      paint,
+    );
+    canvas.restore();
+
+    final numeral = TextPainter(
+      text: TextSpan(
+        text: '10',
+        style: TextStyle(
+          color: color,
+          fontSize: extent * 0.31,
+          fontWeight: FontWeight.w400,
+          height: 1,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    numeral.paint(
+      canvas,
+      Offset(
+        center.dx - numeral.width / 2,
+        center.dy - numeral.height / 2 + extent * 0.025,
+      ),
+    );
+  }
+
+  @override
+  bool shouldRepaint(_AppSeekTenIconPainter oldDelegate) =>
+      oldDelegate.backwards != backwards || oldDelegate.color != color;
+}
+
+/// Owned push-pin glyph for pinned-item status.
+///
+/// Heroicons does not include a push pin; using its bookmark glyph made pinned
+/// chats look like Saved Messages. This compact outline keeps the visual
+/// language of the owned icon set without falling back to platform icons.
+class AppPinIcon extends StatelessWidget {
+  const AppPinIcon({super.key, this.size = 16, this.color});
+
+  final double size;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final resolvedColor =
+        color ?? IconTheme.of(context).color ?? const Color(0xFF000000);
+    return SizedBox.square(
+      dimension: size,
+      child: CustomPaint(painter: _AppPinIconPainter(color: resolvedColor)),
+    );
+  }
+}
+
+/// Owned "jump to earlier message" glyph.
+///
+/// The horizontal rule is the destination and the arrow moves toward it. The
+/// bundled Heroicons set has arrows and trays, but no upward arrow terminating
+/// at a line, so the chat quote control draws that exact shape here.
+class AppArrowUpToLineIcon extends StatelessWidget {
+  const AppArrowUpToLineIcon({super.key, this.size = 18, this.color});
+
+  final double size;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final resolvedColor =
+        color ?? IconTheme.of(context).color ?? const Color(0xFF000000);
+    return SizedBox.square(
+      dimension: size,
+      child: CustomPaint(
+        painter: _AppArrowUpToLineIconPainter(color: resolvedColor),
+      ),
+    );
+  }
+}
+
+class _AppArrowUpToLineIconPainter extends CustomPainter {
+  const _AppArrowUpToLineIconPainter({required this.color});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final strokeWidth = (size.shortestSide * 0.10).clamp(1.35, 1.9);
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final centerX = size.width * 0.5;
+    final barY = size.height * 0.17;
+    final tipY = size.height * 0.34;
+    final wingY = size.height * 0.53;
+    final stemBottom = size.height * 0.86;
+
+    canvas.drawLine(
+      Offset(size.width * 0.20, barY),
+      Offset(size.width * 0.80, barY),
+      paint,
+    );
+    canvas.drawPath(
+      Path()
+        ..moveTo(size.width * 0.28, wingY)
+        ..lineTo(centerX, tipY)
+        ..lineTo(size.width * 0.72, wingY)
+        ..moveTo(centerX, tipY)
+        ..lineTo(centerX, stemBottom),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_AppArrowUpToLineIconPainter oldDelegate) =>
+      oldDelegate.color != color;
+}
+
+class _AppPinIconPainter extends CustomPainter {
+  const _AppPinIconPainter({required this.color});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final strokeWidth = (size.shortestSide * 0.11).clamp(1.1, 1.7);
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final body = Path()
+      ..moveTo(size.width * 0.30, size.height * 0.14)
+      ..lineTo(size.width * 0.70, size.height * 0.14)
+      ..lineTo(size.width * 0.64, size.height * 0.42)
+      ..lineTo(size.width * 0.78, size.height * 0.57)
+      ..lineTo(size.width * 0.22, size.height * 0.57)
+      ..lineTo(size.width * 0.36, size.height * 0.42)
+      ..close();
+    canvas.drawPath(body, paint);
+    canvas.drawLine(
+      Offset(size.width * 0.50, size.height * 0.57),
+      Offset(size.width * 0.50, size.height * 0.90),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_AppPinIconPainter oldDelegate) =>
+      oldDelegate.color != color;
 }
 
 class HeroAppIcons {
@@ -45,6 +283,7 @@ class HeroAppIcons {
   static const alignBottom = AppIconData(HeroiconsOutline.barsArrowDown);
   static const bell = AppIconData(HeroiconsOutline.bell);
   static const bellSlash = AppIconData(HeroiconsOutline.bellSlash);
+  static const bookmark = AppIconData(HeroiconsOutline.bookmark);
   static const venue = AppIconData(HeroiconsOutline.buildingStorefront);
   static const camera = AppIconData(HeroiconsOutline.camera);
   static const check = AppIconData(HeroiconsOutline.check);
@@ -72,6 +311,10 @@ class HeroAppIcons {
   static const compactDisc = AppIconData(HeroiconsOutline.circleStack);
   static const crop = AppIconData(HeroiconsOutline.viewfinderCircle);
   static const cpuChip = AppIconData(HeroiconsOutline.cpuChip);
+
+  /// Bot chats and the bot menu. Heroicons has no robot; the chip is what
+  /// the app already uses for machine-driven features.
+  static const bot = AppIconData(HeroiconsOutline.cpuChip);
   static const cube = AppIconData(HeroiconsOutline.cubeTransparent);
   static const download = AppIconData(HeroiconsOutline.arrowDownTray);
   static const droplet = AppIconData(HeroiconsOutline.beaker);
@@ -83,12 +326,17 @@ class HeroAppIcons {
   static const eye = AppIconData(HeroiconsOutline.eye);
   static const eyeSlash = AppIconData(HeroiconsOutline.eyeSlash);
   static const faceScan = AppIconData(HeroiconsOutline.viewfinderCircle);
+  static const faceSmile = AppIconData(HeroiconsOutline.faceSmile);
   static const file = AppIconData(HeroiconsOutline.document);
   static const filter = AppIconData(HeroiconsOutline.funnel);
   static const fingerprint = AppIconData(HeroiconsOutline.fingerPrint);
   static const flash = AppIconData(HeroiconsOutline.bolt);
   static const folder = AppIconData(HeroiconsOutline.folder);
   static const font = AppIconData(HeroiconsOutline.documentText);
+
+  /// Message, post, and story forwarding. Generic share/export actions keep
+  /// using [share] so the two commands stay visually distinct.
+  static const forward = AppIconData(HeroiconsOutline.arrowUturnRight);
   static const gear = AppIconData(HeroiconsOutline.cog6Tooth);
   static const gif = AppIconData(HeroiconsOutline.gif);
   static const globe = AppIconData(HeroiconsOutline.globeAlt);

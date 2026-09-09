@@ -41,6 +41,11 @@ class _DownloadItem {
   int downloaded;
   String path;
 
+  /// Bumped per updateFile chunk. TDLib emits those tens of times a second per
+  /// active download, and only this row's progress moves — the page-wide
+  /// setState rebuilt the header, the search field and every visible row.
+  final ValueNotifier<int> revision = ValueNotifier(0);
+
   bool get completed => completeDate > 0 || (size > 0 && downloaded >= size);
 }
 
@@ -74,6 +79,9 @@ class _DownloadsViewState extends State<DownloadsView> {
   void dispose() {
     _updates?.cancel();
     _searchTimer?.cancel();
+    for (final item in _items) {
+      item.revision.dispose();
+    }
     _search
       ..removeListener(_queueSearch)
       ..dispose();
@@ -103,7 +111,8 @@ class _DownloadsViewState extends State<DownloadsView> {
         offset: reset ? '' : _nextOffset,
       );
       final next = <_DownloadItem>[];
-      for (final raw in result.objects('files') ?? const []) {
+      for (final raw
+          in result.objects('files') ?? const <Map<String, dynamic>>[]) {
         final item = _parse(raw);
         if (item != null) next.add(item);
       }
@@ -179,14 +188,14 @@ class _DownloadsViewState extends State<DownloadsView> {
     }
     final text = message?.text.trim() ?? '';
     if (text.isNotEmpty) return text;
-    return switch (raw.obj('content')?.type) {
-      'messageVideo' => 'Video',
-      'messagePhoto' => 'Photo',
-      'messageVoiceNote' => 'Voice message',
-      'messageVideoNote' => 'Video message',
-      'messageAnimation' => 'GIF',
-      _ => 'Telegram media',
-    };
+    return AppStrings.t(switch (raw.obj('content')?.type) {
+      'messageVideo' => AppStringKeys.downloadsMediaVideo,
+      'messagePhoto' => AppStringKeys.downloadsMediaPhoto,
+      'messageVoiceNote' => AppStringKeys.downloadsMediaVoiceMessage,
+      'messageVideoNote' => AppStringKeys.downloadsMediaVideoMessage,
+      'messageAnimation' => AppStringKeys.downloadsMediaAnimation,
+      _ => AppStringKeys.downloadsMediaTelegramMedia,
+    });
   }
 
   void _handleUpdate(Map<String, dynamic> update) {
@@ -197,12 +206,11 @@ class _DownloadsViewState extends State<DownloadsView> {
       final local = file?.obj('local');
       final index = _items.indexWhere((item) => item.fileId == fileId);
       if (index < 0 || !mounted) return;
-      setState(() {
-        final item = _items[index];
-        item.size = file?.int64('size') ?? item.size;
-        item.downloaded = local?.int64('downloaded_size') ?? item.downloaded;
-        item.path = local?.str('path') ?? item.path;
-      });
+      final item = _items[index];
+      item.size = file?.int64('size') ?? item.size;
+      item.downloaded = local?.int64('downloaded_size') ?? item.downloaded;
+      item.path = local?.str('path') ?? item.path;
+      item.revision.value++;
     } else if (update.type == 'updateFileAddedToDownloads' ||
         update.type == 'updateFileDownloads') {
       unawaited(_load(reset: true));
@@ -227,12 +235,9 @@ class _DownloadsViewState extends State<DownloadsView> {
         final c = sheetContext.colors;
         return SafeArea(
           top: false,
-          child: Container(
+          child: SettingsPanel(
+            padding: const EdgeInsets.fromLTRB(16, 15, 16, 10),
             margin: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: c.card,
-              borderRadius: BorderRadius.circular(18),
-            ),
             clipBehavior: Clip.antiAlias,
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -249,7 +254,7 @@ class _DownloadsViewState extends State<DownloadsView> {
                         style: TextStyle(
                           color: c.textPrimary,
                           fontSize: 17,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                       const SizedBox(height: 4),
@@ -320,56 +325,50 @@ class _DownloadsViewState extends State<DownloadsView> {
         final c = sheetContext.colors;
         return SafeArea(
           top: false,
-          child: Container(
+          child: SettingsCard(
             margin: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: c.card,
-              borderRadius: BorderRadius.circular(18),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SettingsRow(
-                  leading: const AppIcon(HeroAppIcons.arrowsRotate),
-                  title: AppStrings.t(AppStringKeys.downloadsRefreshDownloads),
-                  onTap: () {
-                    Navigator.of(sheetContext).pop();
-                    unawaited(_load(reset: true));
-                  },
+            children: [
+              SettingsRow(
+                leading: const AppIcon(HeroAppIcons.arrowsRotate),
+                title: AppStrings.t(AppStringKeys.downloadsRefreshDownloads),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  unawaited(_load(reset: true));
+                },
+              ),
+              Divider(height: 1, color: c.divider),
+              SettingsRow(
+                leading: AppIcon(
+                  hasRunning ? HeroAppIcons.pause : HeroAppIcons.play,
                 ),
-                Divider(height: 1, color: c.divider),
-                SettingsRow(
-                  leading: AppIcon(
-                    hasRunning ? HeroAppIcons.pause : HeroAppIcons.play,
-                  ),
-                  title: hasRunning
-                      ? 'Pause all downloads'
-                      : 'Resume all downloads',
-                  onTap: () async {
-                    Navigator.of(sheetContext).pop();
-                    await _service.toggleAllDownloads(paused: hasRunning);
-                    await _load(reset: true);
-                  },
+                title: AppStrings.t(
+                  hasRunning
+                      ? AppStringKeys.downloadsPauseAllDownloads
+                      : AppStringKeys.downloadsResumeAllDownloads,
                 ),
-                Divider(height: 1, color: c.divider),
-                SettingsRow(
-                  leading: const AppIcon(HeroAppIcons.trash),
-                  title: AppStrings.t(
-                    AppStringKeys.downloadsClearActiveDownloads,
-                  ),
-                  onTap: () => _clear(true, false),
+                onTap: () async {
+                  Navigator.of(sheetContext).pop();
+                  await _service.toggleAllDownloads(paused: hasRunning);
+                  await _load(reset: true);
+                },
+              ),
+              Divider(height: 1, color: c.divider),
+              SettingsRow(
+                leading: const AppIcon(HeroAppIcons.trash),
+                title: AppStrings.t(
+                  AppStringKeys.downloadsClearActiveDownloads,
                 ),
-                Divider(height: 1, color: c.divider),
-                SettingsRow(
-                  leading: const AppIcon(HeroAppIcons.trash),
-                  title: AppStrings.t(
-                    AppStringKeys.downloadsClearCompletedDownloads,
-                  ),
-                  onTap: () => _clear(false, true),
+                onTap: () => _clear(true, false),
+              ),
+              Divider(height: 1, color: c.divider),
+              SettingsRow(
+                leading: const AppIcon(HeroAppIcons.trash),
+                title: AppStrings.t(
+                  AppStringKeys.downloadsClearCompletedDownloads,
                 ),
-              ],
-            ),
+                onTap: () => _clear(false, true),
+              ),
+            ],
           ),
         );
       },
@@ -387,39 +386,24 @@ class _DownloadsViewState extends State<DownloadsView> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.generalDownloads),
+      onBack: () => Navigator.of(context).pop(),
+      trailing: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _showActions,
+        child: const Padding(
+          padding: EdgeInsets.all(AppSpacing.sm),
+          child: AppIcon(HeroAppIcons.ellipsis, size: 22),
+        ),
+      ),
+      child: Column(
         children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.generalDownloads),
-            onBack: () => Navigator.of(context).pop(),
-            trailing: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: _showActions,
-              child: const Padding(
-                padding: EdgeInsets.all(8),
-                child: AppIcon(HeroAppIcons.ellipsis, size: 22),
-              ),
-            ),
-          ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-            child: TextField(
+            padding: AppInsets.screen.copyWith(bottom: AppSpacing.sm),
+            child: SettingsSearchField(
               controller: _search,
-              decoration: InputDecoration(
-                hintText: AppStrings.t(AppStringKeys.downloadsSearchDownloads),
-                prefixIcon: const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: AppIcon(HeroAppIcons.magnifyingGlass, size: 19),
-                ),
-                filled: true,
-                fillColor: c.searchFill,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-              ),
+              hintText: AppStringKeys.downloadsSearchDownloads,
             ),
           ),
           _filters(),
@@ -439,7 +423,7 @@ class _DownloadsViewState extends State<DownloadsView> {
                     ],
                   )
                 : ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+                    padding: AppInsets.screen.copyWith(top: AppSpacing.sm),
                     itemCount: _items.length + (_nextOffset.isEmpty ? 0 : 1),
                     itemBuilder: (context, index) {
                       if (index == _items.length) {
@@ -476,43 +460,22 @@ class _DownloadsViewState extends State<DownloadsView> {
   }
 
   Widget _filters() {
-    final c = context.colors;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Row(
         children: [
           for (final entry in const {
-            _DownloadFilter.all: 'All',
-            _DownloadFilter.active: 'Active',
-            _DownloadFilter.completed: 'Completed',
+            _DownloadFilter.all: AppStringKeys.downloadsFilterAll,
+            _DownloadFilter.active: AppStringKeys.downloadsFilterActive,
+            _DownloadFilter.completed: AppStringKeys.downloadsFilterCompleted,
           }.entries) ...[
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
+            SettingsFilterChip(
+              label: AppStrings.t(entry.value),
+              selected: _filter == entry.key,
               onTap: () {
                 setState(() => _filter = entry.key);
                 unawaited(_load(reset: true));
               },
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 13,
-                  vertical: 7,
-                ),
-                decoration: BoxDecoration(
-                  color: _filter == entry.key
-                      ? AppTheme.brand.withValues(alpha: 0.13)
-                      : c.card,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Text(
-                  entry.value,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: _filter == entry.key
-                        ? AppTheme.brand
-                        : c.textSecondary,
-                  ),
-                ),
-              ),
             ),
             const SizedBox(width: 7),
           ],
@@ -521,17 +484,19 @@ class _DownloadsViewState extends State<DownloadsView> {
     );
   }
 
-  Widget _row(_DownloadItem item) {
+  Widget _row(_DownloadItem item) => ValueListenableBuilder<int>(
+    valueListenable: item.revision,
+    builder: (_, _, _) => _rowContent(item),
+  );
+
+  Widget _rowContent(_DownloadItem item) {
     final c = context.colors;
     final progress = item.size <= 0
         ? null
         : (item.downloaded / item.size).clamp(0.0, 1.0);
-    return Container(
+    return SettingsPanel(
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
       margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(13),
-      ),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: item.completed ? () => _open(item) : null,
@@ -576,7 +541,13 @@ class _DownloadsViewState extends State<DownloadsView> {
                       item.completed
                           ? _bytes(item.size)
                           : item.isPaused
-                          ? 'Paused · ${_bytes(item.downloaded)} / ${_bytes(item.size)}'
+                          ? AppStrings.t(
+                              AppStringKeys.downloadsPausedProgress,
+                              {
+                                'value1': _bytes(item.downloaded),
+                                'value2': _bytes(item.size),
+                              },
+                            )
                           : '${_bytes(item.downloaded)} / ${_bytes(item.size)}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,

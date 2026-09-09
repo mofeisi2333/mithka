@@ -86,124 +86,97 @@ class _MithkaProViewState extends State<MithkaProView> {
   Widget build(BuildContext context) {
     final service = _service(context);
     final c = context.colors;
-    return DefaultTextStyle(
-      style: AppTextStyle.body(c.textPrimary),
-      child: ColoredBox(
-        color: c.groupedBackground,
-        child: Column(
-          children: [
-            NavHeader(
-              title: AppStringKeys.mithkaProTitle,
-              onBack: () => Navigator.of(context).pop(),
+    return SettingsPageScaffold(
+      title: AppStringKeys.mithkaProTitle,
+      onBack: () => Navigator.of(context).pop(),
+      child: SettingsListView(
+        children: [
+          _hero(service),
+          const SizedBox(height: 14),
+          SettingsPanel(
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                _benefit(
+                  HeroAppIcons.solidStar,
+                  AppStringKeys.mithkaProSupportDevelopment,
+                  AppStringKeys.mithkaProSupportDevelopmentDescription,
+                ),
+              ],
             ),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(12, 14, 12, 28),
-                children: [
-                  _hero(service),
-                  const SizedBox(height: 14),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: c.card,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Column(
-                      children: [
-                        _benefit(
-                          HeroAppIcons.solidStar,
-                          AppStringKeys.mithkaProSupportDevelopment,
-                          AppStringKeys.mithkaProSupportDevelopmentDescription,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: c.card,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Column(
-                      children: [
-                        _productCard(
-                          service,
-                          id: mithkaProMonthlyProductId,
-                          titleKey: AppStringKeys.mithkaProMonthly,
-                          fallbackPrice: r'$0.69',
-                          periodKey: AppStringKeys.mithkaProPerMonth,
-                        ),
-                        const InsetDivider(leadingInset: 16),
-                        _productCard(
-                          service,
-                          id: mithkaProYearlyProductId,
-                          titleKey: AppStringKeys.mithkaProYearly,
-                          fallbackPrice: r'$4.99',
-                          periodKey: AppStringKeys.mithkaProPerYear,
-                          badgeKey: AppStringKeys.mithkaProBestValue,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  _purchaseButton(service),
-                  const SizedBox(height: 6),
-                  _restoreButton(service),
-                  if (_errorKey != null) ...[
-                    const SizedBox(height: 10),
-                    Text(
-                      AppStrings.t(_errorKey!),
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 13,
-                        height: 1.3,
-                        color: AppTheme.tagRed,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 10),
-                  Text(
-                    AppStrings.t(AppStringKeys.mithkaProBillingNotice),
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 12,
-                      height: 1.35,
-                      color: c.textTertiary,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _legalLink(
-                        AppStringKeys.mithkaProTerms,
-                        () => launchUrl(
-                          _termsUri,
-                          mode: LaunchMode.externalApplication,
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Text(
-                          '·',
-                          style: TextStyle(color: c.textTertiary, fontSize: 13),
-                        ),
-                      ),
-                      _legalLink(
-                        AppStringKeys.mithkaProPrivacy,
-                        () => launchUrl(
-                          _privacyUri,
-                          mode: LaunchMode.externalApplication,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+          ),
+          const SizedBox(height: 14),
+          SettingsPanel(
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                _productCard(
+                  service,
+                  id: mithkaProMonthlyProductId,
+                  titleKey: AppStringKeys.mithkaProMonthly,
+                  fallbackPrice: r'$0.69',
+                  periodKey: AppStringKeys.mithkaProPerMonth,
+                ),
+                const InsetDivider(leadingInset: 16),
+                _productCard(
+                  service,
+                  id: mithkaProYearlyProductId,
+                  titleKey: AppStringKeys.mithkaProYearly,
+                  fallbackPrice: r'$4.99',
+                  periodKey: AppStringKeys.mithkaProPerYear,
+                  badgeKey: AppStringKeys.mithkaProBestValue,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          _purchaseButton(service),
+          const SizedBox(height: 6),
+          _restoreButton(service),
+          if (_errorKey != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              AppStrings.t(_errorKey!),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.3,
+                color: AppTheme.tagRed,
               ),
             ),
           ],
-        ),
+          const SizedBox(height: 10),
+          Text(
+            AppStrings.t(AppStringKeys.mithkaProBillingNotice),
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12, height: 1.35, color: c.textTertiary),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _legalLink(
+                AppStringKeys.mithkaProTerms,
+                () =>
+                    launchUrl(_termsUri, mode: LaunchMode.externalApplication),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text(
+                  '·',
+                  style: TextStyle(color: c.textTertiary, fontSize: 13),
+                ),
+              ),
+              _legalLink(
+                AppStringKeys.mithkaProPrivacy,
+                () => launchUrl(
+                  _privacyUri,
+                  mode: LaunchMode.externalApplication,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -243,7 +216,7 @@ class _MithkaProViewState extends State<MithkaProView> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: context.colors.card,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadius.card),
       ),
       child: Row(
         children: [
@@ -253,7 +226,7 @@ class _MithkaProViewState extends State<MithkaProView> {
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: AppTheme.brand.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(AppRadius.card),
             ),
             child: AppIcon(
               HeroAppIcons.solidStar,
@@ -270,7 +243,7 @@ class _MithkaProViewState extends State<MithkaProView> {
                   AppStrings.t(AppStringKeys.mithkaProTitle),
                   style: TextStyle(
                     fontSize: 18,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                     color: context.colors.textPrimary,
                   ),
                 ),
@@ -304,7 +277,7 @@ class _MithkaProViewState extends State<MithkaProView> {
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: AppTheme.brand.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(AppRadius.control),
             ),
             child: AppIcon(icon, size: 17, color: AppTheme.brand),
           ),
@@ -395,13 +368,15 @@ class _MithkaProViewState extends State<MithkaProView> {
                             ),
                             decoration: BoxDecoration(
                               color: AppTheme.brand.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(8),
+                              borderRadius: BorderRadius.circular(
+                                AppRadius.control,
+                              ),
                             ),
                             child: Text(
                               AppStrings.t(badgeKey),
                               style: TextStyle(
                                 fontSize: 9,
-                                fontWeight: FontWeight.w700,
+                                fontWeight: FontWeight.w600,
                                 color: AppTheme.brand,
                               ),
                             ),
@@ -448,7 +423,7 @@ class _MithkaProViewState extends State<MithkaProView> {
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: AppTheme.brand,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(AppRadius.card),
             ),
             child: service.working
                 ? AppActivityIndicator(size: 19, color: AppTheme.onBrand)

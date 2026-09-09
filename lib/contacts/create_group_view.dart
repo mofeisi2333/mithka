@@ -10,8 +10,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 
-import '../app/app_navigator.dart';
-import '../chat/chat_view.dart';
+import '../app/ipad_window_chrome.dart';
+import '../app/primary_chat_launcher.dart';
 import '../components/app_icons.dart';
 import '../components/photo_avatar.dart';
 import '../components/toast.dart';
@@ -96,11 +96,11 @@ class _CreateGroupViewState extends State<CreateGroupView> {
       if (!mounted) return;
       if (chatId != null) {
         unawaited(
-          replaceWithAppChatRoute(
+          openChatFromCurrentWindow(
             context,
-            AppChatPageRoute(
-              builder: (_) => ChatView(chatId: chatId, title: title),
-            ),
+            chatId: chatId,
+            title: title,
+            replaceCurrent: true,
           ),
         );
       } else {
@@ -133,7 +133,11 @@ class _CreateGroupViewState extends State<CreateGroupView> {
     final c = context.colors;
     final canCreate = _selected.isNotEmpty && !_creating;
     return Container(
-      padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
+      padding: EdgeInsets.only(
+        top:
+            MediaQuery.of(context).padding.top +
+            iPadWindowChromeInsetOf(context),
+      ),
       decoration: BoxDecoration(
         color: c.navBar,
         border: Border(bottom: BorderSide(color: c.divider, width: 0.5)),
@@ -176,9 +180,8 @@ class _CreateGroupViewState extends State<CreateGroupView> {
                   child: Text(
                     _selected.isEmpty
                         ? AppStrings.t(AppStringKeys.addMembersDone)
-                        : AppStrings.t(AppStringKeys.addMembersDoneWithCount, {
-                            'value1': _selected.length,
-                          }),
+                        : '${AppStrings.t(AppStringKeys.addMembersDone)} '
+                              '(${_selected.length})',
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,

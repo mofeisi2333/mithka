@@ -14,9 +14,11 @@ import 'package:mithka/l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
 import '../components/app_icons.dart';
-import '../l10n/telegram_language_controller.dart';
+import '../platform/adaptive_platform.dart';
 import '../settings/translation_controller.dart';
 import '../tdlib/td_models.dart';
+import '../theme/app_motion.dart';
+import '../theme/app_theme.dart';
 import 'custom_emoji.dart';
 import 'emoji_store.dart';
 import 'quick_reaction_choice.dart';
@@ -26,15 +28,21 @@ enum MessageAction {
   edit(HeroAppIcons.pen, AppStringKeys.messageActionEdit),
   suggestOffer(HeroAppIcons.penToSquare, AppStringKeys.suggestedPostEditOffer),
   translate(HeroAppIcons.language, AppStringKeys.messageActionTranslate),
+  displayOriginal(HeroAppIcons.eye, AppStringKeys.messageActionDisplayOriginal),
+  displayTranslation(
+    HeroAppIcons.language,
+    AppStringKeys.messageActionDisplayTranslation,
+  ),
   reply(HeroAppIcons.quoteLeft, AppStringKeys.chatInputBarReply),
   replies(HeroAppIcons.comments, AppStringKeys.messageActionReplies),
-  forward(HeroAppIcons.share, AppStringKeys.messageActionForward),
+  forward(HeroAppIcons.forward, AppStringKeys.messageActionForward),
   repeat(HeroAppIcons.circlePlus, AppStringKeys.messageActionRepeat),
   report(HeroAppIcons.triangleExclamation, AppStringKeys.messageActionReport),
   block(HeroAppIcons.ban, AppStringKeys.messageActionBlock),
   playMuted(HeroAppIcons.volumeXmark, AppStringKeys.messageActionPlayMuted),
   addToPlaylist(HeroAppIcons.music, AppStringKeys.musicPlayerAddToPlaylist),
   saveToPhotos(HeroAppIcons.download, AppStringKeys.messageActionSaveToPhotos),
+  saveAs(HeroAppIcons.download, AppStringKeys.messageActionSaveAs),
   multiSelect(HeroAppIcons.circleCheck, AppStringKeys.messageActionMultiSelect),
   pinTodo(HeroAppIcons.thumbtack, AppStringKeys.messageActionSetTodo),
   unpinTodo(HeroAppIcons.thumbtack, AppStringKeys.messageActionUnsetTodo),
@@ -54,6 +62,8 @@ enum MessageAction {
 }
 
 enum MessageActionSource { normal, video }
+
+enum MessageActionMenuLayout { adaptive, grid, vertical }
 
 class QuickReactionBar extends StatelessWidget {
   const QuickReactionBar({
@@ -80,7 +90,7 @@ class QuickReactionBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
         color: const Color(0xFF2C2C2E),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(AppRadius.xxl),
         boxShadow: [
           BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 12),
         ],
@@ -160,6 +170,138 @@ class QuickReactionBar extends StatelessWidget {
   }
 }
 
+/// The reaction strip that rides on top of the desktop context menu.
+///
+/// Drawn as the menu's own upper storey: same surface, same 9pt radius, same
+/// hairline border, laid out to the menu's width so the two read as one
+/// stack rather than a pill parked above a card. Touch keeps the rounded
+/// [QuickReactionBar], which floats free of its grid menu.
+class MenuReactionBar extends StatelessWidget {
+  const MenuReactionBar({
+    super.key,
+    required this.reactions,
+    required this.onReaction,
+    required this.onExpand,
+  });
+
+  /// Six plus the expand button divide the menu's 220pt width into 30pt
+  /// slots. More would either narrow the slots below a comfortable target or
+  /// push the strip wider than the menu it sits on.
+  static const maxReactionCount = 6;
+  static const height = 40.0;
+  static const _padding = 5.0;
+  static const _emojiSize = 22.0;
+
+  final List<QuickReactionChoice> reactions;
+  final ValueChanged<QuickReactionChoice> onReaction;
+  final VoidCallback onExpand;
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = reactions.take(maxReactionCount).toList(growable: false);
+    return Container(
+      key: const ValueKey('menu-reaction-bar'),
+      height: height,
+      padding: const EdgeInsets.symmetric(horizontal: _padding),
+      decoration: BoxDecoration(
+        color: MessageActionMenu.surface,
+        borderRadius: BorderRadius.circular(AppRadius.control),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.22),
+          width: 0.75,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.24),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          for (final reaction in shown)
+            Expanded(
+              child: _MenuReactionSlot(
+                key: ValueKey('menu-reaction-${reaction.storageValue}'),
+                onTap: () => onReaction(reaction),
+                child: reaction.isCustom
+                    ? CustomEmojiView(
+                        id: reaction.customEmojiId,
+                        size: _emojiSize,
+                        color: Colors.white,
+                      )
+                    : Text(
+                        reaction.emoji,
+                        textScaler: TextScaler.noScaling,
+                        style: const TextStyle(fontSize: _emojiSize),
+                      ),
+              ),
+            ),
+          Expanded(
+            child: _MenuReactionSlot(
+              key: const ValueKey('menu-reaction-expand'),
+              onTap: onExpand,
+              child: const AppIcon(
+                HeroAppIcons.faceSmile,
+                size: 21,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One slot of [MenuReactionBar]. A pointer gets a rounded fill under the
+/// glyph it is over, matching how a row of the menu below lights up.
+class _MenuReactionSlot extends StatefulWidget {
+  const _MenuReactionSlot({
+    super.key,
+    required this.onTap,
+    required this.child,
+  });
+
+  final VoidCallback onTap;
+  final Widget child;
+
+  @override
+  State<_MenuReactionSlot> createState() => _MenuReactionSlotState();
+}
+
+class _MenuReactionSlotState extends State<_MenuReactionSlot> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: AppMotion.duration(context, AppMotion.quick),
+          curve: AppMotion.standard,
+          height: MenuReactionBar.height - MenuReactionBar._padding * 2,
+          margin: const EdgeInsets.symmetric(horizontal: 1),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: _hovering
+                ? Colors.white.withValues(alpha: 0.12)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+          ),
+          child: widget.child,
+        ),
+      ),
+    );
+  }
+}
+
 class MessageActionMenu extends StatelessWidget {
   const MessageActionMenu({
     super.key,
@@ -167,22 +309,32 @@ class MessageActionMenu extends StatelessWidget {
     required this.isPinned,
     required this.onSelect,
     this.allowForwarding = true,
+    this.allowTranslation = true,
     this.allowSuggestedPostOffer = false,
     this.source = MessageActionSource.normal,
+    this.showingOriginalTranslation = false,
+    this.layout = MessageActionMenuLayout.adaptive,
   });
   final ChatMessage message;
   final bool isPinned;
   final ValueChanged<MessageAction> onSelect;
   final bool allowForwarding;
+  final bool allowTranslation;
   final bool allowSuggestedPostOffer;
   final MessageActionSource source;
+  final bool showingOriginalTranslation;
+  final MessageActionMenuLayout layout;
 
-  static const _surface = Color(0xFF2C2C2E);
+  static const surface = Color(0xFF2C2C2E);
   static const _destructive = Color(0xFFFF6961);
   static const _horizontalPadding = 6.0;
   static const _actionWidth = 58.0;
+  static const _maxContentSizedActionCount = 10;
   static const preferredWidth = 332.0;
   static const preferredHeight = 152.0;
+  static const desktopPreferredWidth = 220.0;
+  static const _desktopActionHeight = 36.0;
+  static const maxGridLabelCharacters = 8;
 
   @visibleForTesting
   static ({int first, int second}) rowCountsForActionCount(int count) {
@@ -193,6 +345,97 @@ class MessageActionMenu extends StatelessWidget {
 
   static double widthForAvailable(double availableWidth) =>
       math.min(preferredWidth, availableWidth);
+
+  @visibleForTesting
+  static double mobileWidthForActionCount(int count, double availableWidth) {
+    if (count > _maxContentSizedActionCount) {
+      return widthForAvailable(availableWidth);
+    }
+    final rows = rowCountsForActionCount(count);
+    final columns = math.max(rows.first, rows.second);
+    final fitted =
+        (_horizontalPadding * 2) + (math.max(columns, 1) * _actionWidth);
+    return math.min(fitted, availableWidth);
+  }
+
+  @visibleForTesting
+  static double desktopHeightForActionCount(
+    int count, {
+    required double availableHeight,
+  }) =>
+      math.min(math.max(0, count) * _desktopActionHeight + 12, availableHeight);
+
+  static Rect rectInOverlay(
+    Rect globalRect, {
+    required Offset Function(Offset) globalToLocal,
+  }) => Rect.fromPoints(
+    globalToLocal(globalRect.topLeft),
+    globalToLocal(globalRect.bottomRight),
+  );
+
+  static Rect? anchorRectForPresentation({
+    required Rect? targetRect,
+    required Offset? pointer,
+    required bool usePointer,
+  }) {
+    if (usePointer && pointer != null) {
+      return Rect.fromLTWH(pointer.dx, pointer.dy, 0, 0);
+    }
+    return targetRect;
+  }
+
+  static Offset verticalOriginForPointer({
+    required Offset pointer,
+    required Size viewport,
+    required Size menuSize,
+    required double topSafe,
+    required double bottomSafe,
+    double horizontalMargin = 10,
+  }) {
+    final maxLeft = math.max(
+      horizontalMargin,
+      viewport.width - menuSize.width - horizontalMargin,
+    );
+    final maxTop = math.max(topSafe, bottomSafe - menuSize.height);
+    return Offset(
+      pointer.dx.clamp(horizontalMargin, maxLeft),
+      pointer.dy.clamp(topSafe, maxTop),
+    );
+  }
+
+  static Offset desktopOriginForPointer({
+    required Offset pointer,
+    required Size viewport,
+    required Size menuSize,
+    required double topSafe,
+    required double bottomSafe,
+    double horizontalMargin = 10,
+  }) => verticalOriginForPointer(
+    pointer: pointer,
+    viewport: viewport,
+    menuSize: menuSize,
+    topSafe: topSafe,
+    bottomSafe: bottomSafe,
+    horizontalMargin: horizontalMargin,
+  );
+
+  @visibleForTesting
+  static String gridLabel(String label) {
+    final codePoints = label.runes.toList(growable: false);
+    if (codePoints.length <= maxGridLabelCharacters) return label;
+    final prefix = String.fromCharCodes(
+      codePoints.take(maxGridLabelCharacters - 1),
+    ).trimRight();
+    return '$prefix…';
+  }
+
+  bool _usesVerticalLayout(BuildContext context) => switch (layout) {
+    MessageActionMenuLayout.vertical => true,
+    MessageActionMenuLayout.grid => false,
+    MessageActionMenuLayout.adaptive => isDesktopTargetPlatform(
+      Theme.of(context).platform,
+    ),
+  };
 
   bool get _isEditableMessage =>
       message.contentType == 'messageText' ||
@@ -206,7 +449,10 @@ class MessageActionMenu extends StatelessWidget {
 
   bool get _hasCopyableText => message.text.trim().isNotEmpty;
 
-  List<MessageAction> _actions(bool translationEnabled) {
+  List<MessageAction> _actions(
+    TranslationController translation, {
+    required bool isDesktop,
+  }) {
     if (message.isCall) return [MessageAction.delete];
     final result = <MessageAction>[];
     if (_hasCopyableText) {
@@ -214,7 +460,17 @@ class MessageActionMenu extends StatelessWidget {
       if (message.isOutgoing && _isEditableMessage) {
         result.add(MessageAction.edit);
       }
-      if (translationEnabled) result.add(MessageAction.translate);
+      if (translation.displayStyle == TranslationDisplayStyle.translatedOnly &&
+          (message.translationText?.trim().isNotEmpty ?? false)) {
+        result.add(
+          showingOriginalTranslation
+              ? MessageAction.displayTranslation
+              : MessageAction.displayOriginal,
+        );
+      }
+      if (translation.enabled && allowTranslation) {
+        result.add(MessageAction.translate);
+      }
     }
     if (!_hasCopyableText && message.isOutgoing && _isEditableMessage) {
       result.add(MessageAction.edit);
@@ -237,7 +493,8 @@ class MessageActionMenu extends StatelessWidget {
       result.add(MessageAction.addToPlaylist);
     }
     if (message.isPhoto || message.video != null) {
-      result.add(MessageAction.saveToPhotos);
+      // A computer has no album to add to — it gets a save panel instead.
+      result.add(isDesktop ? MessageAction.saveAs : MessageAction.saveToPhotos);
     }
     result.add(MessageAction.multiSelect);
     result.add(isPinned ? MessageAction.unpinTodo : MessageAction.pinTodo);
@@ -256,9 +513,28 @@ class MessageActionMenu extends StatelessWidget {
     return result;
   }
 
+  double preferredHeightFor(BuildContext context) {
+    if (!_usesVerticalLayout(context)) {
+      return preferredHeight;
+    }
+    return desktopHeightForActionCount(
+      _actions(
+        context.read<TranslationController>(),
+        isDesktop: isDesktopTargetPlatform(Theme.of(context).platform),
+      ).length,
+      availableHeight: MediaQuery.sizeOf(context).height - 24,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final actions = _actions(context.watch<TranslationController>().enabled);
+    final actions = _actions(
+      context.watch<TranslationController>(),
+      isDesktop: isDesktopTargetPlatform(Theme.of(context).platform),
+    );
+    if (_usesVerticalLayout(context)) {
+      return _VerticalActionList(actions: actions, onSelect: onSelect);
+    }
     final rowCounts = rowCountsForActionCount(actions.length);
     final firstRowCount = rowCounts.first;
     final firstRow = actions.take(firstRowCount).toList();
@@ -274,7 +550,10 @@ class MessageActionMenu extends StatelessWidget {
         final availableWidth = constraints.hasBoundedWidth
             ? constraints.maxWidth.clamp(0.0, maxWidth)
             : maxWidth;
-        final menuWidth = widthForAvailable(availableWidth);
+        final menuWidth = mobileWidthForActionCount(
+          actions.length,
+          availableWidth,
+        );
         final actionContentWidth =
             (math.max(columnCount, 1) * _actionWidth) +
             (_horizontalPadding * 2);
@@ -285,8 +564,8 @@ class MessageActionMenu extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 11),
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
-            color: _surface,
-            borderRadius: BorderRadius.circular(16),
+            color: surface,
+            borderRadius: BorderRadius.circular(AppRadius.lg),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.3),
@@ -325,6 +604,109 @@ class MessageActionMenu extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _VerticalActionList extends StatelessWidget {
+  const _VerticalActionList({required this.actions, required this.onSelect});
+
+  final List<MessageAction> actions;
+  final ValueChanged<MessageAction> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final availableWidth = MediaQuery.sizeOf(context).width - 20;
+    final availableHeight = MediaQuery.sizeOf(context).height - 24;
+    final width = math.min(
+      MessageActionMenu.desktopPreferredWidth,
+      availableWidth,
+    );
+    final height = MessageActionMenu.desktopHeightForActionCount(
+      actions.length,
+      availableHeight: availableHeight,
+    );
+    return Container(
+      key: const ValueKey('message-action-menu-surface'),
+      width: width,
+      height: height,
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: MessageActionMenu.surface,
+        borderRadius: BorderRadius.circular(AppRadius.control),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.22),
+          width: 0.75,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.24),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: ListView.builder(
+        key: const ValueKey('message-action-menu-vertical-list'),
+        padding: EdgeInsets.zero,
+        itemCount: actions.length,
+        itemBuilder: (context, index) {
+          final action = actions[index];
+          final startsDestructiveGroup =
+              index > 0 &&
+              action.isDestructive &&
+              !actions[index - 1].isDestructive;
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (startsDestructiveGroup)
+                Container(
+                  key: const ValueKey('message-action-destructive-divider'),
+                  height: 1,
+                  margin: const EdgeInsets.symmetric(horizontal: 10),
+                  color: Colors.white.withValues(alpha: 0.10),
+                ),
+              GestureDetector(
+                key: ValueKey('message-action-${action.name}'),
+                behavior: HitTestBehavior.opaque,
+                onTap: () => onSelect(action),
+                child: SizedBox(
+                  height: MessageActionMenu._desktopActionHeight,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Row(
+                      children: [
+                        AppIcon(
+                          action.glyph,
+                          size: 17,
+                          color: action.isDestructive
+                              ? MessageActionMenu._destructive
+                              : Colors.white,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            AppStrings.t(action.label),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: action.isDestructive
+                                  ? MessageActionMenu._destructive
+                                  : Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 }
@@ -374,7 +756,8 @@ class _ActionRow extends StatelessWidget {
                     ),
                   const SizedBox(height: 5),
                   Text(
-                    telegramText(action.label),
+                    MessageActionMenu.gridLabel(AppStrings.t(action.label)),
+                    semanticsLabel: AppStrings.t(action.label),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(

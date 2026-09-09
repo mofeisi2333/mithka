@@ -13,8 +13,8 @@ import 'package:flutter/material.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
-import '../app/app_navigator.dart';
-import '../chat/chat_view.dart';
+import '../app/ipad_window_chrome.dart';
+import '../app/primary_chat_launcher.dart';
 import '../components/app_icons.dart';
 import '../components/icon_grid.dart';
 import '../components/photo_avatar.dart';
@@ -223,11 +223,8 @@ class _AddPeopleViewState extends State<AddPeopleView> {
     ),
   );
 
-  void _openChat(_ChatHit h) => pushAppChatRoute(
-    context,
-    AppChatPageRoute(
-      builder: (_) => ChatView(chatId: h.id, title: h.title),
-    ),
+  void _openChat(_ChatHit h) => unawaited(
+    openChatFromCurrentWindow(context, chatId: h.id, title: h.title),
   );
 
   void _createGroup() => Navigator.of(
@@ -254,14 +251,7 @@ class _AddPeopleViewState extends State<AddPeopleView> {
       });
       final id = chat.int64('id') ?? chat.int64('chat_id');
       if (!mounted || id == null) return;
-      unawaited(
-        pushAppChatRoute(
-          context,
-          AppChatPageRoute(
-            builder: (_) => ChatView(chatId: id, title: title),
-          ),
-        ),
-      );
+      unawaited(openChatFromCurrentWindow(context, chatId: id, title: title));
     } catch (_) {
       if (mounted) {
         showToast(
@@ -290,7 +280,11 @@ class _AddPeopleViewState extends State<AddPeopleView> {
   Widget _header() {
     final c = context.colors;
     return Container(
-      padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
+      padding: EdgeInsets.only(
+        top:
+            MediaQuery.of(context).padding.top +
+            iPadWindowChromeInsetOf(context),
+      ),
       decoration: BoxDecoration(
         color: c.navBar,
         border: Border(bottom: BorderSide(color: c.divider, width: 0.5)),
@@ -333,7 +327,7 @@ class _AddPeopleViewState extends State<AddPeopleView> {
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
           decoration: BoxDecoration(
             color: on ? c.textPrimary : Colors.transparent,
-            borderRadius: BorderRadius.circular(7),
+            borderRadius: BorderRadius.circular(AppRadius.md),
           ),
           child: Text(
             label,
@@ -351,7 +345,7 @@ class _AddPeopleViewState extends State<AddPeopleView> {
       padding: const EdgeInsets.all(2),
       decoration: BoxDecoration(
         color: c.searchFill,
-        borderRadius: BorderRadius.circular(9),
+        borderRadius: BorderRadius.circular(AppRadius.control),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -373,7 +367,7 @@ class _AddPeopleViewState extends State<AddPeopleView> {
         padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
           color: c.searchFill,
-          borderRadius: BorderRadius.circular(9),
+          borderRadius: BorderRadius.circular(AppRadius.control),
         ),
         child: Row(
           children: [
@@ -430,7 +424,7 @@ class _AddPeopleViewState extends State<AddPeopleView> {
         margin: const EdgeInsets.fromLTRB(12, 14, 12, 0),
         decoration: BoxDecoration(
           color: c.card,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppRadius.card),
         ),
         padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
         child: IconGrid(

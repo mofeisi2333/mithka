@@ -266,7 +266,7 @@ class _VoiceNotePreviewViewState extends State<VoiceNotePreviewView> {
                 padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
                 decoration: BoxDecoration(
                   color: c.card,
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
                   border: Border.all(color: c.divider, width: 0.5),
                 ),
                 child: Row(
@@ -351,6 +351,11 @@ class _VoiceNotePreviewViewState extends State<VoiceNotePreviewView> {
                     min: 0,
                     max: widget.duration.toDouble(),
                     minimumGap: 0.25,
+                    semanticLabel: AppStrings.t(
+                      AppStringKeys.mediaSendPreviewVideoTrimRange,
+                    ),
+                    semanticValue:
+                        '${_duration(_trimStart.floor())} – ${_duration(_trimEnd.ceil())}',
                     onChanged: (start, end) {
                       if (!_exporting) {
                         unawaited(_changeTrim(RangeValues(start, end)));

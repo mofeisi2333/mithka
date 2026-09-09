@@ -12,26 +12,91 @@ import 'dart:async';
 
 import 'dart:io';
 
+import 'package:f_videoplayer/f_videoplayer.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 
-import '../app/app_navigator.dart';
+import '../app/ipad_window_chrome.dart';
+import '../app/primary_chat_launcher.dart';
 import '../chat/chat_picker_view.dart';
-import '../chat/chat_view.dart';
 import '../chat/custom_emoji.dart';
+import '../chat/link_handler.dart';
 import '../components/app_dialog.dart';
 import '../components/app_icons.dart';
+import '../components/app_interactive_surface.dart';
 import '../components/photo_avatar.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
+import '../platform/adaptive_platform.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_image_loader.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
+
+enum StoryViewerDesktopCommand {
+  close,
+  previous,
+  next,
+  togglePlayback,
+  toggleMute,
+  volumeUp,
+  volumeDown,
+}
+
+@visibleForTesting
+bool storyViewerUsesDesktopControls(
+  TargetPlatform platform, {
+  bool isWeb = kIsWeb,
+}) => !isWeb && isDesktopTargetPlatform(platform);
+
+@visibleForTesting
+StoryViewerDesktopCommand? storyViewerDesktopCommandForKey(
+  LogicalKeyboardKey key, {
+  required bool replyHasFocus,
+}) {
+  if (key == LogicalKeyboardKey.escape) {
+    return StoryViewerDesktopCommand.close;
+  }
+  if (replyHasFocus) return null;
+  if (key == LogicalKeyboardKey.arrowLeft) {
+    return StoryViewerDesktopCommand.previous;
+  }
+  if (key == LogicalKeyboardKey.arrowRight) {
+    return StoryViewerDesktopCommand.next;
+  }
+  if (key == LogicalKeyboardKey.space) {
+    return StoryViewerDesktopCommand.togglePlayback;
+  }
+  if (key == LogicalKeyboardKey.keyM) {
+    return StoryViewerDesktopCommand.toggleMute;
+  }
+  if (key == LogicalKeyboardKey.arrowUp) {
+    return StoryViewerDesktopCommand.volumeUp;
+  }
+  if (key == LogicalKeyboardKey.arrowDown) {
+    return StoryViewerDesktopCommand.volumeDown;
+  }
+  return null;
+}
+
+@visibleForTesting
+double storyViewerToggledVolume({
+  required double volume,
+  required double lastAudibleVolume,
+}) {
+  final normalizedVolume = volume.isFinite ? volume.clamp(0.0, 1.0) : 0.0;
+  if (normalizedVolume > 0.01) return 0;
+  final restored = lastAudibleVolume.isFinite
+      ? lastAudibleVolume.clamp(0.0, 1.0)
+      : 1.0;
+  return restored > 0.01 ? restored : 1.0;
+}
 
 class _StoryMedia {
   _StoryMedia({
@@ -92,11 +157,18 @@ class _StoryViewerViewState extends State<StoryViewerView>
   bool _videoStarting = false;
   final _replyController = TextEditingController();
   final _replyFocus = FocusNode();
+  final _desktopKeyboardFocus = FocusNode(
+    debugLabel: 'StoryViewerDesktopKeyboard',
+  );
   late final AnimationController _progress;
   bool _holding = false;
   bool _sendingReply = false;
   bool _updatingReaction = false;
   bool _storyMuted = false;
+  double _videoVolume = 1;
+  double _lastAudibleVideoVolume = 1;
+  bool _volumePanelVisible = false;
+  bool _desktopControlsHovered = false;
   int _stealthActiveUntil = 0;
   StreamSubscription<Map<String, dynamic>>? _updates;
 
@@ -106,8 +178,23 @@ class _StoryViewerViewState extends State<StoryViewerView>
     _videoController?.dispose();
     _replyController.dispose();
     _replyFocus.dispose();
+    _desktopKeyboardFocus.dispose();
     _updates?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final desktop = storyViewerUsesDesktopControls(Theme.of(context).platform);
+    if (!desktop) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted &&
+          !_replyFocus.hasFocus &&
+          ModalRoute.of(context)?.isCurrent == true) {
+        _desktopKeyboardFocus.requestFocus();
+      }
+    });
   }
 
   @override
@@ -120,7 +207,9 @@ class _StoryViewerViewState extends State<StoryViewerView>
       ..addStatusListener(_handleProgressStatus);
     _replyFocus.addListener(_handleReplyFocus);
     _resolveSender();
-    _updates = TdClient.shared.subscribe().listen(_handleUpdate);
+    _updates = TdClient.shared
+        .updatesOf('updateStoryStealthMode')
+        .listen(_handleUpdate);
     if (widget.storyIds.isNotEmpty) _load(_index);
   }
 
@@ -178,6 +267,7 @@ class _StoryViewerViewState extends State<StoryViewerView>
       _index = index;
       _current = null;
       _loadError = false;
+      _volumePanelVisible = false;
     });
 
     // Mark the story as viewed (best-effort).
@@ -301,6 +391,12 @@ class _StoryViewerViewState extends State<StoryViewerView>
     try {
       await c.initialize();
       await c.setLooping(false);
+      try {
+        await c.setVolume(_videoVolume);
+      } catch (_) {
+        // Volume support is best-effort on third-party video backends. A
+        // backend that cannot change gain must not make the story unplayable.
+      }
       if (!_holding && !_replyFocus.hasFocus) await c.play();
     } catch (_) {
       await c.dispose();
@@ -367,17 +463,98 @@ class _StoryViewerViewState extends State<StoryViewerView>
     }
   }
 
+  void _toggleDesktopPlayback() {
+    if (_current == null || _loadError) return;
+    final video = _videoController;
+    final paused =
+        _holding ||
+        (video != null && video.value.isInitialized
+            ? !video.value.isPlaying
+            : !_progress.isAnimating);
+    if (paused) {
+      _resumePlayback();
+    } else {
+      _pausePlayback();
+    }
+  }
+
+  Future<void> _setVideoVolume(double value) async {
+    final next = value.isFinite ? value.clamp(0.0, 1.0) : 0.0;
+    if (next > 0.01) _lastAudibleVideoVolume = next;
+    if (mounted && _videoVolume != next) {
+      setState(() => _videoVolume = next);
+    }
+    final controller = _videoController;
+    if (controller == null || !controller.value.isInitialized) return;
+    try {
+      await controller.setVolume(next);
+    } catch (_) {
+      // Keep playback available even when a platform backend rejects gain.
+    }
+  }
+
+  void _toggleVideoMute() {
+    if (!(_current?.isVideo ?? false)) return;
+    unawaited(
+      _setVideoVolume(
+        storyViewerToggledVolume(
+          volume: _videoVolume,
+          lastAudibleVolume: _lastAudibleVideoVolume,
+        ),
+      ),
+    );
+  }
+
+  void _adjustVideoVolume(double delta) {
+    if (!(_current?.isVideo ?? false)) return;
+    unawaited(_setVideoVolume(_videoVolume + delta));
+  }
+
+  KeyEventResult _handleDesktopKey(FocusNode _, KeyEvent event) {
+    if (event is! KeyDownEvent ||
+        !TickerMode.valuesOf(context).enabled ||
+        ModalRoute.of(context)?.isCurrent != true) {
+      return KeyEventResult.ignored;
+    }
+    final command = storyViewerDesktopCommandForKey(
+      event.logicalKey,
+      replyHasFocus: _replyFocus.hasFocus,
+    );
+    switch (command) {
+      case StoryViewerDesktopCommand.close:
+        Navigator.of(context).pop();
+      case StoryViewerDesktopCommand.previous:
+        _goPrevious();
+      case StoryViewerDesktopCommand.next:
+        _goNext();
+      case StoryViewerDesktopCommand.togglePlayback:
+        _toggleDesktopPlayback();
+      case StoryViewerDesktopCommand.toggleMute:
+        _toggleVideoMute();
+      case StoryViewerDesktopCommand.volumeUp:
+        _adjustVideoVolume(0.05);
+      case StoryViewerDesktopCommand.volumeDown:
+        _adjustVideoVolume(-0.05);
+      case null:
+        return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
+  }
+
   double _fill(int i) => i < _index ? 1 : (i == _index ? _progress.value : 0);
 
   @override
   Widget build(BuildContext context) {
-    final top = MediaQuery.of(context).padding.top;
-    return Scaffold(
+    final top =
+        MediaQuery.of(context).padding.top + iPadWindowChromeInsetOf(context);
+    final desktop = storyViewerUsesDesktopControls(Theme.of(context).platform);
+    final viewer = Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // Full-bleed media fills the screen behind the chrome.
-          Positioned.fill(child: _media()),
+          // Full-bleed media fills the screen behind the chrome. Its own layer,
+          // so the per-frame progress bar never re-records the media.
+          Positioned.fill(child: RepaintBoundary(child: _media())),
           // Top scrim so the white progress bars + name stay legible over
           // bright media.
           Positioned(
@@ -403,35 +580,38 @@ class _StoryViewerViewState extends State<StoryViewerView>
           Column(
             children: [
               SizedBox(height: top + 12),
-              // Progress bars
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: AnimatedBuilder(
-                  animation: _progress,
-                  builder: (context, child) => Row(
-                    children: [
-                      for (var i = 0; i < widget.storyIds.length; i++)
-                        Expanded(
-                          child: Container(
-                            height: 3,
-                            margin: const EdgeInsets.symmetric(horizontal: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.3),
-                              borderRadius: BorderRadius.circular(2),
-                            ),
-                            child: FractionallySizedBox(
-                              alignment: Alignment.centerLeft,
-                              widthFactor: _fill(i),
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(2),
+              // Progress bars — boundaried so the 60fps fill does not drag the
+              // scrims, header, caption and action bar into every repaint.
+              RepaintBoundary(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  child: AnimatedBuilder(
+                    animation: _progress,
+                    builder: (context, child) => Row(
+                      children: [
+                        for (var i = 0; i < widget.storyIds.length; i++)
+                          Expanded(
+                            child: Container(
+                              height: 3,
+                              margin: const EdgeInsets.symmetric(horizontal: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.3),
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                              child: FractionallySizedBox(
+                                alignment: Alignment.centerLeft,
+                                widthFactor: _fill(i),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -478,6 +658,7 @@ class _StoryViewerViewState extends State<StoryViewerView>
                         ],
                       ),
                     ),
+                    if (_current?.isVideo ?? false) _headerVideoVolumeButton(),
                     GestureDetector(
                       key: const ValueKey('storyMoreActions'),
                       behavior: HitTestBehavior.opaque,
@@ -529,13 +710,19 @@ class _StoryViewerViewState extends State<StoryViewerView>
               ),
             ],
           ),
-          // Tap the left/right edges to move, swipe horizontally as a fallback,
-          // swipe down to close, and hold to pause both photos and videos.
+          // Edge taps and center playback work everywhere. Touch additionally
+          // keeps swipe navigation, swipe-down dismissal, and hold-to-pause;
+          // pointer drags are left to the desktop window system.
           Positioned.fill(
             top: top + 96,
             child: GestureDetector(
+              key: const ValueKey('storyGestureSurface'),
               behavior: HitTestBehavior.translucent,
               onTapUp: (details) {
+                if (_volumePanelVisible) {
+                  setState(() => _volumePanelVisible = false);
+                  return;
+                }
                 final width = MediaQuery.sizeOf(context).width;
                 final x = details.localPosition.dx;
                 if (x < width * 0.3) {
@@ -546,30 +733,64 @@ class _StoryViewerViewState extends State<StoryViewerView>
                   unawaited(_onTapMedia());
                 }
               },
-              onLongPressStart: (_) => _pausePlayback(),
-              onLongPressEnd: (_) => _resumePlayback(),
-              onHorizontalDragEnd: (d) {
-                final v = d.primaryVelocity ?? 0;
-                if (v < -150) {
-                  _goNext();
-                } else if (v > 150) {
-                  _goPrevious();
-                }
-              },
-              onVerticalDragEnd: (d) {
-                if ((d.primaryVelocity ?? 0) > 320) {
-                  Navigator.of(context).pop();
-                }
-              },
+              onLongPressStart: desktop ? null : (_) => _pausePlayback(),
+              onLongPressEnd: desktop ? null : (_) => _resumePlayback(),
+              onHorizontalDragEnd: desktop
+                  ? null
+                  : (d) {
+                      final v = d.primaryVelocity ?? 0;
+                      if (v < -150) {
+                        _goNext();
+                      } else if (v > 150) {
+                        _goPrevious();
+                      }
+                    },
+              onVerticalDragEnd: desktop
+                  ? null
+                  : (d) {
+                      if ((d.primaryVelocity ?? 0) > 320) {
+                        Navigator.of(context).pop();
+                      }
+                    },
               child: const SizedBox.expand(),
             ),
           ),
+          if (desktop) ...[
+            Positioned(
+              left: 18,
+              top: top + 96,
+              bottom: MediaQuery.of(context).padding.bottom + 72,
+              child: Center(
+                child: _desktopNavigationButton(
+                  key: const ValueKey('storyDesktopPrevious'),
+                  icon: HeroAppIcons.chevronLeft,
+                  semanticLabel: AppStringKeys.navigationBack.l10n(context),
+                  onTap: _goPrevious,
+                ),
+              ),
+            ),
+            Positioned(
+              right: 18,
+              top: top + 96,
+              bottom: MediaQuery.of(context).padding.bottom + 72,
+              child: Center(
+                child: _desktopNavigationButton(
+                  key: const ValueKey('storyDesktopNext'),
+                  icon: HeroAppIcons.chevronRight,
+                  semanticLabel: AppStringKeys.storyNext.l10n(context),
+                  onTap: _goNext,
+                ),
+              ),
+            ),
+          ],
           if (_current?.areas.isNotEmpty ?? false)
             Positioned.fill(
               top: top + 96,
               bottom: MediaQuery.of(context).padding.bottom + 88,
               child: _storyAreas(),
             ),
+          if ((_current?.isVideo ?? false) && _volumePanelVisible)
+            Positioned(top: top + 76, right: 14, child: _videoVolumePanel()),
           if (_current != null)
             Positioned(
               left: 12,
@@ -578,6 +799,196 @@ class _StoryViewerViewState extends State<StoryViewerView>
               child: _actionBar(),
             ),
         ],
+      ),
+    );
+    if (!desktop) return viewer;
+    return Focus(
+      focusNode: _desktopKeyboardFocus,
+      autofocus: true,
+      onKeyEvent: _handleDesktopKey,
+      child: MouseRegion(
+        key: const ValueKey('storyDesktopHoverRegion'),
+        onEnter: (_) {
+          if (!_replyFocus.hasFocus) _desktopKeyboardFocus.requestFocus();
+          if (!_desktopControlsHovered) {
+            setState(() => _desktopControlsHovered = true);
+          }
+        },
+        onExit: (_) {
+          if (_desktopControlsHovered) {
+            setState(() => _desktopControlsHovered = false);
+          }
+        },
+        child: viewer,
+      ),
+    );
+  }
+
+  Widget _desktopNavigationButton({
+    required Key key,
+    required AppIconData icon,
+    required String semanticLabel,
+    required VoidCallback onTap,
+  }) => ExcludeSemantics(
+    excluding: !_desktopControlsHovered,
+    child: ExcludeFocus(
+      excluding: !_desktopControlsHovered,
+      child: IgnorePointer(
+        ignoring: !_desktopControlsHovered,
+        child: AnimatedOpacity(
+          key: key,
+          duration: AppMotion.duration(context, AppMotion.quick),
+          curve: AppMotion.standard,
+          opacity: _desktopControlsHovered ? 1 : 0,
+          child: AppInteractiveSurface(
+            semanticLabel: semanticLabel,
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(24),
+            child: Container(
+              width: 48,
+              height: 48,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.52),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.28),
+                  width: 0.8,
+                ),
+              ),
+              child: AppIcon(icon, size: 24, color: Colors.white),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  Widget _headerVideoVolumeButton() {
+    final muted = _videoVolume <= 0.01;
+    return AppInteractiveSurface(
+      key: const ValueKey('storyVolumeButton'),
+      semanticLabel: AppStringKeys.videoPlaybackSwipeAdjustVolume.l10n(context),
+      semanticValue: '${(_videoVolume * 100).round()}%',
+      expanded: _volumePanelVisible,
+      onTap: () {
+        setState(() => _volumePanelVisible = !_volumePanelVisible);
+      },
+      borderRadius: BorderRadius.circular(22),
+      child: SizedBox(
+        width: 44,
+        height: 44,
+        child: Center(
+          child: AppIcon(
+            muted ? HeroAppIcons.volumeXmark : HeroAppIcons.volumeHigh,
+            size: 21,
+            color: Colors.white,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _videoVolumePanel() {
+    final width = (MediaQuery.sizeOf(context).width - 28)
+        .clamp(0.0, 236.0)
+        .toDouble();
+    final muted = _videoVolume <= 0.01;
+    return Semantics(
+      container: true,
+      label: AppStringKeys.videoPlaybackSwipeAdjustVolume.l10n(context),
+      child: Container(
+        key: const ValueKey('storyVolumePanel'),
+        width: width,
+        height: 56,
+        padding: const EdgeInsets.fromLTRB(7, 6, 12, 6),
+        decoration: BoxDecoration(
+          color: const Color(0xEB202023),
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.24),
+            width: 0.8,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.32),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final showSlider = constraints.maxWidth >= 96;
+            final showValue = constraints.maxWidth >= 137;
+            return Row(
+              children: [
+                AppInteractiveSurface(
+                  key: const ValueKey('storyMuteButton'),
+                  semanticLabel:
+                      (muted
+                              ? AppStringKeys.chatUnmute
+                              : AppStringKeys.callMute)
+                          .l10n(context),
+                  semanticValue: '${(_videoVolume * 100).round()}%',
+                  toggled: muted,
+                  onTap: _toggleVideoMute,
+                  borderRadius: BorderRadius.circular(22),
+                  child: SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: Center(
+                      child: AppIcon(
+                        muted
+                            ? HeroAppIcons.volumeXmark
+                            : HeroAppIcons.volumeHigh,
+                        size: 19,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+                if (showSlider) ...[
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: SizedBox(
+                      height: 44,
+                      child: FVideoSlider(
+                        key: const ValueKey('storyVolumeSlider'),
+                        value: _videoVolume,
+                        trackHeight: 3,
+                        thumbRadius: 7,
+                        activeColor: Colors.white,
+                        inactiveColor: Colors.white.withValues(alpha: 0.24),
+                        semanticLabel: AppStringKeys
+                            .videoPlaybackSwipeAdjustVolume
+                            .l10n(context),
+                        semanticValue: '${(_videoVolume * 100).round()}%',
+                        onChanged: (value) => unawaited(_setVideoVolume(value)),
+                      ),
+                    ),
+                  ),
+                ],
+                if (showValue) ...[
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 34,
+                    child: Text(
+                      '${(_videoVolume * 100).round()}',
+                      textAlign: TextAlign.end,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.82),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -618,7 +1029,7 @@ class _StoryViewerViewState extends State<StoryViewerView>
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.42),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(AppRadius.card),
               border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
             ),
             child: Text(
@@ -667,16 +1078,16 @@ class _StoryViewerViewState extends State<StoryViewerView>
           title = chat.str('title') ?? title;
         } catch (_) {}
         if (mounted) {
-          await Navigator.of(context).push(
-            AppChatPageRoute<void>(
-              builder: (_) => ChatView(chatId: chatId, title: title),
-            ),
+          await openChatFromCurrentWindow(
+            context,
+            chatId: chatId,
+            title: title,
           );
         }
       case 'storyAreaTypeLink':
-        final uri = Uri.tryParse(type.str('url') ?? '');
-        if (uri != null) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        final url = type.str('url')?.trim() ?? '';
+        if (url.isNotEmpty && mounted) {
+          await openLink(context, url);
         }
       case 'storyAreaTypeLocation':
         await _openMap(type.obj('location'));
@@ -770,7 +1181,7 @@ class _StoryViewerViewState extends State<StoryViewerView>
             key: const ValueKey('storyShare'),
             onTap: () => unawaited(_shareStory()),
             child: const AppIcon(
-              HeroAppIcons.share,
+              HeroAppIcons.forward,
               size: 21,
               color: Colors.white,
             ),
@@ -845,7 +1256,7 @@ class _StoryViewerViewState extends State<StoryViewerView>
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
           decoration: BoxDecoration(
             color: const Color(0xFF242426),
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(AppRadius.lg),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -977,7 +1388,7 @@ class _StoryViewerViewState extends State<StoryViewerView>
           margin: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: const Color(0xFF242426),
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(AppRadius.lg),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -986,7 +1397,7 @@ class _StoryViewerViewState extends State<StoryViewerView>
                 _storyMenuRow(
                   context,
                   value: AppStrings.t(AppStringKeys.storyViewerShare),
-                  icon: HeroAppIcons.share,
+                  icon: HeroAppIcons.forward,
                   label: AppStringKeys.storyShare,
                 ),
               _storyMenuRow(
@@ -1308,7 +1719,7 @@ class _StoryViewerViewState extends State<StoryViewerView>
                 margin: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   color: const Color(0xFF242426),
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,

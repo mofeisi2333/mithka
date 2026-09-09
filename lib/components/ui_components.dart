@@ -12,7 +12,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../app/ipad_window_chrome.dart';
 import '../l10n/app_localizations.dart';
+import '../platform/adaptive_platform.dart';
 import '../platform/system_ui.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
@@ -20,6 +22,284 @@ import '../theme/date_text.dart';
 import '../theme/theme_controller.dart';
 import 'app_icons.dart';
 import 'app_interactive_surface.dart';
+import 'desktop_content_constraint.dart';
+
+/// Marks only the first route hosted by the settings split-detail pane.
+///
+/// Its first route is selected by the sidebar rather than pushed by history,
+/// so a back control is invalid there. Routes subsequently pushed inside the
+/// same navigator do not inherit this route-local marker and retain normal
+/// back navigation. Keeping the marker inside the route also avoids mistaking
+/// the Settings window's outer navigation history for detail-pane history.
+class SettingsSplitPaneScope extends InheritedWidget {
+  const SettingsSplitPaneScope({super.key, required super.child});
+
+  static bool isRootRoute(BuildContext context) {
+    return context
+            .dependOnInheritedWidgetOfExactType<SettingsSplitPaneScope>() !=
+        null;
+  }
+
+  @override
+  bool updateShouldNotify(SettingsSplitPaneScope oldWidget) => false;
+}
+
+/// Shared shell for every settings destination.
+///
+/// The header, grouped background and readable content lane are deliberately
+/// owned here so a page cannot drift by rebuilding those three pieces. The
+/// content lane is full-width on touch platforms and capped at 720 px on
+/// native desktop; the child supplies its scroll behavior.
+class SettingsPageScaffold extends StatelessWidget {
+  const SettingsPageScaffold({
+    super.key,
+    required this.title,
+    required this.child,
+    this.onBack,
+    this.trailingIcon,
+    this.onTrailing,
+    this.trailing,
+    this.constrainContent = true,
+    this.showBackButton = true,
+    this.resizeToAvoidBottomInset = true,
+    this.bottomNavigationBar,
+  });
+
+  final String title;
+  final Widget child;
+  final VoidCallback? onBack;
+  final AppIconData? trailingIcon;
+  final VoidCallback? onTrailing;
+  final Widget? trailing;
+
+  /// Full-canvas utilities such as a camera scanner can opt out explicitly.
+  final bool constrainContent;
+
+  /// The shell still verifies navigator history before it renders the control.
+  /// A settings destination embedded in the desktop split pane therefore has
+  /// a title but no dead back chevron, while the same widget on a pushed mobile
+  /// route gets its back action automatically.
+  final bool showBackButton;
+  final bool resizeToAvoidBottomInset;
+  final Widget? bottomNavigationBar;
+
+  @override
+  Widget build(BuildContext context) {
+    final navigator = Navigator.maybeOf(context);
+    final effectiveOnBack =
+        showBackButton &&
+            !SettingsSplitPaneScope.isRootRoute(context) &&
+            (navigator?.canPop() ?? false)
+        ? onBack ?? () => navigator!.pop()
+        : null;
+    // A scroll view has to span the pane so its scrollbar rides the pane's
+    // edge rather than floating beside the content lane; [SettingsListView]
+    // lanes its own content instead. Everything else is constrained here.
+    final content = constrainContent && child is! SettingsListView
+        ? DesktopContentConstraint(child: child)
+        : child;
+    return Scaffold(
+      backgroundColor: context.colors.groupedBackground,
+      resizeToAvoidBottomInset: resizeToAvoidBottomInset,
+      bottomNavigationBar: bottomNavigationBar,
+      body: Column(
+        children: [
+          NavHeader(
+            title: title,
+            onBack: effectiveOnBack,
+            trailingIcon: trailingIcon,
+            onTrailing: onTrailing,
+            trailing: trailing,
+          ),
+          Expanded(child: content),
+        ],
+      ),
+    );
+  }
+}
+
+/// Canonical scrolling body for settings pages on every platform.
+///
+/// Page inset is intentionally not adaptive: mobile and desktop destinations
+/// share the same 12 / 14 / 12 / 24 outer rhythm. Desktop adaptation happens
+/// at the content-lane level in [SettingsPageScaffold].
+class SettingsListView extends StatelessWidget {
+  const SettingsListView({
+    super.key,
+    required this.children,
+    this.controller,
+    this.physics,
+    this.padding = AppInsets.screen,
+    this.keyboardDismissBehavior = ScrollViewKeyboardDismissBehavior.manual,
+  });
+
+  final List<Widget> children;
+  final ScrollController? controller;
+  final ScrollPhysics? physics;
+  final EdgeInsetsGeometry padding;
+  final ScrollViewKeyboardDismissBehavior keyboardDismissBehavior;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    // The lane lives in the padding, not around the list — see
+    // [desktopContentLaneInset]. Nested inside a pane that is already laned,
+    // the inset resolves to zero and this is a plain ListView.
+    builder: (context, constraints) => ListView(
+      controller: controller,
+      physics: physics,
+      padding: padding.add(
+        EdgeInsets.symmetric(
+          horizontal: desktopContentLaneInset(constraints.maxWidth),
+        ),
+      ),
+      keyboardDismissBehavior: keyboardDismissBehavior,
+      children: children,
+    ),
+  );
+}
+
+/// Project-owned search control shared by settings indexes and selectors.
+///
+/// It intentionally owns the glyphs, fill, radius, height and clear affordance
+/// so platform search widgets cannot introduce a second icon set or padding.
+class SettingsSearchField extends StatelessWidget {
+  const SettingsSearchField({
+    super.key,
+    required this.hintText,
+    this.controller,
+    this.focusNode,
+    this.onChanged,
+    this.onSubmitted,
+    this.textInputAction = TextInputAction.search,
+    this.compact = false,
+  });
+
+  final String hintText;
+  final TextEditingController? controller;
+  final FocusNode? focusNode;
+  final ValueChanged<String>? onChanged;
+  final ValueChanged<String>? onSubmitted;
+  final TextInputAction textInputAction;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final fontSize = compact ? 13.0 : AppTextSize.callout;
+    final iconSize = compact ? 16.0 : AppMetric.searchIcon;
+    final scaledLineHeight =
+        MediaQuery.textScalerOf(context).scale(fontSize) * 1.25;
+    final height = math.max(
+      compact ? 34.0 : AppMetric.searchHeight,
+      scaledLineHeight + AppSpacing.xxl,
+    );
+    final field = Container(
+      key: const ValueKey('settings-search-container'),
+      height: height,
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? AppSpacing.md : AppSpacing.lg,
+      ),
+      decoration: BoxDecoration(
+        color: c.searchFill,
+        borderRadius: BorderRadius.circular(AppRadius.control),
+      ),
+      child: Row(
+        children: [
+          AppIcon(
+            HeroAppIcons.magnifyingGlass,
+            size: iconSize,
+            color: c.textTertiary,
+          ),
+          SizedBox(width: compact ? AppSpacing.sm : AppSpacing.md),
+          Expanded(
+            child: TextField(
+              key: const ValueKey('settings-search-field'),
+              controller: controller,
+              focusNode: focusNode,
+              textInputAction: textInputAction,
+              onChanged: onChanged,
+              onSubmitted: onSubmitted,
+              style: TextStyle(fontSize: fontSize, color: c.textPrimary),
+              decoration: InputDecoration(
+                isCollapsed: true,
+                border: InputBorder.none,
+                hintText: hintText.l10n(context),
+                hintStyle: TextStyle(fontSize: fontSize, color: c.textTertiary),
+              ),
+            ),
+          ),
+          if (controller != null)
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: controller!,
+              builder: (context, value, _) => value.text.isEmpty
+                  ? const SizedBox.shrink()
+                  : AppInteractiveSurface(
+                      semanticLabel: AppStringKeys.countryPickerCancel.l10n(
+                        context,
+                      ),
+                      onTap: () {
+                        controller!.clear();
+                        onChanged?.call('');
+                      },
+                      borderRadius: BorderRadius.circular(AppRadius.control),
+                      child: Padding(
+                        padding: const EdgeInsets.all(AppSpacing.xs),
+                        child: AppIcon(
+                          HeroAppIcons.xmark,
+                          size: AppIconSize.md,
+                          color: c.textTertiary,
+                        ),
+                      ),
+                    ),
+            ),
+        ],
+      ),
+    );
+    return field;
+  }
+}
+
+/// Text action for the trailing side of [SettingsPageScaffold]'s header.
+class SettingsHeaderAction extends StatelessWidget {
+  const SettingsHeaderAction({
+    super.key,
+    required this.label,
+    required this.onTap,
+    this.enabled = true,
+    this.working = false,
+  });
+
+  final String label;
+  final VoidCallback onTap;
+  final bool enabled;
+  final bool working;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return AppInteractiveSurface(
+      semanticLabel: label.l10n(context),
+      enabled: enabled && !working,
+      onTap: enabled && !working ? onTap : null,
+      borderRadius: BorderRadius.circular(AppRadius.control),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.md,
+        ),
+        child: working
+            ? const AppActivityIndicator(size: 18)
+            : Text(
+                label.l10n(context),
+                style: AppTextStyle.body(
+                  enabled ? AppTheme.brand : c.textTertiary,
+                  weight: AppTextWeight.semibold,
+                ),
+              ),
+      ),
+    );
+  }
+}
 
 /// Flat reference-style header bar: optional back chevron, leading title,
 /// optional trailing icon.
@@ -43,14 +323,25 @@ class NavHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     final metrics = context.watch<ThemeController>();
+    final pointerDense = isDesktopTargetPlatform();
     final headerHeight = metrics.navHeaderHeight;
+    final effectiveOnBack = SettingsSplitPaneScope.isRootRoute(context)
+        ? null
+        : onBack;
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: systemUiOverlayStyleForSurface(c.navBar),
       child: Container(
         constraints: BoxConstraints(
-          minHeight: headerHeight + MediaQuery.of(context).padding.top,
+          minHeight:
+              headerHeight +
+              MediaQuery.of(context).padding.top +
+              iPadWindowChromeInsetOf(context),
         ),
-        padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
+        padding: EdgeInsets.only(
+          top:
+              MediaQuery.of(context).padding.top +
+              iPadWindowChromeInsetOf(context),
+        ),
         decoration: BoxDecoration(
           color: c.navBar,
           border: Border(
@@ -61,16 +352,20 @@ class NavHeader extends StatelessWidget {
           padding: AppInsets.navHeader,
           child: Row(
             children: [
-              if (onBack != null)
+              if (effectiveOnBack != null)
                 AppInteractiveSurface(
                   semanticLabel: AppStringKeys.navigationBack.l10n(context),
-                  onTap: onBack,
+                  onTap: effectiveOnBack,
                   borderRadius: BorderRadius.circular(AppRadius.sm),
                   child: Padding(
-                    padding: const EdgeInsets.only(right: AppSpacing.lg),
+                    padding: EdgeInsets.only(
+                      right: pointerDense ? AppSpacing.md : AppSpacing.lg,
+                    ),
                     child: AppIcon(
                       HeroAppIcons.chevronLeft,
-                      size: metrics.scaled(AppIconSize.nav),
+                      size: metrics.scaled(
+                        pointerDense ? AppIconSize.lg : AppIconSize.nav,
+                      ),
                       color: c.textPrimary,
                     ),
                   ),
@@ -80,7 +375,12 @@ class NavHeader extends StatelessWidget {
                   title.l10n(context),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: AppTextStyle.title(c.textPrimary),
+                  style: pointerDense
+                      ? AppTextStyle.bodyLarge(
+                          c.textPrimary,
+                          weight: AppTextWeight.medium,
+                        )
+                      : AppTextStyle.title(c.textPrimary),
                 ),
               ),
               ?trailing,
@@ -93,7 +393,9 @@ class NavHeader extends StatelessWidget {
                     padding: const EdgeInsets.all(AppSpacing.xs),
                     child: AppIcon(
                       trailingIcon!,
-                      size: metrics.scaled(AppIconSize.nav - 1),
+                      size: metrics.scaled(
+                        pointerDense ? AppIconSize.lg : AppIconSize.nav - 1,
+                      ),
                       color: c.textPrimary,
                     ),
                   ),
@@ -209,21 +511,33 @@ class _UnreadBadgeState extends State<UnreadBadge> {
     );
   }
 
+  // The badge width needs a text measurement, and every unread row asks for one
+  // on every rebuild. The label set is tiny ('1'..'99+') and the painter does no
+  // scaling, so the layout result is bit-identical per (label, direction).
+  static final Map<(String, TextDirection), Size> _sizeCache = {};
+
   Size _visualSize(BuildContext context, String label) {
+    final key = (label, Directionality.of(context));
+    final cached = _sizeCache[key];
+    if (cached != null) return cached;
     const style = TextStyle(
       fontSize: AppTextSize.caption,
       fontWeight: AppTextWeight.semibold,
     );
     final painter = TextPainter(
       text: TextSpan(text: label, style: style),
-      textDirection: Directionality.of(context),
+      textDirection: key.$2,
       maxLines: 1,
     )..layout();
     final horizontalPadding = label.length > 1 ? (AppSpacing.xs + 1) * 2 : 0.0;
-    return Size(
+    final size = Size(
       math.max(AppMetric.unreadBadgeMin, painter.width + horizontalPadding),
       AppMetric.unreadBadgeMin,
     );
+    painter.dispose();
+    if (_sizeCache.length >= 256) _sizeCache.clear();
+    _sizeCache[key] = size;
+    return size;
   }
 }
 
@@ -251,7 +565,10 @@ class _UnreadBadgeBody extends StatelessWidget {
       child: Text(
         label,
         style: AppTextStyle.caption(
-          Colors.white,
+          // Telegram stores the counter's label colour alongside its fill
+          // (chats_unreadCounterText), so a theme can darken it for a pale
+          // badge instead of being stuck with white.
+          context.colors.badgeText,
           weight: AppTextWeight.semibold,
         ),
       ),
@@ -414,26 +731,229 @@ class InsetDivider extends StatelessWidget {
   );
 }
 
+/// Divider aligned with the title column of a canonical settings row.
+///
+/// Use [SettingsDivider.text] for a text-only selection list. Keeping these
+/// two alignments named prevents pages from inventing nearly-identical magic
+/// numbers such as 47, 48, 52, 54, 58, or 62.
+class SettingsDivider extends StatelessWidget {
+  const SettingsDivider({super.key})
+    : leadingInset = AppMetric.settingsIconDividerInset;
+
+  const SettingsDivider.text({super.key})
+    : leadingInset = AppMetric.settingsTextDividerInset;
+
+  final double leadingInset;
+
+  @override
+  Widget build(BuildContext context) =>
+      InsetDivider(leadingInset: leadingInset);
+}
+
 /// Standard grouped settings card. Use this for left-label/right-value rows
 /// instead of duplicating per-screen private `_settingsCard` variants.
-class SettingsCard extends StatelessWidget {
-  const SettingsCard({super.key, required this.children, this.margin});
+/// Label above a group of settings rows.
+///
+/// Every settings screen used to define its own: sixteen private copies under
+/// five names, with three paddings, two sizes, two colours, and one that
+/// uppercased its text. This is the one shape they all share.
+class SettingsSectionHeader extends StatelessWidget {
+  /// [titleKey] is an `AppStringKeys` constant.
+  const SettingsSectionHeader(this.titleKey, {super.key, this.text, this.color})
+    : assert(
+        titleKey != null || text != null,
+        'a section header needs a key or literal text',
+      );
 
-  final List<Widget> children;
-  final EdgeInsetsGeometry? margin;
+  /// For a label that is data rather than copy — a folder name, say.
+  const SettingsSectionHeader.text(String this.text, {super.key, this.color})
+    : titleKey = null;
+
+  final String? titleKey;
+  final String? text;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.xxl,
+        AppSpacing.lg,
+        AppSpacing.xxl,
+        AppSpacing.sm,
+      ),
+      child: Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: Text(
+          text ?? AppStrings.t(titleKey!),
+          style: TextStyle(
+            fontSize: AppTextSize.footnote,
+            color: color ?? context.colors.textTertiary,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class SettingsCard extends StatelessWidget {
+  const SettingsCard({
+    super.key,
+    required this.children,
+    this.margin,
+    this.addDividers = false,
+    this.dividerInset = AppMetric.settingsIconDividerInset,
+  });
+
+  /// A grouped row card that owns divider placement as well as its surface.
+  const SettingsCard.rows({
+    super.key,
+    required List<Widget> rows,
+    this.margin,
+    this.dividerInset = AppMetric.settingsIconDividerInset,
+  }) : children = rows,
+       addDividers = true;
+
+  final List<Widget> children;
+  final EdgeInsetsGeometry? margin;
+  final bool addDividers;
+  final double dividerInset;
+
+  @override
+  Widget build(BuildContext context) {
+    final effectiveChildren = addDividers && children.length > 1
+        ? <Widget>[
+            for (var index = 0; index < children.length; index++) ...[
+              if (index > 0) InsetDivider(leadingInset: dividerInset),
+              children[index],
+            ],
+          ]
+        : children;
     final card = Container(
       decoration: BoxDecoration(
         color: context.colors.card,
         borderRadius: BorderRadius.circular(AppRadius.card),
       ),
       clipBehavior: Clip.antiAlias,
-      child: Column(mainAxisSize: MainAxisSize.min, children: children),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: effectiveChildren,
+      ),
     );
     return margin == null ? card : Padding(padding: margin!, child: card);
   }
+}
+
+/// A complete settings section: optional label, canonical card, canonical
+/// row dividers. This is the preferred unit inside [SettingsListView].
+class SettingsSection extends StatelessWidget {
+  const SettingsSection({
+    super.key,
+    required this.rows,
+    this.titleKey,
+    this.title,
+    this.headerColor,
+    this.dividerInset = AppMetric.settingsIconDividerInset,
+  }) : assert(
+         titleKey == null || title == null,
+         'use either a localization key or literal section title',
+       );
+
+  final String? titleKey;
+  final String? title;
+  final Color? headerColor;
+  final List<Widget> rows;
+  final double dividerInset;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      if (titleKey != null)
+        SettingsSectionHeader(titleKey, color: headerColor)
+      else if (title != null)
+        SettingsSectionHeader.text(title!, color: headerColor),
+      SettingsCard.rows(rows: rows, dividerInset: dividerInset),
+    ],
+  );
+}
+
+/// Explanatory copy associated with the settings section immediately above.
+class SettingsNote extends StatelessWidget {
+  const SettingsNote({super.key, required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsetsDirectional.fromSTEB(
+      AppSpacing.xs,
+      AppSpacing.sm,
+      AppSpacing.xs,
+      0,
+    ),
+    child: Text(
+      text.l10n(context),
+      style: AppTextStyle.footnote(
+        context.colors.textTertiary,
+      ).copyWith(height: 1.35),
+    ),
+  );
+}
+
+/// Card surface holding arbitrary content rather than a list of rows.
+///
+/// [SettingsCard] is a column of rows and clips to its own corners, which is
+/// wrong for a chart, a paragraph, a slider or a wrap of chips. Those used to
+/// hand-roll the same BoxDecoration, which is how the corner radius drifted
+/// across seven values in the first place.
+class SettingsPanel extends StatelessWidget {
+  const SettingsPanel({
+    super.key,
+    required this.child,
+    this.padding,
+    this.margin,
+    this.clipBehavior = Clip.none,
+  });
+
+  final Widget child;
+
+  /// Null leaves the child to manage its own insets, which several panels do.
+  final EdgeInsetsGeometry? padding;
+  final EdgeInsetsGeometry? margin;
+
+  /// Set when the child paints into the corners — a list or an image.
+  final Clip clipBehavior;
+
+  @override
+  Widget build(BuildContext context) {
+    final panel = Container(
+      padding: padding,
+      clipBehavior: clipBehavior,
+      decoration: BoxDecoration(
+        color: context.colors.card,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+      ),
+      child: child,
+    );
+    return margin == null ? panel : Padding(padding: margin!, child: panel);
+  }
+}
+
+/// Standard line icon for a settings row.
+///
+/// Detail screens use one accent-coloured glyph treatment. The coloured tile
+/// remains available for the top-level settings index, where it distinguishes
+/// destinations rather than controls within one screen.
+class SettingsLeadingIcon extends StatelessWidget {
+  const SettingsLeadingIcon({super.key, required this.icon, this.color});
+
+  final AppIconData icon;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) =>
+      AppIcon(icon, size: AppIconSize.xl, color: color ?? AppTheme.brand);
 }
 
 /// Colored settings glyph tile used by the main settings list and nested
@@ -456,16 +976,26 @@ class SettingsIconTile extends StatelessWidget {
   final double radius;
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: size,
-    height: size,
-    alignment: Alignment.center,
-    decoration: BoxDecoration(
-      color: backgroundColor,
-      borderRadius: BorderRadius.circular(radius),
-    ),
-    child: AppIcon(icon, size: iconSize, color: const Color(0xFFFFFFFF)),
-  );
+  Widget build(BuildContext context) {
+    final pointerDense = isDesktopTargetPlatform();
+    final effectiveSize = pointerDense && size == 28 ? 24.0 : size;
+    final effectiveIconSize = pointerDense && iconSize == 15 ? 13.0 : iconSize;
+    final effectiveRadius = pointerDense && radius == 7 ? 6.0 : radius;
+    return Container(
+      width: effectiveSize,
+      height: effectiveSize,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(effectiveRadius),
+      ),
+      child: AppIcon(
+        icon,
+        size: effectiveIconSize,
+        color: const Color(0xFFFFFFFF),
+      ),
+    );
+  }
 }
 
 class SettingsRow extends StatelessWidget {
@@ -479,6 +1009,9 @@ class SettingsRow extends StatelessWidget {
     this.height = AppMetric.settingsRowHeight,
     this.leadingInset = AppMetric.settingsLeadingInset,
     this.trailing,
+    this.titleColor,
+    this.subtitle,
+    this.enabled = true,
   });
 
   final String title;
@@ -489,38 +1022,89 @@ class SettingsRow extends StatelessWidget {
   final double height;
   final double leadingInset;
   final Widget? trailing;
+  final Color? titleColor;
+  final String? subtitle;
+  final bool enabled;
+
+  /// The height a settings row of [height] actually resolves to. Exposed so a
+  /// hand-rolled row that has to line up with the settings rows around it can
+  /// read the rule instead of hard-coding a number and drifting on desktop,
+  /// where rows compress well below [AppMetric.settingsRowHeight].
+  static double resolveHeight([double height = AppMetric.settingsRowHeight]) =>
+      isDesktopTargetPlatform() && height >= AppMetric.compactSettingsRowHeight
+      ? 42.0
+      : height;
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final pointerDense = isDesktopTargetPlatform();
+    final effectiveHeight = resolveHeight(height);
+    final effectiveLeadingInset =
+        pointerDense && leadingInset == AppMetric.settingsLeadingInset
+        ? AppSpacing.lg
+        : leadingInset;
+    final horizontalGap = pointerDense ? AppSpacing.md : AppSpacing.lg;
+    final verticalPadding = pointerDense ? AppSpacing.sm : AppSpacing.md;
     final trailingSwitch = trailing is AppSwitch
         ? trailing! as AppSwitch
         : null;
     return AppInteractiveSurface(
-      onTap: onTap,
+      enabled: enabled,
+      onTap: enabled ? onTap : null,
       toggled: onTap == null ? null : trailingSwitch?.value,
       borderRadius: BorderRadius.circular(AppRadius.sm),
       child: ConstrainedBox(
-        constraints: BoxConstraints(minHeight: height),
+        constraints: BoxConstraints(minHeight: effectiveHeight),
         child: Padding(
           padding: EdgeInsets.only(
-            left: leadingInset,
-            top: AppSpacing.md,
-            right: AppMetric.settingsTrailingInset,
-            bottom: AppSpacing.md,
+            left: effectiveLeadingInset,
+            top: verticalPadding,
+            right: pointerDense
+                ? AppSpacing.lg
+                : AppMetric.settingsTrailingInset,
+            bottom: verticalPadding,
           ),
           child: Row(
             children: [
-              if (leading != null) ...[leading!, const SizedBox(width: 12)],
+              if (leading != null) ...[
+                leading!,
+                SizedBox(width: horizontalGap),
+              ],
               Expanded(
                 flex: trailing == null && value.isNotEmpty ? 3 : 1,
-                child: Text(
-                  title.l10n(context),
-                  style: AppTextStyle.body(c.textPrimary),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title.l10n(context),
+                      style: pointerDense
+                          ? AppTextStyle.callout(
+                              enabled
+                                  ? titleColor ?? c.textPrimary
+                                  : c.textTertiary,
+                            )
+                          : AppTextStyle.body(
+                              enabled
+                                  ? titleColor ?? c.textPrimary
+                                  : c.textTertiary,
+                            ),
+                    ),
+                    if (subtitle != null && subtitle!.isNotEmpty) ...[
+                      const SizedBox(height: AppSpacing.xxs),
+                      Text(
+                        subtitle!.l10n(context),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyle.footnote(c.textTertiary),
+                      ),
+                    ],
+                  ],
                 ),
               ),
               if (trailing != null || value.isNotEmpty) ...[
-                const SizedBox(width: 12),
+                SizedBox(width: horizontalGap),
                 if (trailing != null)
                   onTap == null
                       ? trailing!
@@ -539,17 +1123,19 @@ class SettingsRow extends StatelessWidget {
                         child: Text(
                           value.l10n(context),
                           textAlign: TextAlign.right,
-                          style: AppTextStyle.footnote(c.textTertiary),
+                          style: pointerDense
+                              ? AppTextStyle.caption(c.textTertiary)
+                              : AppTextStyle.footnote(c.textTertiary),
                         ),
                       ),
                     ),
                   ),
               ],
               if (showChevron) ...[
-                const SizedBox(width: 8),
+                SizedBox(width: pointerDense ? AppSpacing.sm : AppSpacing.md),
                 AppIcon(
                   HeroAppIcons.chevronRight,
-                  size: AppIconSize.chevron,
+                  size: pointerDense ? AppIconSize.sm : AppIconSize.chevron,
                   color: c.textTertiary,
                 ),
               ],
@@ -579,7 +1165,16 @@ class AppSwitch extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final pointerDense = isDesktopTargetPlatform();
+    final width = pointerDense ? 38.0 : 50.0;
+    final height = pointerDense ? 22.0 : 30.0;
+    final padding = pointerDense ? 2.0 : 2.0;
+    final handleSize = pointerDense ? 18.0 : 26.0;
     final trackColor = value ? c.linkBlue : c.textTertiary;
+    // The active handle sits on the accent, so it follows the theme's own
+    // on-accent token rather than the page brightness — a light accent needs a
+    // dark handle whatever the rest of the theme is doing. Off, the handle
+    // sits on the neutral track and stays white.
     final handleColor = value ? c.onAccent : const Color(0xFFFFFFFF);
     return AppInteractiveSurface(
       semanticLabel:
@@ -592,27 +1187,27 @@ class AppSwitch extends StatelessWidget {
       toggled: value,
       onTap: enabled ? () => onChanged(!value) : null,
       enabled: enabled,
-      borderRadius: BorderRadius.circular(15),
+      borderRadius: BorderRadius.circular(height / 2),
       child: AnimatedOpacity(
         duration: const Duration(milliseconds: 160),
         opacity: enabled ? 1 : 0.45,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
           curve: Curves.easeOut,
-          width: 50,
-          height: 30,
-          padding: const EdgeInsets.all(2),
+          width: width,
+          height: height,
+          padding: EdgeInsets.all(padding),
           decoration: BoxDecoration(
             color: trackColor,
-            borderRadius: BorderRadius.circular(15),
+            borderRadius: BorderRadius.circular(height / 2),
           ),
           child: AnimatedAlign(
             duration: const Duration(milliseconds: 160),
             curve: Curves.easeOut,
             alignment: value ? Alignment.centerRight : Alignment.centerLeft,
             child: Container(
-              width: 26,
-              height: 26,
+              width: handleSize,
+              height: handleSize,
               decoration: BoxDecoration(
                 color: handleColor,
                 shape: BoxShape.circle,
@@ -656,7 +1251,7 @@ class AppCheckbox extends StatelessWidget {
       checked: value,
       onTap: enabled ? () => onChanged(!value) : null,
       enabled: enabled,
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(AppRadius.md),
       child: AnimatedOpacity(
         duration: const Duration(milliseconds: 150),
         opacity: enabled ? 1 : 0.42,
@@ -667,7 +1262,7 @@ class AppCheckbox extends StatelessWidget {
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: value ? AppTheme.brand : Colors.transparent,
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(AppRadius.md),
             border: Border.all(
               color: value ? AppTheme.brand : foreground,
               width: 1.6,
@@ -686,6 +1281,96 @@ class AppCheckbox extends StatelessWidget {
   }
 }
 
+/// Pill-shaped filter chip for a settings list's segmented header.
+///
+/// Data & Storage and Downloads each grew their own: different radii (8/18 vs
+/// 16), different selected fills (a neutral wash vs an accent tint), one
+/// density-aware and one not, one reachable by keyboard and screen reader and
+/// one a bare GestureDetector. This is the union of the better halves, so a
+/// new filter strip does not start a third dialect.
+class SettingsFilterChip extends StatelessWidget {
+  const SettingsFilterChip({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.icon,
+    this.trailingLabel,
+    this.expand = false,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final AppIconData? icon;
+
+  /// Quiet secondary value after the label — a size, a count.
+  final String? trailingLabel;
+
+  /// Fills the available width, for a strip that divides a row evenly rather
+  /// than sitting inline.
+  final bool expand;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final dense = isDesktopTargetPlatform();
+    final radius = BorderRadius.circular(dense ? 8 : 18);
+    // Selected reads as the accent, not a grey wash, and takes it from the
+    // palette so an imported theme moves it.
+    final foreground = selected ? c.linkBlue : c.textSecondary;
+    final label$ = Text(
+      label,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        color: foreground,
+        fontSize: dense ? AppTextSize.footnote : AppTextSize.callout,
+        fontWeight: selected ? AppTextWeight.semibold : AppTextWeight.medium,
+      ),
+    );
+    return AppInteractiveSurface(
+      onTap: onTap,
+      selected: selected,
+      semanticLabel: label,
+      borderRadius: radius,
+      child: Container(
+        constraints: BoxConstraints(minHeight: dense ? 36 : 42),
+        padding: EdgeInsets.symmetric(horizontal: dense ? 10 : 13),
+        decoration: BoxDecoration(
+          color: selected ? c.linkBlue.withValues(alpha: 0.13) : c.card,
+          borderRadius: radius,
+        ),
+        child: Row(
+          mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+          // A vertical rail wants its glyphs on one straight edge to scan;
+          // an inline chip centres its own content.
+          mainAxisAlignment: expand
+              ? MainAxisAlignment.start
+              : MainAxisAlignment.center,
+          children: [
+            if (icon != null) ...[
+              AppIcon(icon!, size: dense ? 15 : 18, color: foreground),
+              const SizedBox(width: AppSpacing.sm),
+            ],
+            if (expand) Flexible(child: label$) else label$,
+            if (trailingLabel != null && !expand) ...[
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                trailingLabel!,
+                style: TextStyle(
+                  color: c.textTertiary,
+                  fontSize: AppTextSize.tiny + 1,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class SettingsSwitchRow extends StatelessWidget {
   const SettingsSwitchRow({
     super.key,
@@ -693,47 +1378,101 @@ class SettingsSwitchRow extends StatelessWidget {
     required this.value,
     required this.onChanged,
     this.leading,
+    this.subtitle,
+    this.enabled = true,
     this.height = AppMetric.settingsRowHeight,
     this.leadingInset = AppMetric.settingsLeadingInset,
+    this.titleColor,
   });
 
   final String title;
   final bool value;
   final ValueChanged<bool> onChanged;
   final Widget? leading;
+
+  /// Explanatory line under the title, for a switch whose effect is not
+  /// obvious from its label alone.
+  final String? subtitle;
+
+  /// A disabled row still reads, but dims and stops responding — used where
+  /// the platform, not the user, decides.
+  final bool enabled;
+
   final double height;
   final double leadingInset;
+  final Color? titleColor;
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final pointerDense = isDesktopTargetPlatform();
+    final effectiveHeight = SettingsRow.resolveHeight(height);
+    final effectiveLeadingInset =
+        pointerDense && leadingInset == AppMetric.settingsLeadingInset
+        ? AppSpacing.lg
+        : leadingInset;
+    final horizontalGap = pointerDense ? AppSpacing.md : AppSpacing.lg;
+    final verticalPadding = pointerDense ? AppSpacing.sm : AppSpacing.md;
     return AppInteractiveSurface(
       toggled: value,
-      onTap: () => onChanged(!value),
+      enabled: enabled,
+      onTap: enabled ? () => onChanged(!value) : null,
       borderRadius: BorderRadius.circular(AppRadius.sm),
       child: ConstrainedBox(
-        constraints: BoxConstraints(minHeight: height),
+        constraints: BoxConstraints(minHeight: effectiveHeight),
         child: Padding(
           padding: EdgeInsets.only(
-            left: leadingInset,
-            top: AppSpacing.md,
-            right: AppMetric.settingsTrailingInset,
-            bottom: AppSpacing.md,
+            left: effectiveLeadingInset,
+            top: verticalPadding,
+            right: pointerDense
+                ? AppSpacing.lg
+                : AppMetric.settingsTrailingInset,
+            bottom: verticalPadding,
           ),
           child: Row(
             children: [
-              if (leading != null) ...[leading!, const SizedBox(width: 12)],
+              if (leading != null) ...[
+                leading!,
+                SizedBox(width: horizontalGap),
+              ],
               Expanded(
-                child: Text(
-                  title.l10n(context),
-                  style: AppTextStyle.body(c.textPrimary),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title.l10n(context),
+                      style: pointerDense
+                          ? AppTextStyle.callout(
+                              enabled
+                                  ? titleColor ?? c.textPrimary
+                                  : c.textTertiary,
+                            )
+                          : AppTextStyle.body(
+                              enabled
+                                  ? titleColor ?? c.textPrimary
+                                  : c.textTertiary,
+                            ),
+                    ),
+                    if (subtitle != null && subtitle!.isNotEmpty) ...[
+                      const SizedBox(height: AppSpacing.xxs),
+                      Text(
+                        subtitle!.l10n(context),
+                        style: AppTextStyle.footnote(c.textTertiary),
+                      ),
+                    ],
+                  ],
                 ),
               ),
-              const SizedBox(width: 12),
+              SizedBox(width: horizontalGap),
               ExcludeSemantics(
                 child: ExcludeFocus(
                   child: IgnorePointer(
-                    child: AppSwitch(value: value, onChanged: onChanged),
+                    child: AppSwitch(
+                      value: value,
+                      onChanged: onChanged,
+                      enabled: enabled,
+                    ),
                   ),
                 ),
               ),
@@ -773,16 +1512,19 @@ class _AppActivityIndicatorState extends State<AppActivityIndicator>
   @override
   Widget build(BuildContext context) => Semantics(
     label: AppStrings.t(AppStringKeys.topicChatLoading),
-    child: AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) => Transform.rotate(
-        angle: _controller.value * math.pi * 2,
-        child: child,
-      ),
-      child: AppIcon(
-        HeroAppIcons.arrowsRotate,
-        size: widget.size,
-        color: widget.color ?? context.colors.linkBlue,
+    // Own layer, or the 60 Hz spin repaints whatever list or button hosts it.
+    child: RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, child) => Transform.rotate(
+          angle: _controller.value * math.pi * 2,
+          child: child,
+        ),
+        child: AppIcon(
+          HeroAppIcons.arrowsRotate,
+          size: widget.size,
+          color: widget.color ?? context.colors.linkBlue,
+        ),
       ),
     ),
   );
@@ -825,7 +1567,8 @@ class AppProgressBar extends StatelessWidget {
   }
 }
 
-/// Project-owned single-value scrubber.
+/// Project-owned single-value scrubber with pointer, keyboard and assistive
+/// technology adjustment contracts.
 class AppValueScrubber extends StatelessWidget {
   const AppValueScrubber({
     super.key,
@@ -833,74 +1576,124 @@ class AppValueScrubber extends StatelessWidget {
     required this.min,
     required this.max,
     required this.onChanged,
+    required this.semanticLabel,
+    this.semanticValue,
+    this.semanticValueFormatter,
+    this.step,
+    this.compact = false,
+    this.focusNode,
   });
 
   final double value;
   final double min;
   final double max;
   final ValueChanged<double> onChanged;
+  final String semanticLabel;
+  final String? semanticValue;
+  final String Function(double value)? semanticValueFormatter;
+  final double? step;
+  final FocusNode? focusNode;
+
+  /// Slimmer track and thumb, for a scrubber sitting inline in a toolbar.
+  final bool compact;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       final range = math.max(0.000001, max - min);
       final progress = ((value - min) / range).clamp(0.0, 1.0);
-      void update(double dx) =>
-          onChanged(min + (dx / constraints.maxWidth).clamp(0.0, 1.0) * range);
-      return Semantics(
-        slider: true,
-        value: '${(progress * 100).round()}%',
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapDown: (event) => update(event.localPosition.dx),
-          onHorizontalDragUpdate: (event) => update(event.localPosition.dx),
-          child: SizedBox(
-            height: 34,
-            child: Stack(
-              alignment: Alignment.centerLeft,
-              children: [
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  child: Container(
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: context.colors.divider,
-                      borderRadius: BorderRadius.circular(2),
+      final thumbRadius = compact ? 6.0 : 9.0;
+      final trackWidth = math.max(1.0, constraints.maxWidth - thumbRadius * 2);
+      final adjustment = step ?? range / 20;
+      final decreased = (value - adjustment).clamp(min, max);
+      final increased = (value + adjustment).clamp(min, max);
+      String fallbackValue(double next) =>
+          '${(((next - min) / range).clamp(0.0, 1.0) * 100).round()}%';
+      String formattedValue(double next) =>
+          semanticValueFormatter?.call(next) ?? fallbackValue(next);
+
+      void updateFromOffset(double dx) => onChanged(
+        min + ((dx - thumbRadius) / trackWidth).clamp(0.0, 1.0) * range,
+      );
+      void adjust(int direction) =>
+          onChanged((value + adjustment * direction).clamp(min, max));
+
+      return FocusableActionDetector(
+        focusNode: focusNode,
+        shortcuts: _scrubberShortcuts,
+        actions: <Type, Action<Intent>>{
+          _ScrubberAdjustIntent: CallbackAction<_ScrubberAdjustIntent>(
+            onInvoke: (intent) {
+              adjust(intent.direction);
+              return null;
+            },
+          ),
+        },
+        child: Semantics(
+          slider: true,
+          label: semanticLabel,
+          value: semanticValue ?? formattedValue(value),
+          increasedValue: formattedValue(increased),
+          decreasedValue: formattedValue(decreased),
+          onIncrease: () => adjust(1),
+          onDecrease: () => adjust(-1),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            excludeFromSemantics: true,
+            onTapDown: (event) => updateFromOffset(event.localPosition.dx),
+            onHorizontalDragUpdate: (event) =>
+                updateFromOffset(event.localPosition.dx),
+            child: SizedBox(
+              height: compact ? 44 : 48,
+              child: Stack(
+                alignment: Alignment.centerLeft,
+                children: [
+                  Positioned(
+                    left: thumbRadius,
+                    right: thumbRadius,
+                    child: Container(
+                      height: compact ? 3 : 4,
+                      decoration: BoxDecoration(
+                        color: context.colors.divider,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
                   ),
-                ),
-                Positioned(
-                  left: 0,
-                  width: constraints.maxWidth * progress,
-                  child: Container(
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: context.colors.linkBlue,
-                      borderRadius: BorderRadius.circular(2),
+                  Positioned(
+                    left: thumbRadius,
+                    width: trackWidth * progress,
+                    child: Container(
+                      height: compact ? 3 : 4,
+                      decoration: BoxDecoration(
+                        color: context.colors.linkBlue,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
                   ),
-                ),
-                Positioned(
-                  left: constraints.maxWidth * progress - 9,
-                  child: Container(
-                    width: 18,
-                    height: 18,
-                    decoration: BoxDecoration(
-                      color: context.colors.linkBlue,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: context.colors.card, width: 2),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color(0x28000000),
-                          blurRadius: 4,
-                          offset: Offset(0, 1),
+                  Positioned(
+                    left: thumbRadius + trackWidth * progress - thumbRadius,
+                    child: Container(
+                      width: compact ? 12 : 18,
+                      height: compact ? 12 : 18,
+                      decoration: BoxDecoration(
+                        color: context.colors.linkBlue,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: context.colors.card,
+                          width: compact ? 1.5 : 2,
                         ),
-                      ],
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0x28000000),
+                            blurRadius: 4,
+                            offset: Offset(0, 1),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -918,6 +1711,9 @@ class AppRangeScrubber extends StatefulWidget {
     required this.min,
     required this.max,
     required this.onChanged,
+    required this.semanticLabel,
+    this.semanticValue,
+    this.step,
     this.minimumGap = 0,
   });
 
@@ -927,6 +1723,9 @@ class AppRangeScrubber extends StatefulWidget {
   final double max;
   final double minimumGap;
   final void Function(double start, double end) onChanged;
+  final String semanticLabel;
+  final String? semanticValue;
+  final double? step;
 
   @override
   State<AppRangeScrubber> createState() => _AppRangeScrubberState();
@@ -953,36 +1752,54 @@ class _AppRangeScrubberState extends State<AppRangeScrubber> {
     }
   }
 
+  void _adjustThumb(bool start, int direction) {
+    final range = math.max(0.000001, widget.max - widget.min);
+    final adjustment = widget.step ?? range / 20;
+    _movesStart = start;
+    _update((start ? widget.start : widget.end) + adjustment * direction);
+  }
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       final range = math.max(0.000001, widget.max - widget.min);
       final start = ((widget.start - widget.min) / range).clamp(0.0, 1.0);
       final end = ((widget.end - widget.min) / range).clamp(0.0, 1.0);
+      final trackWidth = math.max(1.0, constraints.maxWidth - 44);
+      final normalizedAdjustment = widget.step == null
+          ? 0.05
+          : widget.step! / range;
       double valueAt(double dx) =>
-          widget.min + (dx / constraints.maxWidth).clamp(0.0, 1.0) * range;
-      return Semantics(
-        slider: true,
-        value: '${(start * 100).round()}%–${(end * 100).round()}%',
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapDown: (event) {
-            final value = valueAt(event.localPosition.dx);
-            _selectThumb(value);
-            _update(value);
-          },
-          onHorizontalDragStart: (event) =>
-              _selectThumb(valueAt(event.localPosition.dx)),
-          onHorizontalDragUpdate: (event) =>
-              _update(valueAt(event.localPosition.dx)),
+          widget.min + ((dx - 22) / trackWidth).clamp(0.0, 1.0) * range;
+
+      return GestureDetector(
+        excludeFromSemantics: true,
+        behavior: HitTestBehavior.opaque,
+        onTapDown: (event) {
+          final value = valueAt(event.localPosition.dx);
+          _selectThumb(value);
+          _update(value);
+        },
+        onHorizontalDragStart: (event) =>
+            _selectThumb(valueAt(event.localPosition.dx)),
+        onHorizontalDragUpdate: (event) =>
+            _update(valueAt(event.localPosition.dx)),
+        child: Semantics(
+          container: true,
+          explicitChildNodes: true,
+          label: widget.semanticLabel,
+          value:
+              widget.semanticValue ??
+              '${(start * 100).round()}%–${(end * 100).round()}%',
           child: SizedBox(
-            height: 36,
+            height: 48,
             child: Stack(
+              clipBehavior: Clip.none,
               alignment: Alignment.centerLeft,
               children: [
                 Positioned(
-                  left: 0,
-                  right: 0,
+                  left: 22,
+                  right: 22,
                   child: Container(
                     height: 4,
                     decoration: BoxDecoration(
@@ -992,30 +1809,63 @@ class _AppRangeScrubberState extends State<AppRangeScrubber> {
                   ),
                 ),
                 Positioned(
-                  left: constraints.maxWidth * start,
-                  width: constraints.maxWidth * (end - start),
+                  left: 22 + trackWidth * start,
+                  width: trackWidth * (end - start),
                   child: Container(height: 4, color: context.colors.linkBlue),
                 ),
-                for (final progress in [start, end])
+                for (final thumb in [(true, start), (false, end)])
                   Positioned(
-                    left: constraints.maxWidth * progress - 9,
-                    child: Container(
-                      width: 18,
-                      height: 18,
-                      decoration: BoxDecoration(
-                        color: context.colors.linkBlue,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: context.colors.card,
-                          width: 2,
-                        ),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Color(0x28000000),
-                            blurRadius: 4,
-                            offset: Offset(0, 1),
+                    left: trackWidth * thumb.$2,
+                    child: FocusableActionDetector(
+                      onFocusChange: (focused) {
+                        if (focused) _movesStart = thumb.$1;
+                      },
+                      shortcuts: _scrubberShortcuts,
+                      actions: <Type, Action<Intent>>{
+                        _ScrubberAdjustIntent:
+                            CallbackAction<_ScrubberAdjustIntent>(
+                              onInvoke: (intent) {
+                                _adjustThumb(thumb.$1, intent.direction);
+                                return null;
+                              },
+                            ),
+                      },
+                      child: Semantics(
+                        slider: true,
+                        label:
+                            '${widget.semanticLabel}, ${AppStrings.t(thumb.$1 ? AppStringKeys.businessToolsStarts : AppStringKeys.businessToolsEnds)}',
+                        value: '${(thumb.$2 * 100).round()}%',
+                        increasedValue:
+                            '${((thumb.$2 + normalizedAdjustment).clamp(0.0, 1.0) * 100).round()}%',
+                        decreasedValue:
+                            '${((thumb.$2 - normalizedAdjustment).clamp(0.0, 1.0) * 100).round()}%',
+                        onIncrease: () => _adjustThumb(thumb.$1, 1),
+                        onDecrease: () => _adjustThumb(thumb.$1, -1),
+                        child: SizedBox(
+                          width: 44,
+                          height: 48,
+                          child: Center(
+                            child: Container(
+                              width: 18,
+                              height: 18,
+                              decoration: BoxDecoration(
+                                color: context.colors.linkBlue,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: context.colors.card,
+                                  width: 2,
+                                ),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Color(0x28000000),
+                                    blurRadius: 4,
+                                    offset: Offset(0, 1),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
@@ -1027,6 +1877,19 @@ class _AppRangeScrubberState extends State<AppRangeScrubber> {
     },
   );
 }
+
+class _ScrubberAdjustIntent extends Intent {
+  const _ScrubberAdjustIntent(this.direction);
+
+  final int direction;
+}
+
+const Map<ShortcutActivator, Intent> _scrubberShortcuts = {
+  SingleActivator(LogicalKeyboardKey.arrowLeft): _ScrubberAdjustIntent(-1),
+  SingleActivator(LogicalKeyboardKey.arrowDown): _ScrubberAdjustIntent(-1),
+  SingleActivator(LogicalKeyboardKey.arrowRight): _ScrubberAdjustIntent(1),
+  SingleActivator(LogicalKeyboardKey.arrowUp): _ScrubberAdjustIntent(1),
+};
 
 /// Centered gray timestamp separator in a conversation.
 class TimeSeparator extends StatelessWidget {
@@ -1100,11 +1963,13 @@ class ChatPreviewText extends StatelessWidget {
     required this.message,
     this.draft = false,
     this.alertPrefix,
+    this.fontSize = AppTextSize.footnote,
   });
   final String? sender;
   final String message;
   final bool draft; // render a red "[草稿]" prefix and ignore sender
   final String? alertPrefix;
+  final double fontSize;
 
   static const _redTags = [
     AppStringKeys.commonUiNewFileBadge,
@@ -1119,8 +1984,9 @@ class ChatPreviewText extends StatelessWidget {
     final isRed = _redTags.any(message.startsWith);
     final baseStyle = DefaultTextStyle.of(
       context,
-    ).style.merge(const TextStyle(fontSize: AppTextSize.footnote));
+    ).style.merge(TextStyle(fontSize: fontSize));
     return RichText(
+      textScaler: MediaQuery.textScalerOf(context),
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       text: TextSpan(

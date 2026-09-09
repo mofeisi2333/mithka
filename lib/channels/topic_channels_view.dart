@@ -31,9 +31,14 @@ import 'topic_chat_view.dart';
 import 'topic_post_content.dart';
 
 class TopicChannelsView extends StatefulWidget {
-  const TopicChannelsView({super.key, this.onOpenDetail});
+  const TopicChannelsView({
+    super.key,
+    this.onOpenDetail,
+    this.desktopSidebar = false,
+  });
 
   final ValueChanged<Widget>? onOpenDetail;
+  final bool desktopSidebar;
 
   @override
   State<TopicChannelsView> createState() => _TopicChannelsViewState();
@@ -322,7 +327,11 @@ class _TopicChannelsViewState extends State<TopicChannelsView> {
               .toList()
             ..sort((a, b) => b.date.compareTo(a.date));
       final roots = messages
-          .where((message) => message.replyToMessageId == null)
+          .where(
+            (message) =>
+                message.replyToMessageId == null ||
+                message.replyToMessageId == threadId,
+          )
           .toList();
       if (roots.isNotEmpty) return roots;
       if (messages.isNotEmpty) return messages;
@@ -377,28 +386,39 @@ class _TopicChannelsViewState extends State<TopicChannelsView> {
       color: c.background,
       child: Column(
         children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.tabChannels),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _toggleNonMutedOnly,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 8, 0, 8),
-                    child: Icon(
-                      _nonMutedOnly
-                          ? HeroAppIcons.solidBell.data
-                          : HeroAppIcons.bellSlash.data,
-                      size: 24,
-                      color: _nonMutedOnly ? AppTheme.brand : c.textPrimary,
-                    ),
+          if (widget.desktopSidebar)
+            Container(
+              key: const ValueKey('channels-desktop-toolbar'),
+              height: 52,
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
+              decoration: BoxDecoration(
+                color: c.navBar,
+                border: Border(
+                  bottom: BorderSide(
+                    color: c.divider,
+                    width: AppMetric.divider,
                   ),
                 ),
-              ],
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      AppStringKeys.tabChannels.l10n(context),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyle.title(c.textPrimary),
+                    ),
+                  ),
+                  _channelFilterAction(c),
+                ],
+              ),
+            )
+          else
+            NavHeader(
+              title: AppStrings.t(AppStringKeys.tabChannels),
+              trailing: _channelFilterAction(c),
             ),
-          ),
           Expanded(
             child: posts.isEmpty
                 ? _empty()
@@ -414,6 +434,21 @@ class _TopicChannelsViewState extends State<TopicChannelsView> {
                   ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _channelFilterAction(AppColors c) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _toggleNonMutedOnly,
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: AppIcon(
+          _nonMutedOnly ? HeroAppIcons.solidBell : HeroAppIcons.bellSlash,
+          size: 22,
+          color: _nonMutedOnly ? AppTheme.brand : c.textPrimary,
+        ),
       ),
     );
   }
@@ -579,7 +614,7 @@ class _TopicStats extends StatelessWidget {
           style: TextStyle(fontSize: 15, color: c.textPrimary),
         ),
         const SizedBox(width: 24),
-        AppIcon(HeroAppIcons.share, size: 27, color: c.textPrimary),
+        AppIcon(HeroAppIcons.forward, size: 27, color: c.textPrimary),
       ],
     );
   }

@@ -73,107 +73,95 @@ class _QuickReactionSettingsViewState extends State<QuickReactionSettingsView> {
   Widget build(BuildContext context) {
     final c = context.colors;
     final controller = context.watch<ThemeController>();
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
-        children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.quickReactionsTitle),
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: AnimatedBuilder(
-              animation: EmojiStore.shared,
-              builder: (context, _) {
-                final selected = effectiveQuickReactions(
-                  controller.quickReactions,
-                  allowCustomEmoji: EmojiStore.shared.isPremium,
-                );
-                return ListView(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.lg,
-                    AppSpacing.xl,
-                    AppSpacing.lg,
-                    AppSpacing.section,
-                  ),
-                  children: [
-                    _sectionLabel(AppStringKeys.quickReactionsSelected),
-                    _selectedStrip(selected),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(
-                        AppSpacing.xxl,
-                        AppSpacing.sm,
-                        AppSpacing.xxl,
-                        AppSpacing.xl,
-                      ),
-                      child: Text(
-                        AppStrings.t(AppStringKeys.quickReactionsHint),
-                        style: AppTextStyle.footnote(c.textTertiary),
-                      ),
-                    ),
-                    _sectionLabel(AppStringKeys.quickReactionsAvailable),
-                    _picker(selected),
-                  ],
-                );
-              },
-            ),
-          ),
-        ],
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.quickReactionsTitle),
+      onBack: () => Navigator.of(context).pop(),
+      child: AnimatedBuilder(
+        animation: EmojiStore.shared,
+        builder: (context, _) {
+          final selected = effectiveQuickReactions(
+            controller.quickReactions,
+            allowCustomEmoji: EmojiStore.shared.isPremium,
+          );
+          return SettingsListView(
+            children: [
+              const SettingsSectionHeader(AppStringKeys.quickReactionsSelected),
+              _selectedStrip(selected),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.xxl,
+                  AppSpacing.sm,
+                  AppSpacing.xxl,
+                  AppSpacing.xl,
+                ),
+                child: Text(
+                  AppStrings.t(AppStringKeys.quickReactionsHint),
+                  style: AppTextStyle.footnote(c.textTertiary),
+                ),
+              ),
+              const SettingsSectionHeader(
+                AppStringKeys.quickReactionsAvailable,
+              ),
+              _picker(selected),
+            ],
+          );
+        },
       ),
     );
   }
 
-  Widget _sectionLabel(String key) => Padding(
-    padding: const EdgeInsets.only(left: AppSpacing.xxl, bottom: AppSpacing.sm),
-    child: Text(
-      AppStrings.t(key),
-      style: AppTextStyle.footnote(context.colors.textTertiary),
-    ),
-  );
-
   Widget _selectedStrip(List<QuickReactionChoice> selected) {
-    return Container(
-      height: 70,
-      decoration: BoxDecoration(
-        color: context.colors.card,
-        borderRadius: BorderRadius.circular(AppRadius.card),
+    return SettingsPanel(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
       ),
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: AppSpacing.sm,
-        ),
-        itemCount: selected.length,
-        separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.xs),
-        itemBuilder: (context, index) {
-          final reaction = selected[index];
-          return DragTarget<QuickReactionChoice>(
-            onWillAcceptWithDetails: (details) => details.data != reaction,
-            onAcceptWithDetails: (details) => _move(details.data, index),
-            builder: (context, candidates, _) => LongPressDraggable(
-              data: reaction,
-              axis: Axis.horizontal,
-              feedback: Directionality(
-                textDirection: Directionality.of(context),
-                child: _reactionTile(reaction, selected: true, elevated: true),
-              ),
-              childWhenDragging: Opacity(
-                opacity: 0.25,
-                child: _reactionTile(reaction, selected: true),
-              ),
-              child: AnimatedScale(
-                duration: const Duration(milliseconds: 120),
-                scale: candidates.isEmpty ? 1 : 1.08,
-                child: _reactionTile(
-                  reaction,
-                  selected: true,
-                  onTap: () => _toggle(reaction),
+      child: SizedBox(
+        // A horizontal viewport must have a bounded cross-axis extent. The
+        // unbounded list used to collapse the selected strip (and hide the
+        // picker) on Android.
+        height: 62,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm,
+          ),
+          itemCount: selected.length,
+          separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.xs),
+          itemBuilder: (context, index) {
+            final reaction = selected[index];
+            return DragTarget<QuickReactionChoice>(
+              onWillAcceptWithDetails: (details) => details.data != reaction,
+              onAcceptWithDetails: (details) => _move(details.data, index),
+              builder: (context, candidates, _) => LongPressDraggable(
+                data: reaction,
+                axis: Axis.horizontal,
+                feedback: Directionality(
+                  textDirection: Directionality.of(context),
+                  child: _reactionTile(
+                    reaction,
+                    selected: true,
+                    elevated: true,
+                  ),
+                ),
+                childWhenDragging: Opacity(
+                  opacity: 0.25,
+                  child: _reactionTile(reaction, selected: true),
+                ),
+                child: AnimatedScale(
+                  duration: const Duration(milliseconds: 120),
+                  scale: candidates.isEmpty ? 1 : 1.08,
+                  child: _reactionTile(
+                    reaction,
+                    selected: true,
+                    onTap: () => _toggle(reaction),
+                  ),
                 ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }
@@ -187,10 +175,10 @@ class _QuickReactionSettingsViewState extends State<QuickReactionSettingsView> {
         !packs.any((pack) => pack.id.toString() == _tab)) {
       _tab = 'standard';
     }
-    return Container(
-      decoration: BoxDecoration(
-        color: context.colors.card,
-        borderRadius: BorderRadius.circular(AppRadius.card),
+    return SettingsPanel(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(

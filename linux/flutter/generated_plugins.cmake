@@ -7,7 +7,11 @@ list(APPEND FLUTTER_PLUGIN_LIST
   file_selector_linux
   flutter_secure_storage_linux
   fvp
+  gtk
+  hotkey_manager_linux
   multi_window_manager
+  record_linux
+  screen_capturer_linux
   sentry_flutter
   url_launcher_linux
 )

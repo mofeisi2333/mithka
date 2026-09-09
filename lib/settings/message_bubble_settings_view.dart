@@ -60,7 +60,12 @@ class _MessageBubbleSettingsViewState extends State<MessageBubbleSettingsView> {
         ),
       );
     } catch (_) {
-      if (mounted) showToast(context, 'Could not open @msgbubble.');
+      if (mounted) {
+        showToast(
+          context,
+          AppStrings.t(AppStringKeys.messageBubbleSettingsOpenFailed),
+        );
+      }
     } finally {
       if (mounted) setState(() => _opening = false);
     }
@@ -74,128 +79,157 @@ class _MessageBubbleSettingsViewState extends State<MessageBubbleSettingsView> {
     final sourceLink =
         custom?.sourceMessageLink ??
         theme.messageBubbleBackground.repositoryLink;
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
+    final brightness = Theme.of(context).brightness;
+    final cloudTheme = theme.cloudThemeFor(brightness);
+    final incomingBackground = theme.effectiveMessageBubbleBackgroundSpecFor(
+      outgoing: false,
+    );
+    final outgoingBackground = theme.effectiveMessageBubbleBackgroundSpecFor(
+      outgoing: true,
+    );
+    final showIncomingSurface = theme.shouldRenderMessageBubbleSurface(
+      outgoing: false,
+      brightness: brightness,
+    );
+    final showOutgoingSurface = theme.shouldRenderMessageBubbleSurface(
+      outgoing: true,
+      brightness: brightness,
+    );
+    final showBubbleCustomization =
+        theme.messageBubblesEnabled ||
+        incomingBackground.isDecorative ||
+        outgoingBackground.isDecorative;
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.appearanceMessageBubbles),
+      onBack: () => Navigator.of(context).pop(),
+      child: SettingsListView(
         children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.appearanceMessageBubbles),
-            onBack: () => Navigator.of(context).pop(),
+          SettingsCard.rows(
+            rows: [
+              SettingsSwitchRow(
+                key: const ValueKey('message-bubbles-enabled'),
+                title: AppStrings.t(AppStringKeys.appearanceShowMessageBubbles),
+                value: theme.messageBubblesEnabled,
+                onChanged: (value) => theme.messageBubblesEnabled = value,
+                leading: const SettingsLeadingIcon(icon: HeroAppIcons.message),
+              ),
+            ],
           ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(14, 18, 14, 28),
-              children: [
-                MessageBubbleChatPreview(
-                  incomingBackground: theme
-                      .effectiveMessageBubbleBackgroundSpecFor(outgoing: false),
-                  outgoingBackground: theme
-                      .effectiveMessageBubbleBackgroundSpecFor(outgoing: true),
-                ),
-                const SizedBox(height: 16),
-                _applicationScopeCard(context, theme),
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: c.card,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: c.divider, width: 0.5),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+          SettingsNote(
+            text: AppStrings.t(
+              AppStringKeys.appearanceShowMessageBubblesDescription,
+            ),
+          ),
+          const SizedBox(height: 16),
+          MessageBubbleChatPreview(
+            incomingBackground: incomingBackground,
+            outgoingBackground: outgoingBackground,
+            showIncomingSurface: showIncomingSurface,
+            showOutgoingSurface: showOutgoingSurface,
+            incomingSurfaceColor: cloudTheme?.incomingColor,
+            outgoingSurfaceColor: cloudTheme?.outgoingColor,
+            incomingTextColor: cloudTheme?.incomingTextColor,
+            outgoingTextColor: cloudTheme?.outgoingTextColor,
+          ),
+          if (showBubbleCustomization) ...[
+            const SizedBox(height: 16),
+            _applicationScopeCard(context, theme),
+            const SizedBox(height: 16),
+            SettingsPanel(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     children: [
-                      Row(
-                        children: [
-                          SettingsIconTile(
-                            icon: HeroAppIcons.palette,
-                            backgroundColor: AppTheme.brand,
+                      const SettingsLeadingIcon(icon: HeroAppIcons.palette),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          '@msgbubble repository',
+                          style: TextStyle(
+                            color: c.textPrimary,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w600,
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              '@msgbubble repository',
-                              style: TextStyle(
-                                color: c.textPrimary,
-                                fontSize: 17,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Browse the public channel as a bubble grid. Repository images are exactly 360 × 180 px, with a 300 × 120 bubble box and 30 px transparent padding on every side.',
-                        style: TextStyle(
-                          color: c.textSecondary,
-                          fontSize: 13.5,
-                          height: 1.4,
-                        ),
-                      ),
-                      if (sourceLink != null) ...[
-                        const SizedBox(height: 10),
-                        GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () => openLink(context, sourceLink),
-                          child: Text(
-                            sourceLink,
-                            style: TextStyle(
-                              color: AppTheme.brand,
-                              fontSize: 13,
-                              decoration: TextDecoration.underline,
-                            ),
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 15),
-                      GestureDetector(
-                        key: const ValueKey('messageBubbleOpenRepository'),
-                        behavior: HitTestBehavior.opaque,
-                        onTap: _opening ? null : _openRepository,
-                        child: Container(
-                          height: 46,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: AppTheme.brand,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: _opening
-                              ? SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: AppTheme.onBrand,
-                                  ),
-                                )
-                              : Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    AppIcon(
-                                      HeroAppIcons.share,
-                                      size: 17,
-                                      color: AppTheme.onBrand,
-                                    ),
-                                    const SizedBox(width: 7),
-                                    Text(
-                                      'Open bubble repository',
-                                      style: TextStyle(
-                                        color: AppTheme.onBrand,
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ],
-                                ),
                         ),
                       ),
                     ],
                   ),
-                ),
-              ],
+                  const SizedBox(height: 12),
+                  Text(
+                    AppStrings.t(
+                      AppStringKeys.messageBubbleSettingsRepoDescription,
+                    ),
+                    style: TextStyle(
+                      color: c.textSecondary,
+                      fontSize: 13.5,
+                      height: 1.4,
+                    ),
+                  ),
+                  if (sourceLink != null) ...[
+                    const SizedBox(height: 10),
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => openLink(context, sourceLink),
+                      child: Text(
+                        sourceLink,
+                        style: TextStyle(
+                          color: AppTheme.brand,
+                          fontSize: 13,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 15),
+                  GestureDetector(
+                    key: const ValueKey('messageBubbleOpenRepository'),
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _opening ? null : _openRepository,
+                    child: Container(
+                      height: 46,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: AppTheme.brand,
+                        borderRadius: BorderRadius.circular(AppRadius.card),
+                      ),
+                      child: _opening
+                          ? SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppTheme.onBrand,
+                              ),
+                            )
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                AppIcon(
+                                  HeroAppIcons.share,
+                                  size: 17,
+                                  color: AppTheme.onBrand,
+                                ),
+                                const SizedBox(width: 7),
+                                Text(
+                                  AppStrings.t(
+                                    AppStringKeys.messageBubbleSettingsOpenRepo,
+                                  ),
+                                  style: TextStyle(
+                                    color: AppTheme.onBrand,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );
@@ -233,12 +267,7 @@ class _MessageBubbleSettingsViewState extends State<MessageBubbleSettingsView> {
       );
     }
 
-    return Container(
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: c.divider, width: 0.5),
-      ),
+    return SettingsPanel(
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -246,7 +275,7 @@ class _MessageBubbleSettingsViewState extends State<MessageBubbleSettingsView> {
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 13, 14, 5),
             child: Text(
-              'Apply bubble to',
+              AppStrings.t(AppStringKeys.messageBubbleSettingsApplyTo),
               style: TextStyle(
                 color: c.textSecondary,
                 fontSize: 13,
@@ -254,9 +283,15 @@ class _MessageBubbleSettingsViewState extends State<MessageBubbleSettingsView> {
               ),
             ),
           ),
-          choice('My messages only', MessageBubbleApplicationScope.ownMessages),
+          choice(
+            AppStrings.t(AppStringKeys.messageBubbleSettingsOwnMessages),
+            MessageBubbleApplicationScope.ownMessages,
+          ),
           Divider(height: 0.5, thickness: 0.5, color: c.divider),
-          choice('All messages', MessageBubbleApplicationScope.allMessages),
+          choice(
+            AppStrings.t(AppStringKeys.messageBubbleSettingsAllMessages),
+            MessageBubbleApplicationScope.allMessages,
+          ),
         ],
       ),
     );

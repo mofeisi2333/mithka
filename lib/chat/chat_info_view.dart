@@ -15,47 +15,326 @@ import 'package:mithka/l10n/app_localizations.dart';
 import 'package:mithka/notifications/scope_notification_settings.dart';
 import 'package:provider/provider.dart';
 
-import '../app/app_navigator.dart';
+import '../app/primary_chat_launcher.dart';
+import '../chats/chat_delete_dialog.dart';
 import '../chats/chat_delete_policy.dart';
 import '../components/app_icons.dart';
-import '../components/confirm_dialog.dart';
+import '../components/app_interactive_surface.dart';
 import '../components/icon_grid.dart';
 import '../components/photo_avatar.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
-import '../l10n/telegram_language_controller.dart';
 import '../moments/story_management_view.dart';
 import '../notifications/notification_settings_payload.dart';
 import '../profile/qr_code_view.dart';
+import '../settings/chat_folder_service.dart';
+import '../settings/edit_field_view.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
+import '../tdlib/td_user_index.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import 'add_members_view.dart';
-import 'channel_direct_messages_view.dart';
+import 'chat_members_cache.dart';
 import 'chat_members_view.dart';
 import 'chat_search_view.dart';
 import 'chat_theme_view.dart';
-import 'chat_view.dart';
 import 'chat_wallpaper_view.dart';
 import 'group_management_view.dart';
+import 'group_remark_controller.dart';
 import 'pinned_messages_view.dart';
 import 'shared_media_view.dart';
 import 'telegram_rich_text.dart';
 
 class ChatMember {
-  ChatMember(this.id, this.name, this.photo);
+  ChatMember(this.id, this.name, this.photo, {this.role, this.roleTitle});
+
   final int id;
   final String name;
   final TdFileRef? photo;
+  final MemberRole? role;
+  final String? roleTitle;
 }
 
+@visibleForTesting
+class ChatInfoGroupDetailsCard extends StatelessWidget {
+  const ChatInfoGroupDetailsCard({
+    super.key,
+    required this.groupName,
+    required this.remark,
+    required this.announcement,
+    required this.canEditRemark,
+    required this.onEditRemark,
+    required this.onOpenAnnouncement,
+  });
+
+  final String groupName;
+  final String remark;
+  final String announcement;
+  final bool canEditRemark;
+  final VoidCallback onEditRemark;
+  final VoidCallback onOpenAnnouncement;
+
+  @override
+  Widget build(BuildContext context) => SettingsCard(
+    children: [
+      _GroupDetailRow(
+        key: const ValueKey('chatInfoGroupNameRow'),
+        title: AppStringKeys.groupManagementGroupName,
+        value: groupName,
+      ),
+      const InsetDivider(leadingInset: AppSpacing.xxl),
+      _GroupDetailRow(
+        key: const ValueKey('chatInfoGroupRemarkRow'),
+        title: AppStringKeys.chatInfoGroupRemark,
+        subtitle: AppStringKeys.chatInfoGroupRemarkLocalOnly,
+        value: remark.isEmpty
+            ? AppStringKeys.chatInfoGroupRemarkEmpty.l10n(context)
+            : remark,
+        onTap: canEditRemark ? onEditRemark : null,
+      ),
+      const InsetDivider(leadingInset: AppSpacing.xxl),
+      _GroupAnnouncementRow(
+        announcement: announcement,
+        onTap: onOpenAnnouncement,
+      ),
+    ],
+  );
+}
+
+class _GroupDetailRow extends StatelessWidget {
+  const _GroupDetailRow({
+    super.key,
+    required this.title,
+    required this.value,
+    this.subtitle,
+    this.onTap,
+  });
+
+  final String title;
+  final String value;
+  final String? subtitle;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return AppInteractiveSurface(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          minHeight: subtitle == null
+              ? AppMetric.settingsRowHeight
+              : AppMetric.listRowHeight,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.xxl,
+            AppSpacing.md,
+            AppSpacing.xl,
+            AppSpacing.md,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      title.l10n(context),
+                      style: AppTextStyle.body(c.textPrimary),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.lg),
+                  Expanded(
+                    child: Text(
+                      value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.right,
+                      style: AppTextStyle.footnote(c.textTertiary),
+                    ),
+                  ),
+                  if (onTap != null) ...[
+                    const SizedBox(width: AppSpacing.md),
+                    AppIcon(
+                      HeroAppIcons.chevronRight,
+                      size: AppIconSize.chevron,
+                      color: c.textTertiary,
+                    ),
+                  ],
+                ],
+              ),
+              if (subtitle != null) ...[
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  subtitle!.l10n(context),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyle.caption(c.textTertiary),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GroupAnnouncementRow extends StatelessWidget {
+  const _GroupAnnouncementRow({
+    required this.announcement,
+    required this.onTap,
+  });
+
+  final String announcement;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final empty = announcement.trim().isEmpty;
+    return AppInteractiveSurface(
+      key: const ValueKey('chatInfoGroupAnnouncementRow'),
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 72),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.xxl,
+            AppSpacing.lg,
+            AppSpacing.xl,
+            AppSpacing.lg,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      AppStringKeys.chatInfoGroupAnnouncement.l10n(context),
+                      style: AppTextStyle.body(c.textPrimary),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                  AppIcon(
+                    HeroAppIcons.chevronRight,
+                    size: AppIconSize.chevron,
+                    color: c.textTertiary,
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                empty
+                    ? AppStringKeys.chatInfoGroupAnnouncementEmpty.l10n(context)
+                    : announcement,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  height: 1.35,
+                  color: empty ? c.textTertiary : c.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+@visibleForTesting
+class GroupAnnouncementView extends StatelessWidget {
+  const GroupAnnouncementView({
+    super.key,
+    required this.announcement,
+    required this.entities,
+  });
+
+  final String announcement;
+  final List<MessageTextEntity> entities;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final empty = announcement.trim().isEmpty;
+    return Scaffold(
+      backgroundColor: c.groupedBackground,
+      body: Column(
+        children: [
+          NavHeader(
+            title: AppStringKeys.chatInfoGroupAnnouncement,
+            onBack: () => Navigator.of(context).pop(),
+          ),
+          Expanded(
+            child: ListView(
+              padding: AppInsets.screen,
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: AppInsets.card,
+                  decoration: BoxDecoration(
+                    color: c.card,
+                    borderRadius: BorderRadius.circular(AppRadius.card),
+                  ),
+                  child: empty
+                      ? Text(
+                          AppStringKeys.chatInfoGroupAnnouncementEmpty.l10n(
+                            context,
+                          ),
+                          style: AppTextStyle.body(c.textTertiary),
+                        )
+                      : TelegramRichText(
+                          text: announcement,
+                          entities: entities,
+                          style: TextStyle(
+                            fontSize: 15,
+                            height: 1.45,
+                            color: c.textPrimary,
+                          ),
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+typedef ChatInfoSearchChatLauncher =
+    Future<void> Function({
+      required int chatId,
+      required String title,
+      required int initialMessageId,
+    });
+
 class ChatInfoView extends StatefulWidget {
-  const ChatInfoView({super.key, required this.chatId, required this.title});
+  const ChatInfoView({
+    super.key,
+    required this.chatId,
+    required this.title,
+    this.showBackButton = true,
+    @visibleForTesting this.searchChatLauncher,
+  });
   final int chatId;
   final String title;
+  final bool showBackButton;
+  @visibleForTesting
+  final ChatInfoSearchChatLauncher? searchChatLauncher;
 
   @override
   State<ChatInfoView> createState() => _ChatInfoViewState();
@@ -125,18 +404,10 @@ class _ChatInfoViewState extends State<ChatInfoView> {
     );
   }
 
-  void _openDirectMessages() {
+  Future<void> _openDirectMessages() async {
     final chatId = _vm.directMessagesChatId;
     if (chatId == 0) return;
-    final route = _vm.opensDirectMessagesAsTopics
-        ? MaterialPageRoute<void>(
-            builder: (_) =>
-                ChannelDirectMessagesView(chatId: chatId, title: _vm.title),
-          )
-        : AppChatPageRoute<void>(
-            builder: (_) => ChatView(chatId: chatId, title: _vm.title),
-          );
-    Navigator.of(context).push(route);
+    await openChatFromCurrentWindow(context, chatId: chatId, title: _vm.title);
   }
 
   Future<void> _openSearchHistory() async {
@@ -147,26 +418,87 @@ class _ChatInfoViewState extends State<ChatInfoView> {
       ),
     );
     if (!mounted || messageId == null) return;
+    if (!widget.showBackButton) {
+      final launcher = widget.searchChatLauncher;
+      if (launcher != null) {
+        await launcher(
+          chatId: widget.chatId,
+          title: widget.title,
+          initialMessageId: messageId,
+        );
+      } else {
+        await openChatFromCurrentWindow(
+          context,
+          chatId: widget.chatId,
+          title: widget.title,
+          initialMessageId: messageId,
+        );
+      }
+      return;
+    }
     Navigator.of(context).pop(messageId);
+  }
+
+  Future<void> _editGroupRemark() async {
+    final controller = context.read<GroupRemarkController?>();
+    if (controller == null || !controller.canPersist) return;
+    final current = controller.remarkFor(widget.chatId) ?? '';
+    final value = await Navigator.of(context).push<String>(
+      AppPageRoute<String>(
+        pageBuilder: (_, _, _) => EditFieldView(
+          title: AppStringKeys.chatInfoGroupRemark,
+          initial: current,
+          hint: AppStringKeys.chatInfoGroupRemarkHint,
+          maxLength: 128,
+        ),
+      ),
+    );
+    if (!mounted || value == null || value.trim() == current) return;
+    await controller.setRemark(widget.chatId, value);
+  }
+
+  void _openGroupAnnouncement() {
+    Navigator.of(context).push(
+      AppPageRoute<void>(
+        pageBuilder: (_, _, _) => GroupAnnouncementView(
+          announcement: _vm.description,
+          entities: _vm.descriptionEntities,
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final remarkController = context.watch<GroupRemarkController?>();
     return Scaffold(
       backgroundColor: c.groupedBackground,
       body: Column(
         children: [
           NavHeader(
             title: AppStrings.t(AppStringKeys.chatInfoTitle),
-            onBack: () => Navigator.of(context).pop(),
+            onBack: widget.showBackButton
+                ? () => Navigator.of(context).pop()
+                : null,
           ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
               children: [
                 _topCard(),
-                if (_vm.description.isNotEmpty) ...[
+                if (_vm.isGroup && !_vm.isChannel) ...[
+                  const SizedBox(height: 14),
+                  ChatInfoGroupDetailsCard(
+                    groupName: _vm.title,
+                    remark: remarkController?.remarkFor(widget.chatId) ?? '',
+                    announcement: _vm.description,
+                    canEditRemark: remarkController?.canPersist ?? false,
+                    onEditRemark: () => unawaited(_editGroupRemark()),
+                    onOpenAnnouncement: _openGroupAnnouncement,
+                  ),
+                ],
+                if (_vm.isChannel && _vm.description.isNotEmpty) ...[
                   const SizedBox(height: 14),
                   _descriptionCard(),
                 ],
@@ -194,7 +526,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
 
   BoxDecoration get _card => BoxDecoration(
     color: context.colors.card,
-    borderRadius: BorderRadius.circular(12),
+    borderRadius: BorderRadius.circular(AppRadius.card),
   );
 
   void _openQR() {
@@ -326,7 +658,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
         color: c.searchFill,
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(AppRadius.sm),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -353,7 +685,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
             child: Row(
               children: [
                 Text(
-                  telegramText(AppStringKeys.chatInfoGroupMembers),
+                  AppStrings.t(AppStringKeys.chatInfoGroupMembers),
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w500,
@@ -497,7 +829,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
           if (_vm.isGroup && _vm.canManageGroup) ...[
             const InsetDivider(leadingInset: 14),
             _infoRow(
-              'Stories',
+              AppStrings.t(AppStringKeys.chatInfoStories),
               () => Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => StoryManagementView(
@@ -513,7 +845,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
           if (!_vm.isGroup) ...[
             const InsetDivider(leadingInset: 14),
             _infoRow(
-              telegramText(AppStringKeys.topicPostContentFile),
+              AppStrings.t(AppStringKeys.topicPostContentFile),
               () => Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => SharedMediaView(
@@ -618,7 +950,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
                   _groupAppItem(
                     icon: HeroAppIcons.solidFolder.data,
                     color: const Color(0xFFFFB300),
-                    label: telegramText(AppStringKeys.topicPostContentFile),
+                    label: AppStrings.t(AppStringKeys.topicPostContentFile),
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => SharedMediaView(
@@ -665,7 +997,7 @@ class _ChatInfoViewState extends State<ChatInfoView> {
                   _groupAppItem(
                     icon: HeroAppIcons.solidStar.data,
                     color: const Color(0xFF18C26E),
-                    label: telegramText(AppStringKeys.chatInfoPinnedHighlights),
+                    label: AppStrings.t(AppStringKeys.chatInfoPinnedHighlights),
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => PinnedMessagesView(
@@ -834,24 +1166,11 @@ class _ChatInfoViewState extends State<ChatInfoView> {
   }
 
   Future<void> _clearHistory() async {
-    final first = await confirmDialog(
+    final confirmed = await showTwoStepClearHistoryDialog(
       context,
-      title: AppStrings.t(AppStringKeys.chatInfoClearHistoryQuestion),
-      message: AppStrings.t(AppStringKeys.chatInfoClearHistoryDescription),
-      confirmText: AppStrings.t(AppStringKeys.chatInfoClear),
-      destructive: true,
+      chatTitle: widget.title,
     );
-    if (!mounted || !first) return;
-    final second = await confirmDialog(
-      context,
-      title: AppStrings.t(AppStringKeys.chatInfoConfirmAgain),
-      message: AppStrings.t(
-        AppStringKeys.chatInfoClearHistoryIrreversibleWarning,
-      ),
-      confirmText: AppStrings.t(AppStringKeys.chatInfoConfirmClearHistory),
-      destructive: true,
-    );
-    if (!mounted || !second) return;
+    if (!mounted || !confirmed) return;
     try {
       await _vm.clearHistory();
       if (mounted) Navigator.of(context).pop();
@@ -861,6 +1180,25 @@ class _ChatInfoViewState extends State<ChatInfoView> {
   }
 
   Future<void> _leaveChat() async {
+    final action = _vm.isChannel
+        ? AppStringKeys.topicChatLeaveChannel
+        : AppStringKeys.chatInfoLeaveGroup;
+    final impact = AppStrings.t(AppStringKeys.chatLeaveAndDeleteDescription, {
+      'value1': widget.title,
+    });
+    final confirmed = await showTwoStepDestructiveConfirmation(
+      context,
+      firstTitle: action,
+      firstMessage: impact,
+      firstConfirmText: AppStringKeys.confirmContinue,
+      finalTitle: AppStrings.t(AppStringKeys.chatDeleteFinalQuestion, {
+        'value1': widget.title,
+      }),
+      finalMessage:
+          '$impact\n\n${AppStringKeys.chatDeleteFinalWarning.l10n(context)}',
+      finalConfirmText: action,
+    );
+    if (!mounted || !confirmed) return;
     try {
       await _vm.leaveChat();
       if (mounted) Navigator.of(context).pop();
@@ -1110,27 +1448,12 @@ class _ChatFolderMembershipViewState extends State<ChatFolderMembershipView> {
     Map<String, dynamic> folder, {
     required Set<int> includedChatIds,
     required Set<int> excludedChatIds,
-  }) {
-    return {
-      '@type': 'chatFolder',
-      'title':
-          folder.str('title') ??
-          _folderTitle(folder, const <String, dynamic>{}, 0),
-      if (folder.obj('icon') != null) 'icon': folder.obj('icon'),
-      'is_shareable': folder.boolean('is_shareable') ?? false,
-      'pinned_chat_ids': folder.int64Array('pinned_chat_ids') ?? const <int>[],
-      'included_chat_ids': includedChatIds.toList()..sort(),
-      'excluded_chat_ids': excludedChatIds.toList()..sort(),
-      'exclude_muted': folder.boolean('exclude_muted') ?? false,
-      'exclude_read': folder.boolean('exclude_read') ?? false,
-      'exclude_archived': folder.boolean('exclude_archived') ?? false,
-      'include_contacts': folder.boolean('include_contacts') ?? false,
-      'include_non_contacts': folder.boolean('include_non_contacts') ?? false,
-      'include_bots': folder.boolean('include_bots') ?? false,
-      'include_groups': folder.boolean('include_groups') ?? false,
-      'include_channels': folder.boolean('include_channels') ?? false,
-    };
-  }
+  }) => ChatFolderDraft.fromRaw(folder)
+      .copyWith(
+        includedChatIds: includedChatIds,
+        excludedChatIds: excludedChatIds,
+      )
+      .toRequest();
 
   void _openCreateFolderPrompt() {
     if (_showCreatePrompt) return;
@@ -1251,7 +1574,7 @@ class _ChatFolderMembershipViewState extends State<ChatFolderMembershipView> {
         Container(
           decoration: BoxDecoration(
             color: c.card,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(AppRadius.card),
           ),
           clipBehavior: Clip.antiAlias,
           child: Column(
@@ -1300,6 +1623,7 @@ class _ChatFolderMembershipViewState extends State<ChatFolderMembershipView> {
               Opacity(
                 opacity: item.editable ? 1 : 0.45,
                 child: _ChatFolderToggle(
+                  key: ValueKey('chat-folder-toggle-${item.id}'),
                   value: item.selected,
                   onChanged: item.editable
                       ? (value) => _toggle(item, value)
@@ -1354,7 +1678,11 @@ class _ChatFolderAction extends StatelessWidget {
 }
 
 class _ChatFolderToggle extends StatelessWidget {
-  const _ChatFolderToggle({required this.value, required this.onChanged});
+  const _ChatFolderToggle({
+    super.key,
+    required this.value,
+    required this.onChanged,
+  });
 
   final bool value;
   final ValueChanged<bool>? onChanged;
@@ -1497,7 +1825,7 @@ class _CreateChatFolderPromptState extends State<_CreateChatFolderPrompt> {
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
                 decoration: BoxDecoration(
                   color: c.card,
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
                   boxShadow: const [
                     BoxShadow(
                       color: Color(0x30000000),
@@ -1515,7 +1843,7 @@ class _CreateChatFolderPromptState extends State<_CreateChatFolderPrompt> {
                       style: TextStyle(
                         color: c.textPrimary,
                         fontSize: 19,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -1525,7 +1853,7 @@ class _CreateChatFolderPromptState extends State<_CreateChatFolderPrompt> {
                       padding: const EdgeInsets.symmetric(horizontal: 14),
                       decoration: BoxDecoration(
                         color: c.searchFill,
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(AppRadius.card),
                       ),
                       child: Stack(
                         alignment: Alignment.centerLeft,
@@ -1664,6 +1992,10 @@ class ChatInfoViewModel extends ChangeNotifier {
   bool isArchived = false;
   int autoDeleteTime = 0;
   List<ChatMember> members = [];
+  // Suppresses progressive streaming during a refresh: the strip is already
+  // showing a full cached list, so filling it one member at a time would
+  // shrink it back to one and regrow.
+  bool _paintedFromCache = false;
   bool canInvite = false;
   bool canRemove = false;
   bool canManageGroup = false;
@@ -1740,7 +2072,22 @@ class ChatInfoViewModel extends ChangeNotifier {
   void load() {
     if (_loaded) return;
     _loaded = true;
+    _seedMembersFromCache();
     _loadAsync();
+  }
+
+  /// Paints a previously resolved member strip before the network pass starts,
+  /// so switching back to a chat does not replay the whole resolve. The strip
+  /// stays live: [_loadMembers] still refreshes and overwrites it.
+  void _seedMembersFromCache() {
+    final cached = ChatMembersCache.shared.read(
+      accountSlot: TdClient.shared.activeSlot,
+      chatId: chatId,
+    );
+    if (cached == null) return;
+    members = cached.members;
+    memberCount = cached.memberCount;
+    _paintedFromCache = true;
   }
 
   Future<void> _loadAsync() async {
@@ -1959,23 +2306,68 @@ class ChatInfoViewModel extends ChangeNotifier {
       final uid = memberId?.int64('user_id');
       if (uid == null) continue;
       try {
-        final user = await TdClient.shared.query({
-          '@type': 'getUser',
-          'user_id': uid,
-        });
+        // TDLib guarantees updateUser lands before the id is handed to us, so
+        // the index usually already holds this user and the round-trip is
+        // pure latency — the resolve is sequential, so it costs the strip a
+        // full RTT per member.
+        final user =
+            TdUserIndex.shared.userFor(TdClient.shared.activeSlot, uid) ??
+            await TdClient.shared.query({'@type': 'getUser', 'user_id': uid});
+        final status = entry.obj('status');
+        final roleTitle = _memberTitle(entry, status);
+        var role = switch (status?.type) {
+          'chatMemberStatusCreator' => MemberRole.owner,
+          'chatMemberStatusAdministrator' => MemberRole.admin,
+          _ => null,
+        };
+        if (role == null && roleTitle != null) role = MemberRole.member;
         result.add(
           ChatMember(
             uid,
             TDParse.userName(user),
             TDParse.smallPhoto(user.obj('profile_photo')),
+            role: role,
+            roleTitle: roleTitle,
           ),
         );
         // Stream after each resolve so the grid fills progressively and a slow
-        // or failing lookup can't keep the whole list empty.
-        members = List.of(result);
-        notifyListeners();
+        // or failing lookup can't keep the whole list empty. Skipped once a
+        // cached strip is on screen — there is nothing to fill in, and the
+        // partial lists would only flicker.
+        if (!_paintedFromCache) {
+          members = List.of(result);
+          notifyListeners();
+        }
       } catch (_) {}
     }
+    if (result.isNotEmpty) {
+      if (_paintedFromCache) {
+        // Swap in one step. An empty result here means the refresh failed
+        // rather than that the group emptied, so the cached strip stands.
+        members = List.of(result);
+        notifyListeners();
+      }
+      ChatMembersCache.shared.store(
+        accountSlot: TdClient.shared.activeSlot,
+        chatId: chatId,
+        members: result,
+        memberCount: memberCount,
+      );
+    }
+  }
+
+  String? _memberTitle(
+    Map<String, dynamic> member,
+    Map<String, dynamic>? status,
+  ) {
+    final raw =
+        status?.str('custom_title') ??
+        member.str('custom_title') ??
+        member.str('tag') ??
+        status?.str('title') ??
+        member.str('title');
+    final title = raw?.trim();
+    return title == null || title.isEmpty ? null : title;
   }
 
   void setPinned(bool value) {

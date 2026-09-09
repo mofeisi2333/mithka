@@ -1,19 +1,20 @@
 //
 //  general_settings_view.dart
 //
-//  通用 (General): storage controls and general chat preference toggles. Port
-//  of the Swift `GeneralSettingsView` / `GeneralSettingsViewModel`.
+//  Data and storage controls plus Mithka's separate chat-behavior settings.
+//  Port of the Swift `GeneralSettingsView` / `GeneralSettingsViewModel`.
 //
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
+import '../chat/link_browser.dart';
 import '../components/app_icons.dart';
-import '../components/desktop_content_constraint.dart';
+import '../components/settings_selection_row.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../l10n/app_localizations.dart';
+import '../platform/adaptive_platform.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../theme/app_theme.dart';
@@ -26,7 +27,9 @@ import 'storage_usage_view.dart';
 import 'video_playback_settings_view.dart';
 
 class GeneralSettingsView extends StatefulWidget {
-  const GeneralSettingsView({super.key});
+  const GeneralSettingsView({super.key, this.showBackButton = true});
+
+  final bool showBackButton;
 
   @override
   State<GeneralSettingsView> createState() => _GeneralSettingsViewState();
@@ -35,23 +38,11 @@ class GeneralSettingsView extends StatefulWidget {
 class _GeneralSettingsViewState extends State<GeneralSettingsView> {
   String _cacheSize = '—';
   bool _loadingCache = true;
-  bool _clearing = false;
-  bool _enterToSend = false;
-  SharedPreferences? _prefs;
 
   @override
   void initState() {
     super.initState();
-    _loadPrefs();
     _loadCache();
-  }
-
-  Future<void> _loadPrefs() async {
-    _prefs = await SharedPreferences.getInstance();
-    if (!mounted) return;
-    setState(() {
-      _enterToSend = _prefs!.getBool('enterToSend') ?? false;
-    });
   }
 
   Future<void> _loadCache() async {
@@ -65,22 +56,6 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
       _cacheSize = '—';
     }
     if (mounted) setState(() => _loadingCache = false);
-  }
-
-  Future<void> _clearCache() async {
-    setState(() => _clearing = true);
-    TdClient.shared.send({
-      '@type': 'optimizeStorage',
-      'size': 0,
-      'ttl': 0,
-      'count': 0,
-      'immunity_delay': 0,
-      'chat_limit': 0,
-      'return_deleted_file_statistics': false,
-    });
-    await Future.delayed(const Duration(milliseconds: 800));
-    if (mounted) setState(() => _clearing = false);
-    await _loadCache();
   }
 
   static String _formatBytes(int bytes) {
@@ -98,88 +73,54 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
-        children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.generalTitle),
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: DesktopContentConstraint(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(12, 14, 12, 24),
-                children: [
-                  _storageCard(),
-                  const SizedBox(height: 14),
-                  _autoDownloadCard(),
-                  const SizedBox(height: 14),
-                  _chatCard(),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
+    return SettingsPageScaffold(
+      title: AppStringKeys.settingsDataAndStorage,
+      showBackButton: widget.showBackButton,
+      onBack: () => Navigator.of(context).pop(),
+      child: SettingsListView(children: [_storageCard(), _autoDownloadCard()]),
     );
   }
 
-  Widget _sectionHeader(String title) => Padding(
-    padding: const EdgeInsets.only(left: 16, bottom: 6),
-    child: Align(
-      alignment: Alignment.centerLeft,
-      child: Text(
-        title.l10n(context),
-        style: TextStyle(fontSize: 13, color: context.colors.textTertiary),
-      ),
-    ),
-  );
-
   Widget _autoDownloadCard() {
     final auto = context.watch<AutoDownloadMediaController>();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _sectionHeader(AppStrings.t(AppStringKeys.generalAutoDownloadMedia)),
-        _card([
-          _toggleRowWithSubtitle(
-            HeroAppIcons.mobileScreenButton,
-            const Color(0xFF34C759),
-            AppStrings.t(AppStringKeys.generalAutoDownloadMobileData),
-            auto.mobileHighResImages
+    final desktop = isDesktopTargetPlatform(Theme.of(context).platform);
+    return SettingsSection(
+      titleKey: AppStringKeys.generalAutoDownloadMedia,
+      rows: [
+        if (!desktop)
+          SettingsSwitchRow(
+            key: const ValueKey('general-auto-download-mobile'),
+            title: AppStrings.t(AppStringKeys.generalAutoDownloadMobileData),
+            subtitle: auto.mobileHighResImages
                 ? AppStrings.t(AppStringKeys.generalAutoDownloadHighResImages)
                 : AppStrings.t(AppStringKeys.generalAutoDownloadDisabled),
-            auto.mobileHighResImages,
-            auto.isApplying,
-            (value) =>
+            value: auto.mobileHighResImages,
+            enabled: !auto.isApplying,
+            leading: const SettingsLeadingIcon(
+              icon: HeroAppIcons.mobileScreenButton,
+            ),
+            onChanged: (value) =>
                 _setAutoDownload(() => auto.setMobileHighResImages(value)),
           ),
-          const InsetDivider(leadingInset: 56),
-          _toggleRowWithSubtitle(
-            HeroAppIcons.image,
-            const Color(0xFF1D9BF0),
-            AppStrings.t(AppStringKeys.generalAutoDownloadWifi),
-            auto.wifiHighResImages
-                ? AppStrings.t(AppStringKeys.generalAutoDownloadHighResImages)
-                : AppStrings.t(AppStringKeys.generalAutoDownloadDisabled),
-            auto.wifiHighResImages,
-            auto.isApplying,
-            (value) => _setAutoDownload(() => auto.setWifiHighResImages(value)),
+        SettingsSwitchRow(
+          key: const ValueKey('general-auto-download-wifi'),
+          title: AppStrings.t(AppStringKeys.generalAutoDownloadWifi),
+          subtitle: auto.wifiHighResImages
+              ? AppStrings.t(AppStringKeys.generalAutoDownloadHighResImages)
+              : AppStrings.t(AppStringKeys.generalAutoDownloadDisabled),
+          value: auto.wifiHighResImages,
+          enabled: !auto.isApplying,
+          leading: const SettingsLeadingIcon(icon: HeroAppIcons.image),
+          onChanged: (value) =>
+              _setAutoDownload(() => auto.setWifiHighResImages(value)),
+        ),
+        SettingsRow(
+          title: AppStrings.t(AppStringKeys.generalAdvancedAutomaticDownload),
+          leading: const SettingsLeadingIcon(icon: HeroAppIcons.gear),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const AutoDownloadSettingsView()),
           ),
-          const InsetDivider(leadingInset: 56),
-          _navigationRow(
-            HeroAppIcons.gear,
-            const Color(0xFFAF52DE),
-            AppStrings.t(AppStringKeys.generalAdvancedAutomaticDownload),
-            () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => const AutoDownloadSettingsView(),
-              ),
-            ),
-          ),
-        ]),
+        ),
       ],
     );
   }
@@ -197,303 +138,162 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
     }
   }
 
-  Widget _iconBadge(AppIconData icon, Color color) =>
-      SettingsIconTile(icon: icon, backgroundColor: color);
-
-  Widget _card(List<Widget> children) {
-    return Container(
-      decoration: BoxDecoration(
-        color: context.colors.card,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(children: children),
+  Widget _storageCard() {
+    return SettingsSection(
+      titleKey: AppStringKeys.generalStorage,
+      rows: [
+        SettingsRow(
+          title: AppStrings.t(AppStringKeys.generalCacheSize),
+          value: _loadingCache ? '' : _cacheSize,
+          leading: const SettingsLeadingIcon(icon: HeroAppIcons.solidFolder),
+          trailing: _loadingCache
+              ? const AppActivityIndicator(size: AppIconSize.md)
+              : null,
+          showChevron: false,
+        ),
+        SettingsRow(
+          title: AppStrings.t(AppStringKeys.generalDetailedStorageUsage),
+          leading: const SettingsLeadingIcon(icon: HeroAppIcons.compactDisc),
+          onTap: () => Navigator.of(
+            context,
+          ).push(MaterialPageRoute(builder: (_) => const StorageUsageView())),
+        ),
+        SettingsRow(
+          title: AppStrings.t(AppStringKeys.generalDownloads),
+          leading: const SettingsLeadingIcon(icon: HeroAppIcons.download),
+          onTap: () => Navigator.of(
+            context,
+          ).push(MaterialPageRoute(builder: (_) => const DownloadsView())),
+        ),
+        SettingsRow(
+          title: AppStrings.t(AppStringKeys.generalNetworkUsage),
+          leading: const SettingsLeadingIcon(icon: HeroAppIcons.networkWired),
+          onTap: () => Navigator.of(
+            context,
+          ).push(MaterialPageRoute(builder: (_) => const NetworkUsageView())),
+        ),
+      ],
     );
   }
+}
 
-  Widget _storageCard() {
-    final c = context.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _sectionHeader(AppStrings.t(AppStringKeys.generalStorage)),
-        _card([
-          SizedBox(
-            height: 52,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                children: [
-                  _iconBadge(HeroAppIcons.solidFolder, const Color(0xFF16B0A0)),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      AppStrings.t(AppStringKeys.generalCacheSize),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 16, color: c.textPrimary),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  if (_loadingCache)
-                    const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  else
-                    Text(
-                      _cacheSize,
-                      style: TextStyle(fontSize: 15, color: c.textSecondary),
+/// Mithka-only chat behavior that was previously mixed into data and storage.
+class ChatBehaviorSettingsView extends StatefulWidget {
+  const ChatBehaviorSettingsView({super.key});
+
+  @override
+  State<ChatBehaviorSettingsView> createState() =>
+      _ChatBehaviorSettingsViewState();
+}
+
+class _ChatBehaviorSettingsViewState extends State<ChatBehaviorSettingsView> {
+  @override
+  Widget build(BuildContext context) {
+    final theme = context.watch<ThemeController>();
+    final supportsInternalBrowser = internalBrowserSupported(
+      platform: Theme.of(context).platform,
+    );
+    final selectedLinkMode = supportsInternalBrowser
+        ? theme.linkOpenMode
+        : LinkOpenMode.defaultBrowser;
+    final linkModes = supportsInternalBrowser
+        ? const [
+            LinkOpenMode.askEveryTime,
+            LinkOpenMode.internalBrowser,
+            LinkOpenMode.defaultBrowser,
+          ]
+        : const [LinkOpenMode.defaultBrowser];
+    return SettingsPageScaffold(
+      title: AppStringKeys.settingsChatBehavior,
+      onBack: () => Navigator.of(context).pop(),
+      child: SettingsListView(
+        children: [
+          SettingsCard.rows(
+            rows: [
+              SettingsSwitchRow(
+                key: const ValueKey('chat-behavior-enter-to-send'),
+                title: AppStringKeys.generalSendMessageWithEnter,
+                value: theme.enterToSend,
+                leading: const SettingsLeadingIcon(icon: HeroAppIcons.reply),
+                onChanged: (value) => theme.enterToSend = value,
+              ),
+              SettingsSwitchRow(
+                key: const ValueKey('chat-behavior-open-at-latest'),
+                title: AppStringKeys.generalOpenChatAtLatestMessage,
+                value: theme.openChatsAtLatest,
+                leading: const SettingsLeadingIcon(icon: HeroAppIcons.download),
+                onChanged: (value) => theme.openChatsAtLatest = value,
+              ),
+              SettingsSwitchRow(
+                key: const ValueKey('chat-behavior-saved-messages-identity'),
+                title: AppStringKeys.generalShowSavedMessagesIdentity,
+                value: theme.showSavedMessagesIdentity,
+                leading: const SettingsLeadingIcon(icon: HeroAppIcons.bookmark),
+                onChanged: (value) => theme.showSavedMessagesIdentity = value,
+              ),
+              SettingsSwitchRow(
+                key: const ValueKey('chat-behavior-preserve-sender'),
+                title: AppStringKeys.generalRepeatPreserveSender,
+                value: theme.preserveSenderWhenRepeating,
+                leading: const SettingsLeadingIcon(
+                  icon: HeroAppIcons.arrowsRotate,
+                ),
+                onChanged: (value) => theme.preserveSenderWhenRepeating = value,
+              ),
+              // Only mobile composers offer a camera button, so only they can
+              // put a capture in the system album.
+              if (!isDesktopTargetPlatform(Theme.of(context).platform))
+                SettingsSwitchRow(
+                  key: const ValueKey('chat-behavior-save-captured-photos'),
+                  title: AppStringKeys.generalSaveCapturedPhotos,
+                  subtitle: AppStringKeys.generalSaveCapturedPhotosHint,
+                  value: theme.saveCapturedPhotosToAlbum,
+                  leading: const SettingsLeadingIcon(icon: HeroAppIcons.camera),
+                  onChanged: (value) => theme.saveCapturedPhotosToAlbum = value,
+                ),
+              SettingsSwitchRow(
+                key: const ValueKey('chat-behavior-quick-replies'),
+                title: AppStringKeys.businessToolsQuickReplies,
+                value: theme.quickRepliesEnabled,
+                leading: const SettingsLeadingIcon(
+                  icon: HeroAppIcons.solidMessage,
+                ),
+                onChanged: (value) => theme.quickRepliesEnabled = value,
+              ),
+              SettingsSelectionRow<LinkOpenMode>(
+                key: const ValueKey('chat-behavior-link-browser'),
+                title: AppStrings.t(AppStringKeys.linkBrowserOpenLinksIn),
+                value: AppStrings.t(selectedLinkMode.label),
+                menuTitle: AppStringKeys.linkBrowserOpenLinksIn,
+                menuKey: const ValueKey('link-browser-setting-menu'),
+                leading: const SettingsLeadingIcon(icon: HeroAppIcons.globe),
+                enabled: supportsInternalBrowser,
+                options: [
+                  for (final mode in linkModes)
+                    SettingsSelectionOption<LinkOpenMode>(
+                      id: 'link-browser-mode-${mode.name}',
+                      value: mode,
+                      label: AppStrings.t(mode.label),
+                      subtitle: AppStrings.t(mode.description),
+                      icon: mode.icon,
                     ),
                 ],
+                isSelected: (mode) => mode == selectedLinkMode,
+                onSelected: (mode) => theme.linkOpenMode = mode,
               ),
-            ),
-          ),
-          const InsetDivider(leadingInset: 56),
-          _navigationRow(
-            HeroAppIcons.compactDisc,
-            const Color(0xFF16B0A0),
-            AppStrings.t(AppStringKeys.generalDetailedStorageUsage),
-            () => Navigator.of(
-              context,
-            ).push(MaterialPageRoute(builder: (_) => const StorageUsageView())),
-          ),
-          const InsetDivider(leadingInset: 56),
-          _navigationRow(
-            HeroAppIcons.download,
-            const Color(0xFF3C8CF0),
-            AppStrings.t(AppStringKeys.generalDownloads),
-            () => Navigator.of(
-              context,
-            ).push(MaterialPageRoute(builder: (_) => const DownloadsView())),
-          ),
-          const InsetDivider(leadingInset: 56),
-          _navigationRow(
-            HeroAppIcons.networkWired,
-            const Color(0xFFFF9500),
-            AppStrings.t(AppStringKeys.generalNetworkUsage),
-            () => Navigator.of(
-              context,
-            ).push(MaterialPageRoute(builder: (_) => const NetworkUsageView())),
-          ),
-          const InsetDivider(leadingInset: 56),
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: _clearing || _loadingCache ? null : _clearCache,
-            child: SizedBox(
-              height: 52,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        _clearing
-                            ? AppStrings.t(AppStringKeys.generalClearingCache)
-                            : AppStrings.t(AppStringKeys.generalClearCache),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 16, color: AppTheme.tagRed),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    if (_clearing)
-                      const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                  ],
+              SettingsRow(
+                key: const ValueKey('chat-behavior-video-playback'),
+                title: AppStringKeys.videoPlaybackSettingsTitle,
+                leading: const SettingsLeadingIcon(icon: HeroAppIcons.video),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const VideoPlaybackSettingsView(),
+                  ),
                 ),
-              ),
-            ),
-          ),
-        ]),
-      ],
-    );
-  }
-
-  Widget _chatCard() {
-    final theme = context.watch<ThemeController>();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _sectionHeader(AppStrings.t(AppStringKeys.audioSearchChatTab)),
-        _card([
-          _toggleRow(
-            HeroAppIcons.reply,
-            const Color(0xFF3C8CF0),
-            AppStrings.t(AppStringKeys.generalSendMessageWithEnter),
-            _enterToSend,
-            (v) {
-              setState(() => _enterToSend = v);
-              _prefs?.setBool('enterToSend', v);
-            },
-          ),
-          const InsetDivider(leadingInset: 56),
-          _toggleRow(
-            HeroAppIcons.download,
-            const Color(0xFF3C8CF0),
-            AppStrings.t(AppStringKeys.generalOpenChatAtLatestMessage),
-            theme.openChatsAtLatest,
-            (v) => theme.openChatsAtLatest = v,
-          ),
-          const InsetDivider(leadingInset: 56),
-          _toggleRow(
-            HeroAppIcons.arrowsRotate,
-            const Color(0xFF16B0A0),
-            AppStrings.t(AppStringKeys.generalRepeatPreserveSender),
-            theme.preserveSenderWhenRepeating,
-            (v) => theme.preserveSenderWhenRepeating = v,
-          ),
-          const InsetDivider(leadingInset: 56),
-          _toggleRow(
-            HeroAppIcons.solidMessage,
-            const Color(0xFF34C759),
-            AppStrings.t(AppStringKeys.businessToolsQuickReplies),
-            theme.quickRepliesEnabled,
-            (v) => theme.quickRepliesEnabled = v,
-          ),
-          const InsetDivider(leadingInset: 56),
-          _navigationRow(
-            HeroAppIcons.video,
-            const Color(0xFFAF52DE),
-            AppStringKeys.videoPlaybackSettingsTitle,
-            () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => const VideoPlaybackSettingsView(),
-              ),
-            ),
-          ),
-        ]),
-      ],
-    );
-  }
-
-  Widget _navigationRow(
-    AppIconData icon,
-    Color color,
-    String title,
-    VoidCallback onTap,
-  ) {
-    final c = context.colors;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: SizedBox(
-        height: 52,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              _iconBadge(icon, color),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  title.l10n(context),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 16, color: c.textPrimary),
-                ),
-              ),
-              const SizedBox(width: 8),
-              AppIcon(
-                HeroAppIcons.chevronRight,
-                size: 17,
-                color: c.textTertiary,
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _toggleRow(
-    AppIconData icon,
-    Color color,
-    String title,
-    bool value,
-    ValueChanged<bool> onChanged,
-  ) {
-    final c = context.colors;
-    return SizedBox(
-      height: 52,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          children: [
-            _iconBadge(icon, color),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                title.l10n(context),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 16, color: c.textPrimary),
-              ),
-            ),
-            const SizedBox(width: 12),
-            AppSwitch(
-              value: value,
-              semanticLabel: title.l10n(context),
-              onChanged: onChanged,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _toggleRowWithSubtitle(
-    AppIconData icon,
-    Color color,
-    String title,
-    String subtitle,
-    bool value,
-    bool disabled,
-    ValueChanged<bool> onChanged,
-  ) {
-    final c = context.colors;
-    return SizedBox(
-      height: 66,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          children: [
-            _iconBadge(icon, color),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title.l10n(context),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 17, color: c.textPrimary),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle.l10n(context),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 15, color: c.textSecondary),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            AppSwitch(
-              value: value,
-              enabled: !disabled,
-              semanticLabel: title.l10n(context),
-              onChanged: onChanged,
-            ),
-          ],
-        ),
+        ],
       ),
     );
   }

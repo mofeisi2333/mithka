@@ -9,6 +9,7 @@ import '../components/ui_components.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import 'custom_emoji.dart';
+import 'link_handler.dart';
 import 'telegram_ai_service.dart';
 
 Widget _aiTapLabel(
@@ -49,10 +50,12 @@ Widget _aiPrimaryButton(
   required String label,
   required VoidCallback? onTap,
   bool working = false,
+  String? badge,
 }) => Semantics(
+  key: const ValueKey('telegramAiPrimaryAction'),
   button: true,
   enabled: onTap != null,
-  label: label,
+  label: badge == null ? label : '$label $badge',
   child: GestureDetector(
     behavior: HitTestBehavior.opaque,
     onTap: onTap,
@@ -64,17 +67,48 @@ Widget _aiPrimaryButton(
         color: onTap == null
             ? AppTheme.brand.withValues(alpha: 0.42)
             : AppTheme.brand,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadius.card),
       ),
       child: working
           ? const AppActivityIndicator(size: 20, color: Colors.white)
-          : Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-              ),
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (badge != null) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.38),
+                        width: 0.5,
+                      ),
+                    ),
+                    child: Text(
+                      badge,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        height: 1,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
     ),
   ),
@@ -201,7 +235,7 @@ Future<T?> _aiChoiceSheet<T>(
         ),
         decoration: BoxDecoration(
           color: c.card,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(AppRadius.lg),
           border: Border.all(color: c.divider, width: 0.5),
         ),
         child: Column(
@@ -216,7 +250,7 @@ Future<T?> _aiChoiceSheet<T>(
                   style: TextStyle(
                     color: c.textPrimary,
                     fontSize: 17,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
@@ -255,10 +289,16 @@ class TelegramAiEditorView extends StatefulWidget {
     super.key,
     required this.service,
     required this.source,
+    this.showBackButton = true,
+    this.onClose,
+    this.onSubmit,
   });
 
   final TelegramAiService service;
   final TelegramAiFormattedText source;
+  final bool showBackButton;
+  final FutureOr<void> Function()? onClose;
+  final FutureOr<void> Function(TelegramAiFormattedText result)? onSubmit;
 
   @override
   State<TelegramAiEditorView> createState() => _TelegramAiEditorViewState();
@@ -284,6 +324,7 @@ class _TelegramAiEditorViewState extends State<TelegramAiEditorView> {
   String _style = '';
   String? _expandedStylePromptName;
   bool _working = false;
+  bool _premiumLimitReached = false;
   TelegramAiFormattedText? _result;
 
   bool get _canGenerate => switch (_mode) {
@@ -326,10 +367,41 @@ class _TelegramAiEditorViewState extends State<TelegramAiEditorView> {
       );
       if (mounted) setState(() => _result = result);
     } catch (error) {
-      if (mounted) showToast(context, error.toString());
+      if (!mounted) return;
+      if (isTelegramAiPremiumFlood(error)) {
+        setState(() => _premiumLimitReached = true);
+        showToast(
+          context,
+          '${AppStrings.t(AppStringKeys.telegramAiDailyLimitReached)}\n'
+          '${AppStrings.t(AppStringKeys.telegramAiDailyLimitMessage)}',
+          visibleFor: const Duration(seconds: 4),
+        );
+      } else {
+        showToast(context, error.toString());
+      }
     } finally {
       if (mounted) setState(() => _working = false);
     }
+  }
+
+  void _close() {
+    final callback = widget.onClose;
+    if (callback != null) {
+      unawaited(Future<void>.sync(callback));
+      return;
+    }
+    Navigator.of(context).pop();
+  }
+
+  void _submitResult() {
+    final result = _result;
+    if (result == null) return;
+    final callback = widget.onSubmit;
+    if (callback != null) {
+      unawaited(Future<void>.sync(() => callback(result)));
+      return;
+    }
+    Navigator.of(context).pop(result);
   }
 
   @override
@@ -341,7 +413,7 @@ class _TelegramAiEditorViewState extends State<TelegramAiEditorView> {
         children: [
           NavHeader(
             title: AppStrings.t(AppStringKeys.telegramAiEditorRewriteTitle),
-            onBack: () => Navigator.of(context).pop(),
+            onBack: widget.showBackButton ? _close : null,
           ),
           Expanded(
             child: AnimatedBuilder(
@@ -360,10 +432,17 @@ class _TelegramAiEditorViewState extends State<TelegramAiEditorView> {
                   _aiPrimaryButton(
                     context,
                     label: _primaryLabel,
+                    badge: _premiumLimitReached
+                        ? AppStrings.t(
+                            AppStringKeys.telegramAiIncreaseLimitValue,
+                          )
+                        : null,
                     onTap: _working
                         ? null
+                        : _premiumLimitReached
+                        ? _openPremiumLimit
                         : _result != null
-                        ? () => Navigator.of(context).pop(_result)
+                        ? _submitResult
                         : _canGenerate
                         ? _generate
                         : null,
@@ -379,6 +458,9 @@ class _TelegramAiEditorViewState extends State<TelegramAiEditorView> {
   }
 
   String get _primaryLabel {
+    if (_premiumLimitReached) {
+      return AppStrings.t(AppStringKeys.telegramAiIncreaseLimit);
+    }
     if (_result != null) {
       return AppStrings.t(AppStringKeys.composerFormatApply);
     }
@@ -395,13 +477,17 @@ class _TelegramAiEditorViewState extends State<TelegramAiEditorView> {
     };
   }
 
+  void _openPremiumLimit() {
+    unawaited(openTelegramPremiumFeatures(context, referrer: 'ai_tools'));
+  }
+
   Widget _previewCard() {
     final c = context.colors;
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
         color: c.card,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
         border: Border.all(color: c.divider, width: 0.5),
       ),
       child: Column(
@@ -519,7 +605,7 @@ class _TelegramAiEditorViewState extends State<TelegramAiEditorView> {
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
         color: c.textPrimary.withValues(alpha: 0.055),
-        borderRadius: BorderRadius.circular(28),
+        borderRadius: BorderRadius.circular(AppRadius.xxl),
       ),
       child: Row(
         children: [
@@ -564,7 +650,7 @@ class _TelegramAiEditorViewState extends State<TelegramAiEditorView> {
               color: selected
                   ? AppTheme.brand.withValues(alpha: 0.12)
                   : Colors.transparent,
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(AppRadius.xxl),
             ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -582,7 +668,7 @@ class _TelegramAiEditorViewState extends State<TelegramAiEditorView> {
                   style: TextStyle(
                     color: selected ? AppTheme.brand : c.textSecondary,
                     fontSize: 13,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w600,
                   ),
                 ),
               ],
@@ -604,7 +690,7 @@ class _TelegramAiEditorViewState extends State<TelegramAiEditorView> {
     return Container(
       decoration: BoxDecoration(
         color: c.card,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppRadius.card),
         border: Border.all(color: c.divider, width: 0.5),
       ),
       child: Column(
@@ -649,7 +735,7 @@ class _TelegramAiEditorViewState extends State<TelegramAiEditorView> {
       padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
       decoration: BoxDecoration(
         color: c.card,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppRadius.card),
         border: Border.all(color: c.divider, width: 0.5),
       ),
       child: Column(
@@ -732,7 +818,7 @@ class _TelegramAiEditorViewState extends State<TelegramAiEditorView> {
             color: selected
                 ? AppTheme.brand.withValues(alpha: 0.12)
                 : c.searchFill,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(AppRadius.lg),
             border: Border.all(
               color: selected
                   ? AppTheme.brand.withValues(alpha: 0.60)
@@ -817,7 +903,7 @@ class _TelegramAiEditorViewState extends State<TelegramAiEditorView> {
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color: c.groupedBackground,
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(AppRadius.control),
                     border: Border.all(color: c.divider, width: 0.5),
                   ),
                   child: ConstrainedBox(
@@ -932,7 +1018,7 @@ class _TelegramAiStylesViewState extends State<TelegramAiStylesView> {
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
                 decoration: BoxDecoration(
                   color: c.card,
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
                   border: Border.all(color: c.divider, width: 0.5),
                 ),
                 child: SingleChildScrollView(
@@ -949,7 +1035,7 @@ class _TelegramAiStylesViewState extends State<TelegramAiStylesView> {
                         style: TextStyle(
                           color: c.textPrimary,
                           fontSize: 18,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                       const SizedBox(height: 14),
@@ -1158,7 +1244,7 @@ class _TelegramAiStylesViewState extends State<TelegramAiStylesView> {
                     return Container(
                       decoration: BoxDecoration(
                         color: c.card,
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(AppRadius.card),
                         border: Border.all(color: c.divider, width: 0.5),
                       ),
                       child: _aiRow(

@@ -8,9 +8,14 @@
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
 
+import '../app/ipad_window_chrome.dart';
+import '../app/macos_desktop_title_bar.dart';
 import '../components/app_icons.dart';
 import '../components/ui_components.dart';
 import '../tdlib/td_image_loader.dart';
@@ -44,9 +49,18 @@ class _FullImageViewerState extends State<FullImageViewer> {
   late int _index = widget.startIndex.clamp(0, _max);
   double _dragY = 0;
   bool _zoomed = false;
+  final _pageKeys = <int, GlobalKey<_ViewerPageState>>{};
+  int? _gesturePage;
   bool _runningAction = false;
 
   int get _max => widget.items.isEmpty ? 0 : widget.items.length - 1;
+
+  /// Keeps the viewer's own controls clear of the macOS window controls, which
+  /// sit over this route because it covers the window edge to edge.
+  static double get _chromeInset =>
+      defaultTargetPlatform == TargetPlatform.macOS
+      ? MacosDesktopTitleBar.trafficLightLeadingClearance
+      : 0;
 
   @override
   void dispose() {
@@ -64,6 +78,29 @@ class _FullImageViewerState extends State<FullImageViewer> {
     }
   }
 
+  _ViewerPageState? get _gesturePageState =>
+      _pageKeys[_gesturePage]?.currentState;
+
+  void _onPointerDown(PointerDownEvent event) {
+    if (event.kind != PointerDeviceKind.touch) return;
+    _gesturePage ??= _index;
+    _gesturePageState?._onPointerDown(event);
+  }
+
+  void _onPointerMove(PointerMoveEvent event) {
+    final page = _gesturePageState;
+    final viewport = context.size;
+    if (page != null && viewport != null) {
+      page._onPointerMove(event, viewport);
+    }
+  }
+
+  void _onPointerEnd(PointerEvent event) {
+    final page = _gesturePageState;
+    page?._onPointerEnd(event);
+    if (page == null || page._touches.isEmpty) _gesturePage = null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final progress = (_dragY.abs() / 260).clamp(0.0, 1.0);
@@ -71,41 +108,65 @@ class _FullImageViewerState extends State<FullImageViewer> {
       color: const Color(0xFF000000).withValues(alpha: 1 - progress * 0.85),
       child: Stack(
         children: [
-          GestureDetector(
-            onVerticalDragUpdate: _zoomed
-                ? null
-                : (d) => setState(() => _dragY += d.delta.dy),
-            onVerticalDragEnd: _zoomed
-                ? null
-                : (_) {
-                    if (_dragY.abs() > 110) {
-                      Navigator.of(context).pop();
-                    } else {
-                      setState(() => _dragY = 0);
-                    }
-                  },
-            child: Transform.translate(
-              offset: Offset(0, _dragY),
-              child: PageView.builder(
-                controller: _pageController,
-                physics: _zoomed
-                    ? const NeverScrollableScrollPhysics()
-                    : const PageScrollPhysics(),
-                onPageChanged: (i) => setState(() => _index = i),
-                itemCount: widget.items.length,
-                itemBuilder: (context, i) => _ViewerPage(
-                  ref: widget.items[i],
-                  onZoomChanged: (z) {
-                    if (z != _zoomed) setState(() => _zoomed = z);
-                  },
+          Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerDown: _onPointerDown,
+            onPointerMove: _onPointerMove,
+            onPointerUp: _onPointerEnd,
+            onPointerCancel: _onPointerEnd,
+            child: GestureDetector(
+              onVerticalDragUpdate: _zoomed
+                  ? null
+                  : (d) => setState(() => _dragY += d.delta.dy),
+              onVerticalDragEnd: _zoomed
+                  ? null
+                  : (_) {
+                      if (_dragY.abs() > 110) {
+                        Navigator.of(context).pop();
+                      } else {
+                        setState(() => _dragY = 0);
+                      }
+                    },
+              child: Transform.translate(
+                offset: Offset(0, _dragY),
+                child: PageView.builder(
+                  controller: _pageController,
+                  physics: _zoomed
+                      ? const NeverScrollableScrollPhysics()
+                      : const PageScrollPhysics(),
+                  onPageChanged: (i) => setState(() => _index = i),
+                  itemCount: widget.items.length,
+                  itemBuilder: (context, i) => _ViewerPage(
+                    key: _pageKeys.putIfAbsent(
+                      i,
+                      GlobalKey<_ViewerPageState>.new,
+                    ),
+                    ref: widget.items[i],
+                    onPinchStart: () {
+                      setState(() {
+                        _dragY = 0;
+                        _zoomed = true;
+                      });
+                      _pageController.jumpToPage(_index);
+                    },
+                    onZoomChanged: (z) {
+                      if (z != _zoomed) setState(() => _zoomed = z);
+                    },
+                  ),
                 ),
               ),
             ),
           ),
           Positioned(
-            top: MediaQuery.of(context).padding.top + 8,
-            left: 16,
-            right: 16,
+            top:
+                MediaQuery.of(context).padding.top +
+                iPadWindowChromeInsetOf(context) +
+                8,
+            // The viewer covers the whole window, so on macOS the row would
+            // otherwise sit under the traffic lights. Both sides move in by the
+            // same clearance to keep the counter centred on the window.
+            left: 16 + _chromeInset,
+            right: 16 + _chromeInset,
             child: Opacity(
               opacity: 1 - progress,
               child: Row(
@@ -119,23 +180,33 @@ class _FullImageViewerState extends State<FullImageViewer> {
                     child: Center(
                       child: widget.items.length > 1
                           ? Container(
+                              key: const ValueKey('image-viewer-counter'),
+                              height: 32,
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 12,
                               ),
-                              height: 32,
-                              alignment: Alignment.center,
                               decoration: BoxDecoration(
                                 color: const Color(
                                   0xFFFFFFFF,
                                 ).withValues(alpha: 0.18),
-                                borderRadius: BorderRadius.circular(16),
+                                borderRadius: BorderRadius.circular(
+                                  AppRadius.lg,
+                                ),
                               ),
-                              child: Text(
-                                '${_index + 1} / ${widget.items.length}',
-                                style: const TextStyle(
-                                  color: Color(0xFFFFFFFF),
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w500,
+                              // A Container given an alignment grows to its
+                              // constraints, which here is the whole width
+                              // between the buttons: the counter rendered as a
+                              // bar across the window. Centring with a width
+                              // factor keeps the pill around its text.
+                              child: Center(
+                                widthFactor: 1,
+                                child: Text(
+                                  '${_index + 1} / ${widget.items.length}',
+                                  style: const TextStyle(
+                                    color: Color(0xFFFFFFFF),
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                 ),
                               ),
                             )
@@ -159,8 +230,8 @@ class _FullImageViewerState extends State<FullImageViewer> {
           if (widget.primaryActionLabel != null &&
               widget.onPrimaryAction != null)
             Positioned(
-              left: 22,
-              right: 22,
+              left: 22 + _chromeInset,
+              right: 22 + _chromeInset,
               bottom: MediaQuery.of(context).padding.bottom + 18,
               child: Opacity(
                 opacity: 1 - progress,
@@ -178,7 +249,7 @@ class _FullImageViewerState extends State<FullImageViewer> {
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
                         color: AppTheme.brand,
-                        borderRadius: BorderRadius.circular(14),
+                        borderRadius: BorderRadius.circular(AppRadius.card),
                         boxShadow: const [
                           BoxShadow(
                             color: Color(0x55000000),
@@ -230,9 +301,15 @@ class _FullImageViewerState extends State<FullImageViewer> {
 }
 
 class _ViewerPage extends StatefulWidget {
-  const _ViewerPage({required this.ref, required this.onZoomChanged});
+  const _ViewerPage({
+    super.key,
+    required this.ref,
+    required this.onZoomChanged,
+    required this.onPinchStart,
+  });
   final TdFileRef ref;
   final ValueChanged<bool> onZoomChanged;
+  final VoidCallback onPinchStart;
 
   @override
   State<_ViewerPage> createState() => _ViewerPageState();
@@ -240,19 +317,129 @@ class _ViewerPage extends StatefulWidget {
 
 class _ViewerPageState extends State<_ViewerPage> {
   final _controller = TransformationController();
+  final _touches = <int, Offset>{};
+  bool _touchZoomActive = false;
+  double _pinchStartSpan = 1;
+  double _pinchStartScale = 1;
+  Offset _pinchScenePoint = Offset.zero;
   File? _file;
+  File? _thumbnailFile;
+  int _resolutionGeneration = 0;
 
   @override
   void initState() {
     super.initState();
     _controller.addListener(_onTransform);
-    TdFileCenter.shared.pathFor(widget.ref).then((path) {
-      if (mounted && path != null) setState(() => _file = File(path));
+    _resolveFiles();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ViewerPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_isSameFile(oldWidget.ref, widget.ref)) {
+      _file = null;
+      _thumbnailFile = null;
+      _controller.value = Matrix4.identity();
+      widget.onZoomChanged(false);
+      _resolveFiles();
+    }
+  }
+
+  bool _isSameFile(TdFileRef a, TdFileRef b) =>
+      a.id == b.id &&
+      a.localPath == b.localPath &&
+      a.thumbnail?.id == b.thumbnail?.id &&
+      a.thumbnail?.localPath == b.thumbnail?.localPath;
+
+  void _resolveFiles() {
+    final generation = ++_resolutionGeneration;
+    final ref = widget.ref;
+    TdFileCenter.shared.pathFor(ref).then((path) {
+      if (!mounted || generation != _resolutionGeneration || path == null) {
+        return;
+      }
+      setState(() => _file = File(path));
+    });
+
+    final thumbnail = ref.thumbnail;
+    if (thumbnail == null || thumbnail.id == ref.id) return;
+    TdFileCenter.shared.pathFor(thumbnail).then((path) {
+      if (!mounted || generation != _resolutionGeneration || path == null) {
+        return;
+      }
+      setState(() => _thumbnailFile = File(path));
     });
   }
 
   void _onTransform() {
-    widget.onZoomChanged(_controller.value.getMaxScaleOnAxis() > 1.01);
+    widget.onZoomChanged(
+      _touchZoomActive || _controller.value.getMaxScaleOnAxis() > 1.01,
+    );
+  }
+
+  // A second finger can take over even when a gallery swipe or dismiss drag
+  // has already won the gesture arena before the scale recognizer starts.
+  void _onPointerDown(PointerDownEvent event) {
+    if (event.kind != PointerDeviceKind.touch) return;
+    _touches[event.pointer] = event.localPosition;
+    if (_touches.length != 2) return;
+    setState(() => _touchZoomActive = true);
+    widget.onPinchStart();
+    final points = _touches.values.toList();
+    _pinchStartSpan = math.max(1, (points[1] - points[0]).distance);
+    _pinchStartScale = _controller.value.getMaxScaleOnAxis();
+    _pinchScenePoint = _controller.toScene((points[0] + points[1]) / 2);
+  }
+
+  void _onPointerMove(PointerMoveEvent event, Size viewport) {
+    final previous = _touches[event.pointer];
+    if (previous == null) return;
+    _touches[event.pointer] = event.localPosition;
+    if (!_touchZoomActive) return;
+    if (_touches.length >= 2) {
+      final points = _touches.values.take(2).toList();
+      final scale =
+          (_pinchStartScale *
+                  (points[1] - points[0]).distance /
+                  _pinchStartSpan)
+              .clamp(1.0, 5.0);
+      _setTouchTransform(
+        scale,
+        (points[0] + points[1]) / 2 - _pinchScenePoint * scale,
+        viewport,
+      );
+    } else {
+      final translation = _controller.value.getTranslation();
+      _setTouchTransform(
+        _controller.value.getMaxScaleOnAxis(),
+        Offset(translation.x, translation.y) + event.localPosition - previous,
+        viewport,
+      );
+    }
+  }
+
+  void _setTouchTransform(double scale, Offset offset, Size viewport) {
+    _controller.value = Matrix4.identity()
+      ..setTranslationRaw(
+        offset.dx.clamp(viewport.width * (1 - scale), 0),
+        offset.dy.clamp(viewport.height * (1 - scale), 0),
+        0,
+      )
+      ..scaleByDouble(scale, scale, 1, 1);
+  }
+
+  void _onPointerEnd(PointerEvent event) {
+    _touches.remove(event.pointer);
+    if (_touches.isEmpty && _touchZoomActive) {
+      setState(() => _touchZoomActive = false);
+      _onTransform();
+    }
+  }
+
+  void _toggleZoom() {
+    final current = _controller.value.getMaxScaleOnAxis();
+    final next = current > 1.01 ? 1.0 : 2.0;
+    _controller.value = Matrix4.diagonal3Values(next, next, 1);
   }
 
   @override
@@ -264,16 +451,63 @@ class _ViewerPageState extends State<_ViewerPage> {
 
   @override
   Widget build(BuildContext context) {
-    final media = MediaQuery.of(context);
-    final cacheWidth = (media.size.width * media.devicePixelRatio).ceil();
-    final cacheHeight = (media.size.height * media.devicePixelRatio).ceil();
+    // Sized from the box this page is given, not MediaQuery: the viewer also
+    // runs inside a desktop window and a split-layout pane, where the screen is
+    // larger than the viewport and the image spilled past it.
+    return LayoutBuilder(builder: _buildPage);
+  }
+
+  Widget _buildPage(BuildContext context, BoxConstraints constraints) {
+    final ratio = MediaQuery.devicePixelRatioOf(context);
+    final size = constraints.biggest;
+    final cacheWidth = (size.width * ratio).ceil();
+    final cacheHeight = (size.height * ratio).ceil();
+    Widget fittedImage(ImageProvider<Object> image) => SizedBox(
+      width: size.width,
+      height: size.height,
+      child: Image(image: image, fit: BoxFit.contain),
+    );
+    Widget interactive(Widget child) => GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onDoubleTap: _toggleZoom,
+      child: InteractiveViewer(
+        transformationController: _controller,
+        minScale: 1,
+        maxScale: 5,
+        panEnabled: !_touchZoomActive,
+        scaleEnabled: !_touchZoomActive,
+        trackpadScrollCausesScale: true,
+        // Keep a finite viewport-sized child for both the real image and its
+        // full image and every thumbnail. Previously only a fully downloaded
+        // file or an in-memory mini-thumbnail was put in InteractiveViewer,
+        // so images still resolving from TDLib could not be zoomed at all.
+        child: child,
+      ),
+    );
     if (_file == null) {
+      if (_thumbnailFile != null) {
+        return interactive(
+          fittedImage(
+            ResizeImage(
+              FileImage(_thumbnailFile!),
+              width: cacheWidth,
+              height: cacheHeight,
+              policy: ResizeImagePolicy.fit,
+            ),
+          ),
+        );
+      }
       if (widget.ref.miniThumb != null) {
         return Center(
-          child: Image.memory(
-            widget.ref.miniThumb!,
-            cacheWidth: cacheWidth,
-            cacheHeight: cacheHeight,
+          child: interactive(
+            fittedImage(
+              ResizeImage(
+                MemoryImage(widget.ref.miniThumb!),
+                width: cacheWidth,
+                height: cacheHeight,
+                policy: ResizeImagePolicy.fit,
+              ),
+            ),
           ),
         );
       }
@@ -281,16 +515,13 @@ class _ViewerPageState extends State<_ViewerPage> {
         child: AppActivityIndicator(size: 24, color: Color(0xFFFFFFFF)),
       );
     }
-    return InteractiveViewer(
-      transformationController: _controller,
-      minScale: 1,
-      maxScale: 5,
-      child: Center(
-        child: Image.file(
-          _file!,
-          fit: BoxFit.contain,
-          cacheWidth: cacheWidth,
-          cacheHeight: cacheHeight,
+    return interactive(
+      fittedImage(
+        ResizeImage(
+          FileImage(_file!),
+          width: cacheWidth,
+          height: cacheHeight,
+          policy: ResizeImagePolicy.fit,
         ),
       ),
     );

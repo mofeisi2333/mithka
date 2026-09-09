@@ -134,7 +134,7 @@ class _StickerSetStudioViewState extends State<StickerSetStudioView> {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
         color: colors.card,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppRadius.card),
       ),
       child: Row(
         children: [
@@ -198,7 +198,7 @@ class _StickerSetStudioViewState extends State<StickerSetStudioView> {
           padding: const EdgeInsets.all(11),
           decoration: BoxDecoration(
             color: colors.card,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(AppRadius.card),
           ),
           child: Row(
             children: [
@@ -208,7 +208,7 @@ class _StickerSetStudioViewState extends State<StickerSetStudioView> {
                 clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
                   color: colors.searchFill,
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(AppRadius.control),
                 ),
                 child: cover == null
                     ? Center(
@@ -1017,64 +1017,78 @@ class _StickerSetManageViewState extends State<StickerSetManageView> {
           Expanded(
             child: _loading
                 ? const Center(child: AppActivityIndicator(size: 24))
-                : ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      _manageCard(colors),
-                      const SizedBox(height: 14),
+                // A shrinkWrap grid under a ListView gets unbounded height and
+                // lays out every cell, mounting a decoder per sticker up front.
+                : CustomScrollView(
+                    slivers: [
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                        sliver: SliverToBoxAdapter(child: _manageCard(colors)),
+                      ),
+                      const SliverToBoxAdapter(child: SizedBox(height: 14)),
                       if (_stickers.isEmpty)
-                        Padding(
-                          padding: const EdgeInsets.all(28),
-                          child: Text(
-                            AppStringKeys.stickerStudioEmptySet.l10n(context),
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: colors.textSecondary),
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                          sliver: SliverToBoxAdapter(
+                            child: Padding(
+                              padding: const EdgeInsets.all(28),
+                              child: Text(
+                                AppStringKeys.stickerStudioEmptySet.l10n(
+                                  context,
+                                ),
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: colors.textSecondary),
+                              ),
+                            ),
                           ),
                         )
                       else
-                        GridView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: 4,
-                                mainAxisSpacing: 10,
-                                crossAxisSpacing: 10,
-                              ),
-                          itemCount: _stickers.length,
-                          itemBuilder: (_, index) => GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: _working
-                                ? null
-                                : () => _stickerActions(index),
-                            child: Stack(
-                              children: [
-                                Positioned.fill(
-                                  child: StickerPreview(
-                                    item: _stickers[index],
-                                    cornerRadius: 10,
-                                  ),
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                          sliver: SliverGrid.builder(
+                            gridDelegate:
+                                const SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: 4,
+                                  mainAxisSpacing: 10,
+                                  crossAxisSpacing: 10,
                                 ),
-                                Positioned(
-                                  right: 2,
-                                  bottom: 2,
-                                  child: Container(
-                                    width: 22,
-                                    height: 22,
-                                    decoration: BoxDecoration(
-                                      color: colors.card.withValues(alpha: 0.9),
-                                      shape: BoxShape.circle,
+                            itemCount: _stickers.length,
+                            itemBuilder: (_, index) => GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: _working
+                                  ? null
+                                  : () => _stickerActions(index),
+                              child: Stack(
+                                children: [
+                                  Positioned.fill(
+                                    child: StickerPreview(
+                                      item: _stickers[index],
+                                      cornerRadius: 10,
                                     ),
-                                    child: Center(
-                                      child: AppIcon(
-                                        HeroAppIcons.ellipsis,
-                                        size: 15,
-                                        color: colors.textSecondary,
+                                  ),
+                                  Positioned(
+                                    right: 2,
+                                    bottom: 2,
+                                    child: Container(
+                                      width: 22,
+                                      height: 22,
+                                      decoration: BoxDecoration(
+                                        color: colors.card.withValues(
+                                          alpha: 0.9,
+                                        ),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Center(
+                                        child: AppIcon(
+                                          HeroAppIcons.ellipsis,
+                                          size: 15,
+                                          color: colors.textSecondary,
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -1089,7 +1103,7 @@ class _StickerSetManageViewState extends State<StickerSetManageView> {
   Widget _manageCard(AppColors colors) => Container(
     decoration: BoxDecoration(
       color: colors.card,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(AppRadius.card),
     ),
     child: Column(
       children: [
@@ -1317,7 +1331,9 @@ class _StickerDraftEditorViewState extends State<StickerDraftEditorView> {
                               height: 64,
                               decoration: BoxDecoration(
                                 color: colors.searchFill,
-                                borderRadius: BorderRadius.circular(12),
+                                borderRadius: BorderRadius.circular(
+                                  AppRadius.card,
+                                ),
                               ),
                               child: Center(
                                 child: AppIcon(
@@ -1592,7 +1608,7 @@ class _StickerMaskPlacementViewState extends State<StickerMaskPlacementView> {
     padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
     decoration: BoxDecoration(
       color: colors.card,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(AppRadius.card),
     ),
     child: Column(
       children: [
@@ -1756,7 +1772,7 @@ class _OwnedDialog extends StatelessWidget {
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: context.colors.card,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(AppRadius.lg),
             border: Border.all(color: context.colors.divider, width: 0.5),
             boxShadow: const [
               BoxShadow(
@@ -1847,7 +1863,7 @@ Widget _section(AppColors colors, {required List<Widget> children}) =>
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: colors.card,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppRadius.card),
       ),
       child: Column(children: children),
     );
@@ -1937,7 +1953,7 @@ class _DraftPreview extends StatelessWidget {
     clipBehavior: Clip.antiAlias,
     decoration: BoxDecoration(
       color: context.colors.searchFill,
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(AppRadius.control),
     ),
     child: draft.format == StickerFileFormat.webp
         ? Image.file(

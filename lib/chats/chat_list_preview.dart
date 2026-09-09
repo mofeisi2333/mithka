@@ -4,7 +4,9 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mithka/l10n/app_localizations.dart';
+import 'package:provider/provider.dart';
 
+import '../chat/group_remark_controller.dart';
 import '../chat/message_bubble.dart';
 import '../components/app_icons.dart';
 import '../components/photo_avatar.dart';
@@ -101,6 +103,8 @@ Future<void> showChatListPreview(
   BuildContext context, {
   required ChatSummary chat,
   required List<ChatListPreviewAction> actions,
+  String? meName,
+  TdFileRef? mePhoto,
   ChatListPreviewLoader? loadMessages,
 }) async {
   unawaited(HapticFeedback.mediumImpact());
@@ -112,6 +116,8 @@ Future<void> showChatListPreview(
     pageBuilder: (dialogContext, _, _) => ChatListPreviewSurface(
       chat: chat,
       actions: actions,
+      meName: meName,
+      mePhoto: mePhoto,
       loadMessages:
           loadMessages ?? () => loadChatListPreviewMessages(chat: chat),
     ),
@@ -238,11 +244,15 @@ class ChatListPreviewSurface extends StatefulWidget {
     required this.chat,
     required this.actions,
     required this.loadMessages,
+    this.meName,
+    this.mePhoto,
   });
 
   final ChatSummary chat;
   final List<ChatListPreviewAction> actions;
   final ChatListPreviewLoader loadMessages;
+  final String? meName;
+  final TdFileRef? mePhoto;
 
   @override
   State<ChatListPreviewSurface> createState() => _ChatListPreviewSurfaceState();
@@ -333,7 +343,7 @@ class _ChatListPreviewSurfaceState extends State<ChatListPreviewSurface> {
       key: const ValueKey('chat-list-preview-card'),
       decoration: BoxDecoration(
         color: c.card,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(AppRadius.xl),
         border: Border.all(
           color: c.divider.withValues(alpha: 0.82),
           width: 0.5,
@@ -347,7 +357,7 @@ class _ChatListPreviewSurfaceState extends State<ChatListPreviewSurface> {
         ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(AppRadius.xl),
         child: Column(
           children: [
             _previewHeader(context),
@@ -361,6 +371,13 @@ class _ChatListPreviewSurfaceState extends State<ChatListPreviewSurface> {
 
   Widget _previewHeader(BuildContext context) {
     final c = context.colors;
+    final title = widget.chat.kind == ChatKind.group
+        ? context.watch<GroupRemarkController?>()?.displayTitleFor(
+                widget.chat.id,
+                widget.chat.title,
+              ) ??
+              widget.chat.title
+        : widget.chat.title;
     return Container(
       height: 62,
       padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -368,7 +385,7 @@ class _ChatListPreviewSurfaceState extends State<ChatListPreviewSurface> {
       child: Row(
         children: [
           PhotoAvatar(
-            title: widget.chat.title,
+            title: title,
             photo: widget.chat.photo,
             size: 40,
             square: widget.chat.usesSquareAvatar,
@@ -377,7 +394,7 @@ class _ChatListPreviewSurfaceState extends State<ChatListPreviewSurface> {
           const SizedBox(width: 11),
           Expanded(
             child: Text(
-              widget.chat.title,
+              title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -394,14 +411,7 @@ class _ChatListPreviewSurfaceState extends State<ChatListPreviewSurface> {
           ],
           if (widget.chat.isPinned) ...[
             const SizedBox(width: 8),
-            Transform.rotate(
-              angle: 0.785,
-              child: AppIcon(
-                HeroAppIcons.thumbtack,
-                size: 15,
-                color: c.textTertiary,
-              ),
-            ),
+            AppPinIcon(size: 15, color: c.textTertiary),
           ],
         ],
       ),
@@ -449,6 +459,9 @@ class _ChatListPreviewSurfaceState extends State<ChatListPreviewSurface> {
                   peerTitle: widget.chat.title,
                   peerPhoto: widget.chat.photo,
                   isGroup: isGroup,
+                  meName:
+                      widget.meName ?? AppStringKeys.chatMeLabel.l10n(context),
+                  mePhoto: widget.mePhoto,
                 ),
               ),
             ),
@@ -501,7 +514,7 @@ class _ChatListPreviewSurfaceState extends State<ChatListPreviewSurface> {
       key: const ValueKey('chat-list-preview-actions'),
       decoration: BoxDecoration(
         color: c.card,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
         border: Border.all(
           color: c.divider.withValues(alpha: 0.82),
           width: 0.5,
@@ -515,7 +528,7 @@ class _ChatListPreviewSurfaceState extends State<ChatListPreviewSurface> {
         ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
         child: ListView.separated(
           padding: EdgeInsets.zero,
           itemCount: widget.actions.length,

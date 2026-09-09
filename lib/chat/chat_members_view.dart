@@ -10,11 +10,14 @@ import 'package:flutter/material.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
+import '../components/app_icons.dart';
 import '../components/confirm_dialog.dart';
+import '../components/desktop_row_actions.dart';
 import '../components/photo_avatar.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
-import '../l10n/telegram_language_controller.dart';
+import '../platform/adaptive_platform.dart';
+import '../profile/profile_detail_view.dart';
 import '../settings/edit_field_view.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
@@ -401,7 +404,7 @@ class _ChatMembersViewState extends State<ChatMembersView> {
                 ? AppStrings.t(AppStringKeys.chatMembersTitleWithCount, {
                     'value1': _total,
                   })
-                : telegramText(AppStringKeys.chatInfoGroupMembers),
+                : AppStrings.t(AppStringKeys.chatInfoGroupMembers),
             onBack: () => Navigator.of(context).pop(),
           ),
           Expanded(
@@ -412,40 +415,43 @@ class _ChatMembersViewState extends State<ChatMembersView> {
                     itemCount: _members.length,
                     itemBuilder: (context, i) {
                       final m = _members[i];
-                      final leadingActions = <_MemberSwipeAction>[
+                      final leadingActions = <MemberRowAction>[
                         if (_canPromote && m.role == MemberRole.member)
-                          _MemberSwipeAction(
+                          MemberRowAction(
                             title: AppStringKeys.chatMembersPromote,
+                            icon: HeroAppIcons.userPlus,
                             color: AppTheme.brand,
                             onTap: () => _openAdministratorEditor(m),
                           ),
                         if (_canManageTags && m.role == MemberRole.admin)
-                          _MemberSwipeAction(
+                          MemberRowAction(
                             title: AppStringKeys.chatMembersSetTitle,
+                            icon: HeroAppIcons.idBadge,
                             color: const Color(0xFF16A085),
                             onTap: () => _editTitle(m),
                           ),
                         if (_canManageTags && m.role == MemberRole.member)
-                          _MemberSwipeAction(
-                            title: AppStrings.t(
-                              AppStringKeys.chatMembersMemberTag,
-                            ),
+                          MemberRowAction(
+                            title: AppStringKeys.chatMembersMemberTag,
+                            icon: HeroAppIcons.idBadge,
                             color: const Color(0xFF16A085),
                             onTap: () => _editMemberTag(m),
                           ),
                       ];
-                      final trailingActions = <_MemberSwipeAction>[
+                      final trailingActions = <MemberRowAction>[
                         if (widget.mode == ChatMembersMode.administrators &&
                             _canPromote &&
                             m.role == MemberRole.admin)
-                          _MemberSwipeAction(
+                          MemberRowAction(
                             title: AppStringKeys.chatMembersDemote,
+                            icon: HeroAppIcons.circleMinus,
                             color: AppTheme.tagRed,
                             onTap: () => _confirmDemote(m),
                           )
                         else if (_canRemove && m.role != MemberRole.owner)
-                          _MemberSwipeAction(
+                          MemberRowAction(
                             title: AppStringKeys.chatInfoRemove,
+                            icon: HeroAppIcons.trash,
                             color: AppTheme.tagRed,
                             onTap: () => _confirmRemove(m),
                           ),
@@ -453,7 +459,7 @@ class _ChatMembersViewState extends State<ChatMembersView> {
                       return Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          _MemberSwipeRow(
+                          MemberActionRow(
                             rowId: m.id,
                             openRowId: _openRowId,
                             onOpenChanged: (id) =>
@@ -462,7 +468,7 @@ class _ChatMembersViewState extends State<ChatMembersView> {
                             trailingActions: trailingActions,
                             onTap: widget.mode == ChatMembersMode.administrators
                                 ? () => _openAdministratorEditor(m)
-                                : null,
+                                : () => _openMemberProfile(m),
                             child: _memberRow(m),
                           ),
                           const InsetDivider(leadingInset: 70),
@@ -544,6 +550,14 @@ class _ChatMembersViewState extends State<ChatMembersView> {
     );
   }
 
+  void _openMemberProfile(GroupMember member) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ProfileDetailView(userId: member.id, name: member.name),
+      ),
+    );
+  }
+
   String? _memberTitle(
     Map<String, dynamic> member,
     Map<String, dynamic>? status,
@@ -570,20 +584,23 @@ class _ChatMembersViewState extends State<ChatMembersView> {
   }
 }
 
-class _MemberSwipeAction {
-  const _MemberSwipeAction({
+class MemberRowAction {
+  const MemberRowAction({
     required this.title,
+    required this.icon,
     required this.color,
     required this.onTap,
   });
 
   final String title;
+  final AppIconData icon;
   final Color color;
   final VoidCallback onTap;
 }
 
-class _MemberSwipeRow extends StatefulWidget {
-  const _MemberSwipeRow({
+class MemberActionRow extends StatefulWidget {
+  const MemberActionRow({
+    super.key,
     required this.rowId,
     required this.openRowId,
     required this.onOpenChanged,
@@ -596,16 +613,16 @@ class _MemberSwipeRow extends StatefulWidget {
   final int rowId;
   final int? openRowId;
   final ValueChanged<int?> onOpenChanged;
-  final List<_MemberSwipeAction> leadingActions;
-  final List<_MemberSwipeAction> trailingActions;
+  final List<MemberRowAction> leadingActions;
+  final List<MemberRowAction> trailingActions;
   final Widget child;
   final VoidCallback? onTap;
 
   @override
-  State<_MemberSwipeRow> createState() => _MemberSwipeRowState();
+  State<MemberActionRow> createState() => _MemberActionRowState();
 }
 
-class _MemberSwipeRowState extends State<_MemberSwipeRow> {
+class _MemberActionRowState extends State<MemberActionRow> {
   static const _actionWidth = 76.0;
   double _offset = 0;
 
@@ -613,7 +630,7 @@ class _MemberSwipeRowState extends State<_MemberSwipeRow> {
   double get _trailingWidth => widget.trailingActions.length * _actionWidth;
 
   @override
-  void didUpdateWidget(covariant _MemberSwipeRow oldWidget) {
+  void didUpdateWidget(covariant MemberActionRow oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.openRowId != widget.rowId && _offset != 0) _offset = 0;
   }
@@ -623,7 +640,7 @@ class _MemberSwipeRowState extends State<_MemberSwipeRow> {
     widget.onOpenChanged(null);
   }
 
-  Widget _actions(List<_MemberSwipeAction> actions) => Row(
+  Widget _actions(List<MemberRowAction> actions) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
       for (final action in actions)
@@ -650,62 +667,113 @@ class _MemberSwipeRowState extends State<_MemberSwipeRow> {
   );
 
   @override
-  Widget build(BuildContext context) => ClipRect(
-    child: Stack(
-      children: [
-        if (widget.leadingActions.isNotEmpty)
-          Positioned.fill(
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: _actions(widget.leadingActions),
-            ),
+  Widget build(BuildContext context) {
+    if (isDesktopTargetPlatform()) {
+      final actions = <DesktopRowAction>[
+        for (final action in widget.leadingActions)
+          DesktopRowAction(
+            id: 'member-${widget.rowId}-${action.title}',
+            label: action.title,
+            icon: action.icon,
+            color: action.color,
+            onInvoke: action.onTap,
           ),
-        if (widget.trailingActions.isNotEmpty)
-          Positioned.fill(
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: _actions(widget.trailingActions),
-            ),
+        for (final action in widget.trailingActions)
+          DesktopRowAction(
+            id: 'member-${widget.rowId}-${action.title}',
+            label: action.title,
+            icon: action.icon,
+            color: action.color,
+            onInvoke: action.onTap,
           ),
-        Transform.translate(
-          offset: Offset(_offset, 0),
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: _offset == 0 ? widget.onTap : _close,
-            onHorizontalDragUpdate: (details) {
-              final next = _offset + details.delta.dx;
-              setState(() {
-                if (next > 0 && _leadingWidth > 0) {
-                  _offset = next.clamp(0, _leadingWidth + 20);
-                } else if (next < 0 && _trailingWidth > 0) {
-                  _offset = next.clamp(-_trailingWidth - 20, 0);
-                }
-              });
-            },
-            onHorizontalDragEnd: (details) {
-              final velocity = details.primaryVelocity ?? 0;
-              setState(() {
-                if (_offset > 0 &&
-                    (_offset > _leadingWidth * 0.35 || velocity > 450)) {
-                  _offset = _leadingWidth;
-                  widget.onOpenChanged(widget.rowId);
-                } else if (_offset < 0 &&
-                    (-_offset > _trailingWidth * 0.35 || velocity < -450)) {
-                  _offset = -_trailingWidth;
-                  widget.onOpenChanged(widget.rowId);
-                } else {
-                  _offset = 0;
-                  widget.onOpenChanged(null);
-                }
-              });
-            },
-            child: ColoredBox(
-              color: context.colors.background,
+      ];
+      final content = ColoredBox(
+        color: context.colors.background,
+        child: Stack(
+          children: [
+            Padding(
+              padding: EdgeInsets.only(right: actions.isEmpty ? 0 : 44),
               child: widget.child,
             ),
-          ),
+            if (actions.isNotEmpty)
+              Positioned(
+                right: 10,
+                top: 17,
+                child: DesktopRowActionButton(
+                  key: ValueKey('member-row-actions-${widget.rowId}'),
+                  actions: actions,
+                  semanticLabel: AppStringKeys.notificationOptions,
+                ),
+              ),
+          ],
         ),
-      ],
-    ),
-  );
+      );
+      return DesktopRowActionRegion(
+        actions: actions,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.onTap,
+          child: content,
+        ),
+      );
+    }
+    return ClipRect(
+      child: Stack(
+        children: [
+          if (widget.leadingActions.isNotEmpty)
+            Positioned.fill(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: _actions(widget.leadingActions),
+              ),
+            ),
+          if (widget.trailingActions.isNotEmpty)
+            Positioned.fill(
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: _actions(widget.trailingActions),
+              ),
+            ),
+          Transform.translate(
+            offset: Offset(_offset, 0),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _offset == 0 ? widget.onTap : _close,
+              onHorizontalDragUpdate: (details) {
+                final next = _offset + details.delta.dx;
+                setState(() {
+                  if (next > 0 && _leadingWidth > 0) {
+                    _offset = next.clamp(0, _leadingWidth + 20);
+                  } else if (next < 0 && _trailingWidth > 0) {
+                    _offset = next.clamp(-_trailingWidth - 20, 0);
+                  }
+                });
+              },
+              onHorizontalDragEnd: (details) {
+                final velocity = details.primaryVelocity ?? 0;
+                setState(() {
+                  if (_offset > 0 &&
+                      (_offset > _leadingWidth * 0.35 || velocity > 450)) {
+                    _offset = _leadingWidth;
+                    widget.onOpenChanged(widget.rowId);
+                  } else if (_offset < 0 &&
+                      (-_offset > _trailingWidth * 0.35 || velocity < -450)) {
+                    _offset = -_trailingWidth;
+                    widget.onOpenChanged(widget.rowId);
+                  } else {
+                    _offset = 0;
+                    widget.onOpenChanged(null);
+                  }
+                });
+              },
+              child: ColoredBox(
+                color: context.colors.background,
+                child: widget.child,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

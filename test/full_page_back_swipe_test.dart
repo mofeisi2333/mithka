@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -62,6 +63,7 @@ Future<_RouteHarness> _pumpRouteHarness(
     RepaintBoundary(
       key: harness.boundaryKey,
       child: MaterialApp(
+        theme: ThemeData(platform: TargetPlatform.iOS),
         navigatorKey: harness.navigatorKey,
         navigatorObservers: [harness.observer],
         home: const ColoredBox(key: _previousKey, color: _previousColor),
@@ -142,6 +144,75 @@ void main() {
     await tester.pump();
 
     expect(backCount, 1);
+  });
+
+  testWidgets(
+    'desktop mouse and trackpad drags do not pop while touch still does',
+    (tester) async {
+      var backCount = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(platform: TargetPlatform.macOS),
+          home: Scaffold(
+            body: FullPageBackSwipe(
+              enabled: true,
+              onBack: () => backCount++,
+              child: const SizedBox.expand(key: _fallbackChildKey),
+            ),
+          ),
+        ),
+      );
+
+      final center = tester.getCenter(find.byType(FullPageBackSwipe));
+      for (final kind in const [
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.trackpad,
+      ]) {
+        final gesture = await tester.startGesture(center, kind: kind);
+        await gesture.moveBy(const Offset(140, 0));
+        await gesture.up();
+        await tester.pump();
+
+        expect(backCount, 0);
+        expect(tester.getTopLeft(find.byKey(_fallbackChildKey)).dx, 0);
+      }
+
+      // Explicitly name touch so this remains a regression for desktop touch
+      // screens even though touch is the test binding's default pointer kind.
+      final touch = await tester.startGesture(
+        center,
+        // ignore: avoid_redundant_argument_values
+        kind: PointerDeviceKind.touch,
+      );
+      await touch.moveBy(const Offset(140, 0));
+      await touch.up();
+      await tester.pump();
+
+      expect(backCount, 1);
+    },
+  );
+
+  testWidgets('short horizontal drags do not trigger back', (tester) async {
+    var backCount = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: FullPageBackSwipe(
+            enabled: true,
+            onBack: () => backCount++,
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
+
+    final center = tester.getCenter(find.byType(FullPageBackSwipe));
+    final gesture = await tester.startGesture(center);
+    await gesture.moveBy(const Offset(80, 0));
+    await gesture.up();
+    await tester.pump();
+
+    expect(backCount, 0);
   });
 
   testWidgets('vertical and disabled swipes do not navigate back', (

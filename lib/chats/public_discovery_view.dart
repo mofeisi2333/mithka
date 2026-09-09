@@ -3,8 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 
-import '../app/app_navigator.dart';
-import '../chat/chat_view.dart';
+import '../app/primary_chat_launcher.dart';
 import '../components/app_icons.dart';
 import '../components/confirm_dialog.dart';
 import '../components/photo_avatar.dart';
@@ -47,10 +46,18 @@ class _PublicDiscoveryViewState extends State<PublicDiscoveryView> {
   int _requiredStarCount = 0;
   int? _agreedStarCount;
 
+  /// Whether the last query had any characters (the clear button) and any
+  /// non-blank ones (which empty-state copy to show). Those are the only two
+  /// things `build` reads off the query text.
+  bool _hadQueryText = false;
+  bool _hadQueryTerm = false;
+
   @override
   void initState() {
     super.initState();
     _searchController.text = widget.initialQuery;
+    _hadQueryText = widget.initialQuery.isNotEmpty;
+    _hadQueryTerm = widget.initialQuery.trim().isNotEmpty;
     unawaited(_run(reset: true));
   }
 
@@ -61,11 +68,19 @@ class _PublicDiscoveryViewState extends State<PublicDiscoveryView> {
     super.dispose();
   }
 
-  void _queryChanged(String _) {
+  void _queryChanged(String value) {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 320), () {
       if (mounted) unawaited(_run(reset: true));
     });
+    // The field paints its own text, so a keystroke that changes neither of the
+    // two flags changes nothing on screen — and a rebuild here re-lays-out
+    // every result row.
+    final hasText = value.isNotEmpty;
+    final hasTerm = value.trim().isNotEmpty;
+    if (hasText == _hadQueryText && hasTerm == _hadQueryTerm) return;
+    _hadQueryText = hasText;
+    _hadQueryTerm = hasTerm;
     setState(() {});
   }
 
@@ -202,7 +217,10 @@ class _PublicDiscoveryViewState extends State<PublicDiscoveryView> {
       _loading = true;
       _error = null;
       _similar = const [];
-      _similarTitle = 'Similar to ${source.title}';
+      _similarTitle = AppStrings.t(
+        AppStringKeys.publicDiscoverySimilarToValue1,
+        {'value1': source.title},
+      );
       _similarSourceChatId = source.isBot ? null : source.chatId;
       _similarSourceBotUserId = source.isBot ? source.botUserId : null;
     });
@@ -239,7 +257,9 @@ class _PublicDiscoveryViewState extends State<PublicDiscoveryView> {
       return;
     }
     if (page.limitsExceeded) {
-      _error = 'The public-post search limit has been reached.';
+      _error = AppStrings.t(
+        AppStringKeys.publicDiscoveryPostSearchLimitReached,
+      );
     }
     final hits = await _hydrateMessages(page.messages);
     if (!mounted || generation != _generation) return;
@@ -363,23 +383,14 @@ class _PublicDiscoveryViewState extends State<PublicDiscoveryView> {
       }
     } catch (_) {}
     if (!mounted) return;
-    await pushAppChatRoute(
-      context,
-      AppChatPageRoute(
-        builder: (_) => ChatView(chatId: chatId, title: peer.title),
-      ),
-    );
+    await openChatFromCurrentWindow(context, chatId: chatId, title: peer.title);
   }
 
-  Future<void> _openHit(_DiscoveryHit hit) => pushAppChatRoute(
+  Future<void> _openHit(_DiscoveryHit hit) => openChatFromCurrentWindow(
     context,
-    AppChatPageRoute(
-      builder: (_) => ChatView(
-        chatId: hit.chatId,
-        title: hit.source.title,
-        initialMessageId: hit.message.id,
-      ),
-    ),
+    chatId: hit.chatId,
+    title: hit.source.title,
+    initialMessageId: hit.message.id,
   );
 
   @override
@@ -420,11 +431,11 @@ class _PublicDiscoveryViewState extends State<PublicDiscoveryView> {
                     Expanded(
                       child: Center(
                         child: Text(
-                          tab.label,
+                          AppStrings.t(tab.labelKey),
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: _tab == tab
-                                ? FontWeight.w700
+                                ? FontWeight.w600
                                 : FontWeight.w500,
                             color: _tab == tab
                                 ? AppTheme.brand
@@ -461,7 +472,7 @@ class _PublicDiscoveryViewState extends State<PublicDiscoveryView> {
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           color: c.searchFill,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(AppRadius.control),
         ),
         child: Row(
           children: [
@@ -481,9 +492,15 @@ class _PublicDiscoveryViewState extends State<PublicDiscoveryView> {
                   border: InputBorder.none,
                   isDense: true,
                   hintText: switch (_tab) {
-                    _DiscoveryTab.channels => 'Search channels and bots',
-                    _DiscoveryTab.posts => 'Search public posts or #hashtag',
-                    _DiscoveryTab.media => 'Search all chats',
+                    _DiscoveryTab.channels => AppStrings.t(
+                      AppStringKeys.publicDiscoverySearchChannelsAndBots,
+                    ),
+                    _DiscoveryTab.posts => AppStrings.t(
+                      AppStringKeys.publicDiscoverySearchPublicPostsOrHashtag,
+                    ),
+                    _DiscoveryTab.media => AppStrings.t(
+                      AppStringKeys.publicDiscoverySearchAllChats,
+                    ),
                   },
                   hintStyle: TextStyle(fontSize: 15, color: c.textTertiary),
                 ),
@@ -535,13 +552,13 @@ class _PublicDiscoveryViewState extends State<PublicDiscoveryView> {
                 color: selected
                     ? AppTheme.brand.withValues(alpha: 0.14)
                     : c.groupedBackground,
-                borderRadius: BorderRadius.circular(17),
+                borderRadius: BorderRadius.circular(AppRadius.lg),
                 border: Border.all(
                   color: selected ? AppTheme.brand : c.divider,
                 ),
               ),
               child: Text(
-                filter.label,
+                AppStrings.t(filter.labelKey),
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
@@ -567,7 +584,10 @@ class _PublicDiscoveryViewState extends State<PublicDiscoveryView> {
         (_tab == _DiscoveryTab.channels
             ? _channels.isEmpty && _bots.isEmpty
             : _hits.isEmpty)) {
-      return _status(HeroAppIcons.triangleExclamation, 'Search failed');
+      return _status(
+        HeroAppIcons.triangleExclamation,
+        AppStrings.t(AppStringKeys.publicDiscoverySearchFailed),
+      );
     }
     return switch (_tab) {
       _DiscoveryTab.channels => _channelContent(),
@@ -581,25 +601,45 @@ class _PublicDiscoveryViewState extends State<PublicDiscoveryView> {
     if (_channels.isEmpty && _bots.isEmpty) {
       return _status(
         HeroAppIcons.towerBroadcast,
-        searching ? 'No public channels or bots found' : 'No recommendations',
+        AppStrings.t(
+          searching
+              ? AppStringKeys.publicDiscoveryNoChannelsFound
+              : AppStringKeys.publicDiscoveryNoRecommendations,
+        ),
       );
     }
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(12, 14, 12, 28),
-      children: [
-        if (_channels.isNotEmpty)
-          _peerSection(
-            searching ? 'Public channels' : 'Recommended channels',
-            _channels,
+    // Up to 150 result rows across the three sections, each with an avatar that
+    // resolves and decodes a TDLib file — the old Column built every one of
+    // them, on every keystroke.
+    return CustomScrollView(
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(12, 14, 12, 28),
+          sliver: SliverMainAxisGroup(
+            slivers: [
+              if (_channels.isNotEmpty)
+                _peerSection(
+                  AppStrings.t(
+                    searching
+                        ? AppStringKeys.publicDiscoveryPublicChannels
+                        : AppStringKeys.publicDiscoveryRecommendedChannels,
+                  ),
+                  _channels,
+                ),
+              if (_bots.isNotEmpty) ...[
+                const SliverToBoxAdapter(child: SizedBox(height: 14)),
+                _peerSection(
+                  AppStrings.t(AppStringKeys.publicDiscoveryBotsSection),
+                  _bots,
+                ),
+              ],
+              if (_similarTitle.isNotEmpty) ...[
+                const SliverToBoxAdapter(child: SizedBox(height: 14)),
+                _peerSection(_similarTitle, _similar, tracksSimilarOpen: true),
+              ],
+            ],
           ),
-        if (_bots.isNotEmpty) ...[
-          const SizedBox(height: 14),
-          _peerSection('Bots', _bots),
-        ],
-        if (_similarTitle.isNotEmpty) ...[
-          const SizedBox(height: 14),
-          _peerSection(_similarTitle, _similar, tracksSimilarOpen: true),
-        ],
+        ),
       ],
     );
   }
@@ -610,40 +650,71 @@ class _PublicDiscoveryViewState extends State<PublicDiscoveryView> {
     bool tracksSimilarOpen = false,
   }) {
     final c = context.colors;
-    return Container(
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 7),
-            child: Text(
-              title,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                color: c.textSecondary,
+    const radius = Radius.circular(AppRadius.card);
+    return SliverMainAxisGroup(
+      slivers: [
+        SliverToBoxAdapter(
+          child: ClipRRect(
+            borderRadius: peers.isEmpty
+                ? const BorderRadius.all(radius)
+                : const BorderRadius.vertical(top: radius),
+            child: ColoredBox(
+              color: c.card,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 7),
+                    child: Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: c.textSecondary,
+                      ),
+                    ),
+                  ),
+                  if (peers.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 4, 14, 14),
+                      child: Text(
+                        AppStrings.t(
+                          _loading
+                              ? AppStringKeys.publicDiscoveryLoading
+                              : AppStringKeys.publicDiscoveryNoSimilarResults,
+                        ),
+                        style: TextStyle(fontSize: 14, color: c.textTertiary),
+                      ),
+                    ),
+                ],
               ),
             ),
           ),
-          if (peers.isEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 4, 14, 14),
-              child: Text(
-                _loading ? 'Loading…' : 'No similar results',
-                style: TextStyle(fontSize: 14, color: c.textTertiary),
+        ),
+        SliverList.builder(
+          itemCount: peers.length,
+          itemBuilder: (context, index) {
+            final row = ColoredBox(
+              color: c.card,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (index > 0)
+                    Divider(height: 1, indent: 66, color: c.divider),
+                  _peerRow(peers[index], tracksSimilarOpen: tracksSimilarOpen),
+                ],
               ),
-            ),
-          for (var index = 0; index < peers.length; index++) ...[
-            if (index > 0) Divider(height: 1, indent: 66, color: c.divider),
-            _peerRow(peers[index], tracksSimilarOpen: tracksSimilarOpen),
-          ],
-        ],
-      ),
+            );
+            // Only the last row carries the card's bottom corners.
+            if (index != peers.length - 1) return row;
+            return ClipRRect(
+              borderRadius: const BorderRadius.vertical(bottom: radius),
+              child: row,
+            );
+          },
+        ),
+      ],
     );
   }
 
@@ -702,7 +773,7 @@ class _PublicDiscoveryViewState extends State<PublicDiscoveryView> {
     if (publicPosts && query.isEmpty) {
       return _status(
         HeroAppIcons.magnifyingGlass,
-        'Search public posts by text, #hashtag, or cashtag',
+        AppStrings.t(AppStringKeys.publicDiscoveryPostSearchHint),
       );
     }
     if (_requiredStarCount > 0) {
@@ -742,7 +813,7 @@ class _PublicDiscoveryViewState extends State<PublicDiscoveryView> {
                     AppStrings.t(AppStringKeys.confirmContinue),
                     style: const TextStyle(
                       fontSize: 14,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                       color: Colors.white,
                     ),
                   ),
@@ -756,7 +827,11 @@ class _PublicDiscoveryViewState extends State<PublicDiscoveryView> {
     if (_hits.isEmpty) {
       return _status(
         publicPosts ? HeroAppIcons.message : _mediaFilter.icon,
-        publicPosts ? 'No public posts found' : 'No matching media found',
+        AppStrings.t(
+          publicPosts
+              ? AppStringKeys.publicDiscoveryNoPublicPostsFound
+              : AppStringKeys.publicDiscoveryNoMatchingMedia,
+        ),
       );
     }
     return ListView.separated(
@@ -808,7 +883,7 @@ class _PublicDiscoveryViewState extends State<PublicDiscoveryView> {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 14,
-                            fontWeight: FontWeight.w700,
+                            fontWeight: FontWeight.w600,
                             color: c.textPrimary,
                           ),
                         ),
@@ -897,32 +972,72 @@ class _PublicDiscoveryViewState extends State<PublicDiscoveryView> {
 }
 
 enum _DiscoveryTab {
-  channels('Channels'),
-  posts('Public posts'),
-  media('Global media');
+  channels(AppStringKeys.publicDiscoveryTabChannels),
+  posts(AppStringKeys.publicDiscoveryTabPosts),
+  media(AppStringKeys.publicDiscoveryTabMedia);
 
-  const _DiscoveryTab(this.label);
-  final String label;
+  const _DiscoveryTab(this.labelKey);
+
+  /// Resolved at the render boundary, never stored translated.
+  final String labelKey;
 }
 
 enum _GlobalMediaFilter {
   photoAndVideo(
-    'Photos & videos',
+    AppStringKeys.publicDiscoveryFilterAll,
     'searchMessagesFilterPhotoAndVideo',
     HeroAppIcons.image,
   ),
-  photo('Photos', 'searchMessagesFilterPhoto', HeroAppIcons.image),
-  video('Videos', 'searchMessagesFilterVideo', HeroAppIcons.video),
-  animation('GIFs', 'searchMessagesFilterAnimation', HeroAppIcons.gif),
-  document('Files', 'searchMessagesFilterDocument', HeroAppIcons.file),
-  audio('Music', 'searchMessagesFilterAudio', HeroAppIcons.music),
-  link('Links', 'searchMessagesFilterUrl', HeroAppIcons.link),
-  voice('Voice', 'searchMessagesFilterVoiceNote', HeroAppIcons.microphone),
-  videoNote('Video notes', 'searchMessagesFilterVideoNote', HeroAppIcons.video),
-  poll('Polls', 'searchMessagesFilterPoll', HeroAppIcons.listCheck);
+  photo(
+    AppStringKeys.publicDiscoveryFilterPhoto,
+    'searchMessagesFilterPhoto',
+    HeroAppIcons.image,
+  ),
+  video(
+    AppStringKeys.publicDiscoveryFilterVideo,
+    'searchMessagesFilterVideo',
+    HeroAppIcons.video,
+  ),
+  animation(
+    AppStringKeys.publicDiscoveryFilterAnimation,
+    'searchMessagesFilterAnimation',
+    HeroAppIcons.gif,
+  ),
+  document(
+    AppStringKeys.publicDiscoveryFilterDocument,
+    'searchMessagesFilterDocument',
+    HeroAppIcons.file,
+  ),
+  audio(
+    AppStringKeys.publicDiscoveryFilterAudio,
+    'searchMessagesFilterAudio',
+    HeroAppIcons.music,
+  ),
+  link(
+    AppStringKeys.publicDiscoveryFilterLink,
+    'searchMessagesFilterUrl',
+    HeroAppIcons.link,
+  ),
+  voice(
+    AppStringKeys.publicDiscoveryFilterVoice,
+    'searchMessagesFilterVoiceNote',
+    HeroAppIcons.microphone,
+  ),
+  videoNote(
+    AppStringKeys.publicDiscoveryFilterVideoNote,
+    'searchMessagesFilterVideoNote',
+    HeroAppIcons.video,
+  ),
+  poll(
+    AppStringKeys.publicDiscoveryFilterPoll,
+    'searchMessagesFilterPoll',
+    HeroAppIcons.listCheck,
+  );
 
-  const _GlobalMediaFilter(this.label, this.apiType, this.icon);
-  final String label;
+  const _GlobalMediaFilter(this.labelKey, this.apiType, this.icon);
+
+  /// Resolved at the render boundary, never stored translated.
+  final String labelKey;
   final String apiType;
   final AppIconData icon;
 }

@@ -23,6 +23,7 @@ import '../components/toast.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_image_loader.dart';
 import '../tdlib/td_models.dart';
+import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import 'music_history.dart';
 import 'music_playlist_service.dart';
@@ -32,7 +33,10 @@ const Color musicPlayerAccent = Color(0xFF22C7A9);
 const Color _musicBlack = Color(0xFF000000);
 const Color _musicWhite = Color(0xFFFFFFFF);
 
-enum MusicPlaybackMode { sequence, repeatOne, shuffle }
+@visibleForTesting
+const musicSheetGrabberKey = ValueKey<String>('music-sheet-grabber');
+
+enum MusicPlaybackMode { sequence, reverseSequence, repeatOne, shuffle }
 
 class MusicPlayerController extends ChangeNotifier {
   MusicPlayerController._() {
@@ -43,9 +47,9 @@ class MusicPlayerController extends ChangeNotifier {
   static final MusicPlayerController shared = MusicPlayerController._();
 
   final VoicePlayer _player = VoicePlayer();
-  final MusicPlaylistService _playlistService = MusicPlaylistService();
   final Set<Object> _embeddedPlayerHosts = <Object>{};
   SharedPreferences? _prefs;
+  int _accountSlot = 0;
   int? _loadedSlot;
   int? _playedChatsSlot;
 
@@ -85,7 +89,32 @@ class MusicPlayerController extends ChangeNotifier {
   // opened. main() calls this before TDLib reaches authorizationStateReady.
   void initialize(SharedPreferences prefs) {
     _prefs = prefs;
+    setActiveAccountSlot(TdClient.shared.activeSlot);
     _loadPlayedMusicChats(force: true);
+  }
+
+  /// Clears account-owned playback state before another account becomes the
+  /// source of playlist, chat, and file identifiers.
+  void setActiveAccountSlot(int accountSlot) {
+    if (_accountSlot == accountSlot) return;
+    _accountSlot = accountSlot;
+    _loadedSlot = null;
+    _playedChatsSlot = null;
+    playlists = const [];
+    playlistsLoading = false;
+    _stopPlayback(clearCurrent: true);
+    _loadPlayedMusicChats(force: true);
+    notifyListeners();
+  }
+
+  MusicPlaylistService _playlistServiceForSlot(int accountSlot) {
+    final clientId = TdClient.shared.clientId(accountSlot);
+    return MusicPlaylistService(
+      query: (request) => TdClient.shared.queryForSlot(request, accountSlot),
+      folderUpdate: () => clientId == null
+          ? null
+          : TdClient.shared.latestChatFoldersUpdateForClient(clientId),
+    );
   }
 
   bool isActive(TdFileRef? file) => _player.isActive(file);
@@ -109,23 +138,30 @@ class MusicPlayerController extends ChangeNotifier {
 
   Future<void> refreshPlaylists({bool force = false}) async {
     _loadPlayedMusicChats();
-    final slot = TdClient.shared.activeSlot;
+    final slot = _accountSlot;
     if (!force && _loadedSlot == slot && playlists.isNotEmpty) return;
     _loadedSlot = slot;
     playlistsLoading = true;
     notifyListeners();
     try {
-      playlists = await _playlistService.loadPlaylists();
+      final loaded = await _playlistServiceForSlot(slot).loadPlaylists();
+      if (slot != _accountSlot) return;
+      playlists = loaded;
     } finally {
-      playlistsLoading = false;
-      notifyListeners();
+      if (slot == _accountSlot) {
+        playlistsLoading = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<MusicPlaylist> createPlaylist(String title) async {
-    final playlist = await _playlistService.createPlaylist(title);
-    playlists = [...playlists, playlist];
-    notifyListeners();
+    final slot = _accountSlot;
+    final playlist = await _playlistServiceForSlot(slot).createPlaylist(title);
+    if (slot == _accountSlot) {
+      playlists = [...playlists, playlist];
+      notifyListeners();
+    }
     return playlist;
   }
 
@@ -133,6 +169,7 @@ class MusicPlayerController extends ChangeNotifier {
     ChatMessage message,
     MusicPlaylist playlist,
   ) async {
+    final slot = _accountSlot;
     final fileId = message.music?.file?.id;
     if (fileId == null) return false;
     final index = playlists.indexWhere(
@@ -142,7 +179,8 @@ class MusicPlayerController extends ChangeNotifier {
     if (active.tracks.any((item) => item.music?.file?.id == fileId)) {
       return false;
     }
-    final sent = await _playlistService.addTrack(active, message);
+    final sent = await _playlistServiceForSlot(slot).addTrack(active, message);
+    if (slot != _accountSlot) return true;
     final updated = active.copyWith(tracks: [...active.tracks, sent]);
     playlists = index < 0
         ? [...playlists, updated]
@@ -158,6 +196,7 @@ class MusicPlayerController extends ChangeNotifier {
     MusicPlaylist playlist,
     ChatMessage message,
   ) async {
+    final slot = _accountSlot;
     final fileId = message.music?.file?.id;
     if (fileId == null) return;
     final playlistIndex = playlists.indexWhere(
@@ -169,7 +208,8 @@ class MusicPlayerController extends ChangeNotifier {
       orElse: () => null,
     );
     if (savedTrack == null) return;
-    await _playlistService.removeTrack(active, savedTrack);
+    await _playlistServiceForSlot(slot).removeTrack(active, savedTrack);
+    if (slot != _accountSlot) return;
     final updated = active.copyWith(
       tracks: active.tracks.where((item) => item.id != savedTrack.id).toList(),
     );
@@ -191,6 +231,7 @@ class MusicPlayerController extends ChangeNotifier {
     int chatId, {
     String? title,
   }) async {
+    final accountSlot = _accountSlot;
     _recordPlayedMusicChat(chatId, title ?? message.senderName);
     final sourceRevision = _setPlaybackSource(
       chatId: chatId,
@@ -202,7 +243,10 @@ class MusicPlayerController extends ChangeNotifier {
     // become eligible for next-track playback in the meantime.
     play(message, visibleQueue: [message]);
     try {
-      final tracks = await _playlistService.loadTracks(chatId);
+      final tracks = await _playlistServiceForSlot(
+        accountSlot,
+      ).loadTracks(chatId);
+      if (accountSlot != _accountSlot) return;
       if (sourceRevision != _playbackSourceRevision ||
           _playbackSourceChatId != chatId ||
           _playbackSourceIsPlaylist ||
@@ -227,8 +271,10 @@ class MusicPlayerController extends ChangeNotifier {
     play(message, visibleQueue: playlist.tracks);
   }
 
-  Future<List<ChatMessage>> loadChatTracks(int chatId) =>
-      _playlistService.loadTracks(chatId);
+  Future<List<ChatMessage>> loadChatTracks(int chatId) {
+    final slot = _accountSlot;
+    return _playlistServiceForSlot(slot).loadTracks(chatId);
+  }
 
   void play(
     ChatMessage message, {
@@ -265,6 +311,8 @@ class MusicPlayerController extends ChangeNotifier {
 
   void next() => _playAdjacent(1, manual: true);
 
+  void previous() => _playAdjacent(-1, manual: true);
+
   void seekFraction(double fraction) {
     final fallback = current?.music?.duration ?? 0;
     unawaited(_player.seekFraction(fraction, fallback));
@@ -272,11 +320,33 @@ class MusicPlayerController extends ChangeNotifier {
 
   void cycleMode() {
     mode = switch (mode) {
-      MusicPlaybackMode.sequence => MusicPlaybackMode.repeatOne,
+      MusicPlaybackMode.sequence => MusicPlaybackMode.reverseSequence,
+      MusicPlaybackMode.reverseSequence => MusicPlaybackMode.repeatOne,
       MusicPlaybackMode.repeatOne => MusicPlaybackMode.shuffle,
       MusicPlaybackMode.shuffle => MusicPlaybackMode.sequence,
     };
     notifyListeners();
+  }
+
+  @visibleForTesting
+  static int? resolveAdjacentIndex({
+    required int currentIndex,
+    required int itemCount,
+    required int delta,
+    required bool wrap,
+    required MusicPlaybackMode mode,
+  }) {
+    assert(delta == -1 || delta == 1);
+    if (itemCount <= 0 || currentIndex < 0 || currentIndex >= itemCount) {
+      return null;
+    }
+    final traversalDelta = mode == MusicPlaybackMode.reverseSequence
+        ? -delta
+        : delta;
+    final candidate = currentIndex + traversalDelta;
+    if (candidate >= 0 && candidate < itemCount) return candidate;
+    if (!wrap) return null;
+    return candidate < 0 ? itemCount - 1 : 0;
   }
 
   void collapse() {
@@ -330,12 +400,14 @@ class MusicPlayerController extends ChangeNotifier {
       (item) => item.music?.file?.id == active.music?.file?.id,
     );
     if (index < 0) return;
-    final nextIndex = index + delta;
-    if (nextIndex < 0 || nextIndex >= playable.length) {
-      if (!manual) return;
-      play(playable.first, visibleQueue: playable, reveal: manual);
-      return;
-    }
+    final nextIndex = resolveAdjacentIndex(
+      currentIndex: index,
+      itemCount: playable.length,
+      delta: delta,
+      wrap: manual,
+      mode: mode,
+    );
+    if (nextIndex == null) return;
     play(playable[nextIndex], visibleQueue: playable, reveal: manual);
   }
 
@@ -365,12 +437,11 @@ class MusicPlayerController extends ChangeNotifier {
     return _playbackSourceRevision;
   }
 
-  String get _playedChatsPrefsKey =>
-      'mithka.musicPlayedChats.v1.${TdClient.shared.activeSlot}';
+  String get _playedChatsPrefsKey => 'mithka.musicPlayedChats.v1.$_accountSlot';
 
   void _loadPlayedMusicChats({bool force = false}) {
     final prefs = _prefs;
-    final slot = TdClient.shared.activeSlot;
+    final slot = _accountSlot;
     if (prefs == null || (!force && _playedChatsSlot == slot)) return;
     _playedChatsSlot = slot;
     playedMusicChats = decodePlayedMusicChats(
@@ -840,7 +911,7 @@ class _CollapsedMusicPlayer extends StatelessWidget {
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: _musicBlack.withValues(alpha: 0.22),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadius.card),
                 ),
                 child: AppIcon(
                   controller.isPlaying ? HeroAppIcons.pause : HeroAppIcons.play,
@@ -1014,20 +1085,26 @@ Future<T?> _showMusicBottomSheet<T>(
   BuildContext context, {
   required WidgetBuilder builder,
 }) {
-  return showGeneralDialog<T>(
+  return showAppAdaptiveSheetDialog<T>(
     context: context,
-    barrierDismissible: true,
+    builder: (sheetContext) {
+      final sheet = builder(sheetContext);
+      if (appModalUsesCenteredPresentation(MediaQuery.sizeOf(sheetContext))) {
+        return sheet;
+      }
+      return Align(
+        alignment: Alignment.bottomCenter,
+        child: SizedBox(
+          width: MediaQuery.sizeOf(sheetContext).width,
+          child: sheet,
+        ),
+      );
+    },
     barrierLabel: AppStrings.t(AppStringKeys.countryPickerCancel),
     barrierColor: const Color(0x70000000),
     transitionDuration: const Duration(milliseconds: 220),
-    pageBuilder: (sheetContext, _, _) => Align(
-      alignment: Alignment.bottomCenter,
-      child: SizedBox(
-        width: MediaQuery.sizeOf(sheetContext).width,
-        child: builder(sheetContext),
-      ),
-    ),
-    transitionBuilder: (sheetContext, animation, _, child) {
+    centeredBackgroundColor: context.colors.background,
+    mobileTransitionBuilder: (sheetContext, animation, _, child) {
       final curved = CurvedAnimation(
         parent: animation,
         curve: Curves.easeOutCubic,
@@ -1078,15 +1155,16 @@ void _showMusicQueue(BuildContext context, MusicPlayerController controller) {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 16,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w600,
                           color: c.textPrimary,
                         ),
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        AppStrings.t(AppStringKeys.musicPlayerTrackCount, {
-                          'value1': queue.length,
-                        }),
+                        AppStrings.plural(
+                          AppStringKeys.musicPlayerTrackCount,
+                          queue.length,
+                        ),
                         style: TextStyle(fontSize: 12, color: c.textTertiary),
                       ),
                       const SizedBox(height: 12),
@@ -1359,7 +1437,7 @@ class _MusicPlaylistsSheet extends StatelessWidget {
                         AppStrings.t(AppStringKeys.musicPlayerPlaylists),
                         style: TextStyle(
                           fontSize: 19,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w600,
                           color: c.textPrimary,
                         ),
                       ),
@@ -1400,7 +1478,7 @@ class _MusicPlaylistsSheet extends StatelessWidget {
                           alignment: Alignment.center,
                           decoration: BoxDecoration(
                             color: musicPlayerAccent,
-                            borderRadius: BorderRadius.circular(21),
+                            borderRadius: BorderRadius.circular(AppRadius.xl),
                           ),
                           child: Text(
                             AppStrings.t(
@@ -1471,9 +1549,9 @@ class _MusicPlaylistsSheet extends StatelessWidget {
                                     ),
                                     const SizedBox(height: 3),
                                     Text(
-                                      AppStrings.t(
+                                      AppStrings.plural(
                                         AppStringKeys.musicPlayerTrackCount,
-                                        {'value1': playlist.tracks.length},
+                                        playlist.tracks.length,
                                       ),
                                       style: TextStyle(
                                         fontSize: 12,
@@ -1549,7 +1627,7 @@ class _CreatePlaylistDialogState extends State<_CreatePlaylistDialog> {
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
           decoration: BoxDecoration(
             color: c.card,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(AppRadius.lg),
             boxShadow: [
               BoxShadow(
                 color: _musicBlack.withValues(alpha: 0.18),
@@ -1567,7 +1645,7 @@ class _CreatePlaylistDialogState extends State<_CreatePlaylistDialog> {
                 style: TextStyle(
                   color: c.textPrimary,
                   fontSize: 19,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
               const SizedBox(height: 16),
@@ -1577,7 +1655,7 @@ class _CreatePlaylistDialogState extends State<_CreatePlaylistDialog> {
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 decoration: BoxDecoration(
                   color: c.searchFill,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadius.card),
                 ),
                 child: Stack(
                   alignment: Alignment.centerLeft,
@@ -1763,14 +1841,14 @@ class _PlaylistTracksSheet extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 fontSize: 19,
-                                fontWeight: FontWeight.w700,
+                                fontWeight: FontWeight.w600,
                                 color: c.textPrimary,
                               ),
                             ),
                             Text(
-                              AppStrings.t(
+                              AppStrings.plural(
                                 AppStringKeys.musicPlayerTrackCount,
-                                {'value1': playlist.tracks.length},
+                                playlist.tracks.length,
                               ),
                               style: TextStyle(
                                 fontSize: 12,
@@ -1872,14 +1950,15 @@ class _PlayedChatTracksSheet extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 19,
-                            fontWeight: FontWeight.w700,
+                            fontWeight: FontWeight.w600,
                             color: c.textPrimary,
                           ),
                         ),
                         Text(
-                          AppStrings.t(AppStringKeys.musicPlayerTrackCount, {
-                            'value1': tracks.length,
-                          }),
+                          AppStrings.plural(
+                            AppStringKeys.musicPlayerTrackCount,
+                            tracks.length,
+                          ),
                           style: TextStyle(fontSize: 12, color: c.textTertiary),
                         ),
                       ],
@@ -1941,7 +2020,11 @@ class _SheetGrabber extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (appModalUsesCenteredPresentation(MediaQuery.sizeOf(context))) {
+      return const SizedBox(height: 8);
+    }
     return Padding(
+      key: musicSheetGrabberKey,
       padding: const EdgeInsets.only(top: 8, bottom: 4),
       child: Container(
         width: 38,
@@ -2099,6 +2182,7 @@ void _openOriginal(ChatMessage message) {
     chatId: chatId,
     title: message.senderName ?? '',
     messageId: message.id,
+    preserveChatStack: true,
   );
 }
 
@@ -2129,6 +2213,10 @@ Widget _modeIconWidget(
       size: size,
       color: color,
     ),
+    MusicPlaybackMode.reverseSequence => _ReverseSequenceGlyph(
+      size: size,
+      color: color,
+    ),
     MusicPlaybackMode.repeatOne => _RepeatOneGlyph(size: size, color: color),
     MusicPlaybackMode.shuffle => _ShuffleGlyph(size: size, color: color),
   };
@@ -2156,7 +2244,7 @@ class _RepeatOneGlyph extends StatelessWidget {
                 inherit: false,
                 fontSize: size * 0.44,
                 height: 1,
-                fontWeight: FontWeight.w800,
+                fontWeight: FontWeight.w600,
                 color: color,
               ),
             ),
@@ -2164,6 +2252,58 @@ class _RepeatOneGlyph extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _ReverseSequenceGlyph extends StatelessWidget {
+  const _ReverseSequenceGlyph({required this.size, required this.color});
+
+  final double size;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: size,
+      child: CustomPaint(painter: _ReverseSequenceGlyphPainter(color)),
+    );
+  }
+}
+
+class _ReverseSequenceGlyphPainter extends CustomPainter {
+  const _ReverseSequenceGlyphPainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final stroke = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = (size.width * 0.1).clamp(1.6, 2.4)
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    for (final y in const [0.24, 0.5, 0.76]) {
+      canvas.drawLine(
+        Offset(size.width * 0.1, size.height * y),
+        Offset(size.width * 0.5, size.height * y),
+        stroke,
+      );
+    }
+
+    final arrow = Path()
+      ..moveTo(size.width * 0.76, size.height * 0.84)
+      ..lineTo(size.width * 0.76, size.height * 0.16)
+      ..moveTo(size.width * 0.58, size.height * 0.34)
+      ..lineTo(size.width * 0.76, size.height * 0.16)
+      ..lineTo(size.width * 0.94, size.height * 0.34);
+    canvas.drawPath(arrow, stroke);
+  }
+
+  @override
+  bool shouldRepaint(covariant _ReverseSequenceGlyphPainter oldDelegate) {
+    return oldDelegate.color != color;
   }
 }
 
@@ -2253,6 +2393,8 @@ class _ShuffleGlyphPainter extends CustomPainter {
 String _modeLabel(MusicPlaybackMode mode) {
   return AppStrings.t(switch (mode) {
     MusicPlaybackMode.sequence => AppStringKeys.musicPlayerModeSequence,
+    MusicPlaybackMode.reverseSequence =>
+      AppStringKeys.musicPlayerModeReverseSequence,
     MusicPlaybackMode.repeatOne => AppStringKeys.musicPlayerModeRepeatOne,
     MusicPlaybackMode.shuffle => AppStringKeys.musicPlayerModeShuffle,
   });

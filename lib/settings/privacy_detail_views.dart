@@ -12,10 +12,12 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:mithka/l10n/app_localizations.dart';
+import 'package:provider/provider.dart';
 
 import '../chat/chat_picker_view.dart';
 import '../chat/image_edit_view.dart';
 import '../components/app_icons.dart';
+import '../components/app_interactive_surface.dart';
 import '../components/confirm_dialog.dart';
 import '../components/photo_avatar.dart';
 import '../components/toast.dart';
@@ -25,6 +27,7 @@ import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
+import '../theme/theme_controller.dart';
 import 'keyword_blocker.dart';
 import 'privacy_rule_options.dart';
 import 'qr_login_scanner_view.dart';
@@ -601,16 +604,20 @@ class _PrivacyRuleViewState extends State<PrivacyRuleView> {
     int revision,
     int clientId,
   ) async {
-    final allowExceptions = await _resolveExceptions(
-      selection.allowUserIds,
-      selection.allowChatIds,
-      clientId: clientId,
-    );
-    final restrictExceptions = await _resolveExceptions(
-      selection.restrictUserIds,
-      selection.restrictChatIds,
-      clientId: clientId,
-    );
+    final resolved = await Future.wait([
+      _resolveExceptions(
+        selection.allowUserIds,
+        selection.allowChatIds,
+        clientId: clientId,
+      ),
+      _resolveExceptions(
+        selection.restrictUserIds,
+        selection.restrictChatIds,
+        clientId: clientId,
+      ),
+    ]);
+    final allowExceptions = resolved[0];
+    final restrictExceptions = resolved[1];
     if (!mounted ||
         _client.activeClientId != clientId ||
         _ruleRevision != revision) {
@@ -631,43 +638,46 @@ class _PrivacyRuleViewState extends State<PrivacyRuleView> {
     Set<int> chatIds, {
     required int clientId,
   }) async {
-    final entries = <_PrivacyException>[];
-    for (final id in userIds) {
+    Future<_PrivacyException> resolveUser(int id) async {
       try {
         final user = await _client.queryTo({
           '@type': 'getUser',
           'user_id': id,
         }, clientId);
-        entries.add(
-          _PrivacyException(
-            id: id,
-            isUser: true,
-            title: TDParse.userName(user),
-            photo: TDParse.smallPhoto(user.obj('profile_photo')),
-          ),
+        return _PrivacyException(
+          id: id,
+          isUser: true,
+          title: TDParse.userName(user),
+          photo: TDParse.smallPhoto(user.obj('profile_photo')),
         );
       } catch (_) {
-        entries.add(_PrivacyException(id: id, isUser: true, title: '$id'));
+        return _PrivacyException(id: id, isUser: true, title: '$id');
       }
     }
-    for (final id in chatIds) {
+
+    Future<_PrivacyException> resolveChat(int id) async {
       try {
         final chat = await _client.queryTo({
           '@type': 'getChat',
           'chat_id': id,
         }, clientId);
-        entries.add(
-          _PrivacyException(
-            id: id,
-            isUser: false,
-            title: chat.str('title') ?? '$id',
-            photo: TDParse.smallPhoto(chat.obj('photo')),
-          ),
+        return _PrivacyException(
+          id: id,
+          isUser: false,
+          title: chat.str('title') ?? '$id',
+          photo: TDParse.smallPhoto(chat.obj('photo')),
         );
       } catch (_) {
-        entries.add(_PrivacyException(id: id, isUser: false, title: '$id'));
+        return _PrivacyException(id: id, isUser: false, title: '$id');
       }
     }
+
+    // Every entry is its own FFI round trip; awaiting them one by one kept the
+    // exception rows blank until the last one landed.
+    final entries = await Future.wait([
+      for (final id in userIds) resolveUser(id),
+      for (final id in chatIds) resolveChat(id),
+    ]);
     entries.sort(
       (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
     );
@@ -935,39 +945,19 @@ class _PrivacyRuleViewState extends State<PrivacyRuleView> {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
-        children: [
-          PopScope(canPop: !_saving, child: const SizedBox.shrink()),
-          NavHeader(
-            title: widget.title,
-            onBack: _saving ? () {} : () => Navigator.of(context).maybePop(),
-            trailing: _saving
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator.adaptive(strokeWidth: 2),
-                  )
-                : null,
-          ),
-          if (_loading)
-            const Expanded(
-              child: Center(
-                child: SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator.adaptive(strokeWidth: 2),
-                ),
-              ),
-            )
-          else if (_loadError != null)
-            Expanded(child: _loadFailureView())
-          else
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(12, 14, 12, 24),
+    final theme = context.watch<ThemeController>();
+    return PopScope(
+      canPop: !_saving,
+      child: SettingsPageScaffold(
+        title: widget.title,
+        onBack: () => Navigator.of(context).maybePop(),
+        showBackButton: !_saving,
+        trailing: _saving ? const AppActivityIndicator(size: 20) : null,
+        child: _loading
+            ? const Center(child: AppActivityIndicator(size: 24))
+            : _loadError != null
+            ? _loadFailureView()
+            : SettingsListView(
                 children: [
                   if (_isProfilePhoto)
                     _privacySectionLabel(
@@ -980,6 +970,19 @@ class _PrivacyRuleViewState extends State<PrivacyRuleView> {
                         const InsetDivider(leadingInset: 16),
                     ],
                   ]),
+                  if (_isPhoneNumber) ...[
+                    const SizedBox(height: 14),
+                    _card([
+                      KeyedSubtree(
+                        key: const ValueKey('privacy-sidebar-phone-row'),
+                        child: _toggleAction(
+                          label: AppStringKeys.appearanceHidePhoneInSidebar,
+                          value: theme.hideSidebarPhone,
+                          onChanged: (value) => theme.hideSidebarPhone = value,
+                        ),
+                      ),
+                    ]),
+                  ],
                   if (_isProfilePhoto) ...[
                     _hint(
                       AppStrings.t(
@@ -1078,8 +1081,6 @@ class _PrivacyRuleViewState extends State<PrivacyRuleView> {
                   ],
                 ],
               ),
-            ),
-        ],
       ),
     );
   }
@@ -1108,7 +1109,7 @@ class _PrivacyRuleViewState extends State<PrivacyRuleView> {
                 ),
                 decoration: BoxDecoration(
                   color: AppTheme.brand,
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(AppRadius.control),
                 ),
                 child: Text(
                   AppStrings.t(AppStringKeys.privacyRetry),
@@ -1474,15 +1475,7 @@ class _PrivacyRuleViewState extends State<PrivacyRuleView> {
   }
 
   Widget _card(List<Widget> children) {
-    final c = context.colors;
-    return Container(
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(children: children),
-    );
+    return SettingsCard(children: children);
   }
 }
 
@@ -1583,6 +1576,7 @@ class _ActiveSessionsViewState extends State<ActiveSessionsView> {
   }
 
   Future<void> _scanLoginQr() async {
+    if (Platform.isMacOS) return;
     final accepted = await Navigator.of(
       context,
     ).push<bool>(MaterialPageRoute(builder: (_) => const QrLoginScannerView()));
@@ -1594,14 +1588,12 @@ class _ActiveSessionsViewState extends State<ActiveSessionsView> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
-        children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.privacyLoggedInDevices),
-            onBack: () => Navigator.of(context).pop(),
-            trailing: GestureDetector(
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.privacyLoggedInDevices),
+      onBack: () => Navigator.of(context).pop(),
+      trailing: Platform.isMacOS
+          ? null
+          : GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: _scanLoginQr,
               child: Padding(
@@ -1613,144 +1605,112 @@ class _ActiveSessionsViewState extends State<ActiveSessionsView> {
                 ),
               ),
             ),
-          ),
-          if (_loading)
-            const Expanded(
-              child: Center(
-                child: SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator.adaptive(strokeWidth: 2),
-                ),
-              ),
-            )
-          else
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(12, 14, 12, 24),
-                children: [
-                  _card([
-                    GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: _scanLoginQr,
-                      child: SizedBox(
-                        height: 54,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Row(
-                            children: [
-                              AppIcon(
-                                HeroAppIcons.qrcode,
-                                size: 22,
-                                color: AppTheme.brand,
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  AppStrings.t(
-                                    AppStringKeys.privacyScanLoginQr,
-                                  ),
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: c.textPrimary,
-                                    fontWeight: FontWeight.w500,
-                                  ),
+      child: _loading
+          ? const Center(child: AppActivityIndicator(size: 24))
+          : SettingsListView(
+              children: [
+                _card([
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _scanLoginQr,
+                    child: SizedBox(
+                      height: 54,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Row(
+                          children: [
+                            AppIcon(
+                              HeroAppIcons.qrcode,
+                              size: 22,
+                              color: AppTheme.brand,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                AppStrings.t(AppStringKeys.privacyScanLoginQr),
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: c.textPrimary,
+                                  fontWeight: FontWeight.w500,
                                 ),
                               ),
-                              AppIcon(
-                                HeroAppIcons.chevronRight,
-                                size: 14,
-                                color: c.textTertiary,
-                              ),
-                            ],
+                            ),
+                            AppIcon(
+                              HeroAppIcons.chevronRight,
+                              size: 14,
+                              color: c.textTertiary,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: 14),
+                if (_current != null) ...[
+                  const SettingsSectionHeader(
+                    AppStringKeys.privacyCurrentDevice,
+                  ),
+                  _card([_sessionRow(_current!, current: true)]),
+                  const SizedBox(height: 14),
+                ],
+                if (_others.isNotEmpty) ...[
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _terminateAll,
+                    child: _card([
+                      SizedBox(
+                        height: 50,
+                        child: Center(
+                          child: Text(
+                            AppStrings.t(
+                              AppStringKeys.privacyTerminateAllOtherSessions,
+                            ),
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: AppTheme.tagRed,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ]),
+                  ),
+                  const SizedBox(height: 14),
+                  const SettingsSectionHeader(
+                    AppStringKeys.privacyOtherDevices,
+                  ),
+                  _card([
+                    for (var i = 0; i < _others.length; i++) ...[
+                      _sessionRow(_others[i]),
+                      if (i < _others.length - 1)
+                        const InsetDivider(leadingInset: 16),
+                    ],
+                  ]),
+                ] else ...[
+                  const SettingsSectionHeader(
+                    AppStringKeys.privacyOtherDevices,
+                  ),
+                  _card([
+                    SizedBox(
+                      height: 74,
+                      child: Center(
+                        child: Text(
+                          AppStrings.t(AppStringKeys.privacyNoOtherDevices),
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: c.textSecondary,
                           ),
                         ),
                       ),
                     ),
                   ]),
-                  const SizedBox(height: 14),
-                  if (_current != null) ...[
-                    _sectionLabel(
-                      AppStrings.t(AppStringKeys.privacyCurrentDevice),
-                    ),
-                    _card([_sessionRow(_current!, current: true)]),
-                    const SizedBox(height: 14),
-                  ],
-                  if (_others.isNotEmpty) ...[
-                    GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: _terminateAll,
-                      child: _card([
-                        SizedBox(
-                          height: 50,
-                          child: Center(
-                            child: Text(
-                              AppStrings.t(
-                                AppStringKeys.privacyTerminateAllOtherSessions,
-                              ),
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: AppTheme.tagRed,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ]),
-                    ),
-                    const SizedBox(height: 14),
-                    _sectionLabel(
-                      AppStrings.t(AppStringKeys.privacyOtherDevices),
-                    ),
-                    _card([
-                      for (var i = 0; i < _others.length; i++) ...[
-                        _sessionRow(_others[i]),
-                        if (i < _others.length - 1)
-                          const InsetDivider(leadingInset: 16),
-                      ],
-                    ]),
-                  ] else ...[
-                    _sectionLabel(
-                      AppStrings.t(AppStringKeys.privacyOtherDevices),
-                    ),
-                    _card([
-                      SizedBox(
-                        height: 74,
-                        child: Center(
-                          child: Text(
-                            AppStrings.t(AppStringKeys.privacyNoOtherDevices),
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: c.textSecondary,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ]),
-                  ],
                 ],
-              ),
+              ],
             ),
-        ],
-      ),
     );
   }
 
-  Widget _sectionLabel(String t) => Padding(
-    padding: const EdgeInsets.only(left: 16, bottom: 6),
-    child: Text(
-      t,
-      style: TextStyle(fontSize: 13, color: context.colors.textTertiary),
-    ),
-  );
-
-  Widget _card(List<Widget> children) => Container(
-    decoration: BoxDecoration(
-      color: context.colors.card,
-      borderRadius: BorderRadius.circular(12),
-    ),
-    clipBehavior: Clip.antiAlias,
-    child: Column(children: children),
-  );
+  Widget _card(List<Widget> children) => SettingsCard(children: children);
 
   Widget _sessionRow(Map<String, dynamic> s, {bool current = false}) {
     final c = context.colors;
@@ -1880,82 +1840,48 @@ class _BlockedUsersViewState extends State<BlockedUsersView> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
-        children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.privacyBlockedUsers),
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          if (_loading)
-            const Expanded(
-              child: Center(
-                child: SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator.adaptive(strokeWidth: 2),
-                ),
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.privacyBlockedUsers),
+      onBack: () => Navigator.of(context).pop(),
+      child: _loading
+          ? const Center(child: AppActivityIndicator(size: 24))
+          : _blocked.isEmpty
+          ? Center(
+              child: Text(
+                AppStrings.t(AppStringKeys.privacyBlockedUsersEmpty),
+                style: TextStyle(fontSize: 14, color: c.textSecondary),
               ),
             )
-          else if (_blocked.isEmpty)
-            Expanded(
-              child: Center(
-                child: Text(
-                  AppStrings.t(AppStringKeys.privacyBlockedUsersEmpty),
-                  style: TextStyle(fontSize: 14, color: c.textSecondary),
+          : SettingsListView(
+              children: [
+                SettingsCard.rows(
+                  dividerInset: AppMetric.settingsTextDividerInset,
+                  rows: [for (final user in _blocked) _row(user)],
                 ),
-              ),
-            )
-          else
-            Expanded(
-              child: ListView.builder(
-                padding: EdgeInsets.zero,
-                itemCount: _blocked.length,
-                itemBuilder: (context, i) => _row(_blocked[i]),
-              ),
+              ],
             ),
-        ],
-      ),
     );
   }
 
   Widget _row(Contact u) {
-    final c = context.colors;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: c.background,
-        border: Border(bottom: BorderSide(color: c.divider, width: 0.5)),
-      ),
-      child: Row(
-        children: [
-          PhotoAvatar(title: u.name, photo: u.photo, size: 44),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              u.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 16, color: c.textPrimary),
-            ),
+    return SettingsRow(
+      title: u.name,
+      leading: PhotoAvatar(title: u.name, photo: u.photo, size: 36),
+      showChevron: false,
+      trailing: AppInteractiveSurface(
+        semanticLabel: AppStrings.t(AppStringKeys.privacyUnblock),
+        onTap: () => _unblock(u),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          decoration: BoxDecoration(
+            border: Border.all(color: AppTheme.brand),
+            borderRadius: BorderRadius.circular(AppRadius.card),
           ),
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => _unblock(u),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-              decoration: BoxDecoration(
-                border: Border.all(color: AppTheme.brand),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Text(
-                AppStrings.t(AppStringKeys.privacyUnblock),
-                style: TextStyle(fontSize: 13, color: AppTheme.brand),
-              ),
-            ),
+          child: Text(
+            AppStrings.t(AppStringKeys.privacyUnblock),
+            style: TextStyle(fontSize: 13, color: AppTheme.brand),
           ),
-        ],
+        ),
       ),
     );
   }

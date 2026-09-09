@@ -110,8 +110,8 @@ class _TwoStepPasswordViewState extends State<TwoStepPasswordView> {
       showToast(
         context,
         next.isEmpty
-            ? 'Two-step password removed.'
-            : 'Two-step password saved.',
+            ? AppStrings.t(AppStringKeys.accountSecurityTwoStepPasswordRemoved)
+            : AppStrings.t(AppStringKeys.accountSecurityTwoStepPasswordSaved),
       );
       Navigator.of(context).pop(true);
     } catch (error) {
@@ -125,7 +125,9 @@ class _TwoStepPasswordViewState extends State<TwoStepPasswordView> {
     final confirmed = await confirmDialog(
       context,
       title: AppStrings.t(AppStringKeys.accountSecurityRemoveTwoStepPassword),
-      message: 'Your account will no longer require this extra password.',
+      message: AppStrings.t(
+        AppStringKeys.accountSecurityRemoveTwoStepPasswordMessage,
+      ),
       confirmText: AppStrings.t(AppStringKeys.chatInfoRemove),
       destructive: true,
     );
@@ -137,125 +139,115 @@ class _TwoStepPasswordViewState extends State<TwoStepPasswordView> {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
-        children: [
-          NavHeader(
-            title: AppStrings.t(
-              AppStringKeys.accountSecurityTwoStepVerification,
-            ),
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: _loading
-                ? const Center(child: AppActivityIndicator())
-                : ListView(
-                    padding: const EdgeInsets.fromLTRB(12, 16, 12, 28),
-                    children: [
-                      _SecurityCard(
-                        children: [
-                          if (_hasPassword)
-                            _SecurityField(
-                              controller: _oldPassword,
-                              label: AppStrings.t(
-                                AppStringKeys.accountSecurityCurrentPassword,
-                              ),
-                              icon: HeroAppIcons.lock,
-                              obscureText: true,
-                            ),
-                          _SecurityField(
-                            controller: _newPassword,
-                            label: _hasPassword
-                                ? 'New password'
-                                : 'Create password',
-                            icon: HeroAppIcons.key,
-                            obscureText: true,
-                          ),
-                          _SecurityField(
-                            controller: _confirmPassword,
-                            label: AppStrings.t(
-                              AppStringKeys.accountSecurityConfirmNewPassword,
-                            ),
-                            icon: HeroAppIcons.circleCheck,
-                            obscureText: true,
-                          ),
-                          _SecurityField(
-                            controller: _hint,
-                            label: AppStrings.t(
-                              AppStringKeys.accountSecurityPasswordHint,
-                            ),
-                            icon: HeroAppIcons.circleInfo,
-                          ),
-                          if (!_hasRecoveryEmail)
-                            _SecurityField(
-                              controller: _recoveryEmail,
-                              label: AppStrings.t(
-                                AppStringKeys
-                                    .accountSecurityRecoveryEmailRecommended,
-                              ),
-                              icon: HeroAppIcons.at,
-                              keyboardType: TextInputType.emailAddress,
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      _PrimarySecurityButton(
-                        label: _hasPassword
-                            ? 'Change password'
-                            : 'Create password',
-                        working: _working,
-                        onTap: _save,
-                      ),
-                      if (_hasPassword) ...[
-                        const SizedBox(height: 14),
-                        _SecurityCard(
-                          children: [
-                            _SecurityActionRow(
-                              icon: HeroAppIcons.at,
-                              title: _hasRecoveryEmail
-                                  ? 'Change recovery email'
-                                  : 'Add recovery email',
-                              subtitle: _loginEmailPattern,
-                              onTap: () => Navigator.of(context)
-                                  .push<void>(
-                                    MaterialPageRoute(
-                                      builder: (_) => const RecoveryEmailView(),
-                                    ),
-                                  )
-                                  .then((_) => _load()),
-                            ),
-                            if (_hasRecoveryEmail)
-                              _SecurityActionRow(
-                                icon: HeroAppIcons.restore,
-                                title: AppStrings.t(
-                                  AppStringKeys
-                                      .accountSecurityRecoverOrResetPassword,
-                                ),
-                                onTap: () => Navigator.of(context).push<void>(
-                                  MaterialPageRoute(
-                                    builder: (_) =>
-                                        const PasswordRecoveryView(),
-                                  ),
-                                ),
-                              ),
-                            _SecurityActionRow(
-                              icon: HeroAppIcons.trash,
-                              title: AppStrings.t(
-                                AppStringKeys.accountSecurityRemovePassword,
-                              ),
-                              destructive: true,
-                              onTap: _remove,
-                            ),
-                          ],
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.accountSecurityTwoStepVerification),
+      onBack: () => Navigator.of(context).pop(),
+      child: _loading
+          ? const Center(child: AppActivityIndicator())
+          : SettingsListView(
+              children: [
+                _SecurityCard(
+                  children: [
+                    if (_hasPassword)
+                      _SecurityField(
+                        controller: _oldPassword,
+                        label: AppStrings.t(
+                          AppStringKeys.accountSecurityCurrentPassword,
                         ),
-                      ],
+                        icon: HeroAppIcons.lock,
+                        obscureText: true,
+                      ),
+                    _SecurityField(
+                      controller: _newPassword,
+                      label: AppStrings.t(
+                        _hasPassword
+                            ? AppStringKeys.accountSecurityNewPasswordField
+                            : AppStringKeys.accountSecurityCreatePassword,
+                      ),
+                      icon: HeroAppIcons.key,
+                      obscureText: true,
+                    ),
+                    _SecurityField(
+                      controller: _confirmPassword,
+                      label: AppStrings.t(
+                        AppStringKeys.accountSecurityConfirmNewPassword,
+                      ),
+                      icon: HeroAppIcons.circleCheck,
+                      obscureText: true,
+                    ),
+                    _SecurityField(
+                      controller: _hint,
+                      label: AppStrings.t(
+                        AppStringKeys.accountSecurityPasswordHint,
+                      ),
+                      icon: HeroAppIcons.circleInfo,
+                    ),
+                    if (!_hasRecoveryEmail)
+                      _SecurityField(
+                        controller: _recoveryEmail,
+                        label: AppStrings.t(
+                          AppStringKeys.accountSecurityRecoveryEmailRecommended,
+                        ),
+                        icon: HeroAppIcons.at,
+                        keyboardType: TextInputType.emailAddress,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                _PrimarySecurityButton(
+                  label: AppStrings.t(
+                    _hasPassword
+                        ? AppStringKeys.accountSecurityChangePassword
+                        : AppStringKeys.accountSecurityCreatePassword,
+                  ),
+                  working: _working,
+                  onTap: _save,
+                ),
+                if (_hasPassword) ...[
+                  const SizedBox(height: 14),
+                  _SecurityCard(
+                    children: [
+                      _SecurityActionRow(
+                        icon: HeroAppIcons.at,
+                        title: AppStrings.t(
+                          _hasRecoveryEmail
+                              ? AppStringKeys.accountSecurityChangeRecoveryEmail
+                              : AppStringKeys.accountSecurityAddRecoveryEmail,
+                        ),
+                        subtitle: _loginEmailPattern,
+                        onTap: () => Navigator.of(context)
+                            .push<void>(
+                              MaterialPageRoute(
+                                builder: (_) => const RecoveryEmailView(),
+                              ),
+                            )
+                            .then((_) => _load()),
+                      ),
+                      if (_hasRecoveryEmail)
+                        _SecurityActionRow(
+                          icon: HeroAppIcons.restore,
+                          title: AppStrings.t(
+                            AppStringKeys.accountSecurityRecoverOrResetPassword,
+                          ),
+                          onTap: () => Navigator.of(context).push<void>(
+                            MaterialPageRoute(
+                              builder: (_) => const PasswordRecoveryView(),
+                            ),
+                          ),
+                        ),
+                      _SecurityActionRow(
+                        icon: HeroAppIcons.trash,
+                        title: AppStrings.t(
+                          AppStringKeys.accountSecurityRemovePassword,
+                        ),
+                        destructive: true,
+                        onTap: _remove,
+                      ),
                     ],
                   ),
-          ),
-        ],
-      ),
+                ],
+              ],
+            ),
     );
   }
 }
@@ -379,8 +371,12 @@ class _RecoveryEmailCodeViewState extends State<RecoveryEmailCodeView> {
   Widget build(BuildContext context) => _SecurityFormPage(
     title: AppStrings.t(AppStringKeys.accountSecurityVerifyRecoveryEmail),
     description: widget.emailPattern.isEmpty
-        ? 'Enter the code sent to your recovery email.'
-        : 'Enter the code sent to ${widget.emailPattern}.',
+        ? AppStrings.t(
+            AppStringKeys.accountSecurityEnterCodeSentToRecoveryEmail,
+          )
+        : AppStrings.t(AppStringKeys.accountSecurityEnterCodeSentToValue1, {
+            'value1': widget.emailPattern,
+          }),
     children: [
       _SecurityCard(
         children: [
@@ -508,8 +504,12 @@ class _PasswordRecoveryViewState extends State<PasswordRecoveryView> {
   Widget build(BuildContext context) => _SecurityFormPage(
     title: AppStrings.t(AppStringKeys.accountSecurityPasswordRecovery),
     description: _sent
-        ? 'A recovery code was sent to $_emailPattern.'
-        : 'Telegram will send a code to your recovery email.',
+        ? AppStrings.t(AppStringKeys.accountSecurityRecoveryCodeSentToValue1, {
+            'value1': _emailPattern,
+          })
+        : AppStrings.t(
+            AppStringKeys.accountSecurityTelegramWillSendCodeToRecoveryEmail,
+          ),
     children: [
       if (!_sent)
         _PrimarySecurityButton(
@@ -620,8 +620,10 @@ class _ChangePhoneNumberViewState extends State<ChangePhoneNumberView> {
   Widget build(BuildContext context) => _SecurityFormPage(
     title: AppStrings.t(AppStringKeys.accountSecurityChangePhoneNumber),
     description: _sent
-        ? 'Enter the code sent to $_destination.'
-        : 'Your Telegram account and contacts will move to the new number.',
+        ? AppStrings.t(AppStringKeys.accountSecurityEnterCodeSentToValue1, {
+            'value1': _destination,
+          })
+        : AppStrings.t(AppStringKeys.accountSecurityAccountAndContactsWillMove),
     children: [
       _SecurityCard(
         children: [
@@ -643,7 +645,11 @@ class _ChangePhoneNumberViewState extends State<ChangePhoneNumberView> {
       ),
       const SizedBox(height: 14),
       _PrimarySecurityButton(
-        label: _sent ? 'Confirm new number' : 'Send code',
+        label: AppStrings.t(
+          _sent
+              ? AppStringKeys.accountSecurityConfirmNewNumber
+              : AppStringKeys.accountSecuritySendCode,
+        ),
         working: _working,
         onTap: _sent ? _verify : _send,
       ),
@@ -718,31 +724,45 @@ class _AccountInactivityViewState extends State<AccountInactivityView> {
     }
   }
 
-  String _label(int days) {
-    if (days == 30) return '1 month';
-    if (days == 90) return '3 months';
-    if (days == 180) return '6 months';
-    if (days == 365) return '1 year';
-    if (days == 548) return '18 months';
-    if (days == 730) return '2 years';
-    return '$days days';
-  }
+  String _label(int days) => switch (days) {
+    30 => AppStrings.t(AppStringKeys.accountSecurityInactivityOneMonth),
+    90 => AppStrings.t(AppStringKeys.accountSecurityInactivityThreeMonths),
+    180 => AppStrings.t(AppStringKeys.accountSecurityInactivitySixMonths),
+    365 => AppStrings.t(AppStringKeys.accountSecurityInactivityOneYear),
+    548 => AppStrings.t(AppStringKeys.accountSecurityInactivityEighteenMonths),
+    730 => AppStrings.t(AppStringKeys.accountSecurityInactivityTwoYears),
+    _ => AppStrings.t(AppStringKeys.accountSecurityInactivityDaysValue1, {
+      'value1': days,
+    }),
+  };
 
   @override
   Widget build(BuildContext context) => _SecurityFormPage(
     title: AppStrings.t(AppStringKeys.accountSecurityAccountInactivity),
-    description:
-        'If you do not come online during this period, Telegram will delete your account and cloud data.',
+    description: AppStrings.t(
+      AppStringKeys.accountSecurityAccountInactivityDescription,
+    ),
     children: [
       _SecurityCard(
         children: [
+          // A single-choice list, not a set of destinations: no chevron, and
+          // the current value carries a trailing brand check the way every
+          // other picker in 设置 does. Swapping the leading glyph for a
+          // check-circle instead left all six rows reading alike.
           for (final days in _options)
-            _SecurityActionRow(
-              icon: days == _days
-                  ? HeroAppIcons.circleCheck
-                  : HeroAppIcons.clock,
+            SettingsRow(
+              key: ValueKey('account-inactivity-$days'),
               title: _label(days),
+              leading: const SettingsLeadingIcon(icon: HeroAppIcons.clock),
+              showChevron: false,
               onTap: _working ? null : () => _set(days),
+              trailing: days == _days
+                  ? AppIcon(
+                      HeroAppIcons.check,
+                      size: AppIconSize.lg,
+                      color: AppTheme.brand,
+                    )
+                  : null,
             ),
         ],
       ),
@@ -778,8 +798,9 @@ class _DeleteTelegramAccountViewState extends State<DeleteTelegramAccountView> {
       title: AppStrings.t(
         AppStringKeys.accountSecurityPermanentlyDeleteTelegramAccount,
       ),
-      message:
-          'This deletes your cloud messages, contacts, media, and account data. This cannot be undone.',
+      message: AppStrings.t(
+        AppStringKeys.accountSecurityDeleteAccountConfirmMessage,
+      ),
       confirmText: AppStrings.t(
         AppStringKeys.accountSecurityDeleteAccountVariant2,
       ),
@@ -802,8 +823,9 @@ class _DeleteTelegramAccountViewState extends State<DeleteTelegramAccountView> {
   @override
   Widget build(BuildContext context) => _SecurityFormPage(
     title: AppStrings.t(AppStringKeys.accountSecurityDeleteAccount),
-    description:
-        'Deletion happens through Telegram directly. Enter your two-step password if one is enabled.',
+    description: AppStrings.t(
+      AppStringKeys.accountSecurityDeleteAccountDescription,
+    ),
     children: [
       _SecurityCard(
         children: [
@@ -846,33 +868,16 @@ class _SecurityFormPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
+    return SettingsPageScaffold(
+      title: title,
+      onBack: () => Navigator.of(context).pop(),
+      child: SettingsListView(
         children: [
-          NavHeader(title: title, onBack: () => Navigator.of(context).pop()),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(12, 16, 12, 28),
-              children: [
-                if (description != null) ...[
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 14),
-                    child: Text(
-                      description!,
-                      style: TextStyle(
-                        fontSize: 13,
-                        height: 1.35,
-                        color: c.textSecondary,
-                      ),
-                    ),
-                  ),
-                ],
-                ...children,
-              ],
-            ),
-          ),
+          if (description != null) ...[
+            SettingsNote(text: description!),
+            const SizedBox(height: AppSpacing.lg),
+          ],
+          ...children,
         ],
       ),
     );
@@ -885,22 +890,7 @@ class _SecurityCard extends StatelessWidget {
   final List<Widget> children;
 
   @override
-  Widget build(BuildContext context) => Container(
-    decoration: BoxDecoration(
-      color: context.colors.card,
-      borderRadius: BorderRadius.circular(12),
-    ),
-    clipBehavior: Clip.antiAlias,
-    child: Column(
-      children: [
-        for (var index = 0; index < children.length; index++) ...[
-          if (index > 0)
-            Divider(height: 1, indent: 52, color: context.colors.divider),
-          children[index],
-        ],
-      ],
-    ),
-  );
+  Widget build(BuildContext context) => SettingsCard.rows(rows: children);
 }
 
 class _SecurityField extends StatelessWidget {
@@ -1039,17 +1029,20 @@ class _PrimarySecurityButton extends StatelessWidget {
             ? context.colors.textTertiary
             : destructive
             ? AppTheme.unreadBadge
-            : AppTheme.brand,
-        borderRadius: BorderRadius.circular(12),
+            : context.colors.accentButton,
+        borderRadius: BorderRadius.circular(AppRadius.card),
       ),
       child: working
-          ? const AppActivityIndicator(size: 20, color: Colors.white)
+          ? AppActivityIndicator(
+              size: 20,
+              color: context.colors.accentButtonText,
+            )
           : Text(
               label,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 15,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                color: context.colors.accentButtonText,
               ),
             ),
     ),

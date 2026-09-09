@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
+import '../app/ipad_window_chrome.dart';
 import '../chats/chat_list_view_model.dart';
 import '../components/app_icons.dart';
 import '../components/photo_avatar.dart';
@@ -220,7 +221,11 @@ class _ChatPickerViewState extends State<ChatPickerView> {
   Widget _header() {
     final c = context.colors;
     return Container(
-      padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
+      padding: EdgeInsets.only(
+        top:
+            MediaQuery.of(context).padding.top +
+            iPadWindowChromeInsetOf(context),
+      ),
       decoration: BoxDecoration(
         color: c.navBar,
         border: Border(bottom: BorderSide(color: c.divider, width: 0.5)),
@@ -306,7 +311,7 @@ class _ChatPickerViewState extends State<ChatPickerView> {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
           color: c.card,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(AppRadius.control),
           border: Border.all(color: c.divider, width: 0.5),
         ),
         child: Row(
@@ -359,7 +364,7 @@ class _ChatPickerViewState extends State<ChatPickerView> {
             height: 20,
             decoration: BoxDecoration(
               color: selected ? c.linkBlue : c.searchFill,
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(AppRadius.md),
               border: Border.all(color: selected ? c.linkBlue : c.divider),
             ),
             child: selected

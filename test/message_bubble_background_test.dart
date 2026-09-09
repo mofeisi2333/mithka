@@ -12,6 +12,7 @@ import 'package:mithka/settings/message_bubble_settings_view.dart';
 import 'package:mithka/tdlib/td_models.dart';
 import 'package:mithka/theme/custom_message_bubble_background.dart';
 import 'package:mithka/theme/message_bubble_background.dart';
+import 'package:mithka/theme/telegram_cloud_theme.dart';
 import 'package:mithka/theme/theme_controller.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -249,10 +250,13 @@ void main() {
       final preferences = await SharedPreferences.getInstance();
       final theme = ThemeController(preferences);
       addTearDown(theme.dispose);
+      theme.messageBubblesEnabled = false;
       theme.installCustomMessageBubbleBackground(custom);
 
+      expect(theme.messageBubblesEnabled, isTrue);
       expect(theme.messageBubbleBackground, MessageBubbleBackground.custom);
       expect(theme.messageBubbleBackgroundSpec.image, isA<FileImage>());
+      expect(preferences.getBool('messageBubblesEnabled.v1'), isTrue);
       expect(
         preferences.getString('messageBubbleBackground.v1'),
         MessageBubbleBackground.custom.name,
@@ -260,6 +264,7 @@ void main() {
 
       final restored = ThemeController(preferences);
       addTearDown(restored.dispose);
+      expect(restored.messageBubblesEnabled, isTrue);
       expect(restored.messageBubbleBackground, MessageBubbleBackground.custom);
       expect(restored.customMessageBubbleBackground?.filePath, custom.filePath);
 
@@ -291,16 +296,35 @@ void main() {
     theme.messageBubbleBackground = MessageBubbleBackground.berryOrbit;
     theme.messageBubbleApplicationScope =
         MessageBubbleApplicationScope.ownMessages;
+    theme.messageBubblesEnabled = false;
+    expect(preferences.getBool('messageBubblesEnabled.v1'), isFalse);
+    // With the preference off, neither direction uses the image — both fall
+    // back to the theme bubble — while the selection itself is remembered.
     expect(
       theme.effectiveMessageBubbleBackgroundSpecFor(outgoing: false),
       MessageBubbleBackgroundSpec.standard,
     );
     expect(
-      theme.effectiveMessageBubbleBackgroundSpecFor(outgoing: true).selection,
-      MessageBubbleBackground.berryOrbit,
+      theme.effectiveMessageBubbleBackgroundSpecFor(outgoing: true),
+      MessageBubbleBackgroundSpec.standard,
     );
+    expect(theme.messageBubbleBackground, MessageBubbleBackground.berryOrbit);
+    for (final outgoing in const [false, true]) {
+      expect(
+        theme.shouldRenderMessageBubbleSurface(
+          outgoing: outgoing,
+          brightness: Brightness.light,
+        ),
+        isTrue,
+      );
+    }
     theme.usePerAccountTheming = true;
+    expect(
+      preferences.getBool('messageBubblesEnabled.v1.account.user.11'),
+      isFalse,
+    );
     theme.setActiveAccountSlot(1, userId: 22);
+    expect(theme.messageBubblesEnabled, isTrue);
     expect(theme.messageBubbleBackground, MessageBubbleBackground.standard);
     expect(
       theme.messageBubbleApplicationScope,
@@ -308,6 +332,13 @@ void main() {
     );
 
     theme.setActiveAccountSlot(0, userId: 11);
+    expect(theme.messageBubblesEnabled, isFalse);
+    expect(theme.messageBubbleBackground, MessageBubbleBackground.berryOrbit);
+    expect(
+      theme.messageBubbleApplicationScope,
+      MessageBubbleApplicationScope.ownMessages,
+    );
+    theme.messageBubblesEnabled = true;
     expect(theme.messageBubbleBackground, MessageBubbleBackground.berryOrbit);
     expect(
       theme.messageBubbleApplicationScope,
@@ -321,6 +352,78 @@ void main() {
     );
     expect(theme.messageBubbleBackground, MessageBubbleBackground.berryOrbit);
   });
+
+  test('bubble visibility migrates from slot to account identity', () async {
+    SharedPreferences.setMockInitialValues({
+      'usePerAccountTheming': true,
+      'messageBubblesEnabled.v1.account.3': false,
+    });
+    final preferences = await SharedPreferences.getInstance();
+    final theme = ThemeController(
+      preferences,
+      initialAccountSlot: 3,
+      initialAccountUserId: 44,
+    );
+    addTearDown(theme.dispose);
+
+    expect(theme.messageBubblesEnabled, isFalse);
+    expect(
+      preferences.getBool('messageBubblesEnabled.v1.account.user.44'),
+      isFalse,
+    );
+    expect(
+      preferences.containsKey('messageBubblesEnabled.v1.account.3'),
+      isFalse,
+    );
+  });
+
+  test(
+    'the preference picks the bubble style, never removes the bubble',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final preferences = await SharedPreferences.getInstance();
+      final theme = ThemeController(preferences)..messageBubblesEnabled = false;
+      addTearDown(theme.dispose);
+
+      bool surface({bool outgoing = false, bool hasCustomChatTheme = false}) =>
+          theme.shouldRenderMessageBubbleSurface(
+            outgoing: outgoing,
+            brightness: Brightness.light,
+            hasCustomChatTheme: hasCustomChatTheme,
+          );
+
+      // Messages always sit on a bubble, whatever theme is installed.
+      theme.installCloudTheme(
+        builtInTelegramCloudThemes.first,
+        brightness: Brightness.light,
+      );
+      expect(surface(outgoing: true), isTrue);
+      expect(surface(), isTrue);
+      theme.clearCloudTheme(Brightness.light);
+      expect(surface(hasCustomChatTheme: true), isTrue);
+      theme.themingEnabled = false;
+      expect(surface(hasCustomChatTheme: true), isTrue);
+
+      // What the preference actually controls is the decorative image: off
+      // falls back to the theme's own bubble, and the selection survives.
+      theme.themingEnabled = true;
+      theme.messageBubbleBackground = MessageBubbleBackground.emberArcade;
+      expect(
+        theme.effectiveMessageBubbleBackgroundSpecFor(outgoing: true),
+        MessageBubbleBackgroundSpec.standard,
+      );
+      expect(
+        theme.messageBubbleBackground,
+        MessageBubbleBackground.emberArcade,
+      );
+
+      theme.messageBubblesEnabled = true;
+      expect(
+        theme.effectiveMessageBubbleBackgroundSpecFor(outgoing: true).selection,
+        MessageBubbleBackground.emberArcade,
+      );
+    },
+  );
 
   testWidgets('center-sliced background renders at short and multiline sizes', (
     tester,
@@ -463,37 +566,97 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('appearance page routes bubble selection to the repository', (
-    tester,
-  ) async {
-    SharedPreferences.setMockInitialValues({});
-    final preferences = await SharedPreferences.getInstance();
-    final theme = ThemeController(preferences);
-    addTearDown(theme.dispose);
+  testWidgets(
+    'appearance page flattens standard bubbles but retains decorative controls',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      SharedPreferences.setMockInitialValues({});
+      final preferences = await SharedPreferences.getInstance();
+      final theme = ThemeController(preferences);
+      addTearDown(theme.dispose);
 
-    await tester.pumpWidget(
-      ChangeNotifierProvider<ThemeController>.value(
-        value: theme,
-        child: const MaterialApp(
-          locale: Locale('en'),
-          localizationsDelegates: [AppLocalizations.delegate],
-          supportedLocales: AppLocalizations.supportedLocales,
-          home: MessageBubbleSettingsView(),
+      await tester.pumpWidget(
+        ChangeNotifierProvider<ThemeController>.value(
+          value: theme,
+          child: const MaterialApp(
+            locale: Locale('en'),
+            localizationsDelegates: [AppLocalizations.delegate],
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: MessageBubbleSettingsView(),
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.byType(GridView), findsNothing);
-    expect(find.text('@msgbubble repository'), findsOneWidget);
-    expect(find.text('My messages only'), findsOneWidget);
-    expect(find.text('All messages'), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('messageBubbleOpenRepository')),
-      findsOneWidget,
-    );
-    expect(find.textContaining('360 × 180'), findsOneWidget);
-  });
+      final enabledSwitch = find.byKey(
+        const ValueKey('message-bubbles-enabled'),
+      );
+      expect(enabledSwitch, findsOneWidget);
+      expect(theme.messageBubblesEnabled, isTrue);
+      expect(find.byType(GridView), findsNothing);
+      expect(find.text('@msgbubble repository'), findsOneWidget);
+      expect(find.text('My messages only'), findsOneWidget);
+      expect(find.text('All messages'), findsOneWidget);
+      expect(
+        find.textContaining('custom bubble image is not used'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining("fall back to your theme's own bubble"),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('messageBubbleOpenRepository')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('360 × 180'), findsOneWidget);
+
+      await tester.tap(enabledSwitch);
+      await tester.pump();
+
+      expect(theme.messageBubblesEnabled, isFalse);
+      expect(preferences.getBool('messageBubblesEnabled.v1'), isFalse);
+      expect(
+        find.byKey(const ValueKey('message-bubble-chat-preview')),
+        findsOneWidget,
+      );
+      expect(find.text('@msgbubble repository'), findsNothing);
+      expect(find.text('My messages only'), findsNothing);
+      expect(find.text('All messages'), findsNothing);
+
+      await tester.tap(enabledSwitch);
+      await tester.pump();
+      expect(theme.messageBubblesEnabled, isTrue);
+      expect(find.text('@msgbubble repository'), findsOneWidget);
+
+      theme.messageBubbleBackground = MessageBubbleBackground.emberArcade;
+      theme.messageBubbleApplicationScope =
+          MessageBubbleApplicationScope.ownMessages;
+      theme.messageBubblesEnabled = false;
+      await tester.pump();
+
+      // Off hides the image controls whether or not one was chosen, and the
+      // previews fall back to the theme bubble in both directions rather than
+      // keeping an image on one side only.
+      expect(find.text('@msgbubble repository'), findsNothing);
+      expect(find.text('My messages only'), findsNothing);
+      expect(find.text('All messages'), findsNothing);
+      expect(
+        find.byKey(const ValueKey('message-bubble-chat-preview')),
+        findsOneWidget,
+      );
+
+      // The choice is remembered and comes back with the switch.
+      theme.messageBubblesEnabled = true;
+      await tester.pump();
+      expect(
+        theme.messageBubbleBackground,
+        MessageBubbleBackground.emberArcade,
+      );
+      expect(find.text('@msgbubble repository'), findsOneWidget);
+    },
+  );
 
   testWidgets(
     'appearance page refers to an applied bubble by public message link',

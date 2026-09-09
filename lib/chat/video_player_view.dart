@@ -9,500 +9,48 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
+import 'package:f_videoplayer/f_videoplayer.dart';
+import 'package:f_videoplayer_pip/f_video_picture_in_picture.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fvp/fvp.dart';
 import 'package:mithka/l10n/app_localizations.dart';
-import 'package:mithka_video_player/mithka_video_player.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 
 import '../app/app_navigator.dart';
+import '../app/ipad_window_chrome.dart';
 import '../app/video_split_controller.dart';
 import '../components/app_icons.dart';
+import '../components/app_interactive_surface.dart';
 import '../components/photo_avatar.dart';
 import '../components/toast.dart';
+import '../media/video_view_compatibility.dart';
+import '../platform/fullscreen_system_ui.dart';
 import '../platform/player_brightness.dart';
+import '../platform/player_system_volume.dart';
 import '../platform/screen_wakelock.dart';
-import '../platform/system_picture_in_picture.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_image_loader.dart';
 import '../tdlib/td_models.dart';
+import '../theme/app_theme.dart';
 import 'chat_picker_view.dart';
 import 'forward_options.dart';
+import 'media_download_service.dart';
 import 'media_library_saver.dart';
+import 'td_video_stream_server.dart';
 import 'video_playback_preferences.dart';
 import 'video_playback_queue.dart';
+import 'video_stream_debugger.dart';
 
-typedef TdVideoStreamQuery =
-    Future<Map<String, dynamic>> Function(Map<String, dynamic> request);
+export 'td_video_stream_server.dart';
+
 typedef VideoPictureInPictureRestoreCallback =
-    FutureOr<bool> Function(SystemPictureInPictureSnapshot snapshot);
-
-/// A loopback range server for partially downloaded TDLib videos.
-///
-/// The class is public only so its HTTP behavior can be exercised without a
-/// native media player in tests. App code should treat it as an implementation
-/// detail of [VideoPlayerView].
-class TdVideoStreamServer {
-  TdVideoStreamServer(
-    this.fileId, {
-    TdVideoStreamQuery? query,
-    int maxResponseBytes = _defaultMaxResponseBytes,
-    this.rangeWaitTimeout = const Duration(seconds: 45),
-    this.rangePollInterval = const Duration(milliseconds: 100),
-  }) : assert(maxResponseBytes > 0),
-       _query = query ?? TdClient.shared.query,
-       _maxResponseBytes = maxResponseBytes;
-
-  final int fileId;
-  final TdVideoStreamQuery _query;
-  final int _maxResponseBytes;
-  final Duration rangeWaitTimeout;
-  final Duration rangePollInterval;
-  HttpServer? _server;
-  String? _path;
-  int _total = 0;
-  int _downloadOffset = 0;
-  int _downloadedPrefixSize = 0;
-  bool _downloadComplete = false;
-  bool _closed = false;
-  bool _backgroundDownloadRequested = false;
-  int _playbackPreparationCount = 0;
-  int? _continuousDownloadOffset;
-  Future<void> _downloadQueue = Future<void>.value();
-  final Map<(int, int), Future<Map<String, dynamic>?>> _rangeDownloads = {};
-
-  static const _chunkSize = 2 * 1024 * 1024;
-  static const _defaultMaxResponseBytes = 2 * 1024 * 1024;
-  static const _metadataTailSize = 4 * 1024 * 1024;
-
-  Future<Uri?> start() async {
-    if (_closed) return null;
-    try {
-      final file = await _query({'@type': 'getFile', 'file_id': fileId});
-      _updateFileInfo(file);
-    } catch (_) {}
-    if (_closed) return null;
-
-    if (_path == null || _path!.isEmpty || _total <= 0) {
-      await _primePlaybackRange(0, _chunkSize);
-    }
-    if (_closed) return null;
-    if (_total <= 0) {
-      try {
-        final file = await _query({'@type': 'getFile', 'file_id': fileId});
-        _updateFileInfo(file);
-      } catch (_) {}
-    }
-    if (_closed || _total <= 0) return null;
-    final server = await HttpServer.bind(
-      InternetAddress.loopbackIPv4,
-      0,
-      shared: true,
-    );
-    if (_closed) {
-      await server.close(force: true);
-      return null;
-    }
-    _server = server;
-    server.listen(_handleRequest);
-    return Uri.parse('http://127.0.0.1:${server.port}/video/$fileId.mp4');
-  }
-
-  Future<void> close() async {
-    _closed = true;
-    await _server?.close(force: true);
-    _server = null;
-  }
-
-  /// Makes the MP4 header and trailing metadata readable before a native
-  /// player probes the loopback URL. Many Telegram videos keep the `moov` atom
-  /// at EOF; exposing the URL before both ranges exist makes a transient TDLib
-  /// range miss look like an unsupported file to native media backends.
-  Future<bool> prepareForPlayback() async {
-    if (_closed || _total <= 0) return false;
-    _playbackPreparationCount++;
-    try {
-      final headEnd = math.min(_total - 1, _chunkSize - 1);
-      if (!await _ensureRange(0, headEnd)) return false;
-      final tailStart = math.max(0, _total - _metadataTailSize);
-      return await _ensureRange(tailStart, _total - 1);
-    } finally {
-      _playbackPreparationCount--;
-      if (_playbackPreparationCount == 0 &&
-          _backgroundDownloadRequested &&
-          _rangeDownloads.isEmpty) {
-        unawaited(_startContinuousDownload(0));
-      }
-    }
-  }
-
-  void startBackgroundDownload() {
-    if (_closed || _downloadComplete) return;
-    _backgroundDownloadRequested = true;
-    if (_playbackPreparationCount == 0 && _rangeDownloads.isEmpty) {
-      unawaited(_startContinuousDownload(0));
-    }
-  }
-
-  /// Creates TDLib's partial file using a bounded request. Keeping the first
-  /// request finite is important when transfer boost is enabled: an unlimited
-  /// download can have many large parts in flight, and changing that same
-  /// download to a playback range forces TDLib to cancel those parts before it
-  /// can serve the player.
-  Future<void> _primePlaybackRange(int offset, int length) async {
-    if (_closed) return;
-    try {
-      final file = await _query({
-        '@type': 'downloadFile',
-        'file_id': fileId,
-        'priority': 32,
-        'offset': offset,
-        'limit': length,
-        'synchronous': false,
-      });
-      _updateFileInfo(file);
-    } catch (_) {}
-  }
-
-  void _updateFileInfo(Map<String, dynamic> file) {
-    final expected = file.integer('expected_size') ?? 0;
-    final size = file.integer('size') ?? 0;
-    if (size > 0 || expected > 0) {
-      _total = size > 0 ? size : expected;
-    }
-    final path = file.obj('local')?.str('path');
-    if (path != null && path.isNotEmpty) _path = path;
-    final local = file.obj('local');
-    _downloadOffset = local?.integer('download_offset') ?? _downloadOffset;
-    final prefix = local?.integer('downloaded_prefix_size') ?? 0;
-    _downloadedPrefixSize = prefix;
-    _downloadComplete =
-        local?.boolean('is_downloading_completed') == true && _total > 0;
-    if (_downloadComplete) {
-      _downloadOffset = 0;
-      _downloadedPrefixSize = _total;
-      _continuousDownloadOffset = null;
-    }
-  }
-
-  Future<void> _startContinuousDownload(int offset) async {
-    if (_closed ||
-        _downloadComplete ||
-        !_backgroundDownloadRequested ||
-        _playbackPreparationCount > 0 ||
-        _rangeDownloads.isNotEmpty ||
-        _continuousDownloadOffset == offset) {
-      return;
-    }
-    _continuousDownloadOffset = offset;
-    try {
-      final file = await _query({
-        '@type': 'downloadFile',
-        'file_id': fileId,
-        'priority': 32,
-        'offset': offset,
-        'limit': 0,
-        'synchronous': false,
-      });
-      _updateFileInfo(file);
-    } catch (_) {
-      if (_continuousDownloadOffset == offset) {
-        _continuousDownloadOffset = null;
-      }
-    }
-  }
-
-  Future<void> _handleRequest(HttpRequest request) async {
-    var requestFinished = false;
-    unawaited(
-      request.response.done.then<void>(
-        (_) => requestFinished = true,
-        onError: (_, _) => requestFinished = true,
-      ),
-    );
-    try {
-      if (request.method != 'GET' && request.method != 'HEAD') {
-        request.response.statusCode = HttpStatus.methodNotAllowed;
-        await request.response.close();
-        return;
-      }
-
-      request.response.headers
-        ..set(HttpHeaders.acceptRangesHeader, 'bytes')
-        ..contentType = ContentType('video', 'mp4');
-
-      if (_total <= 0) {
-        request.response.statusCode = HttpStatus.notFound;
-        await request.response.close();
-        return;
-      }
-
-      final rangeHeader = request.headers.value(HttpHeaders.rangeHeader);
-      final range = rangeHeader == null ? null : _requestedRange(rangeHeader);
-      if (rangeHeader != null && range == null) {
-        request.response
-          ..statusCode = HttpStatus.requestedRangeNotSatisfiable
-          ..headers.set(HttpHeaders.contentRangeHeader, 'bytes */$_total');
-        await request.response.close();
-        return;
-      }
-      final (start, end) = range ?? (0, _total - 1);
-      if (request.method == 'HEAD') {
-        if (range == null) {
-          _writeRangeHeaders(request.response, start, end, false);
-        } else {
-          final boundedEnd = _boundedEnd(start, end);
-          _writeRangeHeaders(request.response, start, boundedEnd, true);
-        }
-        await request.response.close();
-        return;
-      }
-
-      final boundedEnd = _boundedEnd(start, end);
-      final partial = range != null || boundedEnd < _total - 1;
-      final bytes = await _loadRange(
-        start,
-        boundedEnd,
-        isCancelled: () => requestFinished,
-      );
-      if (requestFinished) return;
-      if (bytes == null) {
-        await _closeEmptyResponse(
-          request.response,
-          HttpStatus.serviceUnavailable,
-          retryAfter: const Duration(seconds: 1),
-        );
-        return;
-      }
-      _writeRangeHeaders(request.response, start, boundedEnd, partial);
-      request.response.add(bytes);
-      await request.response.close();
-    } catch (_) {
-      // The player may cancel a range request after headers were sent. Do not
-      // attempt to mutate that response again; just finish it if it is open.
-      try {
-        request.response.statusCode = HttpStatus.internalServerError;
-        request.response.contentLength = 0;
-      } catch (_) {
-        // Headers were already sent.
-      }
-      try {
-        await request.response.close();
-      } catch (_) {
-        // The client already closed the response.
-      }
-    }
-  }
-
-  int _boundedEnd(int start, int requestedEnd) => math.min(
-    requestedEnd,
-    math.min(_total - 1, start + _maxResponseBytes - 1),
-  );
-
-  Future<void> _closeEmptyResponse(
-    HttpResponse response,
-    int statusCode, {
-    Duration? retryAfter,
-  }) async {
-    response
-      ..statusCode = statusCode
-      ..contentLength = 0;
-    if (retryAfter != null) {
-      response.headers.set(
-        HttpHeaders.retryAfterHeader,
-        retryAfter.inSeconds.toString(),
-      );
-    }
-    await response.close();
-  }
-
-  void _writeRangeHeaders(
-    HttpResponse response,
-    int start,
-    int end,
-    bool partial,
-  ) {
-    response
-      ..statusCode = partial ? HttpStatus.partialContent : HttpStatus.ok
-      ..contentLength = end - start + 1;
-    if (partial) {
-      response.headers.set(
-        HttpHeaders.contentRangeHeader,
-        'bytes $start-$end/$_total',
-      );
-    }
-  }
-
-  /// Loads the complete bounded response before committing its headers.
-  /// AVFoundation validates `Content-Length` strictly, so an unavailable or
-  /// truncated TDLib range must become an empty retryable response rather than
-  /// a short successful body.
-  Future<List<int>?> _loadRange(
-    int start,
-    int end, {
-    required bool Function() isCancelled,
-  }) async {
-    if (isCancelled() ||
-        !await _ensureRange(start, end, isCancelled: isCancelled) ||
-        isCancelled() ||
-        _path == null) {
-      return null;
-    }
-    final bytes = await _readRange(start, end);
-    if (isCancelled() || bytes.length != end - start + 1) return null;
-    return bytes;
-  }
-
-  (int, int)? _requestedRange(String header) {
-    if (!header.startsWith('bytes=')) return null;
-    var start = 0;
-    int? requestedEnd;
-    final value = header.substring('bytes='.length).split(',').first.trim();
-    final parts = value.split('-');
-    if (parts.length != 2) return null;
-    if (parts.first.isEmpty) {
-      final suffixLength = int.tryParse(parts[1]) ?? 0;
-      if (suffixLength <= 0) return null;
-      start = math.max(0, _total - math.min(suffixLength, _maxResponseBytes));
-      requestedEnd = _total - 1;
-    } else {
-      start = int.tryParse(parts.first) ?? -1;
-      if (start < 0 || start >= _total) return null;
-      if (parts[1].isNotEmpty) {
-        requestedEnd = int.tryParse(parts[1]);
-      }
-    }
-    final end = math.min(
-      math.max(start, requestedEnd ?? (_total - 1)),
-      _total - 1,
-    );
-    return (start, end);
-  }
-
-  Future<bool> _ensureRange(
-    int start,
-    int end, {
-    bool Function()? isCancelled,
-  }) async {
-    if (_closed || isCancelled?.call() == true) return false;
-    if (await _rangeIsReadable(start, end)) return true;
-
-    final readableEnd = _downloadOffset + _downloadedPrefixSize - 1;
-    final continuousOffset = _continuousDownloadOffset;
-    final continuousDownloadCanReachRange =
-        continuousOffset != null &&
-        continuousOffset <= start &&
-        start <= readableEnd + _chunkSize;
-    if (continuousDownloadCanReachRange &&
-        await _waitForReadableRange(start, end, isCancelled: isCancelled)) {
-      return true;
-    }
-
-    if (isCancelled?.call() == true) return false;
-    final length = end - start + 1;
-    try {
-      final file = await _downloadPlaybackRange(start, length);
-      if (file != null) _updateFileInfo(file);
-      if (_path == null || _path!.isEmpty) {
-        await _primePlaybackRange(start, length);
-      }
-      return _waitForReadableRange(start, end, isCancelled: isCancelled);
-    } catch (_) {
-      return _waitForReadableRange(start, end, isCancelled: isCancelled);
-    }
-  }
-
-  Future<Map<String, dynamic>?> _downloadPlaybackRange(int offset, int length) {
-    if (_closed) return Future<Map<String, dynamic>?>.value();
-    final key = (offset, length);
-    final existing = _rangeDownloads[key];
-    if (existing != null) return existing;
-
-    final task = _downloadQueue.then((_) async {
-      if (_closed) return null;
-      _continuousDownloadOffset = null;
-      try {
-        return await _query({
-          '@type': 'downloadFile',
-          'file_id': fileId,
-          'priority': 32,
-          'offset': offset,
-          'limit': length,
-          'synchronous': true,
-        }).timeout(const Duration(seconds: 45));
-      } catch (_) {
-        return null;
-      }
-    });
-    _rangeDownloads[key] = task;
-    _downloadQueue = task.then<void>((_) {}, onError: (_) {});
-    unawaited(
-      task.whenComplete(() {
-        if (identical(_rangeDownloads[key], task)) {
-          _rangeDownloads.remove(key);
-        }
-        if (!_closed &&
-            _backgroundDownloadRequested &&
-            _playbackPreparationCount == 0 &&
-            _rangeDownloads.isEmpty &&
-            !_downloadComplete) {
-          unawaited(_startContinuousDownload(0));
-        }
-      }),
-    );
-    return task;
-  }
-
-  Future<bool> _waitForReadableRange(
-    int start,
-    int end, {
-    bool Function()? isCancelled,
-  }) async {
-    final deadline = DateTime.now().add(rangeWaitTimeout);
-    while (DateTime.now().isBefore(deadline)) {
-      if (_closed || isCancelled?.call() == true) return false;
-      if (await _rangeIsReadable(start, end)) return true;
-      await Future<void>.delayed(rangePollInterval);
-    }
-    return false;
-  }
-
-  Future<bool> _rangeIsReadable(int start, int end) async {
-    if (_downloadComplete) return true;
-    try {
-      final prefix = await _query({
-        '@type': 'getFileDownloadedPrefixSize',
-        'file_id': fileId,
-        'offset': start,
-      });
-      return (prefix.integer('size') ?? 0) >= end - start + 1;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  Future<List<int>> _readRange(int start, int end) async {
-    final path = _path;
-    if (path == null || path.isEmpty) return const [];
-    final file = File(path);
-    final available = await file.length();
-    if (available <= start) return const [];
-    final readableEnd = math.min(end, available - 1);
-    final raf = await file.open();
-    try {
-      await raf.setPosition(start);
-      return await raf.read(readableEnd - start + 1);
-    } finally {
-      await raf.close();
-    }
-  }
-}
+    FutureOr<bool> Function(FVideoPictureInPictureSnapshot snapshot);
 
 enum VideoPlayerPresentation { fullscreen, embedded, pictureInPicture }
 
@@ -515,7 +63,7 @@ enum VideoDisplayMode { fullscreen, pictureInPicture, split }
 @visibleForTesting
 Future<bool> restoreVideoPlaybackFromPictureInPicture({
   required VideoPlaybackQueue queue,
-  required SystemPictureInPictureSnapshot snapshot,
+  required FVideoPictureInPictureSnapshot snapshot,
   @visibleForTesting TdVideoStreamQuery? streamQuery,
 }) async {
   final navigator = appNavigatorKey.currentState;
@@ -531,10 +79,11 @@ Future<bool> restoreVideoPlaybackFromPictureInPicture({
     fullscreenDialog: true,
     transitionDuration: Duration.zero,
     reverseTransitionDuration: Duration.zero,
-    pageBuilder: (routeContext, _, _) => VideoPlaylistPlayerView(
+    pageBuilder: (routeContext, _, _) => VideoOnDemandPlayerView(
       queue: queue,
       initialPosition: restoredPosition,
       initialPlaying: snapshot.playing,
+      initialVolume: snapshot.volume,
       initialMuted: snapshot.muted,
       initialSpeed: snapshot.speed,
       streamQuery: streamQuery,
@@ -557,16 +106,21 @@ Future<bool> restoreVideoPlaybackFromPictureInPicture({
   return true;
 }
 
+/// Whether the host should add its configurable touch-style pan gestures.
+///
+/// Desktop interaction stays package-owned: keyboard shortcuts, pointer-wheel
+/// volume, taps, and fullscreen requests are all handled by [FVideoPlayer].
 @visibleForTesting
-bool usesReusableMobileFullscreenPlayer({
+bool videoPlaybackSurfaceUsesPanGestures({
   required VideoPlayerPresentation presentation,
   required TargetPlatform platform,
   bool isWeb = false,
 }) {
-  if (isWeb || presentation != VideoPlayerPresentation.fullscreen) {
-    return false;
-  }
-  return platform == TargetPlatform.android || platform == TargetPlatform.iOS;
+  if (presentation != VideoPlayerPresentation.fullscreen) return false;
+  if (isWeb) return true;
+  return platform != TargetPlatform.macOS &&
+      platform != TargetPlatform.windows &&
+      platform != TargetPlatform.linux;
 }
 
 @visibleForTesting
@@ -580,43 +134,21 @@ enum _PlayerGesture { brightness, volume, seek, changeVideo, skipTenSeconds }
 
 enum _PlayerGestureSide { left, right }
 
-class _VideoControlsLayout {
-  const _VideoControlsLayout({
-    required this.left,
-    required this.right,
-    required this.playButtonSize,
-    required this.playIconSize,
-    required this.playGap,
-    required this.timeGap,
-    required this.timeStyle,
-    required this.actionButtonSize,
-    required this.actionGap,
-    required this.bottomPadding,
-    required this.timelineCompact,
-    required this.timelineAtBottom,
-  });
-
-  final double left;
-  final double right;
-  final Size playButtonSize;
-  final double playIconSize;
-  final double playGap;
-  final double timeGap;
-  final TextStyle timeStyle;
-  final double actionButtonSize;
-  final double actionGap;
-  final double bottomPadding;
-  final bool timelineCompact;
-  final bool timelineAtBottom;
-}
+// Vertical adjustments should require a deliberate drag.  Mapping one screen
+// height to the full range made small phone swipes change volume and brightness
+// too abruptly, especially while holding the device in one hand.
+const _verticalGestureSensitivity = 0.5;
 
 class VideoPlayerView extends StatefulWidget {
   const VideoPlayerView({
     super.key,
     required this.video,
+    this.accountSlot,
     this.thumb,
+    this.title = '',
     this.width,
     this.height,
+    this.durationSeconds,
     this.presentation = VideoPlayerPresentation.fullscreen,
     this.onClose,
     this.compactControls = false,
@@ -624,6 +156,8 @@ class VideoPlayerView extends StatefulWidget {
     this.messageId,
     this.currentMode = VideoDisplayMode.fullscreen,
     this.onSwitchMode,
+    this.onVolumeChanged,
+    this.initialVolume = 1,
     this.initialMuted = false,
     this.initialPlaying = true,
     this.initialSpeed = 1,
@@ -631,15 +165,21 @@ class VideoPlayerView extends StatefulWidget {
     this.previousVideo,
     this.nextVideo,
     this.onNavigate,
-    this.onSystemPictureInPictureRestore,
+    this.onDemandQueue,
+    this.onDemandSelect,
+    this.onFVideoPictureInPictureRestore,
     this.onToggleFullscreen,
     this.streamQuery,
+    this.thumbnailProvider,
   });
 
   final TdFileRef video;
+  final int? accountSlot;
   final TdFileRef? thumb;
+  final String title;
   final int? width;
   final int? height;
+  final int? durationSeconds;
   final VideoPlayerPresentation presentation;
   final VoidCallback? onClose;
   final bool compactControls;
@@ -647,6 +187,8 @@ class VideoPlayerView extends StatefulWidget {
   final int? messageId;
   final VideoDisplayMode currentMode;
   final ValueChanged<VideoDisplayMode>? onSwitchMode;
+  final ValueChanged<double>? onVolumeChanged;
+  final double initialVolume;
   final bool initialMuted;
   final bool initialPlaying;
   final double initialSpeed;
@@ -654,7 +196,9 @@ class VideoPlayerView extends StatefulWidget {
   final VideoPlaybackItem? previousVideo;
   final VideoPlaybackItem? nextVideo;
   final ValueChanged<int>? onNavigate;
-  final VideoPictureInPictureRestoreCallback? onSystemPictureInPictureRestore;
+  final VideoPlaybackQueue? onDemandQueue;
+  final ValueChanged<int>? onDemandSelect;
+  final VideoPictureInPictureRestoreCallback? onFVideoPictureInPictureRestore;
 
   final VoidCallback? onToggleFullscreen;
 
@@ -662,15 +206,19 @@ class VideoPlayerView extends StatefulWidget {
   @visibleForTesting
   final TdVideoStreamQuery? streamQuery;
 
+  /// Overrides native thumbnail generation for deterministic host tests.
+  @visibleForTesting
+  final FVideoThumbnailProvider? thumbnailProvider;
+
   @override
   State<VideoPlayerView> createState() => _VideoPlayerViewState();
 }
 
-typedef VideoPlaylistModeCallback =
+typedef VideoOnDemandModeCallback =
     void Function(VideoPlaybackQueue queue, VideoDisplayMode mode);
 
-class VideoPlaylistPlayerView extends StatefulWidget {
-  const VideoPlaylistPlayerView({
+class VideoOnDemandPlayerView extends StatefulWidget {
+  const VideoOnDemandPlayerView({
     super.key,
     required this.queue,
     this.presentation = VideoPlayerPresentation.fullscreen,
@@ -679,6 +227,8 @@ class VideoPlaylistPlayerView extends StatefulWidget {
     this.currentMode = VideoDisplayMode.fullscreen,
     this.onSwitchMode,
     this.onQueueChanged,
+    this.onVolumeChanged,
+    this.initialVolume = 1,
     this.initialMuted = false,
     this.initialPlaying = true,
     this.initialSpeed = 1,
@@ -691,8 +241,10 @@ class VideoPlaylistPlayerView extends StatefulWidget {
   final VoidCallback? onClose;
   final bool compactControls;
   final VideoDisplayMode currentMode;
-  final VideoPlaylistModeCallback? onSwitchMode;
+  final VideoOnDemandModeCallback? onSwitchMode;
   final ValueChanged<VideoPlaybackQueue>? onQueueChanged;
+  final ValueChanged<double>? onVolumeChanged;
+  final double initialVolume;
   final bool initialMuted;
   final bool initialPlaying;
   final double initialSpeed;
@@ -700,17 +252,29 @@ class VideoPlaylistPlayerView extends StatefulWidget {
   final TdVideoStreamQuery? streamQuery;
 
   @override
-  State<VideoPlaylistPlayerView> createState() =>
-      _VideoPlaylistPlayerViewState();
+  State<VideoOnDemandPlayerView> createState() =>
+      _VideoOnDemandPlayerViewState();
 }
 
-class _VideoPlaylistPlayerViewState extends State<VideoPlaylistPlayerView> {
+class _VideoOnDemandPlayerViewState extends State<VideoOnDemandPlayerView> {
   late VideoPlaybackQueue _queue = widget.queue;
   late Duration? _initialPosition = widget.initialPosition;
   late bool _initialPlaying = widget.initialPlaying;
+  late double _lastAudibleVolume;
+  late bool _muted;
 
   @override
-  void didUpdateWidget(covariant VideoPlaylistPlayerView oldWidget) {
+  void initState() {
+    super.initState();
+    final initial = widget.initialVolume.isFinite
+        ? widget.initialVolume.clamp(0.0, 1.0).toDouble()
+        : 1.0;
+    _lastAudibleVolume = initial > 0.01 ? initial : 1.0;
+    _muted = widget.initialMuted || initial <= 0.01;
+  }
+
+  @override
+  void didUpdateWidget(covariant VideoOnDemandPlayerView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.queue != oldWidget.queue) {
       _queue = widget.queue;
@@ -735,15 +299,40 @@ class _VideoPlaylistPlayerViewState extends State<VideoPlaylistPlayerView> {
     widget.onQueueChanged?.call(next);
   }
 
+  void _selectOnDemandItem(int index) {
+    final next = _queue.moveTo(index);
+    if (next == null || identical(next, _queue)) return;
+    setState(() {
+      _queue = next;
+      _initialPosition = null;
+      _initialPlaying = true;
+    });
+    widget.onQueueChanged?.call(next);
+  }
+
+  void _handleVolumeChanged(double volume) {
+    final normalized = volume.isFinite
+        ? volume.clamp(0.0, 1.0).toDouble()
+        : 0.0;
+    _muted = normalized <= 0.01;
+    if (!_muted) _lastAudibleVolume = normalized;
+    widget.onVolumeChanged?.call(normalized);
+  }
+
   @override
   Widget build(BuildContext context) {
     final item = _queue.current;
     return VideoPlayerView(
-      key: ValueKey('${item.video.id}:${item.messageId ?? 0}'),
+      key: ValueKey(
+        '${item.accountSlot ?? 'active'}:${item.video.id}:${item.messageId ?? 0}',
+      ),
       video: item.video,
+      accountSlot: item.accountSlot,
       thumb: item.thumb,
+      title: item.title,
       width: item.width,
       height: item.height,
+      durationSeconds: item.durationSeconds,
       presentation: widget.presentation,
       onClose: widget.onClose,
       compactControls: widget.compactControls,
@@ -753,15 +342,19 @@ class _VideoPlaylistPlayerViewState extends State<VideoPlaylistPlayerView> {
       onSwitchMode: widget.onSwitchMode == null
           ? null
           : (mode) => widget.onSwitchMode!(_queue, mode),
-      initialMuted: widget.initialMuted,
+      onVolumeChanged: _handleVolumeChanged,
+      initialVolume: _lastAudibleVolume,
+      initialMuted: _muted,
       initialPlaying: _initialPlaying,
       initialSpeed: widget.initialSpeed,
       initialPosition: _initialPosition,
       previousVideo: _queue.previous,
       nextVideo: _queue.next,
       onNavigate: _navigate,
+      onDemandQueue: _queue,
+      onDemandSelect: _selectOnDemandItem,
       streamQuery: widget.streamQuery,
-      onSystemPictureInPictureRestore: (snapshot) =>
+      onFVideoPictureInPictureRestore: (snapshot) =>
           restoreVideoPlaybackFromPictureInPicture(
             queue: _queue,
             snapshot: snapshot,
@@ -771,24 +364,35 @@ class _VideoPlaylistPlayerViewState extends State<VideoPlaylistPlayerView> {
   }
 }
 
-class _VideoPlayerViewState extends State<VideoPlayerView> {
+class _VideoPlayerViewState extends State<VideoPlayerView>
+    with WidgetsBindingObserver {
+  late final TdVideoStreamQuery _streamQuery =
+      widget.streamQuery ?? tdVideoStreamQueryForAccount(widget.accountSlot);
   VideoPlayerController? _controller;
   bool _failed = false;
-  bool _controlsVisible = true;
   bool _moreMenuVisible = false;
   bool _modeMenuVisible = false;
-  Timer? _hideTimer;
-  Timer? _progressRebuildTimer;
   StreamSubscription<TdFileProgress>? _progressSub;
+  Timer? _progressUiTimer;
   TdFileProgress? _progress;
   double _speed = 1;
   double _volume = 1;
+  double _lastAudibleVolume = 1;
+  int _volumeControlRequestGeneration = 0;
   String? _localPath;
   int _lastSavedPositionMs = 0;
   TdVideoStreamServer? _streamServer;
   bool _openedCompletedLocalFile = false;
   bool _streamRecoveryInFlight = false;
+  bool _completedFileRecoveryInFlight = false;
+  bool _completedFileRecoveryAttempted = false;
+  Future<String?>? _completedFileDownloadOperation;
   int _automaticStreamRecoveryCount = 0;
+  Object? _lastControllerInitializationError;
+  Timer? _streamStallTimer;
+  Duration? _streamStallPosition;
+  bool _retryInFlight = false;
+  bool _retryFromPlaybackSnapshot = false;
   bool _lastKnownPlaybackWasPlaying = false;
   Duration _lastKnownPlaybackPosition = Duration.zero;
   bool _systemPiPHandoff = false;
@@ -796,20 +400,47 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   bool _systemPiPSupported = false;
   bool _systemPiPBusy = false;
   bool _systemPiPPrepared = false;
+  bool _systemPiPActive = false;
   String? _systemPiPId;
   Future<void>? _systemPiPPrepareOperation;
   Future<bool>? _systemPiPStartOperation;
   int _lastSystemPiPSyncMs = -1;
+  bool? _lastSystemPiPPlaying;
+  double? _lastSystemPiPSpeed;
+  bool? _lastSystemPiPMuted;
+  Rect? _lastSystemPiPSourceRect;
+  FVideoActions? _reusablePlayerActions;
+  bool _debuggerVisible = false;
+  bool _onDemandPanelVisible = false;
+  final List<String> _debugEvents = <String>[];
+  int _lastDebugDownloaded = -1;
+  int _lastDebugPrefixDownloaded = -1;
+  int _lastDebugTotal = -1;
   bool _wakelockActive = false;
+  bool _landscapePlayback = false;
+  bool _orientationChangeInFlight = false;
   _PlayerGesture? _activeGesture;
   _PlayerGestureSide? _activeGestureSide;
   Offset? _gestureOrigin;
   double _gestureStartValue = 0;
   double _gestureValue = 0;
   bool _gestureBrightnessReady = false;
+  bool _gestureVolumeReady = false;
+  bool _gestureUsesSystemVolume = false;
+  int _gestureVolumeRequestGeneration = 0;
   Duration _gestureStartPosition = Duration.zero;
   Duration _gestureSeekPosition = Duration.zero;
   int _gestureNavigationDelta = 0;
+  double _videoZoomScale = 1;
+  Offset _videoZoomOffset = Offset.zero;
+  Rect _videoZoomViewport = Rect.zero;
+  bool _videoZoomGestureActive = false;
+  double _videoZoomGestureStartScale = 1;
+  double _videoZoomGestureScaleBaseline = 1;
+  Offset _videoZoomGestureContentAnchor = Offset.zero;
+  final Map<int, Offset> _videoZoomPointers = <int, Offset>{};
+  List<int> _videoZoomPinchPointers = const <int>[];
+  bool _videoZoomSuppressPlaybackGestures = false;
   VideoHorizontalSwipeAction _horizontalSwipeAction =
       VideoHorizontalSwipeAction.changeVideo;
   VideoVerticalSwipeAction _leftVerticalSwipeAction =
@@ -829,37 +460,79 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   final FocusNode _modeButtonFocusNode = FocusNode(
     debugLabel: 'video-display-mode-button',
   );
+  final List<FocusNode> _moreMenuFocusNodes = List<FocusNode>.generate(
+    4,
+    (index) => FocusNode(debugLabel: 'video-more-menu-action-$index'),
+  );
+  final Map<VideoDisplayMode, FocusNode> _modeMenuFocusNodes = {
+    for (final mode in VideoDisplayMode.values)
+      mode: FocusNode(debugLabel: 'video-mode-menu-${mode.name}'),
+  };
   final LayerLink _modeButtonLink = LayerLink();
-  final GlobalKey _scrubberKey = GlobalKey(debugLabel: 'video-scrubber');
-  final Map<int, Uint8List> _scrubPreviewCache = {};
-  OverlayEntry? _scrubPreviewOverlay;
-  Timer? _scrubPreviewTimer;
-  Duration? _scrubPosition;
-  Duration? _pendingScrubPreviewPosition;
-  Uint8List? _scrubPreviewBytes;
-  bool _scrubPreviewLoading = false;
-  bool _resumeAfterScrub = false;
-  bool _scrubPreviewCompact = false;
-  Future<void>? _scrubPause;
-  int _scrubPreviewGeneration = 0;
-
-  static const _speeds = <double>[0.5, 0.75, 1, 1.25, 1.5, 2];
   static const _resumePrefix = 'mithka.video.resume.';
-  static const _resumeSaveStep = Duration(seconds: 2);
+  // Every step costs a full SharedPreferences serialization plus a platform
+  // round trip, so the tick is coarse; the exit paths and the lifecycle hook
+  // below force a save, which is what actually makes the position durable.
+  static const _resumeSaveStep = Duration(seconds: 15);
   static const _resumeMinimum = Duration(seconds: 3);
   static const _resumeEndSlack = Duration(seconds: 8);
+  static const _streamStallTimeout = Duration(seconds: 15);
+  static const _minimumVideoZoomScale = 1.0;
+  static const _maximumVideoZoomScale = 4.0;
+  static const _videoZoomResetThreshold = 1.02;
+
+  bool get _canUseAndroidPlatformViewFallback =>
+      !kIsWeb &&
+      defaultTargetPlatform == TargetPlatform.android &&
+      widget.presentation == VideoPlayerPresentation.fullscreen;
+
+  bool get _usesAndroidSystemMediaVolume =>
+      !kIsWeb &&
+      defaultTargetPlatform == TargetPlatform.android &&
+      widget.presentation == VideoPlayerPresentation.fullscreen;
+
+  double get _controllerGainForCurrentVolume =>
+      _usesAndroidSystemMediaVolume && _volume > 0.01 ? 1.0 : _volume;
+
+  bool _isDecoderOrSurfaceFailure(Object? error) {
+    if (!_canUseAndroidPlatformViewFallback || error == null) return false;
+    final message = error.toString().toLowerCase();
+    return message.contains('mediacodecvideorenderer') ||
+        message.contains('mediacodecvideodecoderexception') ||
+        message.contains('decoderinitializationexception') ||
+        message.contains('video codec error') ||
+        message.contains('imagereader') ||
+        message.contains('surfaceproducer') ||
+        (message.contains('surface') && message.contains('released'));
+  }
 
   @override
   void initState() {
     super.initState();
     _brightnessSession = PlayerBrightnessSession.capture();
     _lastKnownPlaybackWasPlaying = widget.initialPlaying;
-    if (widget.initialMuted) _volume = 0;
+    final initialVolume = widget.initialVolume.isFinite
+        ? widget.initialVolume.clamp(0.0, 1.0).toDouble()
+        : 1.0;
+    _lastAudibleVolume = initialVolume > 0.01 ? initialVolume : 1;
+    _volume = widget.initialMuted ? 0 : initialVolume;
     if (widget.initialSpeed.isFinite && widget.initialSpeed > 0) {
       _speed = widget.initialSpeed;
     }
+    WidgetsBinding.instance.addObserver(this);
     unawaited(_loadPlaybackPreferences());
     _load();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Leaving the app is where the resume position has to become durable: the
+    // process may never be resumed, and the periodic save is coarse.
+    if (state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      unawaited(_storePlaybackPosition(force: true));
+    }
   }
 
   Future<void> _loadPlaybackPreferences() async {
@@ -873,33 +546,78 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     });
   }
 
-  Future<void> _load() async {
-    _progressSub = TdFileCenter.shared.progress(widget.video.id).listen((
-      progress,
-    ) {
-      if (!mounted) return;
-      _progress = progress;
-      if (_usesReusableMobileFullscreenPlayer) {
-        _progressRebuildTimer ??= Timer(const Duration(milliseconds: 250), () {
-          _progressRebuildTimer = null;
-          if (mounted) setState(() {});
+  void _recordDebugProgress(TdFileProgress progress) {
+    if (progress.downloaded == _lastDebugDownloaded &&
+        progress.prefixDownloaded == _lastDebugPrefixDownloaded &&
+        progress.total == _lastDebugTotal) {
+      return;
+    }
+    _lastDebugDownloaded = progress.downloaded;
+    _lastDebugPrefixDownloaded = progress.prefixDownloaded;
+    _lastDebugTotal = progress.total;
+    _recordDebugEvent(
+      '${_debugTimestamp()}  download ${_debugBytes(progress.downloaded)}'
+      ' / ${_debugBytes(progress.total)}',
+    );
+  }
+
+  void _recordDebugEvent(String event) {
+    _debugEvents.add(event);
+    if (_debugEvents.length > 80) {
+      _debugEvents.removeRange(0, _debugEvents.length - 80);
+    }
+  }
+
+  String _debugTimestamp() {
+    final now = DateTime.now();
+    return '${now.minute.toString().padLeft(2, '0')}'
+        ':${now.second.toString().padLeft(2, '0')}';
+  }
+
+  String _debugBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    }
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+
+  Future<void> _load({Duration? resumeOverride, bool? playOverride}) async {
+    final preferredViewType = preferredCompatibleVideoViewType;
+    await _progressSub?.cancel();
+    _progressSub = TdFileCenter.shared
+        .progress(widget.video.id, accountSlot: widget.accountSlot)
+        .listen((progress) {
+          if (!mounted) return;
+          _progress = progress;
+          _recordDebugProgress(progress);
+          _progressUiTimer ??= Timer(const Duration(milliseconds: 250), () {
+            _progressUiTimer = null;
+            if (mounted) setState(() {});
+          });
         });
-      } else {
-        setState(() {});
-      }
-    });
     final completedPath = await _completedLocalVideoPath();
     if (!mounted) return;
     if (completedPath != null) {
       _localPath = completedPath;
       _openedCompletedLocalFile = true;
-      final initialized = await _initializeFromFile(completedPath);
+      final initialized = await _initializeFileWithSurfaceFallback(
+        completedPath,
+        preferredViewType: preferredViewType,
+        resumeOverride: resumeOverride,
+        playOverride: playOverride,
+      );
       if (initialized || !mounted) return;
       _openedCompletedLocalFile = false;
     }
     final server = TdVideoStreamServer(
       widget.video.id,
-      query: widget.streamQuery,
+      query: _streamQuery,
+      fileName: widget.video.fileName,
+      mimeType: widget.video.mimeType,
     );
     _streamServer = server;
     final uri = await server.start();
@@ -908,70 +626,220 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       return;
     }
     if (uri == null) {
-      setState(() => _failed = true);
-      showToast(context, AppStringKeys.videoPlayerLoadFailed);
+      if (await _recoverFromCompletedFile(
+        releaseActiveController: false,
+        resumeOverride: resumeOverride,
+        playOverride: playOverride,
+      )) {
+        return;
+      }
+      if (!mounted) return;
+      _showTerminalPlaybackFailure(AppStringKeys.videoPlayerLoadFailed);
       return;
     }
     _localPath = uri.toString();
     var prepared = await server.prepareForPlayback();
     if (!mounted) return;
-    var initialized = prepared && await _initializeFromUri(uri);
+    var initialized =
+        prepared &&
+        await _initializeFromUri(
+          uri,
+          viewType: preferredViewType,
+          resumeOverride: resumeOverride,
+          playOverride: playOverride,
+        );
+    var attemptedPlatformView = preferredViewType == VideoViewType.platformView;
     if (!initialized && mounted) {
       // A player probe can still lose a TDLib request race to an existing
       // download from another view. Revalidate the bootstrap ranges and retry
       // inside this route instead of requiring the user to close and reopen it.
       prepared = await server.prepareForPlayback();
-      if (prepared && mounted) initialized = await _initializeFromUri(uri);
+      if (prepared && mounted) {
+        final viewType =
+            preferredViewType == VideoViewType.platformView ||
+                _isDecoderOrSurfaceFailure(_lastControllerInitializationError)
+            ? VideoViewType.platformView
+            : VideoViewType.textureView;
+        attemptedPlatformView = viewType == VideoViewType.platformView;
+        initialized = await _initializeFromUri(
+          uri,
+          viewType: viewType,
+          resumeOverride: resumeOverride,
+          playOverride: playOverride,
+        );
+      }
+    }
+    if (!initialized &&
+        mounted &&
+        !attemptedPlatformView &&
+        _isDecoderOrSurfaceFailure(_lastControllerInitializationError)) {
+      prepared = await server.prepareForPlayback();
+      if (prepared && mounted) {
+        initialized = await _initializeFromUri(
+          uri,
+          viewType: VideoViewType.platformView,
+          resumeOverride: resumeOverride,
+          playOverride: playOverride,
+        );
+      }
     }
     if (initialized) {
       server.startBackgroundDownload();
       return;
     }
     if (!mounted) return;
-    setState(() => _failed = true);
-    showToast(context, AppStringKeys.videoPlayerCannotPlay);
+    if (await _recoverFromCompletedFile(
+      releaseActiveController: false,
+      resumeOverride: resumeOverride,
+      playOverride: playOverride,
+      preferredViewType:
+          preferredViewType == VideoViewType.platformView ||
+              _isDecoderOrSurfaceFailure(_lastControllerInitializationError)
+          ? VideoViewType.platformView
+          : VideoViewType.textureView,
+    )) {
+      return;
+    }
+    if (!mounted) return;
+    _showTerminalPlaybackFailure(AppStringKeys.videoPlayerCannotPlay);
   }
 
   Future<String?> _completedLocalVideoPath() async {
     try {
-      final query = widget.streamQuery ?? TdClient.shared.query;
-      final file = await query({
+      final file = await _streamQuery({
         '@type': 'getFile',
         'file_id': widget.video.id,
       });
-      final local = file.obj('local');
-      if (local?.boolean('is_downloading_completed') != true) return null;
-      final path = local?.str('path');
-      if (path == null || path.isEmpty) return null;
-      final localFile = File(path);
-      if (!await localFile.exists()) return null;
-      final length = await localFile.length();
-      if (length <= 0) return null;
-      final expected = file.integer('expected_size') ?? 0;
-      final size = file.integer('size') ?? 0;
-      final total = size > 0 ? size : expected;
-      if (total > 0 && length < total) return null;
-      _progress = TdFileProgress(
-        fileId: widget.video.id,
-        downloaded: total > 0 ? total : length,
-        prefixDownloaded: total > 0 ? total : length,
-        total: total > 0 ? total : length,
-        isActive: false,
-        isCompleted: true,
-      );
-      return path;
+      return _validatedCompletedVideoPath(file);
     } catch (_) {
       return null;
     }
   }
 
-  Future<bool> _initializeFromFile(String path) async {
-    final c = VideoPlayerController.file(File(path));
-    return _initializeController(c);
+  Future<String?> _downloadCompletedVideoPath() async {
+    final existingOperation = _completedFileDownloadOperation;
+    final operation = existingOperation ?? _requestCompletedVideoDownload();
+    if (existingOperation == null) {
+      _completedFileDownloadOperation = operation;
+      unawaited(
+        operation.whenComplete(() {
+          if (identical(_completedFileDownloadOperation, operation)) {
+            _completedFileDownloadOperation = null;
+          }
+        }),
+      );
+    }
+    try {
+      return await operation.timeout(const Duration(minutes: 5));
+    } on TimeoutException {
+      debugPrint(
+        'VideoPlayerView full-file fallback timed out for '
+        '${widget.video.id}; retaining the in-flight request.',
+      );
+      return null;
+    }
   }
 
-  Future<bool> _initializeFromUri(Uri uri) async {
-    return _initializeController(VideoPlayerController.networkUrl(uri));
+  Future<String?> _requestCompletedVideoDownload() async {
+    try {
+      final file = await _streamQuery({
+        '@type': 'downloadFile',
+        'file_id': widget.video.id,
+        'priority': 32,
+        'offset': 0,
+        'limit': 0,
+        'synchronous': true,
+      });
+      return _validatedCompletedVideoPath(file);
+    } catch (error) {
+      debugPrint(
+        'VideoPlayerView full-file fallback failed for '
+        '${widget.video.id}: $error',
+      );
+      return null;
+    }
+  }
+
+  Future<String?> _validatedCompletedVideoPath(
+    Map<String, dynamic> file,
+  ) async {
+    final responseFileId = file.integer('id');
+    if (responseFileId != null && responseFileId != widget.video.id) {
+      return null;
+    }
+    final local = file.obj('local');
+    if (local?.boolean('is_downloading_completed') != true) return null;
+    final path = local?.str('path');
+    if (path == null || path.isEmpty) return null;
+    final localFile = File(path);
+    if (!await localFile.exists()) return null;
+    final length = await localFile.length();
+    if (length <= 0) return null;
+    final expected = file.integer('expected_size') ?? 0;
+    final size = file.integer('size') ?? 0;
+    final total = size > 0 ? size : expected;
+    if (total > 0 && length < total) return null;
+    _progress = TdFileProgress(
+      fileId: widget.video.id,
+      downloaded: total > 0 ? total : length,
+      prefixDownloaded: total > 0 ? total : length,
+      total: total > 0 ? total : length,
+      isActive: false,
+      isCompleted: true,
+    );
+    return path;
+  }
+
+  Future<bool> _initializeFileWithSurfaceFallback(
+    String path, {
+    VideoViewType preferredViewType = VideoViewType.textureView,
+    Duration? resumeOverride,
+    bool? playOverride,
+  }) async {
+    final initialized = await _initializeFromFile(
+      path,
+      viewType: preferredViewType,
+      resumeOverride: resumeOverride,
+      playOverride: playOverride,
+    );
+    if (initialized ||
+        preferredViewType != VideoViewType.textureView ||
+        !_isDecoderOrSurfaceFailure(_lastControllerInitializationError)) {
+      return initialized;
+    }
+    return _initializeFromFile(
+      path,
+      viewType: VideoViewType.platformView,
+      resumeOverride: resumeOverride,
+      playOverride: playOverride,
+    );
+  }
+
+  Future<bool> _initializeFromFile(
+    String path, {
+    required VideoViewType viewType,
+    Duration? resumeOverride,
+    bool? playOverride,
+  }) async {
+    final c = VideoPlayerController.file(File(path), viewType: viewType);
+    return _initializeController(
+      c,
+      resumeOverride: resumeOverride,
+      playOverride: playOverride,
+    );
+  }
+
+  Future<bool> _initializeFromUri(
+    Uri uri, {
+    required VideoViewType viewType,
+    Duration? resumeOverride,
+    bool? playOverride,
+  }) async {
+    return _initializeController(
+      VideoPlayerController.networkUrl(uri, viewType: viewType),
+      resumeOverride: resumeOverride,
+      playOverride: playOverride,
+    );
   }
 
   Future<bool> _initializeController(
@@ -979,11 +847,12 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     Duration? resumeOverride,
     bool? playOverride,
   }) async {
+    _lastControllerInitializationError = null;
     try {
       await c.initialize().timeout(const Duration(seconds: 45));
       await c.setLooping(false);
       await c.setPlaybackSpeed(_speed);
-      await c.setVolume(_volume);
+      await c.setVolume(_controllerGainForCurrentVolume);
       final resume = resumeOverride != null
           ? _clampPlaybackPosition(resumeOverride, c.value.duration)
           : widget.initialPosition == null
@@ -995,6 +864,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       if (shouldPlay) await c.play();
       _lastKnownPlaybackWasPlaying = shouldPlay;
     } catch (error, stackTrace) {
+      _lastControllerInitializationError = error;
       debugPrint(
         'VideoPlayerView failed to initialize ${c.dataSource}: $error\n'
         '$stackTrace',
@@ -1007,42 +877,320 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       return true;
     }
     c.addListener(_onTick);
+    _recordDebugEvent(
+      '${_debugTimestamp()}  controller ready  ${_fmt(c.value.duration)}',
+    );
     setState(() => _controller = c);
+    if (_usesAndroidSystemMediaVolume) {
+      unawaited(_syncAndroidSystemVolume(c));
+    }
     _updateWakelock();
-    unawaited(_refreshSystemPictureInPictureSupport());
-    _scheduleHide();
+    unawaited(_refreshFVideoPictureInPictureSupport());
     return true;
   }
 
-  void _handleReusablePlayerError(MithkaVideoPlayerError error) {
+  void _handleReusablePlayerError(FVideoPlayerError error) {
+    _recoverAfterStreamFailure(error, requireControllerError: true);
+  }
+
+  void _handleReusablePlayerEnded() {
+    if (_completionHandled) return;
+    _completionHandled = true;
+    unawaited(_handlePlaybackCompleted());
+  }
+
+  void _handleReusablePlaybackStateChanged(FVideoPlaybackState state) {
+    if (state != FVideoPlaybackState.completed && _completionHandled) {
+      _completionHandled = false;
+    }
+    if (state == FVideoPlaybackState.playing) {
+      _lastKnownPlaybackWasPlaying = true;
+    } else if (state == FVideoPlaybackState.paused ||
+        state == FVideoPlaybackState.completed) {
+      _lastKnownPlaybackWasPlaying = false;
+    }
+  }
+
+  void _handleReusableVolumeChanged(double volume) {
+    final normalized = volume.isFinite
+        ? volume.clamp(0.0, 1.0).toDouble()
+        : 0.0;
+    if (normalized > 0.01) _lastAudibleVolume = normalized;
+    if (mounted && (_volume - normalized).abs() > 0.001) {
+      setState(() => _volume = normalized);
+    }
+    widget.onVolumeChanged?.call(normalized);
+  }
+
+  Future<double> _requestAndroidSystemVolume(double requestedVolume) async {
+    final request = ++_volumeControlRequestGeneration;
+    final normalized = requestedVolume.clamp(0.0, 1.0).toDouble();
+    final current = await PlayerSystemVolume.setFraction(normalized);
+    final controller = _controller;
+    if (!mounted || request != _volumeControlRequestGeneration) {
+      return _volume;
+    }
+    if (current == null) {
+      await controller?.setVolume(normalized);
+      if (!mounted ||
+          request != _volumeControlRequestGeneration ||
+          _controller != controller) {
+        return _volume;
+      }
+      return normalized;
+    }
+    final actual = current.fraction;
+    if (controller != null &&
+        actual > 0.01 &&
+        (controller.value.volume - 1).abs() > 0.001) {
+      await controller.setVolume(1);
+      if (!mounted ||
+          request != _volumeControlRequestGeneration ||
+          _controller != controller) {
+        return _volume;
+      }
+    }
+    return actual;
+  }
+
+  Future<void> _handleReusablePictureInPictureChanged(bool requested) async {
+    if (requested) {
+      await _enterPictureInPicture();
+      return;
+    }
+    if (_systemPiPActive) {
+      await FVideoPictureInPicture.stop();
+    }
+    if (mounted && widget.currentMode == VideoDisplayMode.pictureInPicture) {
+      widget.onSwitchMode?.call(VideoDisplayMode.fullscreen);
+    }
+  }
+
+  void _recoverAfterStreamFailure(
+    Object error, {
+    required bool requireControllerError,
+  }) {
     final controller = _controller;
     final source = _localPath;
-    if (controller?.value.hasError != true ||
+    if (controller == null ||
+        (requireControllerError && controller.value.hasError != true) ||
         _streamRecoveryInFlight ||
-        _automaticStreamRecoveryCount >= 1 ||
+        _completedFileRecoveryInFlight ||
         _systemPiPHandoff ||
         _systemPiPBusy ||
         _systemPiPPrepareOperation != null ||
         _systemPiPStartOperation != null ||
-        _streamServer == null ||
-        source == null ||
-        !(source.startsWith('http://') || source.startsWith('https://'))) {
+        source == null) {
       return;
     }
     debugPrint('VideoPlayerView runtime error for ${widget.video.id}: $error');
+    final isNetworkSource =
+        source.startsWith('http://') || source.startsWith('https://');
+    if (!isNetworkSource) {
+      if (controller.viewType == VideoViewType.textureView &&
+          _isDecoderOrSurfaceFailure(error)) {
+        unawaited(_recoverCompletedLocalPlayback(source));
+      } else {
+        unawaited(_stopErroredLocalPlayback());
+      }
+      return;
+    }
+    if (_streamServer == null) return;
+    if (_automaticStreamRecoveryCount >= 1) {
+      unawaited(
+        _recoverFromCompletedFile(
+          releaseActiveController: true,
+          preferredViewType:
+              _isDecoderOrSurfaceFailure(error) ||
+                  controller.viewType == VideoViewType.platformView
+              ? VideoViewType.platformView
+              : VideoViewType.textureView,
+        ).then((recovered) {
+          if (!recovered && mounted) {
+            _showTerminalPlaybackFailure(
+              AppStringKeys.videoPlayerCannotPlay,
+              preservePlaybackSnapshot: true,
+            );
+          }
+        }),
+      );
+      return;
+    }
     _automaticStreamRecoveryCount++;
-    unawaited(_recoverStreamingPlayback(Uri.parse(source)));
+    final recoveryViewType = _isDecoderOrSurfaceFailure(error)
+        ? VideoViewType.platformView
+        : controller.viewType;
+    unawaited(
+      _recoverStreamingPlayback(Uri.parse(source), viewType: recoveryViewType),
+    );
   }
 
-  Future<void> _recoverStreamingPlayback(Uri uri) async {
+  Future<void> _recoverCompletedLocalPlayback(String path) async {
+    if (_streamRecoveryInFlight || !mounted) return;
+    _streamRecoveryInFlight = true;
+    try {
+      final recovery = await _releaseActivePlaybackForRecovery(
+        closeStreamServer: false,
+      );
+      if (!mounted) return;
+      final initialized = await _initializeFromFile(
+        path,
+        viewType: VideoViewType.platformView,
+        resumeOverride: recovery.$1,
+        playOverride: recovery.$2,
+      );
+      if (!initialized && mounted) {
+        _showTerminalPlaybackFailure(
+          AppStringKeys.videoPlayerCannotPlay,
+          preservePlaybackSnapshot: true,
+        );
+      }
+    } finally {
+      _streamRecoveryInFlight = false;
+    }
+  }
+
+  Future<void> _recoverStreamingPlayback(
+    Uri uri, {
+    required VideoViewType viewType,
+  }) async {
     if (_streamRecoveryInFlight || !mounted) return;
     final server = _streamServer;
     if (server == null) return;
     _streamRecoveryInFlight = true;
+
+    try {
+      final recovery = await _releaseActivePlaybackForRecovery(
+        closeStreamServer: false,
+      );
+      if (!mounted) return;
+      final selectedViewType = _canUseAndroidPlatformViewFallback
+          ? viewType
+          : VideoViewType.textureView;
+      var prepared = await server.prepareForPlayback();
+      if (!mounted) return;
+      var initialized =
+          prepared &&
+          await _initializeController(
+            VideoPlayerController.networkUrl(uri, viewType: selectedViewType),
+            resumeOverride: recovery.$1,
+            playOverride: recovery.$2,
+          );
+      if (!initialized &&
+          selectedViewType == VideoViewType.textureView &&
+          _isDecoderOrSurfaceFailure(_lastControllerInitializationError)) {
+        prepared = await server.prepareForPlayback();
+        if (prepared && mounted) {
+          initialized = await _initializeController(
+            VideoPlayerController.networkUrl(
+              uri,
+              viewType: VideoViewType.platformView,
+            ),
+            resumeOverride: recovery.$1,
+            playOverride: recovery.$2,
+          );
+        }
+      }
+      if (initialized) {
+        server.startBackgroundDownload();
+        return;
+      }
+      final recovered = await _recoverFromCompletedFile(
+        releaseActiveController: false,
+        resumeOverride: recovery.$1,
+        playOverride: recovery.$2,
+        preferredViewType:
+            selectedViewType == VideoViewType.platformView ||
+                _isDecoderOrSurfaceFailure(_lastControllerInitializationError)
+            ? VideoViewType.platformView
+            : VideoViewType.textureView,
+      );
+      if (!recovered && mounted) {
+        _showTerminalPlaybackFailure(
+          AppStringKeys.videoPlayerCannotPlay,
+          preservePlaybackSnapshot: true,
+        );
+      }
+    } finally {
+      _streamRecoveryInFlight = false;
+    }
+  }
+
+  Future<bool> _recoverFromCompletedFile({
+    required bool releaseActiveController,
+    Duration? resumeOverride,
+    bool? playOverride,
+    VideoViewType preferredViewType = VideoViewType.textureView,
+  }) async {
+    if (_completedFileRecoveryInFlight ||
+        _completedFileRecoveryAttempted ||
+        !mounted) {
+      return false;
+    }
+    _completedFileRecoveryInFlight = true;
+    _completedFileRecoveryAttempted = true;
+    _streamStallTimer?.cancel();
+    _streamStallTimer = null;
+    _streamStallPosition = null;
+    try {
+      var resume = resumeOverride;
+      var shouldPlay = playOverride;
+      if (releaseActiveController) {
+        final recovery = await _releaseActivePlaybackForRecovery(
+          closeStreamServer: true,
+        );
+        resume = recovery.$1;
+        shouldPlay = recovery.$2;
+      } else {
+        final server = _streamServer;
+        _streamServer = null;
+        await server?.close();
+      }
+      if (!mounted) return false;
+      final path = await _downloadCompletedVideoPath();
+      if (!mounted || path == null) return false;
+      _localPath = path;
+      _openedCompletedLocalFile = true;
+      final initialized = await _initializeFileWithSurfaceFallback(
+        path,
+        preferredViewType: _canUseAndroidPlatformViewFallback
+            ? preferredViewType
+            : VideoViewType.textureView,
+        resumeOverride: resume,
+        playOverride: shouldPlay,
+      );
+      if (!initialized) _openedCompletedLocalFile = false;
+      return initialized;
+    } finally {
+      _completedFileRecoveryInFlight = false;
+    }
+  }
+
+  Future<void> _stopErroredLocalPlayback() async {
+    if (_streamRecoveryInFlight || !mounted) return;
+    _streamRecoveryInFlight = true;
+    try {
+      await _releaseActivePlaybackForRecovery(closeStreamServer: true);
+      if (!mounted) return;
+      _showTerminalPlaybackFailure(
+        AppStringKeys.videoPlayerCannotPlay,
+        preservePlaybackSnapshot: true,
+      );
+    } finally {
+      _streamRecoveryInFlight = false;
+    }
+  }
+
+  Future<(Duration, bool)> _releaseActivePlaybackForRecovery({
+    required bool closeStreamServer,
+  }) async {
     final oldController = _controller;
     final resume = _lastKnownPlaybackPosition;
     final shouldPlay = _lastKnownPlaybackWasPlaying;
     oldController?.removeListener(_onTick);
+    _streamStallTimer?.cancel();
+    _streamStallTimer = null;
+    _streamStallPosition = null;
 
     final preparedPiPId = _systemPiPId;
     final pendingPiPPreparation = _systemPiPPrepareOperation;
@@ -1053,67 +1201,154 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     _systemPiPUsesActivePlayer = false;
     _systemPiPPrepareOperation = null;
     _systemPiPStartOperation = null;
-    setState(() {
-      _controller = null;
-      _failed = false;
-    });
+    final streamServer = closeStreamServer ? _streamServer : null;
+    if (closeStreamServer) _streamServer = null;
+    if (mounted) {
+      setState(() {
+        _controller = null;
+        _failed = false;
+      });
+    }
     _updateWakelock();
 
+    if (oldController != null) await WidgetsBinding.instance.endOfFrame;
+    await _releasePlaybackResources(
+      controller: oldController,
+      disposeController: true,
+      preparedPiPId: preparedPiPId,
+      pendingPiPPreparation: pendingPiPPreparation,
+      pendingPiPStart: pendingPiPStart,
+      streamServer: streamServer,
+    );
+    return (resume, shouldPlay);
+  }
+
+  void _showTerminalPlaybackFailure(
+    String messageKey, {
+    bool preservePlaybackSnapshot = false,
+  }) {
+    if (!mounted) return;
+    if (preservePlaybackSnapshot) _retryFromPlaybackSnapshot = true;
+    setState(() => _failed = true);
+    showToast(context, messageKey);
+  }
+
+  Future<void> _retryPlayback() async {
+    if (_retryInFlight ||
+        _streamRecoveryInFlight ||
+        _completedFileRecoveryInFlight) {
+      return;
+    }
+    _retryInFlight = true;
     try {
-      await WidgetsBinding.instance.endOfFrame;
-      await _releasePlaybackResources(
-        controller: oldController,
-        disposeController: true,
-        preparedPiPId: preparedPiPId,
-        pendingPiPPreparation: pendingPiPPreparation,
-        pendingPiPStart: pendingPiPStart,
-        streamServer: null,
-      );
-      await server.prepareForPlayback();
+      Duration? resumeOverride;
+      bool? playOverride;
+      if (_retryFromPlaybackSnapshot) {
+        resumeOverride = _lastKnownPlaybackPosition;
+        playOverride = _lastKnownPlaybackWasPlaying;
+      }
+      if (_controller != null) {
+        final recovery = await _releaseActivePlaybackForRecovery(
+          closeStreamServer: true,
+        );
+        resumeOverride = recovery.$1;
+        playOverride = recovery.$2;
+      } else {
+        _streamStallTimer?.cancel();
+        _streamStallTimer = null;
+        _streamStallPosition = null;
+        final server = _streamServer;
+        _streamServer = null;
+        await server?.close();
+      }
       if (!mounted) return;
-      final initialized = await _initializeController(
-        VideoPlayerController.networkUrl(uri),
-        resumeOverride: resume,
-        playOverride: shouldPlay,
-      );
-      if (initialized) {
-        server.startBackgroundDownload();
-        return;
-      }
-      if (mounted) {
-        setState(() => _failed = true);
-        showToast(context, AppStringKeys.videoPlayerCannotPlay);
-      }
+      _automaticStreamRecoveryCount = 0;
+      _completedFileRecoveryAttempted = false;
+      _lastControllerInitializationError = null;
+      _openedCompletedLocalFile = false;
+      _localPath = null;
+      _retryFromPlaybackSnapshot =
+          resumeOverride != null || playOverride != null;
+      setState(() => _failed = false);
+      await _load(resumeOverride: resumeOverride, playOverride: playOverride);
+      if (_controller != null) _retryFromPlaybackSnapshot = false;
     } finally {
-      _streamRecoveryInFlight = false;
+      _retryInFlight = false;
     }
   }
 
-  // Rebuild for play/pause + scrubber position changes.
+  // TDLib recovery, resume persistence, and native PiP remain host-owned. The
+  // reusable player independently refreshes its chrome at a throttled cadence.
   void _onTick() {
     final value = _controller?.value;
     if (value != null && !value.hasError) {
-      _lastKnownPlaybackWasPlaying = value.isPlaying;
+      if (!value.isBuffering) {
+        _lastKnownPlaybackWasPlaying = value.isPlaying;
+      }
       _lastKnownPlaybackPosition = value.position;
     }
-    final completed = value != null && isStoppedVideoPlaybackComplete(value);
-    if (completed && !_completionHandled) {
-      _completionHandled = true;
-      unawaited(_handlePlaybackCompleted());
-    } else if (value != null && !completed && _completionHandled) {
-      _completionHandled = false;
-    }
+    _syncStreamStallRecovery(value);
     if (value != null) {
-      _volume = value.volume.clamp(0.0, 1.0);
       _speed = value.playbackSpeed;
     }
     _storePlaybackPositionIfNeeded();
-    _syncSystemPictureInPictureIfNeeded();
+    _syncFVideoPictureInPictureIfNeeded();
     _updateWakelock();
-    // The reusable player throttles its own chrome refreshes while the texture
-    // renders independently. Avoid rebuilding the entire TDLib host for every
-    // decoded frame on mobile fullscreen playback.
-    if (mounted && !_usesReusableMobileFullscreenPlayer) setState(() {});
+  }
+
+  void _syncStreamStallRecovery(VideoPlayerValue? value) {
+    final controller = _controller;
+    final source = _localPath;
+    final shouldWatch =
+        controller != null &&
+        value != null &&
+        value.isInitialized &&
+        value.isBuffering &&
+        !value.hasError &&
+        _lastKnownPlaybackWasPlaying &&
+        source != null &&
+        (source.startsWith('http://') || source.startsWith('https://')) &&
+        _streamServer != null &&
+        !_streamRecoveryInFlight &&
+        !_completedFileRecoveryInFlight &&
+        !_systemPiPHandoff &&
+        !_systemPiPBusy;
+    if (!shouldWatch) {
+      _streamStallTimer?.cancel();
+      _streamStallTimer = null;
+      _streamStallPosition = null;
+      return;
+    }
+    final watchedPosition = _streamStallPosition;
+    if (watchedPosition != null &&
+        (value.position - watchedPosition).abs() >=
+            const Duration(milliseconds: 250)) {
+      _streamStallTimer?.cancel();
+      _streamStallTimer = null;
+      _streamStallPosition = null;
+    }
+    if (_streamStallTimer != null) return;
+    _streamStallPosition = value.position;
+    _streamStallTimer = Timer(_streamStallTimeout, () {
+      _streamStallTimer = null;
+      final activeController = _controller;
+      final activeValue = activeController?.value;
+      final stalledAt = _streamStallPosition;
+      _streamStallPosition = null;
+      if (!mounted ||
+          activeController == null ||
+          activeValue == null ||
+          !activeValue.isBuffering ||
+          stalledAt == null ||
+          (activeValue.position - stalledAt).abs() >=
+              const Duration(milliseconds: 250)) {
+        return;
+      }
+      _recoverAfterStreamFailure(
+        'The loopback video stream stopped making progress.',
+        requireControllerError: false,
+      );
+    });
   }
 
   /// Keep the screen awake while the video is actively playing; release the
@@ -1129,71 +1364,132 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     );
   }
 
-  void _syncSystemPictureInPictureIfNeeded() {
-    final id = _systemPiPId;
+  void _syncFVideoPictureInPictureIfNeeded() {
     final c = _controller;
-    if (id == null ||
-        !_systemPiPPrepared ||
-        c == null ||
-        !c.value.isInitialized) {
+    if (c == null || !c.value.isInitialized) {
       return;
     }
+    if (_usesAndroidFVideoPictureInPicture &&
+        _systemPiPSupported &&
+        c.value.isPlaying &&
+        _systemPiPId == null &&
+        _systemPiPPrepareOperation == null) {
+      unawaited(_prepareFVideoPictureInPicture());
+      return;
+    }
+    final id = _systemPiPId;
+    if (id == null || !_systemPiPPrepared) return;
     final positionMs = c.value.position.inMilliseconds;
-    if ((positionMs - _lastSystemPiPSyncMs).abs() < 900 && c.value.isPlaying) {
+    final playing = c.value.isPlaying;
+    final muted = _volume <= 0.01;
+    final sourceRect = _systemPiPActive
+        ? null
+        : _systemPictureInPictureSourceRect(c);
+    final sourceRectChanged =
+        sourceRect != null && sourceRect != _lastSystemPiPSourceRect;
+    final playbackStateChanged =
+        playing != _lastSystemPiPPlaying ||
+        _speed != _lastSystemPiPSpeed ||
+        muted != _lastSystemPiPMuted;
+    if ((positionMs - _lastSystemPiPSyncMs).abs() < 900 &&
+        playing &&
+        !playbackStateChanged &&
+        !sourceRectChanged) {
       return;
     }
     _lastSystemPiPSyncMs = positionMs;
+    _lastSystemPiPPlaying = playing;
+    _lastSystemPiPSpeed = _speed;
+    _lastSystemPiPMuted = muted;
+    if (sourceRect != null) _lastSystemPiPSourceRect = sourceRect;
     unawaited(
-      SystemPictureInPicture.updatePrepared(
+      FVideoPictureInPicture.updatePrepared(
         id: id,
         position: c.value.position,
         speed: _speed,
-        muted: _volume <= 0.01,
-        playing: c.value.isPlaying,
+        volume: _pictureInPictureVolume,
+        muted: muted,
+        playing: playing,
         videoSize: c.value.size,
+        sourceRect: sourceRect,
+        playLabel: AppStringKeys.musicPlayerPlay.l10n(context),
+        pauseLabel: AppStringKeys.musicPlayerPause.l10n(context),
       ),
     );
   }
 
-  void _scheduleHide() {
-    _hideTimer?.cancel();
-    if (_usesReusableMobileFullscreenPlayer) return;
-    _hideTimer = Timer(const Duration(seconds: 5), () {
-      if (mounted &&
-          !_moreMenuVisible &&
-          !_modeMenuVisible &&
-          (_controller?.value.isPlaying ?? false)) {
-        setState(() => _controlsVisible = false);
-      }
+  bool get _usesAndroidFVideoPictureInPicture =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  double get _pictureInPictureVolume =>
+      (_volume > 0.01 ? _volume : _lastAudibleVolume)
+          .clamp(0.0, 1.0)
+          .toDouble();
+
+  Rect? _systemPictureInPictureSourceRect(VideoPlayerController controller) {
+    final renderObject = context.findRenderObject();
+    if (renderObject is! RenderBox ||
+        !renderObject.attached ||
+        !renderObject.hasSize) {
+      return null;
+    }
+    final videoSize = _displayVideoSize(controller);
+    if (videoSize.width <= 0 || videoSize.height <= 0) return null;
+    final fitted = _containSize(videoSize, renderObject.size);
+    if (fitted.width <= 0 || fitted.height <= 0) return null;
+    final localOffset = Offset(
+      (renderObject.size.width - fitted.width) / 2,
+      (renderObject.size.height - fitted.height) / 2,
+    );
+    final globalOffset = renderObject.localToGlobal(localOffset);
+    final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+    final physicalRect = Rect.fromLTWH(
+      globalOffset.dx * pixelRatio,
+      globalOffset.dy * pixelRatio,
+      fitted.width * pixelRatio,
+      fitted.height * pixelRatio,
+    );
+    final logicalWindowSize = MediaQuery.sizeOf(context);
+    final physicalWindowBounds = Rect.fromLTWH(
+      0,
+      0,
+      logicalWindowSize.width * pixelRatio,
+      logicalWindowSize.height * pixelRatio,
+    );
+    final clipped = physicalRect.intersect(physicalWindowBounds);
+    return clipped.isEmpty ? null : clipped;
+  }
+
+  void _handleFVideoPictureInPictureEntered(FVideoPictureInPictureSnapshot _) {
+    if (!mounted || _systemPiPActive) return;
+    setState(() {
+      _systemPiPActive = true;
+      _moreMenuVisible = false;
+      _modeMenuVisible = false;
     });
   }
 
-  void _toggleControls() {
-    setState(() => _controlsVisible = !_controlsVisible);
-    if (_controlsVisible) _scheduleHide();
+  void _handleFVideoPictureInPictureRestored(FVideoPictureInPictureSnapshot _) {
+    if (!mounted || !_systemPiPActive) return;
+    _lastSystemPiPSourceRect = null;
+    setState(() => _systemPiPActive = false);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _reusablePlayerActions?.showControls();
+    });
   }
 
-  Future<void> _togglePlay() async {
-    final c = _controller;
-    if (c == null) return;
-    if (c.value.isPlaying) {
-      await c.pause();
-      if (!mounted) return;
-      setState(() => _controlsVisible = true);
-      _hideTimer?.cancel();
-    } else {
-      // Restart from the beginning if it finished.
-      if (c.value.position >= c.value.duration || c.value.isCompleted) {
-        await c.seekTo(Duration.zero);
-        _completionHandled = false;
-      }
-      await c.play();
-      if (!mounted) return;
-      setState(() {
-        _controlsVisible = true;
-        _showCompletionPrompt = false;
-      });
-      _scheduleHide();
+  Future<void> _handleFVideoPictureInPictureAction(
+    FVideoPictureInPictureAction action,
+  ) async {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) return;
+    switch (action) {
+      case FVideoPictureInPictureAction.play:
+        await controller.play();
+        return;
+      case FVideoPictureInPictureAction.pause:
+        await controller.pause();
+        return;
     }
   }
 
@@ -1202,11 +1498,8 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     if (!mounted) return;
     switch (_completionAction) {
       case VideoCompletionAction.prompt:
-        _hideTimer?.cancel();
-        setState(() {
-          _controlsVisible = false;
-          _showCompletionPrompt = true;
-        });
+        _reusablePlayerActions?.hideControls();
+        setState(() => _showCompletionPrompt = true);
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && _showCompletionPrompt) {
             _completionPromptFocusNode.requestFocus();
@@ -1231,12 +1524,10 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     await c.seekTo(Duration.zero);
     _completionHandled = false;
     await c.play();
+    _lastKnownPlaybackWasPlaying = true;
     if (!mounted) return;
-    setState(() {
-      _showCompletionPrompt = false;
-      _controlsVisible = true;
-    });
-    _scheduleHide();
+    setState(() => _showCompletionPrompt = false);
+    _reusablePlayerActions?.showControls();
   }
 
   void _playNextVideo() {
@@ -1244,46 +1535,43 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     widget.onNavigate!(1);
   }
 
-  void _navigateFromControl(int delta) {
-    if (!_canNavigate(delta)) return;
-    widget.onNavigate?.call(delta);
-  }
-
-  Future<void> _setSpeed(double speed) async {
-    final c = _controller;
-    if (c == null) return;
-    await c.setPlaybackSpeed(speed);
-    if (!mounted) return;
-    setState(() {
-      _speed = speed;
-      _controlsVisible = true;
-    });
-    _scheduleHide();
-  }
-
-  void _setVolume(double volume) {
-    final next = volume.clamp(0.0, 1.0);
-    _controller?.setVolume(next);
-    if (!mounted) return;
-    setState(() {
-      _volume = next;
-      _controlsVisible = true;
-    });
-  }
-
-  void _toggleMute() {
-    _hideTimer?.cancel();
-    _setVolume(_volume <= 0.01 ? 1 : 0);
-    _scheduleHide();
+  Future<void> _syncAndroidSystemVolume(
+    VideoPlayerController controller,
+  ) async {
+    final request = _volumeControlRequestGeneration;
+    final current = await PlayerSystemVolume.current();
+    if (!mounted ||
+        request != _volumeControlRequestGeneration ||
+        _controller != controller ||
+        current == null) {
+      return;
+    }
+    final actual = current.fraction;
+    if (actual > 0.01) _lastAudibleVolume = actual;
+    // Preserve an explicitly muted playback snapshot while remembering the
+    // system level that the unmute action should restore.
+    if (_volume <= 0.01) return;
+    await controller.setVolume(1);
+    if (!mounted ||
+        request != _volumeControlRequestGeneration ||
+        _controller != controller) {
+      return;
+    }
+    setState(() => _volume = actual);
+    widget.onVolumeChanged?.call(actual);
   }
 
   String get _resumeKey {
+    final accountScope = switch (widget.accountSlot) {
+      null || 0 => '',
+      final slot => '$slot.',
+    };
     final chatId = widget.sourceChatId;
     final messageId = widget.messageId;
     if (chatId != null && messageId != null) {
-      return '$_resumePrefix$chatId.$messageId';
+      return '$_resumePrefix$accountScope$chatId.$messageId';
     }
-    return '$_resumePrefix${widget.video.id}';
+    return '$_resumePrefix$accountScope${widget.video.id}';
   }
 
   Future<Duration> _loadResumePosition(Duration duration) async {
@@ -1353,11 +1641,15 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   VideoPlaybackQueue _pictureInPictureRestoreQueue() {
     final current = VideoPlaybackItem(
       video: widget.video,
+      accountSlot: widget.accountSlot,
       thumb: widget.thumb,
       width: widget.width,
       height: widget.height,
+      durationSeconds:
+          widget.durationSeconds ?? _controller?.value.duration.inSeconds,
       sourceChatId: widget.sourceChatId,
       messageId: widget.messageId,
+      title: widget.title,
     );
     final items = <VideoPlaybackItem>[
       ?widget.previousVideo,
@@ -1370,20 +1662,21 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     );
   }
 
-  Future<bool> _restoreSystemPictureInPicture(
-    SystemPictureInPictureSnapshot snapshot,
+  Future<bool> _restoreFVideoPictureInPicture(
+    FVideoPictureInPictureSnapshot snapshot,
   ) {
     final c = _controller;
     final duration = c?.value.duration ?? Duration.zero;
     final normalized = _clampPlaybackPosition(snapshot.position, duration);
-    final normalizedSnapshot = SystemPictureInPictureSnapshot(
+    final normalizedSnapshot = FVideoPictureInPictureSnapshot(
       position: normalized,
       playing: snapshot.playing,
       speed: snapshot.speed,
+      volume: snapshot.volume,
       muted: snapshot.muted,
     );
     unawaited(_storeResumePosition(normalized, duration));
-    final callback = widget.onSystemPictureInPictureRestore;
+    final callback = widget.onFVideoPictureInPictureRestore;
     if (callback != null) {
       return Future<bool>.value(callback(normalizedSnapshot));
     }
@@ -1394,14 +1687,14 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     );
   }
 
-  Future<bool> _startSystemPictureInPicture() {
+  Future<bool> _startFVideoPictureInPicture() {
     final pending = _systemPiPStartOperation;
     if (pending != null) return pending;
     late final Future<bool> tracked;
     tracked =
         (() async {
-          await _prepareSystemPictureInPicture();
-          return _performSystemPictureInPictureStart();
+          await _prepareFVideoPictureInPicture();
+          return _performFVideoPictureInPictureStart();
         })().whenComplete(() {
           if (identical(_systemPiPStartOperation, tracked)) {
             _systemPiPStartOperation = null;
@@ -1411,13 +1704,13 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     return tracked;
   }
 
-  Future<bool> _performSystemPictureInPictureStart() async {
+  Future<bool> _performFVideoPictureInPictureStart() async {
     final c = _controller;
     final uri = _systemPiPSourceUri();
     if (c == null || !c.value.isInitialized || uri == null) {
       return false;
     }
-    if (!await _isSystemPictureInPictureSupported()) {
+    if (!await _isFVideoPictureInPictureSupported()) {
       return false;
     }
     final pendingPrepare = _systemPiPPrepareOperation;
@@ -1426,23 +1719,31 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
 
     var id = _systemPiPId;
     var started = false;
+    final sourceRect = _systemPictureInPictureSourceRect(c);
+    if (sourceRect != null) _lastSystemPiPSourceRect = sourceRect;
+    final playLabel = AppStringKeys.musicPlayerPlay.l10n(context);
+    final pauseLabel = AppStringKeys.musicPlayerPause.l10n(context);
     if (id != null && _systemPiPPrepared) {
-      started = await SystemPictureInPicture.startPrepared(
+      started = await FVideoPictureInPicture.startPrepared(
         id: id,
         position: c.value.position,
         speed: _speed,
+        volume: _pictureInPictureVolume,
         muted: _volume <= 0.01,
         playing: c.value.isPlaying,
         videoSize: c.value.size,
+        sourceRect: sourceRect,
+        playLabel: playLabel,
+        pauseLabel: pauseLabel,
       );
       if (!mounted) {
-        await SystemPictureInPicture.cancelPrepared(id);
+        await FVideoPictureInPicture.cancelPrepared(id);
         return false;
       }
     }
     if (!started) {
       if (id != null) {
-        await SystemPictureInPicture.cancelPrepared(id);
+        await FVideoPictureInPicture.cancelPrepared(id);
         _systemPiPPrepared = false;
         _systemPiPId = null;
       }
@@ -1453,25 +1754,42 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       final shouldCancelOnStop =
           !_openedCompletedLocalFile && _progress?.isCompleted != true;
       var restoreAccepted = false;
-      started = await SystemPictureInPicture.start(
+      started = await FVideoPictureInPicture.start(
         id: handoffId,
         uri: uri,
         position: c.value.position,
         speed: _speed,
+        volume: _pictureInPictureVolume,
         muted: _volume <= 0.01,
         playing: c.value.isPlaying,
         videoSize: c.value.size,
+        sourceRect: sourceRect,
+        playLabel: playLabel,
+        pauseLabel: pauseLabel,
         playerId: c.fvpPlayerId,
+        onEntered: _handleFVideoPictureInPictureEntered,
+        onRestored: _handleFVideoPictureInPictureRestored,
+        onActionRequested: _handleFVideoPictureInPictureAction,
         onRestoreRequested: (position) async {
-          final accepted = await _restoreSystemPictureInPicture(position);
+          final accepted = await _restoreFVideoPictureInPicture(position);
           restoreAccepted = accepted;
           return accepted;
         },
         onStop: (finalPosition) async {
+          if (_usesAndroidFVideoPictureInPicture && mounted) {
+            _systemPiPPrepared = false;
+            _systemPiPId = null;
+            _systemPiPActive = false;
+            _streamServer = null;
+            try {
+              await c.pause();
+            } catch (_) {}
+            if (mounted) _close();
+          }
           if (finalPosition != null) {
             await _storeResumePosition(finalPosition, c.value.duration);
           }
-          if (SystemPictureInPicture.usesActivePlayer(handoffId)) {
+          if (FVideoPictureInPicture.usesActivePlayer(handoffId)) {
             await c.dispose();
           }
           await server?.close();
@@ -1481,7 +1799,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         },
       );
       if (!mounted) {
-        await SystemPictureInPicture.cancelPrepared(id);
+        await FVideoPictureInPicture.cancelPrepared(id);
         return false;
       }
     }
@@ -1491,14 +1809,22 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       }
       return false;
     }
-    if (SystemPictureInPicture.keepsFlutterPlayerInActivity) {
+    if (FVideoPictureInPicture.keepsFlutterPlayerInActivity) {
       // Android PiP hosts this Activity. Keep the Flutter route and its video
       // texture mounted so the system captures the active player, not chat.
-      if (mounted) setState(() => _controlsVisible = false);
+      _handleFVideoPictureInPictureEntered(
+        FVideoPictureInPictureSnapshot(
+          position: c.value.position,
+          playing: c.value.isPlaying,
+          speed: _speed,
+          volume: _pictureInPictureVolume,
+          muted: _volume <= 0.01,
+        ),
+      );
       return true;
     }
     _systemPiPUsesActivePlayer =
-        id != null && SystemPictureInPicture.usesActivePlayer(id);
+        id != null && FVideoPictureInPicture.usesActivePlayer(id);
     _systemPiPHandoff = true;
     _systemPiPPrepared = false;
     _streamServer = null;
@@ -1515,11 +1841,11 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         : Uri.file(source);
   }
 
-  Future<void> _prepareSystemPictureInPicture() {
+  Future<void> _prepareFVideoPictureInPicture() {
     final pending = _systemPiPPrepareOperation;
     if (pending != null) return pending;
     late final Future<void> tracked;
-    tracked = _performSystemPictureInPicturePreparation().whenComplete(() {
+    tracked = _performFVideoPictureInPicturePreparation().whenComplete(() {
       if (identical(_systemPiPPrepareOperation, tracked)) {
         _systemPiPPrepareOperation = null;
       }
@@ -1528,14 +1854,14 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     return tracked;
   }
 
-  Future<void> _performSystemPictureInPicturePreparation() async {
+  Future<void> _performFVideoPictureInPicturePreparation() async {
     if (_systemPiPPrepared || _systemPiPId != null) {
       return;
     }
     final c = _controller;
     final uri = _systemPiPSourceUri();
     if (c == null || !c.value.isInitialized || uri == null) return;
-    if (!await _isSystemPictureInPictureSupported()) return;
+    if (!await _isFVideoPictureInPictureSupported()) return;
     if (!mounted) return;
 
     final server = _streamServer;
@@ -1543,26 +1869,45 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         !_openedCompletedLocalFile && _progress?.isCompleted != true;
     final id = '${widget.video.id}-${DateTime.now().microsecondsSinceEpoch}';
     _systemPiPId = id;
+    final sourceRect = _systemPictureInPictureSourceRect(c);
+    if (sourceRect != null) _lastSystemPiPSourceRect = sourceRect;
     var restoreAccepted = false;
-    final prepared = await SystemPictureInPicture.prepare(
+    final prepared = await FVideoPictureInPicture.prepare(
       id: id,
       uri: uri,
       position: c.value.position,
       speed: _speed,
+      volume: _pictureInPictureVolume,
       muted: _volume <= 0.01,
       playing: c.value.isPlaying,
       videoSize: c.value.size,
+      sourceRect: sourceRect,
+      playLabel: AppStringKeys.musicPlayerPlay.l10n(context),
+      pauseLabel: AppStringKeys.musicPlayerPause.l10n(context),
       playerId: c.fvpPlayerId,
+      onEntered: _handleFVideoPictureInPictureEntered,
+      onRestored: _handleFVideoPictureInPictureRestored,
+      onActionRequested: _handleFVideoPictureInPictureAction,
       onRestoreRequested: (position) async {
-        final accepted = await _restoreSystemPictureInPicture(position);
+        final accepted = await _restoreFVideoPictureInPicture(position);
         restoreAccepted = accepted;
         return accepted;
       },
       onStop: (finalPosition) async {
+        if (_usesAndroidFVideoPictureInPicture && mounted) {
+          _systemPiPPrepared = false;
+          _systemPiPId = null;
+          _systemPiPActive = false;
+          _streamServer = null;
+          try {
+            await c.pause();
+          } catch (_) {}
+          if (mounted) _close();
+        }
         if (finalPosition != null) {
           await _storeResumePosition(finalPosition, c.value.duration);
         }
-        if (SystemPictureInPicture.usesActivePlayer(id)) {
+        if (FVideoPictureInPicture.usesActivePlayer(id)) {
           await c.dispose();
         }
         await server?.close();
@@ -1572,24 +1917,30 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       },
     );
     if (!mounted || _systemPiPId != id) {
-      if (prepared) unawaited(SystemPictureInPicture.cancelPrepared(id));
+      if (prepared) unawaited(FVideoPictureInPicture.cancelPrepared(id));
       return;
     }
     if (prepared) {
       _systemPiPPrepared = true;
-      _syncSystemPictureInPictureIfNeeded();
+      _syncFVideoPictureInPictureIfNeeded();
     } else {
       _systemPiPId = null;
     }
   }
 
-  Future<void> _refreshSystemPictureInPictureSupport() async {
-    await _isSystemPictureInPictureSupported();
+  Future<void> _refreshFVideoPictureInPictureSupport() async {
+    final supported = await _isFVideoPictureInPictureSupported();
+    if (supported &&
+        mounted &&
+        _usesAndroidFVideoPictureInPicture &&
+        (_controller?.value.isPlaying ?? false)) {
+      await _prepareFVideoPictureInPicture();
+    }
   }
 
-  Future<bool> _isSystemPictureInPictureSupported() async {
+  Future<bool> _isFVideoPictureInPictureSupported() async {
     if (_systemPiPSupported) return true;
-    final supported = await SystemPictureInPicture.isSupported();
+    final supported = await FVideoPictureInPicture.isSupported();
     if (mounted && _systemPiPSupported != supported) {
       setState(() => _systemPiPSupported = supported);
     }
@@ -1597,6 +1948,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   }
 
   void _close() {
+    _releaseVideoOrientation();
     unawaited(_restorePlayerBrightness());
     if (_wakelockActive) {
       _wakelockActive = false;
@@ -1613,20 +1965,25 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _releaseVideoOrientation();
     unawaited(_restorePlayerBrightness());
     if (_wakelockActive) {
       _wakelockActive = false;
       unawaited(ScreenWakelock.disable());
     }
-    _hideTimer?.cancel();
-    _progressRebuildTimer?.cancel();
-    _scrubPreviewTimer?.cancel();
-    _scrubPreviewOverlay?.remove();
-    _scrubPreviewOverlay = null;
-    _scrubPreviewGeneration++;
+    _progressUiTimer?.cancel();
+    _streamStallTimer?.cancel();
+    _reusablePlayerActions = null;
     _completionPromptFocusNode.dispose();
     _moreButtonFocusNode.dispose();
     _modeButtonFocusNode.dispose();
+    for (final focusNode in _moreMenuFocusNodes) {
+      focusNode.dispose();
+    }
+    for (final focusNode in _modeMenuFocusNodes.values) {
+      focusNode.dispose();
+    }
     _progressSub?.cancel();
     unawaited(_storePlaybackPosition(force: true));
     final controller = _controller;
@@ -1651,13 +2008,8 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   }
 
   Future<void> _cancelIncompleteDownload() async {
-    final query = widget.streamQuery;
-    if (query == null) {
-      TdFileCenter.shared.cancelDownload(widget.video.id);
-      return;
-    }
     try {
-      await query({
+      await _streamQuery({
         '@type': 'cancelDownloadFile',
         'file_id': widget.video.id,
         'only_if_pending': false,
@@ -1686,7 +2038,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       } catch (_) {}
     }
     if (preparedPiPId != null) {
-      await SystemPictureInPicture.cancelPrepared(preparedPiPId);
+      await FVideoPictureInPicture.cancelPrepared(preparedPiPId);
     }
     if (disposeController) {
       try {
@@ -1707,311 +2059,1378 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   Widget build(BuildContext context) {
     final c = _controller;
     final ready = c != null && c.value.isInitialized;
-    if (_usesReusableMobileFullscreenPlayer && ready) {
-      return ColoredBox(
+    return FullscreenSystemUi(
+      enabled:
+          widget.presentation == VideoPlayerPresentation.fullscreen &&
+          !_systemPiPActive,
+      child: ColoredBox(
         color: Colors.black,
-        child: _reusableMobileFullscreenPlayer(c),
-      );
-    }
-    return _legacyPlayer(ready ? c : null);
+        child: _playbackSurface(ready ? c : null),
+      ),
+    );
   }
 
-  Widget _reusableMobileFullscreenPlayer(VideoPlayerController controller) {
-    final source = _reusablePlayerSource();
-    return MithkaVideoPlayer(
-      key: ValueKey('mobile-fullscreen-video-${widget.video.id}'),
-      source: source,
+  Widget _playbackSurface(VideoPlayerController? controller) {
+    final player = controller == null
+        ? _loadingState()
+        : _reusablePlayer(controller);
+    if (widget.presentation != VideoPlayerPresentation.fullscreen ||
+        controller == null) {
+      return player;
+    }
+    return VideoStreamDebuggerOverlay(
+      player: player,
+      visible: _debuggerVisible,
+      inspectorBuilder: (_, constraints) => VideoStreamDebugger(
+        progress: _progress,
+        position: controller.value.position,
+        duration: controller.value.duration,
+        events: List<String>.unmodifiable(_debugEvents),
+        isLive: _streamServer != null || controller.value.isPlaying,
+        viewportSize: Size(constraints.maxWidth, constraints.maxHeight),
+        videoSize: controller.value.size,
+        volume: controller.value.volume,
+        playbackSpeed: controller.value.playbackSpeed,
+        bufferedAhead: _bufferedAhead(controller.value),
+        onClose: () {
+          if (mounted) setState(() => _debuggerVisible = false);
+        },
+      ),
+    );
+  }
+
+  Widget _reusablePlayer(VideoPlayerController controller) {
+    final player = FVideoPlayer(
+      key: ValueKey('video-${widget.video.id}-${widget.presentation.name}'),
+      source: _reusablePlayerSource(),
       controller: controller,
       width: widget.width,
       height: widget.height,
       autoplay: false,
-      initialVolume: _volume,
+      autofocus: _isDesktopPlatform,
+      initialVolume: _controllerGainForCurrentVolume,
       initialPlaybackSpeed: _speed,
       onClose: _close,
       onToggleFullscreen: widget.onToggleFullscreen,
+      onPictureInPictureChanged: _canOfferPictureInPicture
+          ? _handleReusablePictureInPictureChanged
+          : null,
+      showPictureInPictureButton: false,
+      showFullscreenButton: false,
       onPrevious: widget.previousVideo == null
           ? null
-          : () => _navigateFromControl(-1),
-      onNext: widget.nextVideo == null ? null : () => _navigateFromControl(1),
-      lifecycleBehavior: MithkaVideoLifecycleBehavior.delegateToController,
+          : () => widget.onNavigate?.call(-1),
+      onNext: widget.nextVideo == null
+          ? null
+          : () => widget.onNavigate?.call(1),
+      onEnded: _handleReusablePlayerEnded,
+      onPlaybackStateChanged: _handleReusablePlaybackStateChanged,
+      onVolumeChanged: _handleReusableVolumeChanged,
+      lifecycleBehavior: FVideoLifecycleBehavior.delegateToController,
       controlsAutoHideDuration: const Duration(seconds: 5),
       positionUpdateInterval: const Duration(milliseconds: 200),
-      interactionMode: MithkaVideoInteractionMode.delegateToChrome,
-      enableKeyboardShortcuts: !_showCompletionPrompt,
-      showScrubPreview: false,
-      isFullscreen: true,
+      showScrubPreview:
+          widget.presentation != VideoPlayerPresentation.fullscreen,
+      enableKeyboardShortcuts:
+          !_showCompletionPrompt && !_moreMenuVisible && !_modeMenuVisible,
+      enableScrollVolume: _isDesktopPlatform,
+      thumbnailProvider: _provideScrubThumbnail,
+      bufferedFractionOverride: _downloadedFraction,
+      externalVolume: _usesAndroidSystemMediaVolume ? _volume : null,
+      volumeDelegate: _usesAndroidSystemMediaVolume
+          ? _requestAndroidSystemVolume
+          : null,
+      labels: _playerLabels,
+      isFullscreen: widget.presentation == VideoPlayerPresentation.fullscreen,
+      isPictureInPicture:
+          widget.presentation == VideoPlayerPresentation.pictureInPicture ||
+          _systemPiPActive,
+      controlsEnabled: !_showCompletionPrompt && !_systemPiPActive,
       onError: _handleReusablePlayerError,
       loadingBuilder: (_) => _loadingState(),
-      chromeBuilder: (_, scope) => _mobileFullscreenChrome(controller, scope),
+      surfaceInteractionBuilder: _playerSurfaceInteraction,
+      chromeBuilder: widget.presentation == VideoPlayerPresentation.fullscreen
+          ? _playerChrome
+          : null,
+      overlayBuilder: _playerOverlay,
+      topTrailingBuilder: _playerTopTrailing,
+      bottomTrailingBuilder: _playerBottomTrailing,
+    );
+    if (!_supportsPlaybackGestures) return player;
+    return Listener(
+      key: const ValueKey('video-pinch-zoom-listener'),
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: _handleVideoZoomPointerDown,
+      onPointerMove: _handleVideoZoomPointerMove,
+      onPointerUp: _handleVideoZoomPointerEnd,
+      onPointerCancel: _handleVideoZoomPointerEnd,
+      child: player,
     );
   }
 
-  MithkaVideoSource _reusablePlayerSource() {
+  bool _showsOnDemandLayout(BuildContext context) {
+    if (widget.presentation != VideoPlayerPresentation.fullscreen ||
+        !_hasOnDemandQueue ||
+        !_onDemandPanelVisible) {
+      return false;
+    }
+    final size = MediaQuery.sizeOf(context);
+    final wide =
+        size.width >= 900 && size.height >= 560 && size.width > size.height;
+    final portrait = size.width >= 320 && size.height >= 640;
+    return wide || portrait;
+  }
+
+  bool get _hasOnDemandQueue => (widget.onDemandQueue?.items.length ?? 0) >= 2;
+
+  bool _usesStandaloneFullscreenLayout(BuildContext context) {
+    if (widget.presentation != VideoPlayerPresentation.fullscreen) {
+      return false;
+    }
+    final size = MediaQuery.sizeOf(context);
+    return size.width >= 600 && size.height >= 320 && size.width > size.height;
+  }
+
+  double _resolvedVideoAspectRatio(VideoPlayerValue value) {
+    final controllerAspect = value.aspectRatio;
+    if (controllerAspect.isFinite && controllerAspect > 0) {
+      return controllerAspect;
+    }
+    return _metadataAspectRatio() ?? 16 / 9;
+  }
+
+  double? get _downloadedFraction {
+    final value = _progress?.prefixFraction ?? _progress?.fraction;
+    return value?.clamp(0.0, 1.0).toDouble();
+  }
+
+  Future<Uint8List?> _provideScrubThumbnail(FVideoThumbnailRequest request) {
+    final source = _scrubThumbnailSource();
+    if (source == null) {
+      return Future<Uint8List?>.value();
+    }
+    return _generateScrubThumbnail(
+      FVideoThumbnailRequest(
+        source: source,
+        position: request.position,
+        maxWidth: request.maxWidth,
+        quality: request.quality,
+      ),
+    );
+  }
+
+  FVideoPlayerLabels get _playerLabels => FVideoPlayerLabels(
+    play: AppStringKeys.musicPlayerPlay.l10n(context),
+    pause: AppStringKeys.musicPlayerPause.l10n(context),
+    previous: AppStringKeys.videoPlayerPreviousVideo.l10n(context),
+    next: AppStringKeys.videoPlayerNextVideo.l10n(context),
+    mute: AppStringKeys.callMute.l10n(context),
+    unmute: AppStringKeys.chatUnmute.l10n(context),
+    fullscreen: AppStringKeys.videoPlayerFullscreen.l10n(context),
+    exitFullscreen: AppStringKeys.videoPlayerFullscreen.l10n(context),
+    pictureInPicture: AppStringKeys.videoPlayerPictureInPicture.l10n(context),
+    exitPictureInPicture: AppStringKeys.videoPlayerFullscreen.l10n(context),
+    close: AppStringKeys.musicPlayerClose.l10n(context),
+    loading: AppStringKeys.videoPlayerLoading.l10n(context),
+    buffering: AppStringKeys.videoPlayerWaitingForFile.l10n(context),
+    failed: AppStringKeys.videoPlayerCannotPlay.l10n(context),
+    retry: AppStringKeys.callsRetry.l10n(context),
+    speed: AppStringKeys.videoPlayerPlaybackSpeed.l10n(context),
+    position: AppStringKeys.videoPlaybackSwipeAdjustProgress.l10n(context),
+    volume: AppStringKeys.videoPlaybackSwipeAdjustVolume.l10n(context),
+  );
+
+  FVideoSource _reusablePlayerSource() {
     final path = _localPath;
     if (path != null &&
         (path.startsWith('http://') || path.startsWith('https://'))) {
-      return MithkaVideoSource.network(path);
+      return FVideoSource.network(path);
     }
     if (path != null && path.isNotEmpty) {
-      return MithkaVideoSource.file(path);
+      return FVideoSource.file(path);
     }
-    throw StateError('An initialized mobile video must have a source');
+    throw StateError('An initialized video must have a source');
   }
 
-  Widget _mobileFullscreenChrome(
-    VideoPlayerController controller,
-    MithkaVideoChromeScope scope,
-  ) {
-    final controlsVisible =
-        scope.snapshot.controlsVisible && !_showCompletionPrompt;
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        // Keep the surface recognizer behind interactive chrome. A drag that
-        // starts on the scrubber, volume control, or any button therefore
-        // belongs to that control instead of accidentally seeking, navigating,
-        // or changing a side gesture value.
-        Positioned.fill(
-          child: LayoutBuilder(
-            builder: (context, constraints) => GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: scope.actions.toggleControls,
-              onDoubleTapDown: (details) => _handleMobileDoubleTap(
-                details,
-                constraints.maxWidth,
-                scope.actions,
+  Widget _playerChrome(BuildContext context, FVideoChromeScope scope) {
+    _reusablePlayerActions = scope.actions;
+    final snapshot = scope.snapshot;
+    final safePadding = MediaQuery.paddingOf(context);
+    if (scope.snapshot.controlsVisible && _showsOnDemandLayout(context)) {
+      return _playerOnDemandChrome(context, scope, safePadding);
+    }
+    final standalone = _usesStandaloneFullscreenLayout(context);
+    return DefaultTextStyle.merge(
+      style: const TextStyle(
+        decoration: TextDecoration.none,
+        fontWeight: FontWeight.w400,
+      ),
+      child: ExcludeFocus(
+        excluding: !snapshot.controlsVisible,
+        child: ExcludeSemantics(
+          excluding: !snapshot.controlsVisible,
+          child: IgnorePointer(
+            ignoring: !snapshot.controlsVisible,
+            child: AnimatedOpacity(
+              key: const ValueKey('mithka-video-player-chrome'),
+              opacity: snapshot.controlsVisible ? 1 : 0,
+              duration: const Duration(milliseconds: 170),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final wide =
+                      MediaQuery.sizeOf(context).width >= 600 &&
+                      constraints.maxWidth >= 600;
+                  final compactQueueNavigation =
+                      !wide && MediaQuery.sizeOf(context).width >= 320;
+                  final title = _videoChromeTitle();
+                  final subtitle = _videoChromeSubtitle(
+                    snapshot.value.duration,
+                  );
+                  final metadataAspect = _metadataAspectRatio();
+                  final controllerAspect = snapshot.value.aspectRatio;
+                  final aspect =
+                      metadataAspect ??
+                      (controllerAspect.isFinite && controllerAspect > 0
+                          ? controllerAspect
+                          : 16 / 9);
+                  final buffered = math
+                      .max(
+                        snapshot.value.buffered.isEmpty
+                            ? 0.0
+                            : snapshot.value.buffered.last.end.inMilliseconds /
+                                  math.max(
+                                    1,
+                                    snapshot.value.duration.inMilliseconds,
+                                  ),
+                        _downloadedFraction ?? 0,
+                      )
+                      .clamp(0.0, 1.0)
+                      .toDouble();
+                  return Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.black.withValues(alpha: 0.72),
+                                  Colors.transparent,
+                                  Colors.black.withValues(alpha: 0.88),
+                                ],
+                                stops: const [0, 0.46, 1],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      PositionedDirectional(
+                        top: safePadding.top + 12,
+                        start: safePadding.left + 14,
+                        end: safePadding.right + 14,
+                        child: Row(
+                          children: [
+                            _playerChromeIconButton(
+                              icon: HeroAppIcons.xmark,
+                              label: scope.labels.close,
+                              onTap: _close,
+                              size: 52,
+                              iconSize: 27,
+                              cornerRadius: 26,
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w400,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    subtitle,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.76,
+                                      ),
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w400,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            _playerChromeIconButton(
+                              icon: HeroAppIcons.code,
+                              label: AppStrings.t(
+                                AppStringKeys.videoPlayerStreamInspector,
+                              ),
+                              onTap: () {
+                                setState(
+                                  () => _debuggerVisible = !_debuggerVisible,
+                                );
+                                scope.actions.showControls();
+                              },
+                              size: 44,
+                              iconSize: 21,
+                              cornerRadius: 22,
+                              backgroundColor: _debuggerVisible
+                                  ? const Color(0xD92C6565)
+                                  : const Color(0xB82C2C2E),
+                            ),
+                            const SizedBox(width: 8),
+                            _playerChromeIconButton(
+                              icon: HeroAppIcons.ellipsisVertical,
+                              label: AppStrings.t(AppStringKeys.momentsMore),
+                              onTap: _toggleMoreMenu,
+                              size: 44,
+                              iconSize: 23,
+                              cornerRadius: 22,
+                              focusNode: _moreButtonFocusNode,
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (wide && scope.previous != null)
+                        PositionedDirectional(
+                          start: safePadding.left + 18,
+                          top: safePadding.top + 96,
+                          bottom: safePadding.bottom + 132,
+                          child: Center(
+                            child: _MithkaVideoSideButton(
+                              icon: HeroAppIcons.chevronLeft,
+                              label: scope.labels.previous,
+                              onTap: scope.previous!,
+                            ),
+                          ),
+                        ),
+                      if (wide && scope.next != null)
+                        PositionedDirectional(
+                          end: safePadding.right + 18,
+                          top: safePadding.top + 96,
+                          bottom: safePadding.bottom + 132,
+                          child: Center(
+                            child: _MithkaVideoSideButton(
+                              icon: HeroAppIcons.chevronRight,
+                              label: scope.labels.next,
+                              onTap: scope.next!,
+                            ),
+                          ),
+                        ),
+                      Positioned.fill(
+                        top: safePadding.top + 72,
+                        bottom:
+                            safePadding.bottom +
+                            (wide ? (standalone ? 158 : 132) : 168),
+                        child: Center(
+                          child: wide
+                              ? _MithkaVideoCenterTransport(
+                                  value: snapshot.value,
+                                  scope: scope,
+                                )
+                              : _MithkaVideoCompactTransport(
+                                  value: snapshot.value,
+                                  scope: scope,
+                                  showQueueNavigation: !compactQueueNavigation,
+                                ),
+                        ),
+                      ),
+                      Positioned(
+                        left: safePadding.left + (wide ? 28 : 14),
+                        right: safePadding.right + (wide ? 28 : 14),
+                        bottom: safePadding.bottom + (wide ? 14 : 10),
+                        child: standalone
+                            ? _MithkaVideoStandaloneBottomChrome(
+                                scope: scope,
+                                buffered: buffered,
+                                aspectRatio: aspect,
+                                thumbnailProvider: _provideScrubThumbnailAt,
+                                modeButton: _showsDisplayModeButton
+                                    ? _displayModeButton(size: 44)
+                                    : null,
+                                onDemandButton: _hasOnDemandQueue
+                                    ? _onDemandToggleButton()
+                                    : null,
+                                fullscreenButton:
+                                    widget.onToggleFullscreen == null
+                                    ? null
+                                    : _playerChromeIconButton(
+                                        icon: HeroAppIcons.expand,
+                                        label: scope.labels.fullscreen,
+                                        onTap: widget.onToggleFullscreen!,
+                                        size: 44,
+                                        iconSize: 20,
+                                        cornerRadius: 10,
+                                        backgroundColor: const Color(
+                                          0x9A1B1D1E,
+                                        ),
+                                        borderColor: Colors.white.withValues(
+                                          alpha: 0.26,
+                                        ),
+                                      ),
+                              )
+                            : _MithkaVideoBottomChrome(
+                                scope: scope,
+                                wide: wide,
+                                buffered: buffered,
+                                aspectRatio: aspect,
+                                thumbnailProvider: _provideScrubThumbnailAt,
+                                compactQueueNavigation: compactQueueNavigation,
+                                previousButton:
+                                    compactQueueNavigation &&
+                                        scope.previous != null
+                                    ? _MithkaVideoCompactNavButton(
+                                        icon: HeroAppIcons.chevronLeft,
+                                        label: scope.labels.previous,
+                                        onTap: scope.previous!,
+                                        size: 44,
+                                      )
+                                    : null,
+                                nextButton:
+                                    compactQueueNavigation && scope.next != null
+                                    ? _MithkaVideoCompactNavButton(
+                                        icon: HeroAppIcons.chevronRight,
+                                        label: scope.labels.next,
+                                        onTap: scope.next!,
+                                        size: 44,
+                                      )
+                                    : null,
+                                modeButton: _showsDisplayModeButton
+                                    ? _displayModeButton(size: 44)
+                                    : null,
+                                onDemandButton: _hasOnDemandQueue
+                                    ? _onDemandToggleButton()
+                                    : null,
+                                fullscreenButton:
+                                    widget.onToggleFullscreen == null ||
+                                        (widget.onSwitchMode != null && !wide)
+                                    ? null
+                                    : _playerChromeIconButton(
+                                        icon: HeroAppIcons.expand,
+                                        label: widget.onSwitchMode != null
+                                            ? 'Expand player'
+                                            : scope.labels.fullscreen,
+                                        onTap: widget.onToggleFullscreen!,
+                                        size: 44,
+                                        iconSize: 20,
+                                        cornerRadius: 10,
+                                        backgroundColor: const Color(
+                                          0x9A1B1D1E,
+                                        ),
+                                        borderColor: Colors.white.withValues(
+                                          alpha: 0.26,
+                                        ),
+                                      ),
+                              ),
+                      ),
+                    ],
+                  );
+                },
               ),
-              onPanDown: (details) => _gestureOrigin = details.localPosition,
-              onPanStart: (details) {
-                scope.actions.showControls();
-                _startPlaybackGesture(details, controller);
-              },
-              onPanUpdate: (details) =>
-                  _updatePlaybackGesture(details, controller),
-              onPanEnd: (_) => _finishPlaybackGesture(controller),
-              onPanCancel: _cancelPlaybackGesture,
             ),
           ),
         ),
-        if (controlsVisible) ..._controlChromeBlocks(visible: true),
-        if (controlsVisible) ..._controls(controller),
-        if (_gestureIndicatorReady)
+      ),
+    );
+  }
+
+  Widget _playerOnDemandChrome(
+    BuildContext context,
+    FVideoChromeScope scope,
+    EdgeInsets safePadding,
+  ) {
+    final snapshot = scope.snapshot;
+    final queue = widget.onDemandQueue!;
+    final metadataAspect = _metadataAspectRatio();
+    final controllerAspect = snapshot.value.aspectRatio;
+    final aspect =
+        metadataAspect ??
+        (controllerAspect.isFinite && controllerAspect > 0
+            ? controllerAspect
+            : 16 / 9);
+    final buffered = math
+        .max(
+          snapshot.value.buffered.isEmpty
+              ? 0.0
+              : snapshot.value.buffered.last.end.inMilliseconds /
+                    math.max(1, snapshot.value.duration.inMilliseconds),
+          _downloadedFraction ?? 0,
+        )
+        .clamp(0.0, 1.0)
+        .toDouble();
+    final title = _videoChromeTitle();
+    final subtitle =
+        'On-demand  •  '
+        '${formatVideoPlayerDuration(snapshot.value.duration)}';
+
+    return DefaultTextStyle.merge(
+      style: const TextStyle(
+        decoration: TextDecoration.none,
+        fontWeight: FontWeight.w400,
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final geometry = _VideoOnDemandGeometry.resolve(
+            size: Size(constraints.maxWidth, constraints.maxHeight),
+            safePadding: safePadding,
+            aspectRatio: aspect,
+          );
+          final modeButton = _showsDisplayModeButton
+              ? _displayModeButton(size: 44)
+              : null;
+          final onDemandButton = _onDemandToggleButton();
+          final fullscreenButton = widget.onToggleFullscreen == null
+              ? null
+              : _playerChromeIconButton(
+                  icon: HeroAppIcons.expand,
+                  label: scope.labels.fullscreen,
+                  onTap: widget.onToggleFullscreen!,
+                  size: 44,
+                  iconSize: 20,
+                  cornerRadius: 10,
+                  backgroundColor: const Color(0x9A1B1D1E),
+                  borderColor: Colors.white.withValues(alpha: 0.26),
+                );
+          final controls = Stack(
+            fit: StackFit.expand,
+            children: [
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withValues(alpha: 0.54),
+                          Colors.transparent,
+                          Colors.black.withValues(alpha: 0.48),
+                        ],
+                        stops: const [0, 0.42, 1],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned.fromRect(
+                rect: geometry.headerRect,
+                child: Row(
+                  children: [
+                    _playerChromeIconButton(
+                      icon: HeroAppIcons.xmark,
+                      label: scope.labels.close,
+                      onTap: _close,
+                      size: 52,
+                      iconSize: 27,
+                      cornerRadius: 26,
+                    ),
+                    if (geometry.wide) ...[
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 17,
+                                fontWeight: FontWeight.w400,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              subtitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.74),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w400,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ] else
+                      const Spacer(),
+                    const SizedBox(width: 10),
+                    _playerChromeIconButton(
+                      icon: HeroAppIcons.code,
+                      label: AppStrings.t(
+                        AppStringKeys.videoPlayerStreamInspector,
+                      ),
+                      onTap: () {
+                        setState(() => _debuggerVisible = !_debuggerVisible);
+                        scope.actions.showControls();
+                      },
+                      size: 44,
+                      iconSize: 21,
+                      cornerRadius: 22,
+                      backgroundColor: _debuggerVisible
+                          ? const Color(0xD92C6565)
+                          : const Color(0xB82C2C2E),
+                    ),
+                    const SizedBox(width: 8),
+                    _playerChromeIconButton(
+                      icon: HeroAppIcons.ellipsisVertical,
+                      label: AppStrings.t(AppStringKeys.momentsMore),
+                      onTap: _toggleMoreMenu,
+                      size: 44,
+                      iconSize: 23,
+                      cornerRadius: 22,
+                      focusNode: _moreButtonFocusNode,
+                    ),
+                  ],
+                ),
+              ),
+              Positioned.fromRect(
+                rect: geometry.videoRect,
+                child: Center(
+                  child: geometry.wide
+                      ? _MithkaVideoCenterTransport(
+                          value: snapshot.value,
+                          scope: scope,
+                        )
+                      : _MithkaVideoCompactTransport(
+                          value: snapshot.value,
+                          scope: scope,
+                          showQueueNavigation: false,
+                        ),
+                ),
+              ),
+              Positioned.fromRect(
+                rect: geometry.bottomChromeRect,
+                child: geometry.wide
+                    ? Align(
+                        alignment: Alignment.bottomCenter,
+                        child: _MithkaVideoBottomChrome(
+                          scope: scope,
+                          wide: true,
+                          buffered: buffered,
+                          aspectRatio: aspect,
+                          thumbnailProvider: _provideScrubThumbnailAt,
+                          compactQueueNavigation: false,
+                          previousButton: null,
+                          nextButton: null,
+                          modeButton: modeButton,
+                          onDemandButton: onDemandButton,
+                          fullscreenButton: fullscreenButton,
+                        ),
+                      )
+                    : _MithkaVideoOnDemandBottomChrome(
+                        scope: scope,
+                        buffered: buffered,
+                        aspectRatio: aspect,
+                        thumbnailProvider: _provideScrubThumbnailAt,
+                        title: title,
+                        subtitle: subtitle,
+                        modeButton: modeButton,
+                        onDemandButton: onDemandButton,
+                        fullscreenButton: fullscreenButton,
+                      ),
+              ),
+            ],
+          );
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              Positioned.fromRect(
+                rect: geometry.panelRect,
+                child: _MithkaVideoOnDemandPanel(
+                  key: const ValueKey('video-on-demand-panel'),
+                  queue: queue,
+                  wide: geometry.wide,
+                  onSelect: widget.onDemandSelect,
+                  autoplay:
+                      _completionAction == VideoCompletionAction.autoplayNext,
+                  onAutoplayChanged: _setOnDemandAutoplay,
+                ),
+              ),
+              ExcludeFocus(
+                excluding: !snapshot.controlsVisible,
+                child: ExcludeSemantics(
+                  excluding: !snapshot.controlsVisible,
+                  child: IgnorePointer(
+                    ignoring: !snapshot.controlsVisible,
+                    child: AnimatedOpacity(
+                      key: const ValueKey('mithka-video-player-chrome'),
+                      opacity: snapshot.controlsVisible ? 1 : 0,
+                      duration: const Duration(milliseconds: 170),
+                      child: controls,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _setOnDemandAutoplay(bool enabled) async {
+    final action = enabled
+        ? VideoCompletionAction.autoplayNext
+        : VideoCompletionAction.prompt;
+    if (_completionAction == action) return;
+    setState(() {
+      _completionAction = action;
+      _completionHandled = false;
+      _showCompletionPrompt = false;
+    });
+    await VideoPlaybackPreferences.saveCompletionAction(action);
+  }
+
+  void _toggleOnDemandPanel() {
+    if (!_hasOnDemandQueue) return;
+    setState(() {
+      _onDemandPanelVisible = !_onDemandPanelVisible;
+      _moreMenuVisible = false;
+      _modeMenuVisible = false;
+    });
+    _reusablePlayerActions?.showControls();
+  }
+
+  Widget _onDemandToggleButton() {
+    return KeyedSubtree(
+      key: const ValueKey('video-on-demand-toggle'),
+      child: _FocusableVideoIconButton(
+        icon: HeroAppIcons.listCheck,
+        label: AppStrings.t(AppStringKeys.videoPlayerOnDemand),
+        onPressed: _toggleOnDemandPanel,
+        size: const Size.square(44),
+        iconSize: 21,
+        backgroundColor: _onDemandPanelVisible
+            ? const Color(0xD92C6565)
+            : const Color(0x8A1B1D1E),
+        borderColor: Colors.white.withValues(
+          alpha: _onDemandPanelVisible ? 0.32 : 0.24,
+        ),
+        expanded: _onDemandPanelVisible,
+      ),
+    );
+  }
+
+  Widget _playerChromeIconButton({
+    required AppIconData icon,
+    required String label,
+    required VoidCallback onTap,
+    required double size,
+    required double iconSize,
+    required double cornerRadius,
+    Color backgroundColor = const Color(0xB82C2C2E),
+    Color? borderColor,
+    FocusNode? focusNode,
+  }) {
+    return _FocusableVideoIconButton(
+      icon: icon,
+      label: label,
+      onPressed: onTap,
+      size: Size.square(size),
+      iconSize: iconSize,
+      backgroundColor: backgroundColor,
+      borderColor: borderColor ?? Colors.white.withValues(alpha: 0.15),
+      cornerRadius: cornerRadius,
+      focusNode: focusNode,
+    );
+  }
+
+  String _videoChromeTitle() {
+    final explicit = widget.title.trim();
+    if (explicit.isNotEmpty) return explicit;
+    final fileName = widget.video.fileName?.trim() ?? '';
+    if (fileName.isNotEmpty) {
+      final extension = fileName.lastIndexOf('.');
+      return extension > 0 ? fileName.substring(0, extension) : fileName;
+    }
+    return 'Video';
+  }
+
+  String _videoChromeSubtitle(Duration duration) {
+    return 'Video  •  ${formatVideoPlayerDuration(duration)}';
+  }
+
+  Future<Uint8List?> _provideScrubThumbnailAt(Duration position) {
+    final source = _scrubThumbnailSource();
+    if (source == null) {
+      return Future<Uint8List?>.value();
+    }
+    final controller = _controller;
+    final aspect = controller == null
+        ? 16 / 9
+        : _displayVideoSize(controller).aspectRatio;
+    return _generateScrubThumbnail(
+      FVideoThumbnailRequest(
+        source: source,
+        position: position,
+        maxWidth: aspect >= 1 ? 320 : 240,
+        quality: 70,
+      ),
+    );
+  }
+
+  Future<Uint8List?> _generateScrubThumbnail(FVideoThumbnailRequest request) {
+    final provider = widget.thumbnailProvider;
+    return provider == null
+        ? FVideoThumbnail.generateRequest(request)
+        : provider(request);
+  }
+
+  FVideoSource? _scrubThumbnailSource() {
+    final path = _localPath;
+    if (path == null || path.isEmpty) return null;
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return FVideoSource.network(path);
+    }
+    return _openedCompletedLocalFile ? FVideoSource.file(path) : null;
+  }
+
+  Widget _playerSurfaceInteraction(
+    BuildContext context,
+    FVideoChromeScope scope,
+    Widget child,
+  ) {
+    _reusablePlayerActions = scope.actions;
+    final controller = _controller;
+    Widget surface = child;
+    if (scope.snapshot.controlsVisible && _showsOnDemandLayout(context)) {
+      final videoChild = surface;
+      surface = LayoutBuilder(
+        builder: (context, constraints) {
+          final geometry = _VideoOnDemandGeometry.resolve(
+            size: Size(constraints.maxWidth, constraints.maxHeight),
+            safePadding: MediaQuery.paddingOf(context),
+            aspectRatio: _resolvedVideoAspectRatio(scope.snapshot.value),
+          );
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              const ColoredBox(color: Colors.black),
+              if (widget.thumb != null)
+                Positioned.fill(
+                  child: ClipRect(
+                    child: ImageFiltered(
+                      imageFilter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+                      child: Transform.scale(
+                        scale: 1.12,
+                        child: Opacity(
+                          opacity: 0.42,
+                          child: TDImage(photo: widget.thumb, cornerRadius: 0),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withValues(alpha: 0.34),
+                        Colors.black.withValues(alpha: 0.12),
+                        Colors.black.withValues(alpha: 0.72),
+                      ],
+                      stops: const [0, 0.48, 1],
+                    ),
+                  ),
+                ),
+              ),
+              Positioned.fromRect(
+                rect: geometry.videoRect,
+                child: ClipRRect(
+                  key: const ValueKey('video-on-demand-surface'),
+                  borderRadius: BorderRadius.circular(geometry.wide ? 12 : 10),
+                  child: ColoredBox(
+                    color: Colors.black,
+                    child: _zoomedPlaybackSurface(
+                      child: videoChild,
+                      viewport: geometry.videoRect,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      );
+    } else if (_usesStandaloneFullscreenLayout(context)) {
+      final videoChild = surface;
+      surface = Stack(
+        key: const ValueKey('video-standalone-surface'),
+        fit: StackFit.expand,
+        children: [
+          const ColoredBox(color: Colors.black),
+          if (widget.thumb != null)
+            Positioned.fill(
+              child: ClipRect(
+                child: ImageFiltered(
+                  imageFilter: ui.ImageFilter.blur(sigmaX: 26, sigmaY: 26),
+                  child: Transform.scale(
+                    scale: 1.14,
+                    child: Opacity(
+                      opacity: 0.46,
+                      child: TDImage(photo: widget.thumb, cornerRadius: 0),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.28),
+                    Colors.black.withValues(alpha: 0.04),
+                    Colors.black.withValues(alpha: 0.48),
+                  ],
+                  stops: const [0, 0.48, 1],
+                ),
+              ),
+            ),
+          ),
+          Positioned.fill(child: _fullViewportZoomedSurface(videoChild)),
+        ],
+      );
+    } else {
+      surface = _fullViewportZoomedSurface(surface);
+    }
+    if (_supportsPlaybackGestures && controller != null) {
+      surface = GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onPanDown: (details) {
+          if (!_videoZoomSuppressPlaybackGestures) {
+            _gestureOrigin = details.localPosition;
+          }
+        },
+        onPanStart: (details) =>
+            _startSurfacePanGesture(details, controller, scope.actions),
+        onPanUpdate: (details) =>
+            _updateSurfacePanGesture(details, controller, scope.actions),
+        onPanEnd: (_) => _finishSurfacePanGesture(controller),
+        onPanCancel: _cancelSurfacePanGesture,
+        child: surface,
+      );
+    }
+    return surface;
+  }
+
+  Widget _fullViewportZoomedSurface(Widget child) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final viewport =
+            Offset.zero & Size(constraints.maxWidth, constraints.maxHeight);
+        return _zoomedPlaybackSurface(child: child, viewport: viewport);
+      },
+    );
+  }
+
+  Widget _zoomedPlaybackSurface({
+    required Widget child,
+    required Rect viewport,
+  }) {
+    _videoZoomViewport = viewport;
+    _videoZoomOffset = _clampVideoZoomOffset(
+      _videoZoomOffset,
+      _videoZoomScale,
+      viewport.size,
+    );
+    return ClipRect(
+      child: Transform.translate(
+        key: const ValueKey('video-zoom-translation'),
+        offset: _videoZoomOffset,
+        child: Transform.scale(
+          key: const ValueKey('video-zoom-transform'),
+          scale: _videoZoomScale,
+          child: child,
+        ),
+      ),
+    );
+  }
+
+  Widget _playerOverlay(BuildContext context, FVideoChromeScope scope) {
+    _reusablePlayerActions = scope.actions;
+    if (_systemPiPActive) {
+      return const IgnorePointer(child: SizedBox.expand());
+    }
+    final controller = _controller;
+    final overlay = Stack(
+      fit: StackFit.expand,
+      children: [
+        if (_videoZoomGestureActive) _videoZoomIndicator(),
+        if (_gestureIndicatorReady && controller != null)
           _activeGesture == _PlayerGesture.brightness ||
                   _activeGesture == _PlayerGesture.volume
               ? _sideLevelIndicator()
               : _gestureIndicator(controller),
         if (_showCompletionPrompt) _completionPrompt(),
-        if (controlsVisible) _closeButton(),
-        if (controlsVisible) _topOverflowButton(),
-        if (_moreMenuVisible) _moreMenuOverlay(),
-        if (_modeMenuVisible) _modeMenuOverlay(),
+        if (_moreMenuVisible)
+          _moreMenuOverlay(
+            onTapOutside: () => _dismissMenusAndControls(scope: scope),
+          ),
+        if (_modeMenuVisible)
+          _modeMenuOverlay(
+            onTapOutside: () => _dismissMenusAndControls(scope: scope),
+          ),
       ],
     );
-  }
-
-  void _handleMobileDoubleTap(
-    TapDownDetails details,
-    double width,
-    MithkaVideoActions actions,
-  ) {
-    final fraction = width <= 0 ? 0.5 : details.localPosition.dx / width;
-    if (fraction < 0.42) {
-      unawaited(actions.seekBy(const Duration(seconds: -10)));
-    } else if (fraction > 0.58) {
-      unawaited(actions.seekBy(const Duration(seconds: 10)));
-    } else {
-      unawaited(actions.togglePlayback());
-    }
-  }
-
-  Widget _legacyPlayer(VideoPlayerController? controller) {
-    final ready = controller != null && controller.value.isInitialized;
-    final body = Focus(
-      autofocus: _isDesktopPlatform,
-      onKeyEvent: ready
-          ? (_, event) => _handleDesktopKey(event, controller)
-          : null,
-      child: Listener(
-        onPointerSignal: ready ? _handlePointerSignal : null,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: ready ? _toggleControls : null,
-          onDoubleTap: ready && _isDesktopPlatform
-              ? widget.onToggleFullscreen
-              : null,
-          onPanDown: ready && _supportsPlaybackGestures
-              ? (details) => _gestureOrigin = details.localPosition
-              : null,
-          onPanStart: ready && _supportsPlaybackGestures
-              ? (details) => _startPlaybackGesture(details, controller)
-              : null,
-          onPanUpdate: ready && _supportsPlaybackGestures
-              ? (details) => _updatePlaybackGesture(details, controller)
-              : null,
-          onPanEnd: ready && _supportsPlaybackGestures
-              ? (_) => _finishPlaybackGesture(controller)
-              : null,
-          onPanCancel: ready && _supportsPlaybackGestures
-              ? _cancelPlaybackGesture
-              : null,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              if (ready) _videoFrame(controller) else _loadingState(),
-              if (ready && _controlsVisible)
-                ..._controlChromeBlocks(visible: true),
-              if (ready && _controlsVisible) ..._controls(controller),
-              if (ready && _gestureIndicatorReady)
-                _activeGesture == _PlayerGesture.brightness ||
-                        _activeGesture == _PlayerGesture.volume
-                    ? _sideLevelIndicator()
-                    : _gestureIndicator(controller),
-              if (ready && _showCompletionPrompt) _completionPrompt(),
-              if (!ready || _controlsVisible)
-                widget.presentation ==
-                            VideoPlayerPresentation.pictureInPicture &&
-                        ready
-                    ? _pipTopBar()
-                    : _closeButton(),
-              if (ready && _controlsVisible) _topOverflowButton(),
-              if (_moreMenuVisible) _moreMenuOverlay(),
-              if (_modeMenuVisible) _modeMenuOverlay(),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (widget.presentation == VideoPlayerPresentation.embedded) {
-      return Material(color: Colors.black, child: body);
-    }
-    if (widget.presentation == VideoPlayerPresentation.pictureInPicture) {
-      return Material(type: MaterialType.transparency, child: body);
-    }
-    return Scaffold(backgroundColor: Colors.black, body: body);
-  }
-
-  bool get _supportsPlaybackGestures =>
-      widget.presentation == VideoPlayerPresentation.fullscreen;
-
-  bool get _usesReusableMobileFullscreenPlayer =>
-      usesReusableMobileFullscreenPlayer(
-        presentation: widget.presentation,
-        platform: defaultTargetPlatform,
-        isWeb: kIsWeb,
+    if (_showCompletionPrompt || _moreMenuVisible || _modeMenuVisible) {
+      return Focus(
+        canRequestFocus: false,
+        onKeyEvent: (node, event) => _handlePlayerMenuKeyEvent(event),
+        child: overlay,
       );
+    }
+    return IgnorePointer(child: overlay);
+  }
 
-  bool get _isDesktopPlatform =>
-      Platform.isMacOS || Platform.isWindows || Platform.isLinux;
-
-  KeyEventResult _handleDesktopKey(
-    KeyEvent event,
-    VideoPlayerController controller,
-  ) {
-    if (!_isDesktopPlatform || event is! KeyDownEvent) {
+  KeyEventResult _handlePlayerMenuKeyEvent(KeyEvent event) {
+    if (!_moreMenuVisible && !_modeMenuVisible) {
+      return KeyEventResult.ignored;
+    }
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
     final key = event.logicalKey;
-    if (_moreMenuVisible || _modeMenuVisible) {
-      if (key == LogicalKeyboardKey.escape) {
-        if (_moreMenuVisible) {
-          _closeMoreMenu();
-        } else {
-          _closeModeMenu();
-        }
-        return KeyEventResult.handled;
-      }
-      if (key == LogicalKeyboardKey.arrowUp) {
-        FocusScope.of(context).previousFocus();
-        return KeyEventResult.handled;
-      }
-      if (key == LogicalKeyboardKey.arrowDown) {
-        FocusScope.of(context).nextFocus();
-        return KeyEventResult.handled;
-      }
-      if (key == LogicalKeyboardKey.tab ||
-          key == LogicalKeyboardKey.enter ||
-          key == LogicalKeyboardKey.space) {
-        return KeyEventResult.ignored;
+    if (key == LogicalKeyboardKey.escape) {
+      if (_moreMenuVisible) {
+        _closeMoreMenu();
+      } else {
+        _closeModeMenu();
       }
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.space || key == LogicalKeyboardKey.keyK) {
-      unawaited(_togglePlay());
-    } else if (key == LogicalKeyboardKey.arrowLeft ||
-        key == LogicalKeyboardKey.keyJ) {
-      _seekBy(controller, const Duration(seconds: -10));
-    } else if (key == LogicalKeyboardKey.arrowRight ||
-        key == LogicalKeyboardKey.keyL) {
-      _seekBy(controller, const Duration(seconds: 10));
-    } else if (key == LogicalKeyboardKey.arrowUp) {
-      _setVolume(_volume + 0.05);
-    } else if (key == LogicalKeyboardKey.arrowDown) {
-      _setVolume(_volume - 0.05);
-    } else if (key == LogicalKeyboardKey.keyM) {
-      _toggleMute();
-    } else if (key == LogicalKeyboardKey.keyF ||
-        key == LogicalKeyboardKey.enter) {
-      widget.onToggleFullscreen?.call();
-    } else if (key == LogicalKeyboardKey.home) {
-      unawaited(controller.seekTo(Duration.zero));
-    } else if (key == LogicalKeyboardKey.end) {
-      unawaited(controller.seekTo(controller.value.duration));
-    } else if (key == LogicalKeyboardKey.escape) {
-      _close();
-    } else {
+    if (key == LogicalKeyboardKey.arrowDown) {
+      _movePlayerMenuFocus(1);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowUp) {
+      _movePlayerMenuFocus(-1);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.tab) {
+      _movePlayerMenuFocus(HardwareKeyboard.instance.isShiftPressed ? -1 : 1);
+      return KeyEventResult.handled;
+    }
+    // The focused menu item owns activation. Its inner Shortcuts widget sees
+    // these before this ancestor and invokes the corresponding action.
+    if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.space) {
       return KeyEventResult.ignored;
     }
-    _revealControlsTemporarily();
+    // Do not let playback, seeking, volume, or presentation shortcuts run
+    // underneath an open application menu.
     return KeyEventResult.handled;
   }
 
-  void _handlePointerSignal(PointerSignalEvent event) {
-    if (!_isDesktopPlatform || event is! PointerScrollEvent) return;
-    _setVolume(_volume + (event.scrollDelta.dy < 0 ? 0.05 : -0.05));
-    _revealControlsTemporarily();
+  List<FocusNode> get _visiblePlayerMenuFocusNodes {
+    if (_moreMenuVisible) {
+      return [
+        _moreMenuFocusNodes[0],
+        _moreMenuFocusNodes[1],
+        _moreMenuFocusNodes[2],
+        if (_showsOrientationButton) _moreMenuFocusNodes[3],
+      ];
+    }
+    if (_modeMenuVisible) {
+      return [
+        for (final mode in _availableDisplayModes) _modeMenuFocusNodes[mode]!,
+      ];
+    }
+    return const [];
   }
 
-  void _seekBy(VideoPlayerController controller, Duration delta) {
-    final duration = controller.value.duration;
-    final target = Duration(
-      milliseconds:
-          (controller.value.position.inMilliseconds + delta.inMilliseconds)
-              .clamp(0, duration.inMilliseconds),
+  void _movePlayerMenuFocus(int delta) {
+    final nodes = _visiblePlayerMenuFocusNodes;
+    if (nodes.isEmpty) return;
+    final currentIndex = nodes.indexWhere((node) => node.hasFocus);
+    final startIndex = currentIndex < 0 ? (delta < 0 ? 0 : -1) : currentIndex;
+    final nextIndex = (startIndex + delta) % nodes.length;
+    nodes[nextIndex].requestFocus();
+  }
+
+  Widget _playerTopTrailing(BuildContext context, FVideoChromeScope scope) {
+    _reusablePlayerActions = scope.actions;
+    if (widget.presentation != VideoPlayerPresentation.fullscreen) {
+      return const SizedBox.shrink();
+    }
+    return _roundIconButton(
+      HeroAppIcons.ellipsisVertical,
+      _toggleMoreMenu,
+      label: AppStringKeys.momentsMore.l10n(context),
+      size: 44,
+      focusNode: _moreButtonFocusNode,
     );
-    unawaited(controller.seekTo(target));
   }
 
-  void _revealControlsTemporarily() {
-    if (!mounted) return;
-    if (!_controlsVisible) setState(() => _controlsVisible = true);
-    _scheduleHide();
+  Widget _playerBottomTrailing(BuildContext context, FVideoChromeScope scope) {
+    _reusablePlayerActions = scope.actions;
+    return _showsDisplayModeButton
+        ? _displayModeButton(size: 44)
+        : const SizedBox.shrink();
   }
+
+  bool get _supportsPlaybackGestures => videoPlaybackSurfaceUsesPanGestures(
+    presentation: widget.presentation,
+    platform: defaultTargetPlatform,
+    isWeb: kIsWeb,
+  );
+
+  bool get _isDesktopPlatform =>
+      !kIsWeb &&
+      switch (defaultTargetPlatform) {
+        TargetPlatform.linux ||
+        TargetPlatform.macOS ||
+        TargetPlatform.windows => true,
+        _ => false,
+      };
 
   bool get _gestureIndicatorReady =>
       _activeGesture != null &&
-      (_activeGesture != _PlayerGesture.brightness || _gestureBrightnessReady);
+      (_activeGesture != _PlayerGesture.brightness ||
+          _gestureBrightnessReady) &&
+      (_activeGesture != _PlayerGesture.volume || _gestureVolumeReady);
 
-  void _startPlaybackGesture(
+  void _handleVideoZoomPointerDown(PointerDownEvent event) {
+    if (event.kind != ui.PointerDeviceKind.touch) return;
+    _videoZoomPointers[event.pointer] = event.localPosition;
+    if (_videoZoomPinchPointers.isNotEmpty || _videoZoomPointers.length < 2) {
+      return;
+    }
+    _videoZoomSuppressPlaybackGestures = true;
+    _cancelPlaybackGesture();
+    _beginVideoPinchFromActivePointers();
+  }
+
+  void _handleVideoZoomPointerMove(PointerMoveEvent event) {
+    if (event.kind != ui.PointerDeviceKind.touch ||
+        !_videoZoomPointers.containsKey(event.pointer)) {
+      return;
+    }
+    _videoZoomPointers[event.pointer] = event.localPosition;
+    if (_videoZoomPinchPointers.isEmpty) {
+      if (_videoZoomPointers.length >= 2) {
+        _beginVideoPinchFromActivePointers();
+      }
+      return;
+    }
+    final points = _activeVideoPinchPoints;
+    if (points == null) return;
+    _updateVideoZoomGesture(
+      focalPoint: (points.$1 + points.$2) / 2,
+      scaleValue: (points.$1 - points.$2).distance,
+    );
+    _reusablePlayerActions?.hideControls();
+  }
+
+  void _handleVideoZoomPointerEnd(PointerEvent event) {
+    if (event.kind != ui.PointerDeviceKind.touch ||
+        !_videoZoomPointers.containsKey(event.pointer)) {
+      return;
+    }
+    final endedActivePinch = _videoZoomPinchPointers.contains(event.pointer);
+    _videoZoomPointers.remove(event.pointer);
+    if (endedActivePinch) {
+      _videoZoomPinchPointers = const <int>[];
+      _finishVideoZoomGesture();
+      if (_videoZoomPointers.length >= 2) {
+        _beginVideoPinchFromActivePointers();
+      }
+    }
+    if (_videoZoomPointers.isEmpty) {
+      _videoZoomSuppressPlaybackGestures = false;
+    }
+  }
+
+  void _beginVideoPinchFromActivePointers() {
+    if (_videoZoomPointers.length < 2) return;
+    final pointers = _videoZoomPointers.keys.take(2).toList(growable: false);
+    final first = _videoZoomPointers[pointers[0]]!;
+    final second = _videoZoomPointers[pointers[1]]!;
+    _videoZoomPinchPointers = pointers;
+    _videoZoomSuppressPlaybackGestures = true;
+    _beginVideoZoomGesture(
+      (first + second) / 2,
+      scaleBaseline: math.max((first - second).distance, 1),
+    );
+    _reusablePlayerActions?.hideControls();
+  }
+
+  (Offset, Offset)? get _activeVideoPinchPoints {
+    if (_videoZoomPinchPointers.length != 2) return null;
+    final first = _videoZoomPointers[_videoZoomPinchPointers[0]];
+    final second = _videoZoomPointers[_videoZoomPinchPointers[1]];
+    if (first == null || second == null) return null;
+    return (first, second);
+  }
+
+  void _startSurfacePanGesture(
     DragStartDetails details,
     VideoPlayerController controller,
+    FVideoActions actions,
   ) {
-    _hideTimer?.cancel();
-    _gestureOrigin ??= details.localPosition;
+    if (_videoZoomSuppressPlaybackGestures) return;
+    if (_videoZoomScale > _minimumVideoZoomScale) {
+      _cancelPlaybackGesture();
+      _beginVideoZoomGesture(details.localPosition, scaleBaseline: 1);
+      actions.hideControls();
+      return;
+    }
+    actions.showControls();
+    _startPlaybackGesture(details.localPosition, controller);
+  }
+
+  void _updateSurfacePanGesture(
+    DragUpdateDetails details,
+    VideoPlayerController controller,
+    FVideoActions actions,
+  ) {
+    if (_videoZoomSuppressPlaybackGestures) return;
+    if (_videoZoomGestureActive && _videoZoomScale > _minimumVideoZoomScale) {
+      _updateVideoZoomGesture(focalPoint: details.localPosition, scaleValue: 1);
+      actions.hideControls();
+      return;
+    }
+    _updatePlaybackGesture(details.localPosition, controller);
+  }
+
+  void _finishSurfacePanGesture(VideoPlayerController controller) {
+    if (_videoZoomSuppressPlaybackGestures) {
+      _cancelPlaybackGesture();
+      return;
+    }
+    if (_videoZoomGestureActive) {
+      _finishVideoZoomGesture();
+      return;
+    }
+    _finishPlaybackGesture(controller);
+  }
+
+  void _cancelSurfacePanGesture() {
+    if (!_videoZoomSuppressPlaybackGestures && _videoZoomGestureActive) {
+      _finishVideoZoomGesture();
+      return;
+    }
+    _cancelPlaybackGesture();
+  }
+
+  void _beginVideoZoomGesture(
+    Offset focalPoint, {
+    required double scaleBaseline,
+  }) {
+    final viewport = _resolvedVideoZoomViewport;
+    final localFocalPoint = focalPoint - viewport.topLeft;
+    final center = viewport.size.center(Offset.zero);
+    _videoZoomGestureStartScale = _videoZoomScale;
+    _videoZoomGestureScaleBaseline = math.max(scaleBaseline, 0.0001);
+    _videoZoomGestureContentAnchor =
+        (localFocalPoint - center - _videoZoomOffset) / _videoZoomScale;
+    if (mounted) {
+      setState(() => _videoZoomGestureActive = true);
+    }
+  }
+
+  void _updateVideoZoomGesture({
+    required Offset focalPoint,
+    required double scaleValue,
+  }) {
+    if (!_videoZoomGestureActive) return;
+    final viewport = _resolvedVideoZoomViewport;
+    final scale =
+        (_videoZoomGestureStartScale *
+                scaleValue /
+                _videoZoomGestureScaleBaseline)
+            .clamp(_minimumVideoZoomScale, _maximumVideoZoomScale)
+            .toDouble();
+    final localFocalPoint = focalPoint - viewport.topLeft;
+    final center = viewport.size.center(Offset.zero);
+    final offset =
+        localFocalPoint - center - _videoZoomGestureContentAnchor * scale;
+    final clampedOffset = _clampVideoZoomOffset(offset, scale, viewport.size);
+    if (!mounted) return;
+    setState(() {
+      _videoZoomScale = scale;
+      _videoZoomOffset = clampedOffset;
+    });
+  }
+
+  void _finishVideoZoomGesture() {
+    if (!mounted) return;
+    setState(() {
+      _videoZoomGestureActive = false;
+      if (_videoZoomScale <= _videoZoomResetThreshold) {
+        _videoZoomScale = _minimumVideoZoomScale;
+        _videoZoomOffset = Offset.zero;
+      } else {
+        _videoZoomOffset = _clampVideoZoomOffset(
+          _videoZoomOffset,
+          _videoZoomScale,
+          _resolvedVideoZoomViewport.size,
+        );
+      }
+    });
+  }
+
+  Rect get _resolvedVideoZoomViewport {
+    if (!_videoZoomViewport.isEmpty) return _videoZoomViewport;
+    return Offset.zero & MediaQuery.sizeOf(context);
+  }
+
+  Offset _clampVideoZoomOffset(Offset offset, double scale, Size viewport) {
+    if (scale <= _minimumVideoZoomScale || viewport.isEmpty) {
+      return Offset.zero;
+    }
+    final maximumX = viewport.width * (scale - 1) / 2;
+    final maximumY = viewport.height * (scale - 1) / 2;
+    return Offset(
+      offset.dx.clamp(-maximumX, maximumX).toDouble(),
+      offset.dy.clamp(-maximumY, maximumY).toDouble(),
+    );
+  }
+
+  void _startPlaybackGesture(
+    Offset localPosition,
+    VideoPlayerController controller,
+  ) {
+    _reusablePlayerActions?.showControls();
+    _gestureOrigin ??= localPosition;
     _gestureStartValue = _volume;
     _gestureValue = _volume;
     _gestureBrightnessReady = false;
+    _gestureVolumeReady = false;
+    _gestureUsesSystemVolume = false;
+    _gestureVolumeRequestGeneration++;
     _gestureStartPosition = controller.value.position;
     _gestureSeekPosition = _gestureStartPosition;
-    if (!_controlsVisible) setState(() => _controlsVisible = true);
   }
 
   void _updatePlaybackGesture(
-    DragUpdateDetails details,
+    Offset localPosition,
     VideoPlayerController controller,
   ) {
     final origin = _gestureOrigin;
     if (origin == null) return;
-    final delta = details.localPosition - origin;
+    final delta = localPosition - origin;
     final size = MediaQuery.sizeOf(context);
     var gesture = _activeGesture;
     if (gesture == null) {
@@ -2047,6 +3466,15 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       }
       if (gesture == _PlayerGesture.brightness) {
         unawaited(_beginBrightnessGesture());
+      } else if (gesture == _PlayerGesture.volume) {
+        _volumeControlRequestGeneration++;
+        if (_usesAndroidSystemMediaVolume) {
+          unawaited(_beginSystemVolumeGesture(controller));
+        } else {
+          _gestureStartValue = controller.value.volume;
+          _gestureValue = controller.value.volume;
+          _gestureVolumeReady = true;
+        }
       }
     }
 
@@ -2060,17 +3488,23 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
               .clamp(0, duration.inMilliseconds),
         );
       case _PlayerGesture.volume:
-        _gestureValue = (_gestureStartValue - delta.dy / size.height).clamp(
-          0.0,
-          1.0,
-        );
-        controller.setVolume(_gestureValue);
+        if (!_gestureVolumeReady) break;
+        final target =
+            (_gestureStartValue -
+                    delta.dy / size.height * _verticalGestureSensitivity)
+                .clamp(0.0, 1.0);
+        if (_gestureUsesSystemVolume) {
+          unawaited(_setSystemVolumeFromGesture(target));
+        } else {
+          _gestureValue = target;
+          controller.setVolume(target);
+        }
       case _PlayerGesture.brightness:
         if (!_gestureBrightnessReady) break;
-        _gestureValue = (_gestureStartValue - delta.dy / size.height).clamp(
-          0.01,
-          1.0,
-        );
+        _gestureValue =
+            (_gestureStartValue -
+                    delta.dy / size.height * _verticalGestureSensitivity)
+                .clamp(0.01, 1.0);
         unawaited(_setPlayerBrightness(_gestureValue));
       case _PlayerGesture.changeVideo:
         final threshold = (size.width * 0.14).clamp(56.0, 120.0);
@@ -2118,6 +3552,41 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     await session?.set(value);
   }
 
+  Future<void> _beginSystemVolumeGesture(
+    VideoPlayerController controller,
+  ) async {
+    final request = ++_gestureVolumeRequestGeneration;
+    final current = await PlayerSystemVolume.current();
+    if (!mounted ||
+        request != _gestureVolumeRequestGeneration ||
+        _activeGesture != _PlayerGesture.volume) {
+      return;
+    }
+    final useSystemVolume = current?.canSet == true;
+    final start = useSystemVolume
+        ? current!.fraction
+        : controller.value.volume.clamp(0.0, 1.0);
+    setState(() {
+      _gestureStartValue = start;
+      _gestureValue = start;
+      _gestureUsesSystemVolume = useSystemVolume;
+      _gestureVolumeReady = true;
+    });
+  }
+
+  Future<void> _setSystemVolumeFromGesture(double value) async {
+    final request = ++_gestureVolumeRequestGeneration;
+    final current = await PlayerSystemVolume.setFraction(value);
+    if (!mounted ||
+        request != _gestureVolumeRequestGeneration ||
+        _activeGesture != _PlayerGesture.volume ||
+        !_gestureUsesSystemVolume ||
+        current == null) {
+      return;
+    }
+    setState(() => _gestureValue = current.fraction);
+  }
+
   void _finishPlaybackGesture(VideoPlayerController controller) {
     final gesture = _activeGesture;
     if (gesture == _PlayerGesture.seek) {
@@ -2130,19 +3599,30 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         _canNavigate(_gestureNavigationDelta)) {
       widget.onNavigate?.call(_gestureNavigationDelta);
     } else if (gesture == _PlayerGesture.volume) {
+      _volumeControlRequestGeneration++;
       _volume = _gestureValue;
+      if (_volume > 0.01) {
+        _lastAudibleVolume = _volume;
+        if (_gestureUsesSystemVolume && controller.value.volume <= 0.01) {
+          unawaited(controller.setVolume(1));
+        }
+      }
+      widget.onVolumeChanged?.call(_volume);
     }
     _cancelPlaybackGesture();
-    _scheduleHide();
+    _reusablePlayerActions?.showControls();
   }
 
   void _cancelPlaybackGesture() {
+    _gestureVolumeRequestGeneration++;
     if (!mounted) return;
     setState(() {
       _activeGesture = null;
       _activeGestureSide = null;
       _gestureOrigin = null;
       _gestureNavigationDelta = 0;
+      _gestureVolumeReady = false;
+      _gestureUsesSystemVolume = false;
     });
   }
 
@@ -2151,6 +3631,37 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       : delta < 0
       ? widget.previousVideo != null
       : false;
+
+  Widget _videoZoomIndicator() {
+    final percentage = (_videoZoomScale * 100).round();
+    return Center(
+      child: IgnorePointer(
+        child: Semantics(
+          liveRegion: true,
+          label: AppStrings.t(AppStringKeys.videoPlayerVideoZoom),
+          value: '$percentage%',
+          child: Container(
+            key: const ValueKey('video-zoom-indicator'),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.72),
+              borderRadius: BorderRadius.circular(AppRadius.control),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+            ),
+            child: Text(
+              '${_videoZoomScale.toStringAsFixed(1)}×',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w400,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _gestureIndicator(VideoPlayerController controller) {
     final gesture = _activeGesture!;
@@ -2189,7 +3700,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           decoration: BoxDecoration(
             color: Colors.black.withValues(alpha: 0.72),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(AppRadius.card),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -2201,7 +3712,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 17,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w400,
                 ),
               ),
             ],
@@ -2233,7 +3744,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
             padding: const EdgeInsets.fromLTRB(10, 13, 10, 11),
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.72),
-              borderRadius: BorderRadius.circular(26),
+              borderRadius: BorderRadius.circular(AppRadius.xxl),
               border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
             ),
             child: Column(
@@ -2270,7 +3781,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 11,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w400,
                   ),
                 ),
               ],
@@ -2301,7 +3812,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   Widget _completionPrompt() {
     final next = widget.nextVideo;
     final compact =
-        _usesCompactChrome(context) ||
+        MediaQuery.sizeOf(context).shortestSide < 600 ||
         widget.compactControls ||
         widget.presentation == VideoPlayerPresentation.pictureInPicture;
     return Positioned.fill(
@@ -2327,7 +3838,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: compact ? 20 : 26,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w400,
                       ),
                     ),
                     if (next != null) ...[
@@ -2336,7 +3847,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
                         behavior: HitTestBehavior.opaque,
                         onTap: _playNextVideo,
                         child: ClipRRect(
-                          borderRadius: BorderRadius.circular(14),
+                          borderRadius: BorderRadius.circular(AppRadius.card),
                           child: AspectRatio(
                             aspectRatio: _itemAspectRatio(next),
                             child: Stack(
@@ -2383,7 +3894,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
                                     style: const TextStyle(
                                       color: Colors.white,
                                       fontSize: 16,
-                                      fontWeight: FontWeight.w700,
+                                      fontWeight: FontWeight.w400,
                                       shadows: [Shadow(blurRadius: 8)],
                                     ),
                                   ),
@@ -2461,104 +3972,6 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     );
   }
 
-  bool _usesCompactChrome(BuildContext context) {
-    return _usesPhoneFullscreen(context) ||
-        widget.presentation == VideoPlayerPresentation.embedded;
-  }
-
-  List<Widget> _controlChromeBlocks({required bool visible}) {
-    if (widget.presentation == VideoPlayerPresentation.pictureInPicture) {
-      return const [];
-    }
-    final media = MediaQuery.of(context);
-    final layout = _controlsLayout(context);
-    final topInset = widget.presentation == VideoPlayerPresentation.fullscreen
-        ? media.padding.top
-        : 0.0;
-    final bottomInset =
-        widget.presentation == VideoPlayerPresentation.fullscreen
-        ? media.padding.bottom
-        : 0.0;
-    final topHeight = topInset + (layout.timelineCompact ? 56 : 104);
-    final bottomHeight = bottomInset + _bottomChromeHeight(layout);
-    Widget block() {
-      return IgnorePointer(
-        child: AnimatedOpacity(
-          duration: const Duration(milliseconds: 160),
-          curve: Curves.easeOut,
-          opacity: visible ? 1 : 0,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.66),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return [
-      Positioned(left: 0, top: 0, right: 0, height: topHeight, child: block()),
-      Positioned(
-        left: 0,
-        right: 0,
-        bottom: 0,
-        height: bottomHeight,
-        child: block(),
-      ),
-    ];
-  }
-
-  double _bottomChromeHeight(_VideoControlsLayout layout) {
-    final timelineHeight = layout.playButtonSize.height;
-    final minimumSecondaryHeight =
-        layout.timelineCompact && _showsNavigationControls ? 48.0 : 44.0;
-    final secondaryHeight = math.max(
-      minimumSecondaryHeight,
-      layout.actionButtonSize,
-    );
-    final contentHeight = layout.timelineAtBottom
-        ? secondaryHeight + layout.actionGap + timelineHeight
-        : timelineHeight + 24 + secondaryHeight;
-    return layout.bottomPadding + contentHeight + 14;
-  }
-
-  double _controlsBottom(_VideoControlsLayout layout) {
-    final bottomInset =
-        widget.presentation == VideoPlayerPresentation.fullscreen
-        ? MediaQuery.of(context).padding.bottom
-        : 0.0;
-    return bottomInset + layout.bottomPadding;
-  }
-
-  Widget _videoFrame(VideoPlayerController c) {
-    final videoSize = _displayVideoSize(c);
-    if (videoSize.width <= 0 || videoSize.height <= 0) {
-      return const SizedBox.expand();
-    }
-    return Positioned.fill(
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final fitted = _containSize(videoSize, constraints.biggest);
-          return Align(
-            child: SizedBox(
-              width: fitted.width,
-              height: fitted.height,
-              child: ClipRect(
-                child: FittedBox(
-                  child: SizedBox(
-                    width: videoSize.width,
-                    height: videoSize.height,
-                    child: VideoPlayer(c),
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
   Size _displayVideoSize(VideoPlayerController c) {
     final metadataAspect = _metadataAspectRatio();
     if (metadataAspect != null) return Size(metadataAspect, 1);
@@ -2591,91 +4004,19 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     return Size(content.width * scale, content.height * scale);
   }
 
-  bool _usesPhoneFullscreen(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-    return widget.presentation == VideoPlayerPresentation.fullscreen &&
-        size.shortestSide < 600;
-  }
-
-  _VideoControlsLayout _controlsLayout(BuildContext context) {
-    final embedded = widget.presentation == VideoPlayerPresentation.embedded;
-    final compactChrome = _usesCompactChrome(context);
-    return _VideoControlsLayout(
-      left: embedded ? 12 : (compactChrome ? 14 : 54),
-      right: embedded ? 12 : (compactChrome ? 16 : 38),
-      playButtonSize: compactChrome ? const Size(44, 44) : const Size(78, 64),
-      playIconSize: compactChrome ? 30 : 58,
-      playGap: compactChrome ? 8 : 10,
-      timeGap: compactChrome ? 8 : 12,
-      timeStyle: TextStyle(
-        color: const Color(0xFF8E8E93),
-        fontSize: compactChrome ? 15 : 20,
-        fontWeight: FontWeight.w500,
-      ),
-      actionButtonSize: compactChrome ? 36 : 50,
-      actionGap: compactChrome ? 8 : 12,
-      bottomPadding: compactChrome ? 10 : 24,
-      timelineCompact: compactChrome,
-      timelineAtBottom: compactChrome,
-    );
-  }
-
-  Widget _closeButton() {
-    final pip = widget.presentation == VideoPlayerPresentation.pictureInPicture;
-    final embedded = widget.presentation == VideoPlayerPresentation.embedded;
-    final phoneFullscreen = _usesPhoneFullscreen(context);
-    return Positioned(
-      top: pip
-          ? 3
-          : (embedded
-                ? 8
-                : MediaQuery.of(context).padding.top +
-                      (phoneFullscreen ? 6 : 28)),
-      left: pip || embedded ? null : (phoneFullscreen ? 8 : 30),
-      right: pip ? 4 : (embedded ? 8 : null),
-      child: pip || embedded
-          ? _plainIconButton(
-              HeroAppIcons.xmark,
-              _close,
-              label: AppStringKeys.musicPlayerClose.l10n(context),
-            )
-          : _roundIconButton(
-              HeroAppIcons.chevronLeft,
-              _close,
-              label: AppStringKeys.musicPlayerClose.l10n(context),
-              size: phoneFullscreen ? 44 : 58,
-            ),
-    );
-  }
-
-  Widget _topOverflowButton() {
-    if (widget.presentation != VideoPlayerPresentation.fullscreen) {
-      return const SizedBox.shrink();
-    }
-    final phoneFullscreen = _usesPhoneFullscreen(context);
-    final size = phoneFullscreen ? 44.0 : 58.0;
-    final media = MediaQuery.of(context);
-    final rtl = Directionality.of(context) == TextDirection.rtl;
-    final trailingSafeInset = rtl ? media.padding.left : media.padding.right;
-    return PositionedDirectional(
-      top: media.padding.top + (phoneFullscreen ? 6 : 28),
-      end: (phoneFullscreen ? 8 : 30) + trailingSafeInset,
-      child: _roundIconButton(
-        HeroAppIcons.ellipsisVertical,
-        _toggleMoreMenu,
-        label: AppStringKeys.momentsMore.l10n(context),
-        size: size,
-        focusNode: _moreButtonFocusNode,
-      ),
-    );
-  }
-
   void _toggleMoreMenu() {
-    _hideTimer?.cancel();
+    final opening = !_moreMenuVisible;
     setState(() {
-      _moreMenuVisible = !_moreMenuVisible;
+      _moreMenuVisible = opening;
       _modeMenuVisible = false;
     });
+    if (opening) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _moreMenuVisible) {
+          _moreMenuFocusNodes.first.requestFocus();
+        }
+      });
+    }
   }
 
   void _closeMoreMenu() {
@@ -2686,7 +4027,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         if (mounted) _moreButtonFocusNode.requestFocus();
       });
     }
-    _scheduleHide();
+    _reusablePlayerActions?.showControls();
   }
 
   void _runMoreMenuAction(VoidCallback action) {
@@ -2694,9 +4035,19 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     action();
   }
 
-  Widget _moreMenuOverlay() {
+  void _dismissMenusAndControls({FVideoChromeScope? scope}) {
+    FocusManager.instance.primaryFocus?.unfocus();
+    final hideReusableControls = scope?.snapshot.controlsVisible == true;
+    setState(() {
+      _moreMenuVisible = false;
+      _modeMenuVisible = false;
+    });
+    if (hideReusableControls) scope!.actions.toggleControls();
+  }
+
+  Widget _moreMenuOverlay({required VoidCallback onTapOutside}) {
     final media = MediaQuery.of(context);
-    final phoneFullscreen = _usesPhoneFullscreen(context);
+    final phoneFullscreen = media.size.shortestSide < 600;
     final menuWidth = math.min(212.0, media.size.width - 24);
     final rtl = Directionality.of(context) == TextDirection.rtl;
     final trailingSafeInset = rtl ? media.padding.left : media.padding.right;
@@ -2708,7 +4059,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               excludeFromSemantics: true,
-              onTap: _closeMoreMenu,
+              onTap: onTapOutside,
             ),
           ),
           PositionedDirectional(
@@ -2733,7 +4084,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
                 key: const ValueKey('video-more-menu-surface'),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(AppRadius.card),
                     border: Border.all(
                       color: Colors.white.withValues(alpha: 0.13),
                     ),
@@ -2748,7 +4099,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
                   child: Padding(
                     padding: const EdgeInsets.all(1),
                     child: ClipRRect(
-                      borderRadius: BorderRadius.circular(13),
+                      borderRadius: BorderRadius.circular(AppRadius.card),
                       child: ColoredBox(
                         color: const Color(0xF21F1F21),
                         child: Padding(
@@ -2764,7 +4115,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
                                     icon: HeroAppIcons.download,
                                     label: AppStringKeys.musicPlayerDownload
                                         .l10n(context),
-                                    autofocus: true,
+                                    focusNode: _moreMenuFocusNodes[0],
                                     onPressed: () => _runMoreMenuAction(
                                       () =>
                                           unawaited(_downloadVideoForOffline()),
@@ -2777,12 +4128,19 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
                                     'video-more-save-to-photos',
                                   ),
                                   child: _FocusableVideoMenuItem(
-                                    icon: HeroAppIcons.image,
-                                    label: AppStringKeys
-                                        .messageActionSaveToPhotos
-                                        .l10n(context),
+                                    icon: _isDesktopPlatform
+                                        ? HeroAppIcons.folder
+                                        : HeroAppIcons.image,
+                                    label:
+                                        (_isDesktopPlatform
+                                                ? AppStringKeys
+                                                      .messageActionSaveAs
+                                                : AppStringKeys
+                                                      .messageActionSaveToPhotos)
+                                            .l10n(context),
+                                    focusNode: _moreMenuFocusNodes[1],
                                     onPressed: () => _runMoreMenuAction(
-                                      () => unawaited(_saveVideoToPhotos()),
+                                      () => unawaited(_saveVideo()),
                                     ),
                                   ),
                                 ),
@@ -2790,15 +4148,40 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
                                 KeyedSubtree(
                                   key: const ValueKey('video-more-share'),
                                   child: _FocusableVideoMenuItem(
-                                    icon: HeroAppIcons.share,
+                                    icon: HeroAppIcons.forward,
                                     label: AppStringKeys.topicChatShare.l10n(
                                       context,
                                     ),
+                                    focusNode: _moreMenuFocusNodes[2],
                                     onPressed: () => _runMoreMenuAction(
                                       () => unawaited(_forwardVideo()),
                                     ),
                                   ),
                                 ),
+                                if (_showsOrientationButton) ...[
+                                  const _VideoMenuSeparator(),
+                                  KeyedSubtree(
+                                    key: const ValueKey(
+                                      'video-more-orientation',
+                                    ),
+                                    child: _FocusableVideoMenuItem(
+                                      icon: HeroAppIcons.rotate,
+                                      focusNode: _moreMenuFocusNodes[3],
+                                      label:
+                                          (_landscapePlayback
+                                                  ? AppStringKeys
+                                                        .videoPlayerUseSystemOrientation
+                                                  : AppStringKeys
+                                                        .videoPlayerPlayHorizontally)
+                                              .l10n(context),
+                                      onPressed: () => _runMoreMenuAction(
+                                        () => unawaited(
+                                          _toggleVideoOrientation(),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ],
                             ),
                           ),
@@ -2816,11 +4199,22 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   }
 
   void _toggleModeMenu() {
-    _hideTimer?.cancel();
+    final opening = !_modeMenuVisible;
     setState(() {
-      _modeMenuVisible = !_modeMenuVisible;
+      _modeMenuVisible = opening;
       _moreMenuVisible = false;
     });
+    if (opening) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_modeMenuVisible) return;
+        final modes = _availableDisplayModes;
+        if (modes.isEmpty) return;
+        final initialMode = modes.contains(widget.currentMode)
+            ? widget.currentMode
+            : modes.first;
+        _modeMenuFocusNodes[initialMode]?.requestFocus();
+      });
+    }
   }
 
   void _closeModeMenu() {
@@ -2831,7 +4225,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
         if (mounted) _modeButtonFocusNode.requestFocus();
       });
     }
-    _scheduleHide();
+    _reusablePlayerActions?.showControls();
   }
 
   void _selectDisplayMode(VideoDisplayMode mode) {
@@ -2842,35 +4236,43 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       return;
     }
     widget.onSwitchMode?.call(mode);
-    _scheduleHide();
+    _reusablePlayerActions?.showControls();
   }
 
-  Widget _modeMenuOverlay() {
+  List<VideoDisplayMode> get _availableDisplayModes => [
+    if (widget.onSwitchMode != null ||
+        widget.currentMode == VideoDisplayMode.fullscreen)
+      VideoDisplayMode.fullscreen,
+    if (widget.onSwitchMode != null) VideoDisplayMode.split,
+    if (_canOfferPictureInPicture ||
+        widget.currentMode == VideoDisplayMode.pictureInPicture)
+      VideoDisplayMode.pictureInPicture,
+  ];
+
+  Widget _modeMenuOverlay({required VoidCallback onTapOutside}) {
     final media = MediaQuery.of(context);
     final menuWidth = math.min(220.0, media.size.width - 24);
     final rtl = Directionality.of(context) == TextDirection.rtl;
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final options = <({VideoDisplayMode mode, AppIconData icon, String label})>[
-      if (widget.onSwitchMode != null ||
-          widget.currentMode == VideoDisplayMode.fullscreen)
-        (
-          mode: VideoDisplayMode.fullscreen,
-          icon: HeroAppIcons.expand,
-          label: AppStringKeys.videoPlayerFullscreen.l10n(context),
-        ),
-      if (widget.onSwitchMode != null)
-        (
-          mode: VideoDisplayMode.split,
-          icon: HeroAppIcons.tableColumns,
-          label: AppStringKeys.videoPlayerSplitScreen.l10n(context),
-        ),
-      if (_canOfferPictureInPicture ||
-          widget.currentMode == VideoDisplayMode.pictureInPicture)
-        (
-          mode: VideoDisplayMode.pictureInPicture,
-          icon: HeroAppIcons.pictureInPicture,
-          label: AppStringKeys.videoPlayerPictureInPicture.l10n(context),
-        ),
+      for (final mode in _availableDisplayModes)
+        switch (mode) {
+          VideoDisplayMode.fullscreen => (
+            mode: mode,
+            icon: HeroAppIcons.expand,
+            label: AppStringKeys.videoPlayerFullscreen.l10n(context),
+          ),
+          VideoDisplayMode.split => (
+            mode: mode,
+            icon: HeroAppIcons.tableColumns,
+            label: AppStringKeys.videoPlayerSplitScreen.l10n(context),
+          ),
+          VideoDisplayMode.pictureInPicture => (
+            mode: mode,
+            icon: HeroAppIcons.pictureInPicture,
+            label: AppStringKeys.videoPlayerPictureInPicture.l10n(context),
+          ),
+        },
     ];
     return Positioned.fill(
       child: Stack(
@@ -2879,7 +4281,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               excludeFromSemantics: true,
-              onTap: _closeModeMenu,
+              onTap: onTapOutside,
             ),
           ),
           CompositedTransformFollower(
@@ -2909,7 +4311,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       color: const Color(0xF21F1F21),
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(AppRadius.card),
                       border: Border.all(
                         color: Colors.white.withValues(alpha: 0.13),
                       ),
@@ -2941,6 +4343,8 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
                                 child: _FocusableVideoMenuItem(
                                   icon: options[index].icon,
                                   label: options[index].label,
+                                  focusNode:
+                                      _modeMenuFocusNodes[options[index].mode],
                                   selected:
                                       options[index].mode == widget.currentMode,
                                   autofocus:
@@ -2964,25 +4368,12 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     );
   }
 
-  Widget _pipTopBar() {
-    return Positioned(
-      top: 3,
-      right: 4,
-      child: _plainIconButton(
-        HeroAppIcons.xmark,
-        _close,
-        label: AppStringKeys.musicPlayerClose.l10n(context),
-        size: 28,
-      ),
-    );
-  }
-
   Widget _loadingState() {
     final aspect =
-        (widget.width != null &&
+        widget.width != null &&
             widget.height != null &&
             widget.width! > 0 &&
-            widget.height! > 0)
+            widget.height! > 0
         ? widget.width! / widget.height!
         : 16 / 9;
     return Stack(
@@ -3000,813 +4391,81 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
             ),
           )
         else
-          Center(
-            child: AspectRatio(
-              aspectRatio: aspect,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: const Color(0xFF111113),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.08),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        Positioned.fill(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.black.withValues(alpha: 0.10),
-                  Colors.transparent,
-                  Colors.black.withValues(alpha: 0.58),
-                ],
-                stops: const [0, 0.48, 1],
-              ),
-            ),
-          ),
-        ),
-        if (_failed)
-          Center(
-            child: Text(
-              AppStringKeys.videoPlayerLoadFailed.l10n(context),
-              style: const TextStyle(color: Colors.white, fontSize: 15),
-            ),
-          )
-        else ...[
-          ..._controlChromeBlocks(visible: true),
-          ..._pendingControls(),
-        ],
-      ],
-    );
-  }
-
-  List<Widget> _pendingControls() {
-    if (widget.compactControls) return _pendingCompactControls();
-    final layout = _controlsLayout(context);
-    final bottom = _controlsBottom(layout);
-    final timeline = _pendingTimelineRow(layout);
-    final secondary = _pendingSecondaryControls(layout);
-    return [
-      Positioned(
-        left: layout.left,
-        right: layout.right,
-        bottom: bottom,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: layout.timelineAtBottom
-              ? [secondary, SizedBox(height: layout.actionGap), timeline]
-              : [timeline, const SizedBox(height: 24), secondary],
-        ),
-      ),
-    ];
-  }
-
-  Widget _pendingTimelineRow(_VideoControlsLayout layout) {
-    final showNavigation = _showsNavigationControls && !layout.timelineCompact;
-    return Row(
-      children: [
-        if (showNavigation) ...[
-          _navigationControl(-1, size: layout.playButtonSize.height),
-          SizedBox(width: layout.playGap),
-        ],
-        SizedBox(
-          width: layout.playButtonSize.width,
-          height: layout.playButtonSize.height,
+          const ColoredBox(color: Color(0xFF111113)),
+        Center(
           child: Semantics(
-            label: AppStringKeys.videoPlayerLoading.l10n(context),
-            excludeSemantics: true,
-            child: Center(
-              child: AppIcon(
-                HeroAppIcons.play,
-                color: Colors.white.withValues(alpha: 0.7),
-                size: layout.playIconSize,
-              ),
-            ),
+            label: _failed
+                ? AppStringKeys.videoPlayerLoadFailed.l10n(context)
+                : AppStringKeys.videoPlayerLoading.l10n(context),
+            child: _failed
+                ? _FocusableVideoTextButton(
+                    text: AppStringKeys.callsRetry.l10n(context),
+                    label: AppStringKeys.callsRetry.l10n(context),
+                    onPressed: () => unawaited(_retryPlayback()),
+                    size: const Size(96, 40),
+                    fontSize: 14,
+                  )
+                : const _VideoLoadingRing(size: 44),
           ),
         ),
-        if (showNavigation) ...[
-          SizedBox(width: layout.playGap),
-          _navigationControl(1, size: layout.playButtonSize.height),
-        ],
-        SizedBox(width: layout.playGap),
-        Text('00:00', style: layout.timeStyle),
-        SizedBox(width: layout.timeGap),
-        Expanded(child: _loadingScrubber(compact: layout.timelineCompact)),
-        SizedBox(width: layout.timeGap),
-        Text('--:--', style: layout.timeStyle),
+        PositionedDirectional(
+          top:
+              MediaQuery.paddingOf(context).top +
+              iPadWindowChromeInsetOf(context) +
+              6,
+          start: 8,
+          child: _roundIconButton(
+            HeroAppIcons.chevronLeft,
+            _close,
+            label: AppStringKeys.musicPlayerClose.l10n(context),
+            size: 44,
+          ),
+        ),
       ],
     );
   }
 
-  Widget _pendingSecondaryControls(_VideoControlsLayout layout) {
-    return _secondaryActionRow(layout);
-  }
+  bool get _showsOrientationButton =>
+      widget.presentation == VideoPlayerPresentation.fullscreen &&
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
 
-  List<Widget> _pendingCompactControls() {
-    final pip = widget.presentation == VideoPlayerPresentation.pictureInPicture;
-    return [
-      Center(
-        child: SizedBox(
-          width: 54,
-          height: 54,
-          child: Center(
-            child: AppIcon(
-              HeroAppIcons.play,
-              color: Colors.white.withValues(alpha: 0.7),
-              size: 32,
-            ),
-          ),
-        ),
-      ),
-      Positioned(
-        left: 12,
-        right: 12,
-        bottom: 10,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            if (constraints.maxWidth < 220) {
-              return _loadingScrubber(compact: true);
-            }
-            return Row(
-              children: [
-                const Text(
-                  '00:00',
-                  style: TextStyle(color: Colors.white70, fontSize: 11),
-                ),
-                const SizedBox(width: 8),
-                Expanded(child: _loadingScrubber(compact: true)),
-                const SizedBox(width: 8),
-                if (pip)
-                  _muteButton(size: 34)
-                else
-                  SizedBox(width: 104, child: _volumeSlider(compact: true)),
-                const SizedBox(width: 8),
-                Text(
-                  _speedText(_speed),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                if (_showsDisplayModeButton) ...[
-                  const SizedBox(width: 8),
-                  _displayModeButton(size: 34),
-                ],
-              ],
-            );
-          },
-        ),
-      ),
-    ];
-  }
-
-  Widget _loadingScrubber({bool compact = false}) {
-    final loaded = (_progress?.prefixFraction ?? _progress?.fraction ?? 0)
-        .clamp(0.0, 1.0);
-    return SizedBox(
-      height: compact ? 28 : 34,
-      child: Stack(
-        alignment: Alignment.centerLeft,
-        children: [
-          Positioned(
-            left: compact ? 0 : 24,
-            right: compact ? 0 : 24,
-            child: Container(
-              height: compact ? 2.5 : 4,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.16),
-                borderRadius: BorderRadius.circular(3),
-              ),
-            ),
-          ),
-          Positioned(
-            left: compact ? 0 : 24,
-            right: compact ? 0 : 24,
-            child: FractionallySizedBox(
-              alignment: Alignment.centerLeft,
-              widthFactor: loaded,
-              child: Container(
-                height: compact ? 2.5 : 4,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.42),
-                  borderRadius: BorderRadius.circular(3),
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            left: compact ? 0 : 24,
-            child: Container(
-              width: compact ? 10 : 16,
-              height: compact ? 10 : 16,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.7),
-                shape: BoxShape.circle,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  List<Widget> _controls(VideoPlayerController c) {
-    if (widget.compactControls) return _compactControls(c);
-    final layout = _controlsLayout(context);
-    final bottom = _controlsBottom(layout);
-    final timeline = _timelineRow(c, layout);
-    final secondary = _secondaryActionRow(layout);
-    return [
-      Positioned(
-        left: layout.left,
-        right: layout.right,
-        bottom: bottom,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: layout.timelineAtBottom
-              ? [secondary, SizedBox(height: layout.actionGap), timeline]
-              : [timeline, const SizedBox(height: 24), secondary],
-        ),
-      ),
-    ];
-  }
-
-  Widget _timelineRow(VideoPlayerController c, _VideoControlsLayout layout) {
-    final value = c.value;
-    final playing = value.isPlaying;
-    final showNavigation = _showsNavigationControls && !layout.timelineCompact;
-    return Row(
-      children: [
-        if (showNavigation) ...[
-          _navigationControl(-1, size: layout.playButtonSize.height),
-          SizedBox(width: layout.playGap),
-        ],
-        _FocusableVideoIconButton(
-          icon: playing ? HeroAppIcons.pause : HeroAppIcons.play,
-          label:
-              (playing
-                      ? AppStringKeys.musicPlayerPause
-                      : AppStringKeys.musicPlayerPlay)
-                  .l10n(context),
-          onPressed: _togglePlay,
-          size: layout.playButtonSize,
-          iconSize: layout.playIconSize,
-          foregroundColor: Colors.black,
-          backgroundColor: Colors.white.withValues(alpha: 0.96),
-          borderColor: Colors.white,
-          cornerRadius: layout.playButtonSize.height / 2,
-        ),
-        if (showNavigation) ...[
-          SizedBox(width: layout.playGap),
-          _navigationControl(1, size: layout.playButtonSize.height),
-        ],
-        SizedBox(width: layout.playGap),
-        Text(_fmt(_displayPosition(c)), style: layout.timeStyle),
-        SizedBox(width: layout.timeGap),
-        Expanded(child: _scrubber(c, compact: layout.timelineCompact)),
-        SizedBox(width: layout.timeGap),
-        Text(_fmt(value.duration), style: layout.timeStyle),
-      ],
-    );
-  }
-
-  Widget _transportControls(VideoPlayerController controller) {
-    final playing = controller.value.isPlaying;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (_showsNavigationControls) ...[
-          _navigationControl(-1, size: 54),
-          const SizedBox(width: 14),
-        ],
-        _FocusableVideoIconButton(
-          icon: playing ? HeroAppIcons.pause : HeroAppIcons.play,
-          label:
-              (playing
-                      ? AppStringKeys.musicPlayerPause
-                      : AppStringKeys.musicPlayerPlay)
-                  .l10n(context),
-          onPressed: _togglePlay,
-          size: const Size.square(66),
-          iconSize: 36,
-          foregroundColor: Colors.black,
-          backgroundColor: Colors.white.withValues(alpha: 0.96),
-          borderColor: Colors.white,
-          cornerRadius: 33,
-        ),
-        if (_showsNavigationControls) ...[
-          const SizedBox(width: 14),
-          _navigationControl(1, size: 54),
-        ],
-      ],
-    );
-  }
-
-  Widget _secondaryActionRow(_VideoControlsLayout layout) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final compact = layout.timelineCompact;
-        final width = constraints.maxWidth;
-        final actions = <Widget>[];
-
-        void addAction(Widget action) {
-          if (actions.isNotEmpty) {
-            actions.add(SizedBox(width: layout.actionGap));
-          }
-          actions.add(action);
-        }
-
-        if (compact) {
-          addAction(_muteButton(size: layout.actionButtonSize));
-        } else {
-          addAction(_secondaryVolumeSlider(layout));
-        }
-        if (!compact || width >= 220) {
-          addAction(_speedMenu(compact: compact));
-        }
-        final displayModeMinimumWidth = compact && _showsNavigationControls
-            ? 252.0
-            : 240.0;
-        if (_showsDisplayModeButton &&
-            (!compact || width >= displayModeMinimumWidth)) {
-          addAction(_displayModeButton(size: layout.actionButtonSize));
-        }
-        final navigation = <Widget>[];
-        if (compact && _showsNavigationControls) {
-          navigation.add(_navigationControl(-1, size: layout.actionButtonSize));
-          navigation.add(SizedBox(width: layout.actionGap));
-          navigation.add(_navigationControl(1, size: layout.actionButtonSize));
-        }
-        return Row(children: [...navigation, const Spacer(), ...actions]);
-      },
-    );
-  }
-
-  Widget _secondaryVolumeSlider(_VideoControlsLayout layout) {
-    if (!layout.timelineCompact) return _volumeSlider();
-    return SizedBox(width: 82, child: _volumeSlider(compact: true));
-  }
-
-  List<Widget> _compactControls(VideoPlayerController c) {
-    final pip = widget.presentation == VideoPlayerPresentation.pictureInPicture;
-    return [
-      Center(child: _transportControls(c)),
-      Positioned(
-        left: 12,
-        right: 12,
-        bottom: 10,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            if (constraints.maxWidth < 220) {
-              return _scrubber(c);
-            }
-            return Row(
-              children: [
-                Text(
-                  _fmt(_displayPosition(c)),
-                  style: const TextStyle(color: Colors.white70, fontSize: 11),
-                ),
-                const SizedBox(width: 8),
-                Expanded(child: _scrubber(c)),
-                const SizedBox(width: 8),
-                if (pip)
-                  _muteButton(size: 34)
-                else if (constraints.maxWidth >= 320)
-                  SizedBox(width: 104, child: _volumeSlider(compact: true)),
-                if (constraints.maxWidth >= 320) const SizedBox(width: 8),
-                if (constraints.maxWidth >= 280)
-                  Text(
-                    _speedText(_speed),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                if (_showsDisplayModeButton) ...[
-                  const SizedBox(width: 8),
-                  _displayModeButton(size: 34),
-                ],
-              ],
-            );
-          },
-        ),
-      ),
-    ];
-  }
-
-  Widget _scrubber(VideoPlayerController c, {bool compact = false}) {
-    final value = c.value;
-    final duration = value.duration.inMilliseconds;
-    final position = _displayPosition(c).inMilliseconds.clamp(0, duration);
-    final loaded = _loadedFraction(value);
-    return SizedBox(
-      key: _scrubberKey,
-      height: compact ? 28 : 34,
-      child: Stack(
-        alignment: Alignment.centerLeft,
-        children: [
-          Positioned(
-            left: compact ? 0 : 24,
-            right: compact ? 0 : 24,
-            child: Container(
-              height: compact ? 2.5 : 4,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.16),
-                borderRadius: BorderRadius.circular(3),
-              ),
-            ),
-          ),
-          Positioned(
-            left: compact ? 0 : 24,
-            right: compact ? 0 : 24,
-            child: FractionallySizedBox(
-              alignment: Alignment.centerLeft,
-              widthFactor: loaded,
-              child: Container(
-                height: compact ? 2.5 : 4,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.42),
-                  borderRadius: BorderRadius.circular(3),
-                ),
-              ),
-            ),
-          ),
-          MithkaVideoSlider(
-            value: duration <= 0 ? 0 : position / duration,
-            trackHeight: compact ? 2.5 : 4,
-            thumbRadius: compact ? 5 : 8,
-            activeColor: Colors.white,
-            inactiveColor: Colors.transparent,
-            semanticLabel: AppStringKeys.videoPlaybackSwipeAdjustProgress.l10n(
-              context,
-            ),
-            semanticValue:
-                '${_fmt(Duration(milliseconds: position))} / ${_fmt(value.duration)}',
-            onChangeStart: duration <= 0
-                ? null
-                : (fraction) =>
-                      _beginScrub(c, fraction * duration, compact: compact),
-            onChanged: duration <= 0
-                ? null
-                : (fraction) => _updateScrub(fraction * duration),
-            onChangeEnd: duration <= 0
-                ? null
-                : (fraction) => unawaited(_finishScrub(c, fraction * duration)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Duration _displayPosition(VideoPlayerController controller) {
-    final scrubPosition = _scrubPosition;
-    if (scrubPosition != null) return scrubPosition;
-    return switch (_activeGesture) {
-      _PlayerGesture.seek ||
-      _PlayerGesture.skipTenSeconds => _gestureSeekPosition,
-      _ => controller.value.position,
-    };
-  }
-
-  void _beginScrub(
-    VideoPlayerController controller,
-    double value, {
-    required bool compact,
-  }) {
-    _hideTimer?.cancel();
-    _resumeAfterScrub = controller.value.isPlaying;
-    _scrubPause = _resumeAfterScrub ? controller.pause() : null;
-    _scrubPreviewCompact = compact;
-    _scrubPreviewBytes = null;
-    _scrubPreviewGeneration++;
-    final position = Duration(milliseconds: value.round());
-    setState(() => _scrubPosition = position);
-    _showScrubPreviewOverlay();
-    _queueScrubPreview(position, immediate: true);
-  }
-
-  void _updateScrub(double value) {
-    final position = Duration(milliseconds: value.round());
-    setState(() => _scrubPosition = position);
-    _scrubPreviewOverlay?.markNeedsBuild();
-    _queueScrubPreview(position);
-  }
-
-  Future<void> _finishScrub(
-    VideoPlayerController controller,
-    double value,
-  ) async {
-    final position = Duration(milliseconds: value.round());
-    _scrubPreviewTimer?.cancel();
-    _pendingScrubPreviewPosition = null;
-    _scrubPreviewGeneration++;
-    await _scrubPause;
-    _scrubPause = null;
-    await controller.seekTo(position);
-    if (_resumeAfterScrub) await controller.play();
-    _resumeAfterScrub = false;
-    if (!mounted) return;
-    setState(() => _scrubPosition = null);
-    _hideScrubPreviewOverlay();
-    _scheduleHide();
-  }
-
-  void _queueScrubPreview(Duration position, {bool immediate = false}) {
-    final bucketMs = (position.inMilliseconds ~/ 500) * 500;
-    final cached = _scrubPreviewCache[bucketMs];
-    if (cached != null) {
-      _scrubPreviewBytes = cached;
-      _scrubPreviewOverlay?.markNeedsBuild();
-      return;
-    }
-    _pendingScrubPreviewPosition = Duration(milliseconds: bucketMs);
-    _scrubPreviewTimer?.cancel();
-    if (immediate) {
-      unawaited(_drainScrubPreviewQueue());
-    } else {
-      _scrubPreviewTimer = Timer(
-        const Duration(milliseconds: 120),
-        () => unawaited(_drainScrubPreviewQueue()),
-      );
-    }
-  }
-
-  Future<void> _drainScrubPreviewQueue() async {
-    if (_scrubPreviewLoading || _scrubPosition == null) return;
-    final position = _pendingScrubPreviewPosition;
-    final source = _localPath;
-    if (position == null || source == null || source.isEmpty) return;
-    _pendingScrubPreviewPosition = null;
-    final completedLocalFile =
-        _progress?.isCompleted == true &&
-        !source.startsWith('http://') &&
-        !source.startsWith('https://');
-    if (!completedLocalFile) {
-      // A thumbnail decoder opens its own AVAsset. While TDLib is still
-      // streaming, that second reader would contend with the active player's
-      // range requests and cannot be cancelled by a Dart timeout. Keep the
-      // stable message thumbnail + timestamp until the local file is complete.
-      _scrubPreviewBytes = null;
-      _scrubPreviewOverlay?.markNeedsBuild();
-      return;
-    }
-    _scrubPreviewLoading = true;
-    _scrubPreviewOverlay?.markNeedsBuild();
-    final generation = _scrubPreviewGeneration;
-    Uint8List? bytes;
+  Future<void> _toggleVideoOrientation() async {
+    if (_orientationChangeInFlight) return;
+    final forceLandscape = !_landscapePlayback;
+    setState(() => _orientationChangeInFlight = true);
     try {
-      bytes = await MithkaVideoThumbnail.generate(
-        source: source,
-        position: position,
-      ).timeout(const Duration(seconds: 2), onTimeout: () => null);
-    } catch (_) {
-      bytes = null;
-    } finally {
-      _scrubPreviewLoading = false;
-    }
-    if (!mounted ||
-        generation != _scrubPreviewGeneration ||
-        _scrubPosition == null) {
-      return;
-    }
-    if (bytes != null && bytes.isNotEmpty) {
-      final bucketMs = position.inMilliseconds;
-      _scrubPreviewCache[bucketMs] = bytes;
-      while (_scrubPreviewCache.length > 24) {
-        _scrubPreviewCache.remove(_scrubPreviewCache.keys.first);
-      }
-      _scrubPreviewBytes = bytes;
-    }
-    _scrubPreviewOverlay?.markNeedsBuild();
-    if (_pendingScrubPreviewPosition != null) {
-      unawaited(_drainScrubPreviewQueue());
-    }
-  }
-
-  void _showScrubPreviewOverlay() {
-    if (_scrubPreviewOverlay != null) return;
-    final overlay = Overlay.of(context);
-    final entry = OverlayEntry(builder: _buildScrubPreviewOverlay);
-    _scrubPreviewOverlay = entry;
-    overlay.insert(entry);
-  }
-
-  void _hideScrubPreviewOverlay() {
-    _scrubPreviewOverlay?.remove();
-    _scrubPreviewOverlay = null;
-    _scrubPreviewBytes = null;
-  }
-
-  Widget _buildScrubPreviewOverlay(BuildContext _) {
-    final scrubberContext = _scrubberKey.currentContext;
-    final position = _scrubPosition;
-    if (scrubberContext == null || position == null) {
-      return const SizedBox.shrink();
-    }
-    final scrubberBox = scrubberContext.findRenderObject();
-    // An OverlayEntry's builder context belongs to the entry's own positioned
-    // subtree, not necessarily to the Overlay's coordinate space. Using it as
-    // `ancestor` makes localToGlobal return entry-local coordinates (usually
-    // near 0,0), which pinned previews to the window's top-left on desktop.
-    final overlayBox = Overlay.of(scrubberContext).context.findRenderObject();
-    if (scrubberBox is! RenderBox || overlayBox is! RenderBox) {
-      return const SizedBox.shrink();
-    }
-    final durationMs = _controller?.value.duration.inMilliseconds ?? 0;
-    final fraction = durationMs <= 0
-        ? 0.0
-        : (position.inMilliseconds / durationMs).clamp(0.0, 1.0);
-    final visualFraction =
-        Directionality.of(scrubberContext) == TextDirection.rtl
-        ? 1 - fraction
-        : fraction;
-    final trackInset = _scrubPreviewCompact ? 0.0 : 24.0;
-    final trackWidth = math.max(0.0, scrubberBox.size.width - trackInset * 2);
-    final globalTarget = scrubberBox.localToGlobal(
-      Offset(trackInset + trackWidth * visualFraction, 0),
-    );
-    final target = overlayBox.globalToLocal(globalTarget);
-    final previewWidth = _scrubPreviewCompact ? 128.0 : 160.0;
-    final sourceAspect =
-        widget.width != null &&
-            widget.height != null &&
-            widget.width! > 0 &&
-            widget.height! > 0
-        ? widget.width! / widget.height!
-        : 16 / 9;
-    final previewHeight = (previewWidth / sourceAspect)
-        .clamp(72.0, 110.0)
-        .toDouble();
-    final left = (target.dx - previewWidth / 2)
-        .clamp(8.0, math.max(8.0, overlayBox.size.width - previewWidth - 8))
-        .toDouble();
-    final top = math.max(8.0, target.dy - previewHeight - 14);
-    final bytes = _scrubPreviewBytes;
-    return Positioned(
-      left: left,
-      top: top,
-      width: previewWidth,
-      height: previewHeight,
-      child: IgnorePointer(
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: const Color(0xFF111113),
-            borderRadius: BorderRadius.circular(9),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x88000000),
-                blurRadius: 12,
-                offset: Offset(0, 4),
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                if (bytes != null)
-                  Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true)
-                else if (widget.thumb != null)
-                  TDImage(photo: widget.thumb)
-                else
-                  const ColoredBox(color: Color(0xFF111113)),
-                if (bytes == null && _scrubPreviewLoading)
-                  const Center(child: _VideoLoadingRing(size: 18)),
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: DecoratedBox(
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Colors.transparent, Color(0xCC000000)],
-                      ),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(6, 12, 6, 5),
-                      child: Text(
-                        _fmt(position),
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  double _loadedFraction(VideoPlayerValue value) {
-    final durationMs = value.duration.inMilliseconds;
-    if (_progress?.isCompleted == true) return 1;
-    final downloadFraction = _progress?.prefixFraction ?? _progress?.fraction;
-    var loaded = downloadFraction ?? 0.0;
-    if (durationMs > 0 && value.buffered.isNotEmpty) {
-      final bufferedEnd = value.buffered
-          .map((r) => r.end.inMilliseconds)
-          .reduce((a, b) => a > b ? a : b);
-      loaded = math.max(loaded, (bufferedEnd / durationMs).clamp(0.0, 1.0));
-    }
-    if (durationMs > 0) {
-      loaded = math.max(
-        loaded,
-        (value.position.inMilliseconds / durationMs).clamp(0.0, 1.0),
+      await SystemChrome.setPreferredOrientations(
+        forceLandscape
+            ? const [
+                DeviceOrientation.landscapeLeft,
+                DeviceOrientation.landscapeRight,
+              ]
+            : DeviceOrientation.values,
       );
+      if (mounted) setState(() => _landscapePlayback = forceLandscape);
+    } catch (_) {
+      if (mounted) {
+        showToast(context, AppStringKeys.videoPlayerOrientationChangeFailed);
+      }
+    } finally {
+      if (mounted) setState(() => _orientationChangeInFlight = false);
     }
-    return loaded.clamp(0.0, 1.0);
+    _reusablePlayerActions?.showControls();
   }
 
-  Widget _speedMenu({bool compact = false}) {
-    return _FocusableVideoTextButton(
-      text: _speedText(_speed),
-      label: AppStringKeys.videoPlayerPlaybackSpeed.l10n(context),
-      onPressed: _cycleSpeed,
-      size: Size(compact ? 44 : 62, compact ? 36 : 50),
-      fontSize: compact ? 13 : 16,
-    );
-  }
-
-  void _cycleSpeed() {
-    final index = _speeds.indexOf(_speed);
-    final next = _speeds[(index + 1) % _speeds.length];
-    unawaited(_setSpeed(next));
-  }
-
-  Widget _volumeSlider({bool compact = false}) {
-    final iconSize = compact ? 15.0 : 18.0;
-    return SizedBox(
-      width: compact ? null : 152,
-      height: compact ? 36 : 38,
-      child: Row(
-        mainAxisSize: compact ? MainAxisSize.max : MainAxisSize.min,
-        children: [
-          _FocusableVideoIconButton(
-            icon: _volumeIcon,
-            label: _volumeButtonLabel,
-            onPressed: _toggleMute,
-            size: Size(compact ? 36 : 38, compact ? 36 : 38),
-            iconSize: iconSize,
-          ),
-          SizedBox(width: compact ? 0 : 7),
-          Expanded(
-            child: MithkaVideoSlider(
-              value: _volume,
-              trackHeight: compact ? 2.5 : 3,
-              thumbRadius: compact ? 5 : 7,
-              activeColor: Colors.white,
-              inactiveColor: Colors.white.withValues(alpha: 0.22),
-              semanticLabel: AppStringKeys.videoPlaybackSwipeAdjustVolume.l10n(
-                context,
-              ),
-              semanticValue: '${(_volume * 100).round()}%',
-              onChangeStart: (_) => _hideTimer?.cancel(),
-              onChanged: _setVolume,
-              onChangeEnd: (_) => _scheduleHide(),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  AppIconData get _volumeIcon =>
-      _volume <= 0.01 ? HeroAppIcons.volumeXmark : HeroAppIcons.volumeHigh;
-
-  String get _volumeButtonLabel =>
-      (_volume <= 0.01 ? AppStringKeys.chatUnmute : AppStringKeys.callMute)
-          .l10n(context);
-
-  Widget _muteButton({required double size}) {
-    return _roundIconButton(
-      _volumeIcon,
-      _toggleMute,
-      label: _volumeButtonLabel,
-      size: size,
-    );
+  void _releaseVideoOrientation() {
+    if (!_landscapePlayback && !_orientationChangeInFlight) return;
+    _landscapePlayback = false;
+    _orientationChangeInFlight = false;
+    unawaited(SystemChrome.setPreferredOrientations(DeviceOrientation.values));
   }
 
   bool get _canOfferPictureInPicture =>
       (widget.onSwitchMode != null ||
       _systemPiPSupported ||
-      SystemPictureInPicture.isSupportedPlatform);
+      FVideoPictureInPicture.isSupportedPlatform);
 
   bool get _showsDisplayModeButton =>
       widget.onSwitchMode != null || _canOfferPictureInPicture;
@@ -3894,9 +4553,14 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   Future<void> _enterPictureInPicture() async {
     if (_systemPiPBusy) return;
     setState(() => _systemPiPBusy = true);
-    if (SystemPictureInPicture.isSupportedPlatform) {
+    // Prefer the native backend only after it has confirmed support. When a
+    // presentation switch callback is available it remains the deterministic
+    // fallback (including while support probing is still in flight).
+    if (_systemPiPSupported ||
+        (widget.onSwitchMode == null &&
+            FVideoPictureInPicture.isSupportedPlatform)) {
       try {
-        await _startSystemPictureInPicture();
+        await _startFVideoPictureInPicture();
       } catch (_) {}
       if (!mounted) return;
       setState(() => _systemPiPBusy = false);
@@ -3908,41 +4572,6 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     if (callback != null) {
       callback(VideoDisplayMode.pictureInPicture);
     }
-  }
-
-  bool get _showsNavigationControls =>
-      widget.onNavigate != null &&
-      (widget.previousVideo != null || widget.nextVideo != null) &&
-      widget.presentation != VideoPlayerPresentation.pictureInPicture;
-
-  Widget _navigationControl(int delta, {required double size}) {
-    final previous = delta < 0;
-    final enabled = _canNavigate(delta) && widget.onNavigate != null;
-    final rtl = Directionality.of(context) == TextDirection.rtl;
-    final icon = previous
-        ? (rtl ? HeroAppIcons.arrowRight : HeroAppIcons.arrowLeft)
-        : (rtl ? HeroAppIcons.arrowLeft : HeroAppIcons.arrowRight);
-    final label =
-        (previous
-                ? enabled
-                      ? AppStringKeys.videoPlayerPreviousVideo
-                      : AppStringKeys.videoPlayerNoPreviousVideo
-                : enabled
-                ? AppStringKeys.videoPlayerNextVideo
-                : AppStringKeys.videoPlayerNoNextVideo)
-            .l10n(context);
-    return _FocusableVideoIconButton(
-      icon: icon,
-      label: label,
-      enabled: enabled,
-      onPressed: () => _navigateFromControl(delta),
-      size: Size.square(math.max(48, size)),
-      iconSize: math.max(22, size * 0.44),
-      opacity: enabled ? 1 : 0.38,
-      backgroundColor: Colors.black.withValues(alpha: 0.68),
-      borderColor: Colors.white.withValues(alpha: 0.24),
-      cornerRadius: math.max(48, size) / 2,
-    );
   }
 
   Widget _roundIconButton(
@@ -3963,22 +4592,6 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     );
   }
 
-  Widget _plainIconButton(
-    AppIconData icon,
-    VoidCallback onTap, {
-    required String label,
-    double size = 34,
-  }) {
-    return _FocusableVideoIconButton(
-      icon: icon,
-      label: label,
-      onPressed: onTap,
-      size: Size.square(size),
-      iconSize: size * 0.58,
-      opacity: 0.92,
-    );
-  }
-
   Future<void> _downloadVideoForOffline() async {
     if (_progress?.isCompleted == true) {
       showToast(context, AppStringKeys.videoPlayerCachedLocally);
@@ -3989,7 +4602,10 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       AppStringKeys.videoPlayerStreamingWhileDownloading,
       visibleFor: const Duration(milliseconds: 1200),
     );
-    final path = await TdFileCenter.shared.path(widget.video.id);
+    final path = await TdFileCenter.shared.path(
+      widget.video.id,
+      accountSlot: widget.accountSlot,
+    );
     if (!mounted) return;
     showToast(
       context,
@@ -4000,13 +4616,20 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     );
   }
 
-  Future<void> _saveVideoToPhotos() async {
+  Future<void> _saveVideo() async {
+    if (_isDesktopPlatform) {
+      await _saveVideoToFolder();
+      return;
+    }
     showToast(
       context,
       AppStringKeys.chatSavingToPhotos,
       visibleFor: const Duration(milliseconds: 1200),
     );
-    final path = await TdFileCenter.shared.path(widget.video.id);
+    final path = await TdFileCenter.shared.path(
+      widget.video.id,
+      accountSlot: widget.accountSlot,
+    );
     final result = path == null
         ? MediaLibrarySaveResult.failed
         : await MediaLibrarySaver.savePreparedFile(File(path), isVideo: true);
@@ -4018,6 +4641,26 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
       MediaLibrarySaveResult.failed || MediaLibrarySaveResult.unsupported =>
         AppStringKeys.chatSaveToPhotosFailed,
     }, visibleFor: const Duration(seconds: 2));
+  }
+
+  /// A computer has no album, so the original file is copied into a folder
+  /// the user picks instead.
+  Future<void> _saveVideoToFolder() async {
+    showToast(
+      context,
+      AppStringKeys.chatSavingToPhotos,
+      visibleFor: const Duration(milliseconds: 1200),
+    );
+    final outcome = await MediaDownloadService.saveMedia(
+      file: widget.video,
+      isVideo: true,
+      accountSlot: widget.accountSlot,
+    );
+    if (!mounted) return;
+    final feedback = MediaDownloadService.feedbackFor(outcome);
+    if (feedback != null) {
+      showToast(context, feedback, visibleFor: const Duration(seconds: 2));
+    }
   }
 
   Future<void> _forwardVideo() async {
@@ -4072,8 +4715,1664 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
     return h > 0 ? '$h:$m:$s' : '$m:$s';
   }
 
-  static String _speedText(double speed) =>
-      speed == speed.roundToDouble() ? '${speed.toInt()}x' : '${speed}x';
+  Duration _bufferedAhead(VideoPlayerValue value) {
+    var bufferedEnd = value.position;
+    for (final range in value.buffered) {
+      if (range.end.compareTo(bufferedEnd) > 0) bufferedEnd = range.end;
+    }
+    final ahead = bufferedEnd - value.position;
+    return ahead.isNegative ? Duration.zero : ahead;
+  }
+}
+
+/// The full Mithka player chrome used by detached desktop video windows.
+///
+/// Detached windows run in their own Flutter engine, so they cannot reuse the
+/// parent [VideoPlayerView] state. This widget keeps the same concrete chrome
+/// and package-owned playback actions without depending on that state object.
+class MithkaDesktopVideoChrome extends StatelessWidget {
+  const MithkaDesktopVideoChrome({
+    super.key,
+    required this.scope,
+    required this.title,
+    required this.onClose,
+    required this.inspectorVisible,
+    required this.onToggleInspector,
+    required this.aspectRatio,
+    required this.thumbnailProvider,
+    this.downloadedFraction,
+    this.modeButton,
+    this.fullscreenButton,
+    this.topInset = 0,
+  });
+
+  final FVideoChromeScope scope;
+  final String title;
+  final VoidCallback onClose;
+  final bool inspectorVisible;
+  final VoidCallback onToggleInspector;
+  final double aspectRatio;
+  final Future<Uint8List?> Function(Duration position) thumbnailProvider;
+  final double? downloadedFraction;
+  final Widget? modeButton;
+  final Widget? fullscreenButton;
+  final double topInset;
+
+  @override
+  Widget build(BuildContext context) {
+    final snapshot = scope.snapshot;
+    final safePadding = MediaQuery.paddingOf(context);
+    return DefaultTextStyle.merge(
+      style: const TextStyle(
+        decoration: TextDecoration.none,
+        fontWeight: FontWeight.w400,
+      ),
+      child: ExcludeFocus(
+        excluding: !snapshot.controlsVisible,
+        child: ExcludeSemantics(
+          excluding: !snapshot.controlsVisible,
+          child: IgnorePointer(
+            ignoring: !snapshot.controlsVisible,
+            child: AnimatedOpacity(
+              key: const ValueKey('mithka-desktop-video-player-chrome'),
+              opacity: snapshot.controlsVisible ? 1 : 0,
+              duration: const Duration(milliseconds: 170),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final wide = constraints.maxWidth >= 600;
+                  final compactQueueNavigation =
+                      !wide && MediaQuery.sizeOf(context).width >= 320;
+                  final duration = snapshot.value.duration;
+                  final subtitle =
+                      'Video  •  ${formatVideoPlayerDuration(duration)}';
+                  final packageBuffered = snapshot.value.buffered.isEmpty
+                      ? 0.0
+                      : snapshot.value.buffered.last.end.inMilliseconds /
+                            math.max(1, duration.inMilliseconds);
+                  final buffered = math
+                      .max(packageBuffered, downloadedFraction ?? 0)
+                      .clamp(0.0, 1.0)
+                      .toDouble();
+                  return Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.black.withValues(alpha: 0.72),
+                                  Colors.transparent,
+                                  Colors.black.withValues(alpha: 0.88),
+                                ],
+                                stops: const [0, 0.46, 1],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      PositionedDirectional(
+                        top: safePadding.top + topInset + 12,
+                        start: safePadding.left + 14,
+                        end: safePadding.right + 14,
+                        child: Row(
+                          children: [
+                            MithkaVideoChromeAction(
+                              icon: HeroAppIcons.xmark,
+                              label: scope.labels.close,
+                              onTap: onClose,
+                              size: 52,
+                              iconSize: 27,
+                              cornerRadius: 26,
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    title.trim().isEmpty ? 'Video' : title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      decoration: TextDecoration.none,
+                                      fontSize: 18,
+                                      height: 1.12,
+                                      letterSpacing: -0.25,
+                                      fontWeight: FontWeight.w400,
+                                      shadows: [
+                                        Shadow(
+                                          color: Color(0xB3000000),
+                                          blurRadius: 8,
+                                          offset: Offset(0, 1),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    subtitle,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.76,
+                                      ),
+                                      decoration: TextDecoration.none,
+                                      fontSize: 13,
+                                      height: 1.18,
+                                      letterSpacing: 0.1,
+                                      fontWeight: FontWeight.w400,
+                                      fontFeatures: const [
+                                        FontFeature.tabularFigures(),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            MithkaVideoChromeAction(
+                              icon: HeroAppIcons.code,
+                              label: AppStrings.t(
+                                AppStringKeys.videoPlayerStreamInspector,
+                              ),
+                              onTap: () {
+                                onToggleInspector();
+                                scope.actions.showControls();
+                              },
+                              cornerRadius: 22,
+                              backgroundColor: inspectorVisible
+                                  ? const Color(0xD92C6565)
+                                  : const Color(0xB82C2C2E),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Positioned.fill(
+                        top: safePadding.top + topInset + 72,
+                        bottom: safePadding.bottom + (wide ? 132 : 168),
+                        child: Center(
+                          child: wide
+                              ? _MithkaVideoCenterTransport(
+                                  value: snapshot.value,
+                                  scope: scope,
+                                )
+                              : _MithkaVideoCompactTransport(
+                                  value: snapshot.value,
+                                  scope: scope,
+                                  showQueueNavigation: false,
+                                ),
+                        ),
+                      ),
+                      Positioned(
+                        left: safePadding.left + (wide ? 28 : 14),
+                        right: safePadding.right + (wide ? 28 : 14),
+                        bottom: safePadding.bottom + (wide ? 14 : 10),
+                        child: _MithkaVideoBottomChrome(
+                          scope: scope,
+                          wide: wide,
+                          buffered: buffered,
+                          aspectRatio: aspectRatio,
+                          thumbnailProvider: thumbnailProvider,
+                          compactQueueNavigation: compactQueueNavigation,
+                          previousButton: null,
+                          nextButton: null,
+                          modeButton: modeButton,
+                          fullscreenButton: fullscreenButton,
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Owned-icon action styling shared with detached-window chrome controls.
+class MithkaVideoChromeAction extends StatelessWidget {
+  const MithkaVideoChromeAction({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.size = 44,
+    this.iconSize = 21,
+    this.cornerRadius = 10,
+    this.backgroundColor = const Color(0xB82C2C2E),
+    this.borderColor,
+    this.enabled = true,
+  });
+
+  final AppIconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final double size;
+  final double iconSize;
+  final double cornerRadius;
+  final Color backgroundColor;
+  final Color? borderColor;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) => _FocusableVideoIconButton(
+    icon: icon,
+    label: label,
+    onPressed: onTap,
+    size: Size.square(size),
+    iconSize: iconSize,
+    enabled: enabled,
+    opacity: enabled ? 1 : 0.48,
+    backgroundColor: backgroundColor,
+    borderColor: borderColor ?? Colors.white.withValues(alpha: 0.15),
+    cornerRadius: cornerRadius,
+  );
+}
+
+class _VideoOnDemandGeometry {
+  const _VideoOnDemandGeometry({
+    required this.wide,
+    required this.headerRect,
+    required this.videoRect,
+    required this.bottomChromeRect,
+    required this.panelRect,
+  });
+
+  final bool wide;
+  final Rect headerRect;
+  final Rect videoRect;
+  final Rect bottomChromeRect;
+  final Rect panelRect;
+
+  static _VideoOnDemandGeometry resolve({
+    required Size size,
+    required EdgeInsets safePadding,
+    required double aspectRatio,
+  }) {
+    final aspect = aspectRatio.isFinite && aspectRatio > 0
+        ? aspectRatio
+        : 16 / 9;
+    final wide =
+        size.width >= 900 && size.height >= 560 && size.width > size.height;
+    if (wide) {
+      const outer = 24.0;
+      final panelWidth = (size.width * 0.29).clamp(330.0, 420.0).toDouble();
+      final panelRight = size.width - safePadding.right - outer;
+      final panelLeft = panelRight - panelWidth;
+      final panelTop = safePadding.top + 92;
+      final panelBottom = size.height - safePadding.bottom - 58;
+      final contentLeft = safePadding.left + 28;
+      final contentRight = panelLeft - 22;
+      final videoBounds = Rect.fromLTRB(
+        contentLeft,
+        safePadding.top + 88,
+        contentRight,
+        size.height - safePadding.bottom - 126,
+      );
+      return _VideoOnDemandGeometry(
+        wide: true,
+        headerRect: Rect.fromLTWH(
+          safePadding.left + 18,
+          safePadding.top + 12,
+          math.max(0, contentRight - safePadding.left - 18),
+          52,
+        ),
+        videoRect: _containVideoRect(videoBounds, aspect),
+        bottomChromeRect: Rect.fromLTRB(
+          contentLeft,
+          size.height - safePadding.bottom - 116,
+          contentRight,
+          size.height - safePadding.bottom - 12,
+        ),
+        panelRect: Rect.fromLTRB(
+          panelLeft,
+          panelTop,
+          panelRight,
+          math.max(panelTop + 180, panelBottom),
+        ),
+      );
+    }
+
+    const side = 14.0;
+    final videoTop = math.max(safePadding.top + 88, size.height * 0.15);
+    final maxVideoHeight = math.min(
+      (size.width - side * 2) / aspect,
+      size.height * 0.29,
+    );
+    final videoBounds = Rect.fromLTWH(
+      side,
+      videoTop,
+      math.max(0, size.width - side * 2),
+      math.max(1, maxVideoHeight),
+    );
+    final videoRect = _containVideoRect(videoBounds, aspect);
+    final minimumPanelTop = videoRect.bottom + 154;
+    final preferredPanelTop = math.max(size.height * 0.64, minimumPanelTop);
+    final latestPanelTop = math.max(
+      minimumPanelTop,
+      size.height - safePadding.bottom - 190,
+    );
+    final panelTop = preferredPanelTop
+        .clamp(minimumPanelTop, latestPanelTop)
+        .toDouble();
+    final panelBottom = math.max(
+      panelTop + 150,
+      size.height - safePadding.bottom - 8,
+    );
+    return _VideoOnDemandGeometry(
+      wide: false,
+      headerRect: Rect.fromLTWH(
+        safePadding.left + 14,
+        safePadding.top + 10,
+        math.max(0, size.width - safePadding.horizontal - 28),
+        52,
+      ),
+      videoRect: videoRect,
+      bottomChromeRect: Rect.fromLTRB(
+        side + 14,
+        videoRect.bottom + 8,
+        size.width - side - 14,
+        panelTop - 10,
+      ),
+      panelRect: Rect.fromLTRB(side, panelTop, size.width - side, panelBottom),
+    );
+  }
+
+  static Rect _containVideoRect(Rect bounds, double aspectRatio) {
+    var width = bounds.width;
+    var height = width / aspectRatio;
+    if (height > bounds.height) {
+      height = bounds.height;
+      width = height * aspectRatio;
+    }
+    return Rect.fromCenter(
+      center: bounds.center,
+      width: math.max(1, width),
+      height: math.max(1, height),
+    );
+  }
+}
+
+class _MithkaVideoOnDemandBottomChrome extends StatelessWidget {
+  const _MithkaVideoOnDemandBottomChrome({
+    required this.scope,
+    required this.buffered,
+    required this.aspectRatio,
+    required this.thumbnailProvider,
+    required this.title,
+    required this.subtitle,
+    required this.modeButton,
+    required this.onDemandButton,
+    required this.fullscreenButton,
+  });
+
+  final FVideoChromeScope scope;
+  final double buffered;
+  final double aspectRatio;
+  final Future<Uint8List?> Function(Duration position) thumbnailProvider;
+  final String title;
+  final String subtitle;
+  final Widget? modeButton;
+  final Widget onDemandButton;
+  final Widget? fullscreenButton;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final dense = constraints.maxHeight < 150;
+        return Column(
+          mainAxisAlignment: MainAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _MithkaVideoTimeline(
+              scope: scope,
+              wide: false,
+              buffered: buffered,
+              aspectRatio: aspectRatio,
+              thumbnailProvider: thumbnailProvider,
+            ),
+            SizedBox(height: dense ? 3 : 7),
+            Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 17,
+                height: 1.15,
+                fontWeight: FontWeight.w400,
+              ),
+            ),
+            if (!dense) ...[
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.72),
+                  fontSize: 12,
+                  height: 1.15,
+                  fontWeight: FontWeight.w400,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
+            SizedBox(height: dense ? 4 : 8),
+            SizedBox(
+              height: 44,
+              child: LayoutBuilder(
+                builder: (context, rowConstraints) {
+                  final showVolumeSlider = rowConstraints.maxWidth >= 300;
+                  final showSpeed = rowConstraints.maxWidth >= 330;
+                  return Row(
+                    children: [
+                      _FocusableVideoIconButton(
+                        icon: scope.snapshot.volume <= 0.01
+                            ? HeroAppIcons.volumeXmark
+                            : HeroAppIcons.volumeHigh,
+                        label: scope.snapshot.volume <= 0.01
+                            ? scope.labels.unmute
+                            : scope.labels.mute,
+                        onPressed: () => unawaited(scope.actions.toggleMute()),
+                        size: const Size.square(44),
+                        iconSize: 22,
+                        backgroundColor: const Color(0x8A1B1D1E),
+                        borderColor: Colors.white.withValues(alpha: 0.24),
+                      ),
+                      if (showVolumeSlider) ...[
+                        const SizedBox(width: 4),
+                        SizedBox(
+                          width: 60,
+                          height: 44,
+                          child: FVideoSlider(
+                            value: scope.snapshot.volume
+                                .clamp(0.0, 1.0)
+                                .toDouble(),
+                            trackHeight: 3,
+                            thumbRadius: 5,
+                            activeColor: Colors.white,
+                            inactiveColor: Colors.white.withValues(alpha: 0.26),
+                            semanticLabel: scope.labels.volume,
+                            semanticValue:
+                                '${(scope.snapshot.volume * 100).round()}%',
+                            onChanged: (value) =>
+                                unawaited(scope.actions.setVolume(value)),
+                          ),
+                        ),
+                      ],
+                      const Spacer(),
+                      if (showSpeed) ...[
+                        const SizedBox(width: 6),
+                        _MithkaVideoTextButton(
+                          text: _formatPlaybackSpeed(
+                            scope.snapshot.value.playbackSpeed,
+                          ),
+                          label: scope.labels.speed,
+                          onTap: () => unawaited(
+                            scope.actions.setPlaybackSpeed(
+                              _nextPlaybackSpeed(
+                                scope.snapshot.value.playbackSpeed,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (modeButton != null) ...[
+                        const SizedBox(width: 6),
+                        modeButton!,
+                      ],
+                      const SizedBox(width: 6),
+                      onDemandButton,
+                      if (fullscreenButton != null) ...[
+                        const SizedBox(width: 6),
+                        fullscreenButton!,
+                      ],
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _MithkaVideoOnDemandPanel extends StatefulWidget {
+  const _MithkaVideoOnDemandPanel({
+    super.key,
+    required this.queue,
+    required this.wide,
+    required this.onSelect,
+    required this.autoplay,
+    required this.onAutoplayChanged,
+  });
+
+  final VideoPlaybackQueue queue;
+  final bool wide;
+  final ValueChanged<int>? onSelect;
+  final bool autoplay;
+  final ValueChanged<bool> onAutoplayChanged;
+
+  @override
+  State<_MithkaVideoOnDemandPanel> createState() =>
+      _MithkaVideoOnDemandPanelState();
+}
+
+class _MithkaVideoOnDemandPanelState extends State<_MithkaVideoOnDemandPanel> {
+  late final ScrollController _scrollController = ScrollController(
+    initialScrollOffset: math.max(0, widget.queue.index - 1) * 100.0,
+  );
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xEB111315),
+        borderRadius: BorderRadius.circular(widget.wide ? 16 : 20),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x66000000),
+            blurRadius: 24,
+            offset: Offset(0, 10),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(widget.wide ? 15 : 19),
+        child: Column(
+          children: [
+            if (!widget.wide)
+              Padding(
+                padding: const EdgeInsets.only(top: 10, bottom: 2),
+                child: Center(
+                  child: Container(
+                    width: 42,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.22),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+              ),
+            Expanded(
+              child: ListView.builder(
+                controller: _scrollController,
+                padding: EdgeInsets.fromLTRB(
+                  widget.wide ? 10 : 8,
+                  widget.wide ? 10 : 6,
+                  widget.wide ? 10 : 8,
+                  8,
+                ),
+                itemExtent: 100,
+                itemCount: widget.queue.items.length,
+                itemBuilder: (context, index) => _item(index),
+              ),
+            ),
+            if (widget.wide)
+              Container(
+                height: 52,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                decoration: BoxDecoration(
+                  border: Border(
+                    top: BorderSide(
+                      color: Colors.white.withValues(alpha: 0.10),
+                    ),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Text(
+                      AppStrings.t(AppStringKeys.videoPlayerAutoplay),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                    const Spacer(),
+                    _autoplayToggle(),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _item(int index) {
+    final item = widget.queue.items[index];
+    final current = index == widget.queue.index;
+    final title = item.title.trim().isEmpty
+        ? AppStrings.t(AppStringKeys.videoPlayerVideoNumber, {
+            'value1': index + 1,
+          })
+        : item.title;
+    final duration = (item.durationSeconds ?? 0) > 0
+        ? formatVideoPlayerDuration(Duration(seconds: item.durationSeconds!))
+        : null;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: AppInteractiveSurface(
+        key: ValueKey('video-on-demand-item-${item.video.id}'),
+        semanticLabel: title,
+        semanticValue: current
+            ? AppStrings.t(AppStringKeys.videoPlayerPlaying)
+            : duration,
+        selected: current,
+        onTap: current || widget.onSelect == null
+            ? null
+            : () => widget.onSelect!(index),
+        borderRadius: BorderRadius.circular(12),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: current
+                ? const Color(0xD8273436)
+                : Colors.white.withValues(alpha: 0.018),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: current
+                  ? const Color(0xFF24DDD9)
+                  : Colors.white.withValues(alpha: 0.07),
+            ),
+          ),
+          child: Row(
+            children: [
+              if (current) ...[
+                const SizedBox(
+                  width: 18,
+                  child: AppIcon(
+                    HeroAppIcons.play,
+                    size: 14,
+                    color: Color(0xFF24DDD9),
+                  ),
+                ),
+                const SizedBox(width: 4),
+              ],
+              ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadius.control),
+                child: SizedBox(
+                  width: widget.wide ? 116 : 102,
+                  height: widget.wide ? 66 : 58,
+                  child: ColoredBox(
+                    color: const Color(0xFF24272A),
+                    child: item.thumb == null
+                        ? const Center(
+                            child: AppIcon(
+                              HeroAppIcons.play,
+                              size: 20,
+                              color: Color(0x99FFFFFF),
+                            ),
+                          )
+                        : TDImage(photo: item.thumb, cornerRadius: 0),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: current ? const Color(0xFF24DDD9) : Colors.white,
+                        fontSize: 13,
+                        height: 1.2,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                    if (duration != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        duration,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.62),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w400,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                    if (current) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        AppStrings.t(AppStringKeys.videoPlayerPlaying),
+                        style: const TextStyle(
+                          color: Color(0xFF24DDD9),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _autoplayToggle() {
+    return AppInteractiveSurface(
+      semanticLabel: AppStrings.t(AppStringKeys.videoPlayerAutoplay),
+      semanticValue: AppStrings.t(
+        widget.autoplay
+            ? AppStringKeys.privacyEnabled
+            : AppStringKeys.privacyDisabled,
+      ),
+      toggled: widget.autoplay,
+      onTap: () => widget.onAutoplayChanged(!widget.autoplay),
+      borderRadius: BorderRadius.circular(16),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        width: 50,
+        height: 30,
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: widget.autoplay
+              ? const Color(0xFF24CFCB)
+              : Colors.white.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(15),
+        ),
+        child: AnimatedAlign(
+          duration: const Duration(milliseconds: 160),
+          alignment: widget.autoplay
+              ? Alignment.centerRight
+              : Alignment.centerLeft,
+          child: Container(
+            width: 24,
+            height: 24,
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: Color(0x55000000),
+                  blurRadius: 4,
+                  offset: Offset(0, 1),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MithkaVideoCenterTransport extends StatelessWidget {
+  const _MithkaVideoCenterTransport({required this.value, required this.scope});
+
+  final VideoPlayerValue value;
+  final FVideoChromeScope scope;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _MithkaVideoSeekButton(
+          backwards: true,
+          label: AppStrings.t(AppStringKeys.videoPlayerSeekBackwardTenSeconds),
+          onTap: () =>
+              unawaited(scope.actions.seekBy(const Duration(seconds: -10))),
+        ),
+        const SizedBox(width: 18),
+        ExcludeSemantics(
+          child: _MithkaVideoPlayButton(
+            playing: value.isPlaying,
+            onTap: () => unawaited(scope.actions.togglePlayback()),
+            size: 86,
+            semanticLabel: AppStrings.t(
+              AppStringKeys.videoPlaybackSettingsTitle,
+            ),
+          ),
+        ),
+        const SizedBox(width: 18),
+        _MithkaVideoSeekButton(
+          backwards: false,
+          label: AppStrings.t(AppStringKeys.videoPlayerSeekForwardTenSeconds),
+          onTap: () =>
+              unawaited(scope.actions.seekBy(const Duration(seconds: 10))),
+        ),
+      ],
+    );
+  }
+}
+
+class _MithkaVideoCompactTransport extends StatelessWidget {
+  const _MithkaVideoCompactTransport({
+    required this.value,
+    required this.scope,
+    required this.showQueueNavigation,
+  });
+
+  final VideoPlayerValue value;
+  final FVideoChromeScope scope;
+  final bool showQueueNavigation;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (showQueueNavigation && scope.previous != null)
+          _MithkaVideoCompactNavButton(
+            icon: HeroAppIcons.chevronLeft,
+            label: scope.labels.previous,
+            onTap: scope.previous!,
+          )
+        else
+          _MithkaVideoSeekButton(
+            backwards: true,
+            label: AppStrings.t(
+              AppStringKeys.videoPlayerSeekBackwardTenSeconds,
+            ),
+            compact: true,
+            onTap: () =>
+                unawaited(scope.actions.seekBy(const Duration(seconds: -10))),
+          ),
+        const SizedBox(width: 12),
+        ExcludeSemantics(
+          child: _MithkaVideoPlayButton(
+            playing: value.isPlaying,
+            onTap: () => unawaited(scope.actions.togglePlayback()),
+            size: 72,
+            semanticLabel: AppStrings.t(
+              AppStringKeys.videoPlaybackSettingsTitle,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        if (showQueueNavigation && scope.next != null)
+          _MithkaVideoCompactNavButton(
+            icon: HeroAppIcons.chevronRight,
+            label: scope.labels.next,
+            onTap: scope.next!,
+          )
+        else
+          _MithkaVideoSeekButton(
+            backwards: false,
+            label: AppStrings.t(AppStringKeys.videoPlayerSeekForwardTenSeconds),
+            compact: true,
+            onTap: () =>
+                unawaited(scope.actions.seekBy(const Duration(seconds: 10))),
+          ),
+      ],
+    );
+  }
+}
+
+class _MithkaVideoPlayButton extends StatelessWidget {
+  const _MithkaVideoPlayButton({
+    required this.playing,
+    required this.onTap,
+    required this.size,
+    this.semanticLabel,
+  });
+
+  final bool playing;
+  final VoidCallback onTap;
+  final double size;
+  final String? semanticLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return _FocusableVideoIconButton(
+      icon: playing ? HeroAppIcons.pause : HeroAppIcons.play,
+      label: semanticLabel ?? (playing ? 'Pause' : 'Play'),
+      onPressed: onTap,
+      size: Size.square(size),
+      iconSize: size * 0.44,
+      backgroundColor: const Color(0xCC2C2C2E),
+      borderColor: Colors.white.withValues(alpha: 0.18),
+      cornerRadius: size / 2,
+    );
+  }
+}
+
+class _MithkaVideoSeekButton extends StatelessWidget {
+  const _MithkaVideoSeekButton({
+    required this.backwards,
+    required this.label,
+    required this.onTap,
+    this.compact = false,
+  });
+
+  final bool backwards;
+  final String label;
+  final VoidCallback onTap;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = compact ? 62.0 : 78.0;
+    return AppInteractiveSurface(
+      semanticLabel: label,
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(size / 2),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: const Color(0xA92C2C2E),
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x42000000),
+              blurRadius: 14,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: SizedBox.square(
+          dimension: size,
+          child: Center(
+            child: AppSeekTenIcon(
+              backwards: backwards,
+              color: Colors.white,
+              size: size * 0.64,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MithkaVideoCompactNavButton extends StatelessWidget {
+  const _MithkaVideoCompactNavButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.size = 56,
+  });
+
+  final AppIconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => _FocusableVideoIconButton(
+    icon: icon,
+    label: label,
+    onPressed: onTap,
+    size: Size.square(size),
+    iconSize: size * 0.45,
+    backgroundColor: const Color(0xB82C2C2E),
+    borderColor: Colors.white.withValues(alpha: 0.18),
+    cornerRadius: size / 2,
+  );
+}
+
+class _MithkaVideoSideButton extends StatelessWidget {
+  const _MithkaVideoSideButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final AppIconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => _FocusableVideoIconButton(
+    icon: icon,
+    label: label,
+    onPressed: onTap,
+    size: const Size(52, 116),
+    iconSize: 25,
+    backgroundColor: const Color(0xA92C2C2E),
+    borderColor: Colors.white.withValues(alpha: 0.24),
+    cornerRadius: 26,
+  );
+}
+
+class _MithkaVideoStandaloneBottomChrome extends StatelessWidget {
+  const _MithkaVideoStandaloneBottomChrome({
+    required this.scope,
+    required this.buffered,
+    required this.aspectRatio,
+    required this.thumbnailProvider,
+    required this.modeButton,
+    required this.onDemandButton,
+    required this.fullscreenButton,
+  });
+
+  final FVideoChromeScope scope;
+  final double buffered;
+  final double aspectRatio;
+  final Future<Uint8List?> Function(Duration position) thumbnailProvider;
+  final Widget? modeButton;
+  final Widget? onDemandButton;
+  final Widget? fullscreenButton;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final showVolumeSlider = constraints.maxWidth >= 420;
+        final showSpeed = constraints.maxWidth >= 520;
+        return Column(
+          key: const ValueKey('video-standalone-bottom-chrome'),
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _MithkaVideoTimeline(
+              scope: scope,
+              wide: true,
+              buffered: buffered,
+              aspectRatio: aspectRatio,
+              thumbnailProvider: thumbnailProvider,
+            ),
+            const SizedBox(height: 5),
+            SizedBox(
+              height: 44,
+              child: Row(
+                children: [
+                  _FocusableVideoIconButton(
+                    icon: scope.snapshot.value.isPlaying
+                        ? HeroAppIcons.pause
+                        : HeroAppIcons.play,
+                    label: scope.snapshot.value.isPlaying
+                        ? scope.labels.pause
+                        : scope.labels.play,
+                    onPressed: () => unawaited(scope.actions.togglePlayback()),
+                    size: const Size.square(44),
+                    iconSize: 23,
+                  ),
+                  const SizedBox(width: 4),
+                  _FocusableVideoIconButton(
+                    icon: scope.snapshot.volume <= 0.01
+                        ? HeroAppIcons.volumeXmark
+                        : HeroAppIcons.volumeHigh,
+                    label: scope.snapshot.volume <= 0.01
+                        ? scope.labels.unmute
+                        : scope.labels.mute,
+                    onPressed: () => unawaited(scope.actions.toggleMute()),
+                    size: const Size.square(44),
+                    iconSize: 23,
+                  ),
+                  if (showVolumeSlider) ...[
+                    const SizedBox(width: 2),
+                    SizedBox(
+                      width: 86,
+                      height: 44,
+                      child: FVideoSlider(
+                        value: scope.snapshot.volume.clamp(0.0, 1.0).toDouble(),
+                        trackHeight: 3,
+                        thumbRadius: 5,
+                        activeColor: Colors.white,
+                        inactiveColor: Colors.white.withValues(alpha: 0.26),
+                        semanticLabel: scope.labels.volume,
+                        semanticValue:
+                            '${(scope.snapshot.volume * 100).round()}%',
+                        onChanged: (value) =>
+                            unawaited(scope.actions.setVolume(value)),
+                      ),
+                    ),
+                  ],
+                  const Spacer(),
+                  if (showSpeed)
+                    _MithkaVideoTextButton(
+                      text: _formatPlaybackSpeed(
+                        scope.snapshot.value.playbackSpeed,
+                      ),
+                      label: scope.labels.speed,
+                      onTap: () => unawaited(
+                        scope.actions.setPlaybackSpeed(
+                          _nextPlaybackSpeed(
+                            scope.snapshot.value.playbackSpeed,
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (modeButton != null) ...[
+                    const SizedBox(width: 6),
+                    modeButton!,
+                  ],
+                  if (onDemandButton != null) ...[
+                    const SizedBox(width: 6),
+                    onDemandButton!,
+                  ],
+                  if (fullscreenButton != null) ...[
+                    const SizedBox(width: 6),
+                    fullscreenButton!,
+                  ],
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _MithkaVideoBottomChrome extends StatelessWidget {
+  const _MithkaVideoBottomChrome({
+    required this.scope,
+    required this.wide,
+    required this.buffered,
+    required this.aspectRatio,
+    required this.thumbnailProvider,
+    required this.compactQueueNavigation,
+    required this.previousButton,
+    required this.nextButton,
+    required this.modeButton,
+    this.onDemandButton,
+    required this.fullscreenButton,
+  });
+
+  final FVideoChromeScope scope;
+  final bool wide;
+  final double buffered;
+  final double aspectRatio;
+  final Future<Uint8List?> Function(Duration position) thumbnailProvider;
+  final bool compactQueueNavigation;
+  final Widget? previousButton;
+  final Widget? nextButton;
+  final Widget? modeButton;
+  final Widget? onDemandButton;
+  final Widget? fullscreenButton;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _MithkaVideoTimeline(
+          scope: scope,
+          wide: wide,
+          buffered: buffered,
+          aspectRatio: aspectRatio,
+          thumbnailProvider: thumbnailProvider,
+        ),
+        const SizedBox(height: 5),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth;
+            final showVolumeSlider = width >= 220;
+            final showSpeed = !compactQueueNavigation && (width >= 320 || wide);
+            return Row(
+              children: [
+                if (compactQueueNavigation) ...[
+                  previousButton ?? const SizedBox.square(dimension: 44),
+                  const SizedBox(width: 4),
+                ],
+                _FocusableVideoIconButton(
+                  icon: scope.snapshot.value.isPlaying
+                      ? HeroAppIcons.pause
+                      : HeroAppIcons.play,
+                  label: scope.snapshot.value.isPlaying
+                      ? scope.labels.pause
+                      : scope.labels.play,
+                  onPressed: () => unawaited(scope.actions.togglePlayback()),
+                  size: const Size.square(44),
+                  iconSize: 23,
+                ),
+                if (compactQueueNavigation) ...[
+                  const SizedBox(width: 4),
+                  nextButton ?? const SizedBox.square(dimension: 44),
+                ],
+                const SizedBox(width: 4),
+                _FocusableVideoIconButton(
+                  icon: scope.snapshot.volume <= 0.01
+                      ? HeroAppIcons.volumeXmark
+                      : HeroAppIcons.volumeHigh,
+                  label: scope.snapshot.volume <= 0.01
+                      ? scope.labels.unmute
+                      : scope.labels.mute,
+                  onPressed: () => unawaited(scope.actions.toggleMute()),
+                  size: const Size.square(44),
+                  iconSize: 23,
+                ),
+                if (showVolumeSlider) ...[
+                  const SizedBox(width: 2),
+                  SizedBox(
+                    width: wide ? 74 : 64,
+                    height: 44,
+                    child: FVideoSlider(
+                      value: scope.snapshot.volume.clamp(0.0, 1.0).toDouble(),
+                      trackHeight: 3,
+                      thumbRadius: 5,
+                      activeColor: Colors.white,
+                      inactiveColor: Colors.white.withValues(alpha: 0.26),
+                      semanticLabel: scope.labels.volume,
+                      semanticValue:
+                          '${(scope.snapshot.volume * 100).round()}%',
+                      onChanged: (value) =>
+                          unawaited(scope.actions.setVolume(value)),
+                    ),
+                  ),
+                ],
+                const Spacer(),
+                if (showSpeed)
+                  _MithkaVideoTextButton(
+                    text: _formatPlaybackSpeed(
+                      scope.snapshot.value.playbackSpeed,
+                    ),
+                    label: scope.labels.speed,
+                    onTap: () => unawaited(
+                      scope.actions.setPlaybackSpeed(
+                        _nextPlaybackSpeed(scope.snapshot.value.playbackSpeed),
+                      ),
+                    ),
+                  ),
+                if (modeButton != null) ...[
+                  const SizedBox(width: 6),
+                  modeButton!,
+                ],
+                if (onDemandButton != null) ...[
+                  const SizedBox(width: 6),
+                  onDemandButton!,
+                ],
+                if (fullscreenButton != null) ...[
+                  const SizedBox(width: 6),
+                  fullscreenButton!,
+                ],
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _MithkaVideoTextButton extends StatelessWidget {
+  const _MithkaVideoTextButton({
+    required this.text,
+    required this.label,
+    required this.onTap,
+  });
+
+  final String text;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => AppInteractiveSurface(
+    semanticLabel: label,
+    semanticValue: text,
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(AppRadius.control),
+    child: Container(
+      constraints: const BoxConstraints(minWidth: 54, minHeight: 44),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: const Color(0x8A1B1D1E),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
+        borderRadius: BorderRadius.circular(AppRadius.control),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 13,
+          fontWeight: FontWeight.w400,
+          fontFeatures: [FontFeature.tabularFigures()],
+        ),
+      ),
+    ),
+  );
+}
+
+class _MithkaVideoTimeline extends StatefulWidget {
+  const _MithkaVideoTimeline({
+    required this.scope,
+    required this.wide,
+    required this.buffered,
+    required this.aspectRatio,
+    required this.thumbnailProvider,
+  });
+
+  final FVideoChromeScope scope;
+  final bool wide;
+  final double buffered;
+  final double aspectRatio;
+  final Future<Uint8List?> Function(Duration position) thumbnailProvider;
+
+  @override
+  State<_MithkaVideoTimeline> createState() => _MithkaVideoTimelineState();
+}
+
+class _MithkaVideoTimelineState extends State<_MithkaVideoTimeline> {
+  Timer? _thumbnailTimer;
+  Timer? _thumbnailTimeout;
+  int _thumbnailGeneration = 0;
+  bool _thumbnailRequestInFlight = false;
+  double? _pendingThumbnailFraction;
+  double? _scrubFraction;
+  Uint8List? _thumbnail;
+
+  @override
+  void dispose() {
+    _cancelThumbnailWork();
+    super.dispose();
+  }
+
+  Duration _positionFor(double fraction) {
+    final duration = widget.scope.snapshot.value.duration;
+    return Duration(
+      microseconds: (duration.inMicroseconds * fraction.clamp(0.0, 1.0))
+          .round(),
+    );
+  }
+
+  void _beginScrub(double fraction) {
+    _cancelThumbnailWork();
+    widget.scope.actions.beginScrub(fraction);
+    setState(() {
+      _scrubFraction = fraction;
+      _thumbnail = null;
+    });
+    _queueThumbnail(fraction);
+  }
+
+  void _updateScrub(double fraction) {
+    widget.scope.actions.updateScrub(fraction);
+    setState(() => _scrubFraction = fraction);
+    _queueThumbnail(fraction);
+  }
+
+  void _endScrub(double fraction) {
+    _cancelThumbnailWork();
+    final finalFraction = _scrubFraction ?? fraction;
+    unawaited(_commitScrub(finalFraction));
+  }
+
+  Future<void> _commitScrub(double fraction) async {
+    await widget.scope.actions.endScrub(fraction);
+    if (!mounted) return;
+    setState(() {
+      _scrubFraction = null;
+      _thumbnail = null;
+    });
+  }
+
+  void _cancelThumbnailWork() {
+    _thumbnailTimer?.cancel();
+    _thumbnailTimer = null;
+    _thumbnailTimeout?.cancel();
+    _thumbnailTimeout = null;
+    _thumbnailRequestInFlight = false;
+    _pendingThumbnailFraction = null;
+    _thumbnailGeneration++;
+  }
+
+  void _queueThumbnail(double fraction) {
+    _pendingThumbnailFraction = fraction.clamp(0.0, 1.0).toDouble();
+    if (_thumbnailRequestInFlight || _thumbnailTimer != null) return;
+    _thumbnailTimer = Timer(const Duration(milliseconds: 80), () {
+      _thumbnailTimer = null;
+      unawaited(_requestPendingThumbnail());
+    });
+  }
+
+  Future<void> _requestPendingThumbnail() async {
+    final fraction = _pendingThumbnailFraction;
+    if (fraction == null || _scrubFraction == null) return;
+    _pendingThumbnailFraction = null;
+    _thumbnailRequestInFlight = true;
+    final generation = ++_thumbnailGeneration;
+    _thumbnailTimeout = Timer(const Duration(seconds: 2), () {
+      if (!mounted || generation != _thumbnailGeneration) return;
+      _thumbnailGeneration++;
+      _thumbnailTimeout = null;
+      _thumbnailRequestInFlight = false;
+      setState(() => _thumbnail = null);
+      _schedulePendingThumbnail();
+    });
+
+    Uint8List? result;
+    try {
+      result = await widget.thumbnailProvider(_positionFor(fraction));
+    } catch (_) {
+      result = null;
+    }
+    if (!mounted || generation != _thumbnailGeneration) return;
+    _thumbnailTimeout?.cancel();
+    _thumbnailTimeout = null;
+    _thumbnailRequestInFlight = false;
+    final pending = _pendingThumbnailFraction;
+    if (pending != null && (pending - fraction).abs() < 0.0001) {
+      _pendingThumbnailFraction = null;
+    }
+    setState(() => _thumbnail = result);
+    _schedulePendingThumbnail();
+  }
+
+  void _schedulePendingThumbnail() {
+    if (_scrubFraction == null ||
+        _pendingThumbnailFraction == null ||
+        _thumbnailRequestInFlight ||
+        _thumbnailTimer != null) {
+      return;
+    }
+    _thumbnailTimer = Timer(const Duration(milliseconds: 80), () {
+      _thumbnailTimer = null;
+      unawaited(_requestPendingThumbnail());
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final duration = widget.scope.snapshot.value.duration;
+    final durationMs = math.max(1, duration.inMilliseconds);
+    final position = widget.scope.snapshot.displayPosition;
+    final actualFraction = (position.inMilliseconds / durationMs)
+        .clamp(0.0, 1.0)
+        .toDouble();
+    final fraction = _scrubFraction ?? actualFraction;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final previewWidth = widget.wide ? 160.0 : 128.0;
+        final previewHeight = (previewWidth / widget.aspectRatio)
+            .clamp(widget.wide ? 78.0 : 72.0, widget.wide ? 110.0 : 72.0)
+            .toDouble();
+        final trackWidth = constraints.maxWidth;
+        final previewLeft = (fraction * trackWidth - previewWidth / 2)
+            .clamp(0.0, math.max(0.0, trackWidth - previewWidth))
+            .toDouble();
+        final sliderHeight = widget.wide ? 30.0 : 28.0;
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              height: sliderHeight,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Positioned.fill(
+                    child: FVideoSlider(
+                      value: actualFraction,
+                      bufferedValue: widget.buffered,
+                      trackHeight: widget.wide ? 4 : 3,
+                      thumbRadius: widget.wide ? 7 : 6,
+                      activeColor: const Color(0xFF24DDD9),
+                      bufferedColor: Colors.white.withValues(alpha: 0.32),
+                      inactiveColor: Colors.white.withValues(alpha: 0.86),
+                      semanticLabel: widget.scope.labels.position,
+                      semanticValue:
+                          '${formatVideoPlayerDuration(position)} / ${formatVideoPlayerDuration(duration)}',
+                      semanticIncreasedValue: formatVideoPlayerDuration(
+                        position + const Duration(seconds: 10) > duration
+                            ? duration
+                            : position + const Duration(seconds: 10),
+                      ),
+                      semanticDecreasedValue: formatVideoPlayerDuration(
+                        position - const Duration(seconds: 10) < Duration.zero
+                            ? Duration.zero
+                            : position - const Duration(seconds: 10),
+                      ),
+                      keyboardStep: math.min(
+                        1,
+                        const Duration(seconds: 10).inMilliseconds / durationMs,
+                      ),
+                      onChangeStart: _beginScrub,
+                      onChanged: _updateScrub,
+                      onChangeEnd: _endScrub,
+                    ),
+                  ),
+                  if (_scrubFraction != null)
+                    Positioned(
+                      left: previewLeft,
+                      bottom: sliderHeight + 8,
+                      width: previewWidth,
+                      height: previewHeight,
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF111315),
+                            borderRadius: BorderRadius.circular(
+                              AppRadius.control,
+                            ),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.55),
+                            ),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x99000000),
+                                blurRadius: 12,
+                                offset: Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(AppRadius.md),
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                if (_thumbnail != null)
+                                  Image.memory(
+                                    _thumbnail!,
+                                    fit: BoxFit.cover,
+                                    gaplessPlayback: true,
+                                  ),
+                                Positioned(
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 0,
+                                  child: DecoratedBox(
+                                    decoration: const BoxDecoration(
+                                      gradient: LinearGradient(
+                                        begin: Alignment.topCenter,
+                                        end: Alignment.bottomCenter,
+                                        colors: [
+                                          Color(0x00000000),
+                                          Color(0xDD000000),
+                                        ],
+                                      ),
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        6,
+                                        12,
+                                        6,
+                                        5,
+                                      ),
+                                      child: Text(
+                                        formatVideoPlayerDuration(
+                                          _positionFor(fraction),
+                                        ),
+                                        textAlign: TextAlign.center,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w400,
+                                          fontFeatures: [
+                                            FontFeature.tabularFigures(),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 1),
+            Text(
+              key: const ValueKey('video-playback-time'),
+              '${formatVideoPlayerDuration(_positionFor(fraction))} / '
+              '${formatVideoPlayerDuration(duration)}',
+              maxLines: 1,
+              overflow: TextOverflow.fade,
+              softWrap: false,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.88),
+                fontSize: widget.wide ? 13 : 12,
+                height: 1.25,
+                fontWeight: FontWeight.w400,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+String _formatPlaybackSpeed(double speed) {
+  if (!speed.isFinite || speed <= 0) return '1x';
+  return '${speed.toStringAsFixed(speed % 1 == 0 ? 0 : 2)}x';
+}
+
+double _nextPlaybackSpeed(double speed) {
+  const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+  final index = speeds.indexWhere((value) => (value - speed).abs() < 0.001);
+  return speeds[(index + 1) % speeds.length];
+}
+
+@visibleForTesting
+String formatVideoPlayerDuration(Duration value) {
+  final seconds = math.max(0, value.inSeconds);
+  final hours = seconds ~/ 3600;
+  final minutes = (seconds ~/ 60) % 60;
+  final remainder = seconds % 60;
+  return hours > 0
+      ? '$hours:${minutes.toString().padLeft(2, '0')}:${remainder.toString().padLeft(2, '0')}'
+      : '$minutes:${remainder.toString().padLeft(2, '0')}';
 }
 
 class _VideoLoadingRing extends StatefulWidget {
@@ -4204,7 +6503,7 @@ class _FocusableVideoTextButtonState extends State<_FocusableVideoTextButton> {
               border: _focused
                   ? Border.all(color: Colors.white, width: 2)
                   : null,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(AppRadius.control),
             ),
             child: SizedBox(
               width: widget.size.width,
@@ -4215,7 +6514,7 @@ class _FocusableVideoTextButtonState extends State<_FocusableVideoTextButton> {
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: widget.fontSize,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w400,
                     fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
@@ -4237,7 +6536,6 @@ class _FocusableVideoIconButton extends StatefulWidget {
     required this.iconSize,
     this.enabled = true,
     this.opacity = 1,
-    this.foregroundColor = Colors.white,
     this.backgroundColor = Colors.transparent,
     this.borderColor,
     this.cornerRadius = 10,
@@ -4253,7 +6551,6 @@ class _FocusableVideoIconButton extends StatefulWidget {
   final double iconSize;
   final bool enabled;
   final double opacity;
-  final Color foregroundColor;
   final Color backgroundColor;
   final Color? borderColor;
   final double cornerRadius;
@@ -4340,7 +6637,7 @@ class _FocusableVideoIconButtonState extends State<_FocusableVideoIconButton> {
                 child: Center(
                   child: AppIcon(
                     widget.icon,
-                    color: widget.foregroundColor,
+                    color: Colors.white,
                     size: widget.iconSize,
                   ),
                 ),
@@ -4421,7 +6718,7 @@ class _FocusableVideoActionButtonState
                       width: 2,
                     )
                   : null,
-              borderRadius: BorderRadius.circular(22),
+              borderRadius: BorderRadius.circular(AppRadius.xl),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -4433,7 +6730,7 @@ class _FocusableVideoActionButtonState
                   style: TextStyle(
                     color: foreground,
                     fontSize: 15,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w400,
                   ),
                 ),
               ],
@@ -4463,6 +6760,7 @@ class _FocusableVideoMenuItem extends StatefulWidget {
     required this.icon,
     required this.label,
     required this.onPressed,
+    this.focusNode,
     this.autofocus = false,
     this.selected = false,
   });
@@ -4470,6 +6768,7 @@ class _FocusableVideoMenuItem extends StatefulWidget {
   final AppIconData icon;
   final String label;
   final VoidCallback onPressed;
+  final FocusNode? focusNode;
   final bool autofocus;
   final bool selected;
 
@@ -4498,6 +6797,7 @@ class _FocusableVideoMenuItemState extends State<_FocusableVideoMenuItem> {
         ? 0.07
         : 0.0;
     return FocusableActionDetector(
+      focusNode: widget.focusNode,
       autofocus: widget.autofocus,
       shortcuts: const <ShortcutActivator, Intent>{
         SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
@@ -4547,7 +6847,7 @@ class _FocusableVideoMenuItemState extends State<_FocusableVideoMenuItem> {
                     : Colors.transparent,
                 width: 2,
               ),
-              borderRadius: BorderRadius.circular(9),
+              borderRadius: BorderRadius.circular(AppRadius.control),
             ),
             child: Row(
               children: [
@@ -4571,7 +6871,7 @@ class _FocusableVideoMenuItemState extends State<_FocusableVideoMenuItem> {
                       color: Colors.white.withValues(alpha: 0.96),
                       fontSize: 14.5,
                       height: 1.2,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w400,
                     ),
                   ),
                 ),

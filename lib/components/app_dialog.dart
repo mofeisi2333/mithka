@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 
@@ -32,7 +33,7 @@ class AppDialogSurface extends StatelessWidget {
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: c.card,
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
                   border: Border.all(color: c.divider, width: 0.5),
                   boxShadow: const [
                     BoxShadow(
@@ -43,7 +44,7 @@ class AppDialogSurface extends StatelessWidget {
                   ],
                 ),
                 child: DefaultTextStyle(
-                  style: AppTextStyle.body(c.textPrimary),
+                  style: AppTextStyle.body(c.dialogText),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -53,7 +54,7 @@ class AppDialogSurface extends StatelessWidget {
                         child: Text(
                           title,
                           textAlign: TextAlign.center,
-                          style: AppTextStyle.title(c.textPrimary),
+                          style: AppTextStyle.title(c.dialogText),
                         ),
                       ),
                       Flexible(
@@ -99,7 +100,7 @@ class AppDialogAction extends StatelessWidget {
     final color = destructive
         ? AppTheme.tagRed
         : primary
-        ? c.linkBlue
+        ? c.dialogButton
         : c.textSecondary;
     return Expanded(
       child: Semantics(
@@ -128,7 +129,7 @@ Future<String?> showAppTextEntryDialog(
   BuildContext context, {
   required String title,
   required String actionLabel,
-  String cancelLabel = 'Cancel',
+  String? cancelLabel,
   String hint = '',
   String label = '',
   String? description,
@@ -139,14 +140,18 @@ Future<String?> showAppTextEntryDialog(
   TextInputType? keyboardType,
   bool obscureText = false,
   bool allowEmpty = true,
-  String emptyError = 'Required',
+  String? emptyError,
 }) async {
+  // Callers pass already-resolved copy; only the two defaults resolve here.
+  final cancel = cancelLabel ?? AppStrings.t(AppStringKeys.confirmCancel);
+  final required =
+      emptyError ?? AppStrings.t(AppStringKeys.appDialogRequiredField);
   final controller = TextEditingController(text: initial);
   String? validationMessage;
   final value = await showGeneralDialog<String>(
     context: context,
     barrierDismissible: true,
-    barrierLabel: cancelLabel,
+    barrierLabel: cancel,
     barrierColor: Colors.black.withValues(alpha: 0.52),
     transitionDuration: AppMotion.duration(context, AppMotion.responsive),
     transitionBuilder: AppMotion.dialogTransition,
@@ -155,7 +160,7 @@ Future<String?> showAppTextEntryDialog(
         void submit() {
           final text = controller.text.trim();
           if (!allowEmpty && text.isEmpty) {
-            setDialogState(() => validationMessage = emptyError);
+            setDialogState(() => validationMessage = required);
             return;
           }
           Navigator.of(dialogContext).pop(text);
@@ -181,7 +186,7 @@ Future<String?> showAppTextEntryDialog(
                 ),
                 decoration: BoxDecoration(
                   color: dialogContext.colors.searchFill,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadius.card),
                   border: Border.all(color: dialogContext.colors.divider),
                 ),
                 child: TextField(
@@ -199,7 +204,7 @@ Future<String?> showAppTextEntryDialog(
                   onChanged: validationMessage == null
                       ? null
                       : (_) => setDialogState(() => validationMessage = null),
-                  style: AppTextStyle.body(dialogContext.colors.textPrimary),
+                  style: AppTextStyle.body(dialogContext.colors.dialogText),
                   decoration: InputDecoration(
                     labelText: label.isEmpty ? null : label,
                     hintText: hint,
@@ -217,7 +222,7 @@ Future<String?> showAppTextEntryDialog(
           ),
           actions: [
             AppDialogAction(
-              label: cancelLabel,
+              label: cancel,
               onTap: () => Navigator.of(dialogContext).pop(),
             ),
             AppDialogAction(label: actionLabel, primary: true, onTap: submit),

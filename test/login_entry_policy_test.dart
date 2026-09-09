@@ -1,10 +1,65 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mithka/l10n/messages/en.dart';
-import 'package:mithka/l10n/messages/zh_hans.dart';
+import 'package:mithka/auth/auth_manager.dart';
+import 'package:mithka/auth/login_view.dart';
+
+import 'support/l10n_fixtures.dart';
+
+final fixtures = L10nFixtures.load();
 
 void main() {
+  test(
+    'system back stays inside login when the page exposes back navigation',
+    () {
+      expect(
+        loginHasBackAction(
+          showBotLogin: false,
+          forcePhone: false,
+          step: const AuthWaitCode(AuthCodeInfo.fallback),
+          configuredAccountCount: 1,
+        ),
+        isTrue,
+      );
+      expect(
+        loginHasBackAction(
+          showBotLogin: false,
+          forcePhone: false,
+          step: const AuthWaitPhoneNumber(),
+          configuredAccountCount: 1,
+        ),
+        isFalse,
+      );
+      expect(
+        loginHasBackAction(
+          showBotLogin: false,
+          forcePhone: true,
+          step: const AuthWaitCode(AuthCodeInfo.fallback),
+          configuredAccountCount: 1,
+        ),
+        isFalse,
+      );
+      expect(
+        loginHasBackAction(
+          showBotLogin: false,
+          forcePhone: true,
+          step: const AuthWaitPhoneNumber(),
+          configuredAccountCount: 2,
+        ),
+        isTrue,
+      );
+      expect(
+        loginHasBackAction(
+          showBotLogin: true,
+          forcePhone: false,
+          step: const AuthWaitPhoneNumber(),
+          configuredAccountCount: 1,
+        ),
+        isTrue,
+      );
+    },
+  );
+
   test('login exposes passkeys as an Android-only labeled button', () {
     final source = File('lib/auth/login_view.dart').readAsStringSync();
     expect(
@@ -43,22 +98,22 @@ void main() {
 
   test('login explains existing Telegram account requirement', () {
     expect(
-      enMessages['loginCodeWillBeSentToNumber'],
+      fixtures.messages('en')['loginCodeWillBeSentToNumber'],
       "We will send a verification code to your Telegram account. If you don't have one, create it in an official Telegram client first.",
     );
     expect(
-      zhHansMessages['loginCodeWillBeSentToNumber'],
+      fixtures.messages('zhHans')['loginCodeWillBeSentToNumber'],
       contains('Telegram 官方客户端'),
     );
   });
 
-  test('account backup uses a compact background-integrated header', () {
+  test('account backup reuses the shared settings page skeleton', () {
     final source = File(
       'lib/settings/account_backup_view.dart',
     ).readAsStringSync();
 
-    expect(source, contains("ValueKey('account-backup-header')"));
-    expect(source, contains('height: 56'));
-    expect(source, isNot(contains('NavHeader(')));
+    expect(source, contains('SettingsPageScaffold('));
+    expect(source, contains('SettingsListView('));
+    expect(source, isNot(contains("ValueKey('account-backup-header')")));
   });
 }

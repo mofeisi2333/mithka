@@ -71,7 +71,7 @@ class _GlobalChatThemeViewState extends State<GlobalChatThemeView> {
     try {
       final nextWallpaper = option.wallpaper;
       if (nextWallpaper != null) {
-        await _controller.loadDefaultWallpaper(dark: _dark);
+        await _controller.loadDefaultWallpaper(dark: _dark, refresh: true);
         if (!mounted) return;
         final existingDefault = _controller.defaultWallpaper(dark: _dark);
         final previousWallpaper = _controller.globalThemeWallpaperFor(
@@ -102,39 +102,29 @@ class _GlobalChatThemeViewState extends State<GlobalChatThemeView> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    return ColoredBox(
-      color: c.groupedBackground,
-      child: Column(
-        children: [
-          NavHeader(
-            title: AppStringKeys.chatThemeTitle,
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: _loaded
-                ? ListView(
-                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 28),
-                    children: [
-                      _brightnessPicker(),
-                      const SizedBox(height: 14),
-                      _preview(_selection),
-                      const SizedBox(height: 20),
-                      Text(
-                        AppStringKeys.chatThemeChoose.l10n(context),
-                        style: TextStyle(
-                          color: c.textSecondary,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      _themeGrid(),
-                    ],
-                  )
-                : const SizedBox.shrink(),
-          ),
-        ],
-      ),
+    return SettingsPageScaffold(
+      title: AppStringKeys.chatThemeTitle,
+      onBack: () => Navigator.of(context).pop(),
+      child: _loaded
+          ? SettingsListView(
+              children: [
+                _brightnessPicker(),
+                const SizedBox(height: AppSpacing.xl),
+                _preview(_selection),
+                const SizedBox(height: AppSpacing.section),
+                Text(
+                  AppStringKeys.chatThemeChoose.l10n(context),
+                  style: TextStyle(
+                    color: c.textSecondary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                _themeGrid(),
+              ],
+            )
+          : const SizedBox.shrink(),
     );
   }
 
@@ -146,7 +136,7 @@ class _GlobalChatThemeViewState extends State<GlobalChatThemeView> {
       padding: const EdgeInsets.all(2),
       decoration: BoxDecoration(
         color: c.panelBackground,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(AppRadius.control),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -186,7 +176,7 @@ class _GlobalChatThemeViewState extends State<GlobalChatThemeView> {
           color: selected
               ? c.linkBlue.withValues(alpha: 0.15)
               : const Color(0x00000000),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(AppRadius.control),
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -224,7 +214,7 @@ class _GlobalChatThemeViewState extends State<GlobalChatThemeView> {
     final c = context.colors;
     final appearance = context.watch<ThemeController>();
     return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(AppRadius.lg),
       child: SizedBox(
         height: 220,
         child: ChatWallpaperBackground(
@@ -256,7 +246,7 @@ class _GlobalChatThemeViewState extends State<GlobalChatThemeView> {
                   style: const TextStyle(
                     color: Color(0xF2FFFFFF),
                     fontSize: 13,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                     shadows: [Shadow(color: Color(0x77000000), blurRadius: 6)],
                   ),
                 ),
@@ -300,10 +290,10 @@ class _GlobalChatThemeViewState extends State<GlobalChatThemeView> {
             padding: EdgeInsets.all(selected ? 3 : 1),
             decoration: BoxDecoration(
               color: selected ? c.linkBlue : c.divider,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(AppRadius.lg),
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(13),
+              borderRadius: BorderRadius.circular(AppRadius.card),
               child: ChatWallpaperBackground(
                 // Official emoji-theme cards mirror Telegram iOS: the emoji
                 // stays legible over the authored fill/gradient, while the
@@ -354,7 +344,7 @@ class _GlobalChatThemeViewState extends State<GlobalChatThemeView> {
             height: 22,
             decoration: BoxDecoration(
               color: style.outgoingColor,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(AppRadius.card),
             ),
           ),
         ),
@@ -366,7 +356,7 @@ class _GlobalChatThemeViewState extends State<GlobalChatThemeView> {
             height: 22,
             decoration: BoxDecoration(
               color: style.incomingColor,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(AppRadius.card),
             ),
           ),
         ),

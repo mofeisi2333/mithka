@@ -68,6 +68,56 @@ void main() {
     }
   });
 
+  test('an edited attachment is re-read instead of merged in place', () {
+    // The in-place merge keeps the previous attachment, so a message whose
+    // media was replaced kept stale dimensions and a deleted thumbnail path.
+    expect(
+      mediaContentUpdateNeedsRefresh(
+        contentType: 'messagePhoto',
+        isSending: false,
+      ),
+      isTrue,
+    );
+    expect(
+      mediaContentUpdateNeedsRefresh(
+        contentType: 'messageVideo',
+        isSending: false,
+      ),
+      isTrue,
+    );
+    expect(
+      mediaContentUpdateNeedsRefresh(
+        contentType: 'messageVideoNote',
+        isSending: false,
+      ),
+      isTrue,
+    );
+  });
+
+  test('an uploading video keeps its local source instead', () {
+    expect(
+      mediaContentUpdateNeedsRefresh(
+        contentType: 'messageVideo',
+        isSending: true,
+      ),
+      isFalse,
+    );
+  });
+
+  test('a non-media content update needs no re-read', () {
+    expect(
+      mediaContentUpdateNeedsRefresh(
+        contentType: 'messageText',
+        isSending: false,
+      ),
+      isFalse,
+    );
+    expect(
+      mediaContentUpdateNeedsRefresh(contentType: null, isSending: false),
+      isFalse,
+    );
+  });
+
   test('live video update hydrates the outgoing preview media', () {
     final pending = ChatMessage(
       id: 77,
@@ -95,6 +145,8 @@ void main() {
         'caption': {'@type': 'formattedText', 'text': ''},
         'video': {
           '@type': 'video',
+          'file_name': 'clip.webm',
+          'mime_type': 'video/webm',
           'duration': 7,
           'width': 1080,
           'height': 1920,
@@ -112,6 +164,8 @@ void main() {
     expect(updated.image?.id, 401);
     expect(updated.video?.id, 402);
     expect(updated.video?.localPath, '/tmp/outgoing-video.mp4');
+    expect(updated.video?.fileName, 'clip.webm');
+    expect(updated.video?.mimeType, 'video/webm');
     expect(updated.imageWidth, 1080);
     expect(updated.imageHeight, 1920);
     expect(updated.videoDuration, 7);
@@ -144,6 +198,8 @@ void main() {
     expect(confirmed.image?.id, 401);
     expect(confirmed.video?.id, 502);
     expect(confirmed.video?.localPath, '/tmp/outgoing-video.mp4');
+    expect(confirmed.video?.fileName, 'clip.webm');
+    expect(confirmed.video?.mimeType, 'video/webm');
     expect(confirmed.imageWidth, 1080);
     expect(confirmed.imageHeight, 1920);
     expect(confirmed.videoDuration, 7);
@@ -177,6 +233,14 @@ void main() {
       sessionMessages: [pending],
     );
     final transcriptBeforeAcknowledgement = vm.messages;
+    final fullViewRevisionBeforeAcknowledgement = vm.fullViewRevision;
+    final composerRevisionBeforeAcknowledgement = vm.composerRevision;
+    var bubbleRefreshes = 0;
+    var unrelatedBubbleRefreshes = 0;
+    vm.messageRevisionListenable(77).addListener(() => bubbleRefreshes++);
+    vm
+        .messageRevisionListenable(78)
+        .addListener(() => unrelatedBubbleRefreshes++);
 
     vm.applyLiveUpdateForTesting({
       '@type': 'updateMessageSendAcknowledged',
@@ -186,7 +250,11 @@ void main() {
 
     expect(vm.messages.single.isSending, isTrue);
     expect(vm.messages.single.isSendAcknowledged, isTrue);
-    expect(vm.messages, isNot(same(transcriptBeforeAcknowledgement)));
+    expect(vm.messages, same(transcriptBeforeAcknowledgement));
+    expect(vm.fullViewRevision, fullViewRevisionBeforeAcknowledgement);
+    expect(vm.composerRevision, composerRevisionBeforeAcknowledgement + 1);
+    expect(bubbleRefreshes, 1);
+    expect(unrelatedBubbleRefreshes, 0);
     vm.dispose();
   });
 

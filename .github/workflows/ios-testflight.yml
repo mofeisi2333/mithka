@@ -1,0 +1,232 @@
+name: iOS TestFlight
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - release
+      - 'nightly**'
+      - 'release-ios**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mithka-ios-testflight-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Required quality gate
+    uses: ./.github/workflows/quality.yml
+
+  archive-upload:
+    name: Archive and upload iOS
+    needs: quality
+    runs-on: macos-26
+    timeout-minutes: 120
+    env:
+      APP_STORE_ID: '6783830742'
+      BUNDLE_ID: ad.neko.mithka
+      DEVELOPMENT_TEAM: 7P8CLHDH5G
+      MITHKA_CI_PLATFORM: ios
+      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+      FIREBASE_IOS_GOOGLESERVICE_INFO_PLIST_B64: ${{ secrets.FIREBASE_IOS_GOOGLESERVICE_INFO_PLIST_B64 }}
+      SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+      ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.2'
+          channel: stable
+          cache: true
+
+      - name: Select Xcode 26
+        run: |
+          set -euo pipefail
+          xcode_path="$(find /Applications -maxdepth 1 -type d -name 'Xcode_26*.app' | sort -V | tail -1)"
+          test -n "$xcode_path"
+          echo "DEVELOPER_DIR=$xcode_path/Contents/Developer" >> "$GITHUB_ENV"
+
+      - name: Prepare App Store Connect credential
+        env:
+          PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          : "${PRIVATE_KEY:?missing APP_STORE_CONNECT_PRIVATE_KEY}"
+          : "${ASC_KEY_ID:?missing APP_STORE_CONNECT_KEY_ID}"
+          : "${ASC_ISSUER_ID:?missing APP_STORE_CONNECT_ISSUER_ID}"
+          key_directory="$RUNNER_TEMP/app-store-connect"
+          key_path="$key_directory/AuthKey_${ASC_KEY_ID}.p8"
+          mkdir -p "$key_directory"
+          chmod 700 "$key_directory"
+          umask 077
+          printf '%s' "$PRIVATE_KEY" > "$key_path"
+          openssl pkey -in "$key_path" -noout -check >/dev/null
+          echo "ASC_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+
+      - name: Import persistent Apple signing identity
+        env:
+          SIGNING_CERTIFICATE_P12: ${{ secrets.IOS_SIGNING_CERTIFICATE_P12 }}
+          SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.IOS_SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${SIGNING_CERTIFICATE_P12:?missing IOS_SIGNING_CERTIFICATE_P12}"
+          : "${SIGNING_CERTIFICATE_PASSWORD:?missing IOS_SIGNING_CERTIFICATE_PASSWORD}"
+          signing_keychain="$RUNNER_TEMP/mithka-signing.keychain-db"
+          signing_p12="$RUNNER_TEMP/mithka-signing.p12"
+          keychain_password="$(openssl rand -hex 32)"
+          printf '%s' "$SIGNING_CERTIFICATE_P12" | base64 --decode > "$signing_p12"
+          security create-keychain -p "$keychain_password" "$signing_keychain"
+          security set-keychain-settings -lut 21600 "$signing_keychain"
+          security unlock-keychain -p "$keychain_password" "$signing_keychain"
+          security import "$signing_p12" \
+            -k "$signing_keychain" \
+            -P "$SIGNING_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s \
+            -k "$keychain_password" \
+            "$signing_keychain" >/dev/null
+          security list-keychains -d user -s "$signing_keychain"
+          security find-identity -v -p codesigning "$signing_keychain" | grep -q '1 valid identities found'
+          {
+            echo "CI_SIGNING_KEYCHAIN=$signing_keychain"
+            echo "CI_SIGNING_P12=$signing_p12"
+          } >> "$GITHUB_ENV"
+
+      - name: Set build identity
+        run: |
+          set -euo pipefail
+          build_number="$(sh scripts/apple_ci_build_number.sh "$GITHUB_SHA")"
+          {
+            echo "CI_BUILD_NUMBER=$build_number"
+            echo "CI_COMMIT=$GITHUB_SHA"
+            echo "CI_PRIMARY_REPOSITORY_PATH=$GITHUB_WORKSPACE"
+            echo "CI_DERIVED_DATA_PATH=$RUNNER_TEMP/MithkaDerivedData"
+          } >> "$GITHUB_ENV"
+
+      - name: Prepare deterministic iOS build inputs
+        run: sh ci_scripts/ci_post_clone.sh
+
+      - name: Archive iOS app
+        run: |
+          set -euo pipefail
+          archive_path="$RUNNER_TEMP/Mithka-iOS.xcarchive"
+          xcodebuild archive \
+            -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$archive_path" \
+            -derivedDataPath "$CI_DERIVED_DATA_PATH" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
+            PROVISIONING_PROFILE_SPECIFIER=
+
+          tdjson_dsym="$archive_path/dSYMs/tdjson.framework.dSYM"
+          tdjson_binary="$archive_path/Products/Applications/Runner.app/Frameworks/tdjson.framework/tdjson"
+          binary_uuid="$(/usr/bin/dwarfdump --uuid "$tdjson_binary" | awk 'NR == 1 { print $2 }')"
+          dsym_uuid="$(/usr/bin/dwarfdump --uuid "$tdjson_dsym" | awk 'NR == 1 { print $2 }')"
+          test -n "$binary_uuid"
+          test "$dsym_uuid" = "$binary_uuid"
+          echo "ARCHIVE_PATH=$archive_path" >> "$GITHUB_ENV"
+
+      - name: Verify iOS marketing version
+        run: |
+          set -euo pipefail
+          raw_version="$(awk '/^version:/ { print $2; exit }' pubspec.yaml)"
+          expected_version="$(sh scripts/apple_marketing_version.sh \
+            "$raw_version" "$GITHUB_REF_NAME")"
+          info_plist="$ARCHIVE_PATH/Products/Applications/Runner.app/Info.plist"
+          actual_version="$(plutil -extract CFBundleShortVersionString raw "$info_plist")"
+          if [[ "$actual_version" != "$expected_version" ]]; then
+            echo "::error::Expected iOS marketing version $expected_version, got $actual_version"
+            exit 1
+          fi
+          echo "Verified iOS marketing version $actual_version"
+
+      - name: Export and upload IPA to App Store Connect
+        run: |
+          set -euo pipefail
+          export_options="$RUNNER_TEMP/UploadOptions-iOS.plist"
+          upload_path="$RUNNER_TEMP/iOSUpload"
+          plutil -create xml1 "$export_options"
+          plutil -insert method -string app-store-connect "$export_options"
+          plutil -insert destination -string export "$export_options"
+          plutil -insert signingStyle -string automatic "$export_options"
+          plutil -insert teamID -string "$DEVELOPMENT_TEAM" "$export_options"
+          plutil -insert manageAppVersionAndBuildNumber -bool NO "$export_options"
+          plutil -insert stripSwiftSymbols -bool YES "$export_options"
+          plutil -insert uploadSymbols -bool YES "$export_options"
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "$upload_path" \
+            -exportOptionsPlist "$export_options" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+          ipa_count="$(find "$upload_path" -maxdepth 1 -type f -name '*.ipa' -print | wc -l | tr -d ' ')"
+          test "$ipa_count" -eq 1
+          ipa="$(find "$upload_path" -maxdepth 1 -type f -name '*.ipa' -print -quit)"
+          API_PRIVATE_KEYS_DIR="$(dirname "$ASC_KEY_PATH")" \
+            xcrun altool --upload-package "$ipa" \
+              --api-key "$ASC_KEY_ID" \
+              --api-issuer "$ASC_ISSUER_ID" \
+              --wait \
+              --output-format json
+
+      - name: Retain uploaded IPA for release verification
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-app-store-ipa
+          path: ${{ runner.temp }}/iOSUpload/*.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Distribute internally and submit external Beta App Review
+        env:
+          TESTFLIGHT_INTERNAL_GROUP: ${{ vars.TESTFLIGHT_INTERNAL_GROUP || 'Internal' }}
+          TESTFLIGHT_EXTERNAL_GROUP: ${{ vars.TESTFLIGHT_EXTERNAL_GROUP || 'External' }}
+        run: |
+          set -euo pipefail
+          ruby scripts/distribute_testflight_groups.rb \
+            --key-id "$ASC_KEY_ID" \
+            --issuer-id "$ASC_ISSUER_ID" \
+            --key-path "$ASC_KEY_PATH" \
+            --app-id "$APP_STORE_ID" \
+            --build-number "$CI_BUILD_NUMBER" \
+            --platform IOS \
+            --internal-group "$TESTFLIGHT_INTERNAL_GROUP" \
+            --external-group "$TESTFLIGHT_EXTERNAL_GROUP"
+
+      - name: Remove temporary credentials and generated secrets
+        if: always()
+        run: |
+          if [[ -n "${ASC_KEY_PATH:-}" ]]; then
+            rm -f "$ASC_KEY_PATH"
+          fi
+          if [[ -n "${CI_SIGNING_KEYCHAIN:-}" ]]; then
+            security delete-keychain "$CI_SIGNING_KEYCHAIN" || true
+          fi
+          if [[ -n "${CI_SIGNING_P12:-}" ]]; then
+            rm -f "$CI_SIGNING_P12"
+          fi
+          rm -f lib/config/secrets.dart ios/Runner/GoogleService-Info.plist

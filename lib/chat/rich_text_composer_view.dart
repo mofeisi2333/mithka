@@ -14,6 +14,7 @@ import '../components/app_icons.dart';
 import '../components/toast.dart';
 import '../media/app_asset_picker.dart';
 import '../tdlib/td_models.dart';
+import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import 'audio_search_view.dart';
@@ -52,26 +53,24 @@ Future<RichTextComposerResult?> showRichTextComposerSheet(
   String hintText = AppStringKeys.richTextComposerContentPlaceholder,
   bool allowMedia = true,
 }) {
-  return showGeneralDialog<RichTextComposerResult>(
+  return showAppAdaptiveSheetDialog<RichTextComposerResult>(
     context: context,
-    barrierDismissible: true,
+    builder: (dialogContext) => RichTextComposerView(
+      initialText: initialText,
+      initialEntities: initialEntities,
+      initialMedia: initialMedia,
+      initialAttachments: initialAttachments,
+      title: title,
+      submitText: submitText,
+      hintText: hintText,
+      allowMedia: allowMedia,
+      asSheet: true,
+    ),
     barrierLabel: title.l10n(context),
     barrierColor: Colors.black.withValues(alpha: 0.36),
     transitionDuration: const Duration(milliseconds: 240),
-    pageBuilder: (dialogContext, _, _) {
-      return RichTextComposerView(
-        initialText: initialText,
-        initialEntities: initialEntities,
-        initialMedia: initialMedia,
-        initialAttachments: initialAttachments,
-        title: title,
-        submitText: submitText,
-        hintText: hintText,
-        allowMedia: allowMedia,
-        asSheet: true,
-      );
-    },
-    transitionBuilder: (context, animation, secondaryAnimation, child) {
+    centeredBackgroundColor: context.colors.background,
+    mobileTransitionBuilder: (context, animation, secondaryAnimation, child) {
       final curved = CurvedAnimation(
         parent: animation,
         curve: Curves.easeOutCubic,
@@ -100,6 +99,9 @@ class RichTextComposerView extends StatefulWidget {
     this.hintText = AppStringKeys.richTextComposerContentPlaceholder,
     this.allowMedia = true,
     this.asSheet = false,
+    this.showCloseAction = true,
+    this.onClose,
+    this.onSubmit,
   });
 
   final String initialText;
@@ -111,6 +113,9 @@ class RichTextComposerView extends StatefulWidget {
   final String hintText;
   final bool allowMedia;
   final bool asSheet;
+  final bool showCloseAction;
+  final FutureOr<void> Function()? onClose;
+  final FutureOr<void> Function(RichTextComposerResult result)? onSubmit;
 
   @override
   State<RichTextComposerView> createState() => _RichTextComposerViewState();
@@ -429,6 +434,7 @@ enum _RichBlockKind {
   collage,
   slideshow,
   table,
+  buttonRow,
   details,
   map,
   animation,
@@ -498,6 +504,39 @@ class _RichMediaGroupDraft {
   void dispose() => caption.dispose();
 }
 
+enum _RichButtonAlignment { left, center, right }
+
+enum _RichButtonStyle { standard, primary, success, danger }
+
+class _RichButtonDraft {
+  _RichButtonDraft({String label = '', String url = ''})
+    : label = TextEditingController(text: label),
+      url = TextEditingController(text: url);
+
+  final TextEditingController label;
+  final TextEditingController url;
+  _RichButtonStyle style = _RichButtonStyle.primary;
+
+  void dispose() {
+    label.dispose();
+    url.dispose();
+  }
+}
+
+class _RichButtonRowDraft {
+  _RichButtonRowDraft({required String defaultLabel})
+    : buttons = [_RichButtonDraft(label: defaultLabel)];
+
+  final List<_RichButtonDraft> buttons;
+  _RichButtonAlignment alignment = _RichButtonAlignment.left;
+
+  void dispose() {
+    for (final button in buttons) {
+      button.dispose();
+    }
+  }
+}
+
 class _RichContentBlock {
   _RichContentBlock._({
     required this.kind,
@@ -507,6 +546,7 @@ class _RichContentBlock {
     this.attachment,
     this.generic,
     this.mediaGroup,
+    this.buttonRow,
   }) : id = _nextId++;
 
   factory _RichContentBlock.text(_RichTextBlock text, {_RichBlockKind? kind}) =>
@@ -536,6 +576,9 @@ class _RichContentBlock {
   factory _RichContentBlock.mediaGroup(_RichMediaGroupDraft group) =>
       _RichContentBlock._(kind: group.kind, mediaGroup: group);
 
+  factory _RichContentBlock.buttonRow(_RichButtonRowDraft row) =>
+      _RichContentBlock._(kind: _RichBlockKind.buttonRow, buttonRow: row);
+
   static int _nextId = 1;
 
   static _RichBlockKind _kindForAttachment(OutgoingAttachment attachment) {
@@ -558,6 +601,7 @@ class _RichContentBlock {
   final OutgoingAttachment? attachment;
   final _RichGenericDraft? generic;
   final _RichMediaGroupDraft? mediaGroup;
+  final _RichButtonRowDraft? buttonRow;
 }
 
 class _RichTextComposerViewState extends State<RichTextComposerView> {
@@ -607,8 +651,14 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
     late final _RichTextBlock block;
     void onTextChanged() {
       if (controller.text == block.lastText) return;
+      final wasEmpty = block.lastText.trim().isEmpty;
       block.lastText = controller.text;
-      if (mounted) setState(() {});
+      // The field repaints itself off its controller; the only thing this page
+      // builds from block text is `_hasAnyText`, so rebuild it only when this
+      // block crosses empty/non-empty instead of on every keystroke.
+      if (wasEmpty != controller.text.trim().isEmpty && mounted) {
+        setState(() {});
+      }
     }
 
     block = _RichTextBlock(controller, focusNode, onTextChanged, kind: kind);
@@ -632,6 +682,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
     block.math?.dispose();
     block.generic?.dispose();
     block.mediaGroup?.dispose();
+    block.buttonRow?.dispose();
   }
 
   void _submit() {
@@ -656,7 +707,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
 
     void flushHtml() {
       final html = htmlBuffer.toString().trim();
-      if (html.isNotEmpty) {
+      if (html.isNotEmpty || inputBlocks.isNotEmpty) {
         segments.add(
           RichMessageSendSegment.html(
             html,
@@ -733,6 +784,35 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
         continue;
       }
       flushAttachments();
+      final buttonRow = block.buttonRow;
+      if (buttonRow != null) {
+        if (buttonRow.buttons.isEmpty) continue;
+        final buttons = <Map<String, dynamic>>[];
+        for (final button in buttonRow.buttons) {
+          final label = button.label.text.trim();
+          final url = button.url.text.trim();
+          if (label.isEmpty || !_isValidRichButtonUrl(url)) {
+            showToast(
+              context,
+              AppStringKeys.richTextComposerButtonInvalid.l10n(context),
+            );
+            return;
+          }
+          buttons.add({
+            '@type': 'inlineButton',
+            'text': formattedTextToRichText(label, const []),
+            'type': {'@type': 'inlineKeyboardButtonTypeUrl', 'url': url},
+            if (button.style != _RichButtonStyle.standard)
+              'style': {'@type': button.style.tdType},
+          });
+        }
+        inputBlocks.add({
+          '@type': 'inputPageBlockButtonRow',
+          'buttons': buttons,
+          'align': {'@type': buttonRow.alignment.tdType},
+        });
+        continue;
+      }
       String text;
       List<Map<String, dynamic>> blockEntities = const [];
       if (block.text != null) {
@@ -774,14 +854,27 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
     }
     flushAttachments();
     flushHtml();
-    Navigator.of(context).pop(
-      RichTextComposerResult(
-        text: buffer.toString(),
-        entities: entities,
-        attachments: List.unmodifiable(attachments),
-        segments: List.unmodifiable(segments),
-      ),
+    final result = RichTextComposerResult(
+      text: buffer.toString(),
+      entities: entities,
+      attachments: List.unmodifiable(attachments),
+      segments: List.unmodifiable(segments),
     );
+    final callback = widget.onSubmit;
+    if (callback != null) {
+      unawaited(Future<void>.sync(() => callback(result)));
+      return;
+    }
+    Navigator.of(context).pop(result);
+  }
+
+  void _close() {
+    final callback = widget.onClose;
+    if (callback != null) {
+      unawaited(Future<void>.sync(callback));
+      return;
+    }
+    Navigator.of(context).pop();
   }
 
   int _documentTextCharacterCount() {
@@ -798,6 +891,14 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
       }
       final group = block.mediaGroup;
       if (group != null) text.write(group.caption.text);
+      final buttonRow = block.buttonRow;
+      if (buttonRow != null) {
+        for (final button in buttonRow.buttons) {
+          text
+            ..write(button.label.text)
+            ..write(button.url.text);
+        }
+      }
       final table = block.table;
       if (table != null) {
         for (final row in table.cells) {
@@ -808,6 +909,15 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
       }
     }
     return telegramUtf8CharacterCount(text.toString());
+  }
+
+  bool _isValidRichButtonUrl(String value) {
+    final uri = Uri.tryParse(value);
+    if (uri == null || !uri.hasScheme) return false;
+    if (uri.scheme == 'http' || uri.scheme == 'https') {
+      return uri.host.isNotEmpty;
+    }
+    return uri.scheme == 'tg';
   }
 
   String _mediaBlockHtml(OutgoingAttachment attachment, String id) {
@@ -1136,6 +1246,15 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
         );
       case _RichBlockKind.table:
         _insertTable();
+      case _RichBlockKind.buttonRow:
+        _insertStructuredBlock(
+          _RichContentBlock.buttonRow(
+            _RichButtonRowDraft(
+              defaultLabel: AppStringKeys.richTextComposerButtonDefaultLabel
+                  .l10n(context),
+            ),
+          ),
+        );
       case _RichBlockKind.details:
         _insertStructuredBlock(
           _RichContentBlock.generic(
@@ -1229,14 +1348,20 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
             height: 54,
             child: Row(
               children: [
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => Navigator.of(context).pop(),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(
-                      AppStringKeys.countryPickerCancel.l10n(context),
-                      style: TextStyle(fontSize: 16, color: c.textPrimary),
+                Visibility(
+                  visible: widget.showCloseAction,
+                  maintainSize: true,
+                  maintainAnimation: true,
+                  maintainState: true,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _close,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        AppStringKeys.countryPickerCancel.l10n(context),
+                        style: TextStyle(fontSize: 16, color: c.textPrimary),
+                      ),
                     ),
                   ),
                 ),
@@ -1312,6 +1437,9 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
     );
     if (!widget.asSheet) {
       return Scaffold(backgroundColor: c.background, body: content);
+    }
+    if (appModalUsesCenteredPresentation(MediaQuery.sizeOf(context))) {
+      return ColoredBox(color: c.background, child: content);
     }
     return Align(
       alignment: Alignment.bottomCenter,
@@ -1436,6 +1564,10 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
     }
     final table = block.table;
     if (table == null) {
+      final buttonRow = block.buttonRow;
+      if (buttonRow != null) {
+        return _buttonRowEditor(c, index, buttonRow);
+      }
       final group = block.mediaGroup;
       if (group != null) return _mediaGroupEditor(c, index, group);
       final generic = block.generic;
@@ -1520,7 +1652,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: AppTheme.brand.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(7),
+            borderRadius: BorderRadius.circular(AppRadius.md),
           ),
           child: IntrinsicHeight(
             child: Row(
@@ -1540,7 +1672,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
                             style: TextStyle(
                               color: AppTheme.brand,
                               fontSize: 22,
-                              fontWeight: FontWeight.w700,
+                              fontWeight: FontWeight.w600,
                               height: 1,
                             ),
                           ),
@@ -1559,7 +1691,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: c.searchFill,
-            borderRadius: BorderRadius.circular(7),
+            borderRadius: BorderRadius.circular(AppRadius.md),
             border: Border.all(color: c.divider, width: 0.5),
           ),
           child: editor,
@@ -1615,7 +1747,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
                 color: selected
                     ? AppTheme.brand.withValues(alpha: 0.14)
                     : c.searchFill,
-                borderRadius: BorderRadius.circular(7),
+                borderRadius: BorderRadius.circular(AppRadius.md),
                 border: Border.all(
                   color: selected ? AppTheme.brand : c.divider,
                   width: selected ? 1 : 0.5,
@@ -1777,6 +1909,256 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
     (block) => block.text?.controller.text.trim().isNotEmpty ?? false,
   );
 
+  Widget _buttonRowEditor(
+    AppColors c,
+    int blockIndex,
+    _RichButtonRowDraft row,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(2, 3, 12, 3),
+      child: Container(
+        key: const ValueKey('rich-button-row-editor'),
+        padding: const EdgeInsets.fromLTRB(10, 9, 8, 10),
+        decoration: BoxDecoration(
+          color: c.card,
+          borderRadius: BorderRadius.circular(AppRadius.control),
+          border: Border.all(color: c.divider, width: 0.5),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    AppStringKeys.richTextBlockButtonRow.l10n(context),
+                    style: AppTextStyle.callout(
+                      c.textPrimary,
+                      weight: AppTextWeight.semibold,
+                    ),
+                  ),
+                ),
+                for (final alignment in _RichButtonAlignment.values)
+                  _buttonAlignmentControl(c, row, alignment),
+                const SizedBox(width: 2),
+                _miniIconButton(
+                  c,
+                  icon: HeroAppIcons.trash,
+                  label: AppStringKeys.richTextComposerRemoveBlock.l10n(
+                    context,
+                  ),
+                  destructive: true,
+                  onTap: () => _removeStructuredBlock(blockIndex),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            for (var index = 0; index < row.buttons.length; index++) ...[
+              if (index > 0) const SizedBox(height: 8),
+              _buttonDraftEditor(c, row, index),
+            ],
+            const SizedBox(height: 8),
+            GestureDetector(
+              key: const ValueKey('rich-button-add'),
+              behavior: HitTestBehavior.opaque,
+              onTap: row.buttons.length >= 8
+                  ? null
+                  : () {
+                      setState(() {
+                        row.buttons.add(_RichButtonDraft());
+                      });
+                    },
+              child: Container(
+                height: 34,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppTheme.brand.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                  border: Border.all(
+                    color: AppTheme.brand.withValues(alpha: 0.24),
+                    width: 0.5,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AppIcon(
+                      HeroAppIcons.plus,
+                      size: 16,
+                      color: row.buttons.length >= 8
+                          ? c.textTertiary
+                          : AppTheme.brand,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      AppStringKeys.richTextComposerButtonAdd.l10n(context),
+                      style: AppTextStyle.caption(
+                        row.buttons.length >= 8
+                            ? c.textTertiary
+                            : AppTheme.brand,
+                      ).copyWith(fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buttonAlignmentControl(
+    AppColors c,
+    _RichButtonRowDraft row,
+    _RichButtonAlignment alignment,
+  ) {
+    final selected = row.alignment == alignment;
+    return Tooltip(
+      message: alignment.labelKey.l10n(context),
+      excludeFromSemantics: true,
+      child: GestureDetector(
+        key: ValueKey('rich-button-align-${alignment.name}'),
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => row.alignment = alignment),
+        child: Container(
+          width: 30,
+          height: 30,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected
+                ? AppTheme.brand.withValues(alpha: 0.14)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+          ),
+          child: AppIcon(
+            alignment.icon,
+            size: 16,
+            color: selected ? AppTheme.brand : c.textTertiary,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buttonDraftEditor(AppColors c, _RichButtonRowDraft row, int index) {
+    final button = row.buttons[index];
+    return Container(
+      key: ValueKey('rich-button-item-$index'),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: c.searchFill,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            key: ValueKey('rich-button-label-$index'),
+            controller: button.label,
+            onChanged: (_) => setState(() {}),
+            style: AppTextStyle.callout(c.textPrimary),
+            decoration: InputDecoration(
+              isDense: true,
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 8,
+                vertical: 8,
+              ),
+              hintText: AppStringKeys.richTextComposerButtonLabel.l10n(context),
+              hintStyle: AppTextStyle.callout(c.textTertiary),
+            ),
+          ),
+          Container(height: 0.5, color: c.divider),
+          TextField(
+            key: ValueKey('rich-button-url-$index'),
+            controller: button.url,
+            keyboardType: TextInputType.url,
+            autocorrect: false,
+            enableSuggestions: false,
+            onChanged: (_) => setState(() {}),
+            style: AppTextStyle.callout(c.textPrimary),
+            decoration: InputDecoration(
+              isDense: true,
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 8,
+                vertical: 8,
+              ),
+              hintText: AppStringKeys.richTextComposerButtonUrl.l10n(context),
+              hintStyle: AppTextStyle.callout(c.textTertiary),
+            ),
+          ),
+          const SizedBox(height: 7),
+          Row(
+            children: [
+              Expanded(
+                child: Wrap(
+                  spacing: 5,
+                  runSpacing: 5,
+                  children: [
+                    for (final style in _RichButtonStyle.values)
+                      _buttonStyleChip(c, button, style),
+                  ],
+                ),
+              ),
+              _miniIconButton(
+                c,
+                icon: HeroAppIcons.trash,
+                label: AppStringKeys.richTextComposerButtonRemove.l10n(context),
+                destructive: true,
+                onTap: row.buttons.length <= 1
+                    ? null
+                    : () {
+                        setState(() {
+                          row.buttons.removeAt(index).dispose();
+                        });
+                      },
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buttonStyleChip(
+    AppColors c,
+    _RichButtonDraft button,
+    _RichButtonStyle style,
+  ) {
+    final selected = button.style == style;
+    final accent = switch (style) {
+      _RichButtonStyle.standard => c.textSecondary,
+      _RichButtonStyle.primary => AppTheme.brand,
+      _RichButtonStyle.success => const Color(0xFF22A559),
+      _RichButtonStyle.danger => const Color(0xFFE94B4B),
+    };
+    return GestureDetector(
+      key: ValueKey('rich-button-style-${style.name}'),
+      behavior: HitTestBehavior.opaque,
+      onTap: () => setState(() => button.style = style),
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 27),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        decoration: BoxDecoration(
+          color: selected ? accent : accent.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+          border: Border.all(
+            color: selected ? accent : accent.withValues(alpha: 0.24),
+            width: 0.5,
+          ),
+        ),
+        child: Text(
+          style.labelKey.l10n(context),
+          style: AppTextStyle.caption(
+            selected ? Colors.white : accent,
+          ).copyWith(fontWeight: FontWeight.w600),
+        ),
+      ),
+    );
+  }
+
   Widget _genericBlockEditor(AppColors c, int index, _RichContentBlock block) {
     if (block.kind == _RichBlockKind.map) {
       return _mapBlockEditor(c, index, block.generic!);
@@ -1805,7 +2187,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
         padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
         decoration: BoxDecoration(
           color: c.card,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(AppRadius.control),
           border: Border.all(color: c.divider, width: 0.5),
         ),
         child: Column(
@@ -1916,7 +2298,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
             color: c.card,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(AppRadius.control),
             border: Border.all(color: c.divider, width: 0.5),
           ),
           child: Row(
@@ -1927,7 +2309,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: AppTheme.brand.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(AppRadius.control),
                 ),
                 child: AppIcon(
                   HeroAppIcons.locationPin,
@@ -1982,7 +2364,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
     return Container(
       decoration: BoxDecoration(
         color: c.searchFill,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(AppRadius.md),
       ),
       child: TextField(
         controller: controller,
@@ -2011,7 +2393,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
           color: c.card,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(AppRadius.control),
           border: Border.all(color: c.divider, width: 0.5),
         ),
         child: Column(
@@ -2068,7 +2450,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
                       child: Padding(
                         padding: const EdgeInsets.only(right: 6),
                         child: ClipRRect(
-                          borderRadius: BorderRadius.circular(6),
+                          borderRadius: BorderRadius.circular(AppRadius.md),
                           child: _attachmentPreview(
                             c,
                             item,
@@ -2119,7 +2501,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: c.card,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(AppRadius.control),
           border: Border.all(color: c.divider),
         ),
         child: Column(
@@ -2206,7 +2588,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
     return Container(
       decoration: BoxDecoration(
         color: c.card,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadius.card),
         border: Border.all(color: c.divider),
       ),
       child: Column(
@@ -2579,7 +2961,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
             color: selected
                 ? AppTheme.brand.withValues(alpha: 0.14)
                 : c.searchFill,
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(AppRadius.md),
             border: Border.all(
               color: selected
                   ? AppTheme.brand.withValues(alpha: 0.54)
@@ -2726,7 +3108,9 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
           width: 32,
           height: 32,
           alignment: Alignment.center,
-          decoration: BoxDecoration(borderRadius: BorderRadius.circular(6)),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadius.md),
+          ),
           child: AppIcon(icon, size: 17, color: color),
         ),
       ),
@@ -2743,7 +3127,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
         padding: const EdgeInsets.symmetric(horizontal: 7),
         decoration: BoxDecoration(
           color: c.searchFill,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(AppRadius.md),
         ),
         child: Text(
           label,
@@ -2794,6 +3178,12 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
             label: AppStringKeys.richTextComposerInsertTable.l10n(context),
             onTap: () => unawaited(_insertBlockKind(_RichBlockKind.table)),
           ),
+          _iconButton(
+            c,
+            icon: HeroAppIcons.link,
+            label: _RichBlockKind.buttonRow.labelKey.l10n(context),
+            onTap: () => unawaited(_insertBlockKind(_RichBlockKind.buttonRow)),
+          ),
           _actionChip(
             c,
             '∑',
@@ -2829,7 +3219,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: c.searchFill,
-            borderRadius: BorderRadius.circular(7),
+            borderRadius: BorderRadius.circular(AppRadius.md),
           ),
           child: AppIcon(HeroAppIcons.ellipsis, size: 23, color: c.textPrimary),
         ),
@@ -2940,7 +3330,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
           height: 190,
           decoration: BoxDecoration(
             color: c.searchFill,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(AppRadius.control),
             border: Border.all(color: c.divider),
           ),
           clipBehavior: Clip.antiAlias,
@@ -2964,7 +3354,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     color: const Color(0xB8000000),
-                    borderRadius: BorderRadius.circular(7),
+                    borderRadius: BorderRadius.circular(AppRadius.md),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -3007,7 +3397,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
           color: c.searchFill,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(AppRadius.control),
           border: Border.all(color: c.divider),
         ),
         child: Row(
@@ -3016,7 +3406,7 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
               behavior: HitTestBehavior.opaque,
               onTap: isPhoto ? () => _editAttachment(blockIndex) : null,
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(AppRadius.md),
                 child: _attachmentIcon(c, item, size: 70),
               ),
             ),
@@ -3091,6 +3481,12 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
     required double height,
     BoxFit fit = BoxFit.cover,
   }) {
+    // A camera-roll original otherwise decodes at full resolution into a
+    // thumbnail box; the oversized allocation evicts the rest of the image
+    // cache. One axis only, so the aspect ratio survives.
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final cacheWidth = width.isFinite ? (width * dpr).ceil() : null;
+    final cacheHeight = width.isFinite ? null : (height * dpr).ceil();
     final previewBytes = attachment.previewBytes;
     if (previewBytes != null && previewBytes.isNotEmpty) {
       return Image.memory(
@@ -3098,6 +3494,8 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
         width: width,
         height: height,
         fit: fit,
+        cacheWidth: cacheWidth,
+        cacheHeight: cacheHeight,
         errorBuilder: (_, _, _) => _attachmentIcon(c, attachment, size: height),
       );
     }
@@ -3106,6 +3504,8 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
       width: width,
       height: height,
       fit: fit,
+      cacheWidth: cacheWidth,
+      cacheHeight: cacheHeight,
       errorBuilder: (_, _, _) => _attachmentIcon(c, attachment, size: height),
     );
   }
@@ -3367,7 +3767,9 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
         width: 34,
         height: 34,
         alignment: Alignment.center,
-        decoration: BoxDecoration(borderRadius: BorderRadius.circular(6)),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppRadius.md),
+        ),
         child: Text(
           label,
           style: AppTextStyle.callout(
@@ -3395,7 +3797,9 @@ class _RichTextComposerViewState extends State<RichTextComposerView> {
           width: 34,
           height: 34,
           alignment: Alignment.center,
-          decoration: BoxDecoration(borderRadius: BorderRadius.circular(6)),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadius.md),
+          ),
           child: AppIcon(icon, size: 18, color: c.textPrimary),
         ),
       ),
@@ -3419,6 +3823,7 @@ extension on _RichBlockKind {
     _RichBlockKind.collage => AppStringKeys.richTextBlockCollage,
     _RichBlockKind.slideshow => AppStringKeys.richTextBlockSlideshow,
     _RichBlockKind.table => AppStringKeys.richTextBlockTable,
+    _RichBlockKind.buttonRow => AppStringKeys.richTextBlockButtonRow,
     _RichBlockKind.details => AppStringKeys.richTextBlockDetails,
     _RichBlockKind.map => AppStringKeys.richTextBlockMap,
     _RichBlockKind.animation => AppStringKeys.richTextBlockAnimation,
@@ -3444,6 +3849,7 @@ extension on _RichBlockKind {
     _RichBlockKind.collage => HeroAppIcons.images,
     _RichBlockKind.slideshow => HeroAppIcons.tableColumns,
     _RichBlockKind.table => HeroAppIcons.tableCells,
+    _RichBlockKind.buttonRow => HeroAppIcons.link,
     _RichBlockKind.details => HeroAppIcons.bars,
     _RichBlockKind.map => HeroAppIcons.locationPin,
     _RichBlockKind.animation => HeroAppIcons.gif,
@@ -3453,6 +3859,45 @@ extension on _RichBlockKind {
     _RichBlockKind.voiceNote => HeroAppIcons.microphone,
     _RichBlockKind.thinking => HeroAppIcons.comments,
     _RichBlockKind.document => HeroAppIcons.file,
+  };
+}
+
+extension on _RichButtonAlignment {
+  String get tdType => switch (this) {
+    _RichButtonAlignment.left => 'pageBlockHorizontalAlignmentLeft',
+    _RichButtonAlignment.center => 'pageBlockHorizontalAlignmentCenter',
+    _RichButtonAlignment.right => 'pageBlockHorizontalAlignmentRight',
+  };
+
+  String get labelKey => switch (this) {
+    _RichButtonAlignment.left => AppStringKeys.richTextTableAlignLeft,
+    _RichButtonAlignment.center => AppStringKeys.richTextTableAlignCenter,
+    _RichButtonAlignment.right => AppStringKeys.richTextTableAlignRight,
+  };
+
+  AppIconData get icon => switch (this) {
+    _RichButtonAlignment.left => HeroAppIcons.alignLeft,
+    _RichButtonAlignment.center => HeroAppIcons.alignCenter,
+    _RichButtonAlignment.right => HeroAppIcons.alignRight,
+  };
+}
+
+extension on _RichButtonStyle {
+  String get tdType => switch (this) {
+    _RichButtonStyle.standard => 'buttonStyleDefault',
+    _RichButtonStyle.primary => 'buttonStylePrimary',
+    _RichButtonStyle.success => 'buttonStyleSuccess',
+    _RichButtonStyle.danger => 'buttonStyleDanger',
+  };
+
+  String get labelKey => switch (this) {
+    _RichButtonStyle.standard =>
+      AppStringKeys.richTextComposerButtonStyleDefault,
+    _RichButtonStyle.primary =>
+      AppStringKeys.richTextComposerButtonStylePrimary,
+    _RichButtonStyle.success =>
+      AppStringKeys.richTextComposerButtonStyleSuccess,
+    _RichButtonStyle.danger => AppStringKeys.richTextComposerButtonStyleDanger,
   };
 }
 
@@ -3597,7 +4042,7 @@ class _RichContextMenuSurface extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: c.card,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadius.card),
         border: Border.all(color: c.divider, width: 0.5),
         boxShadow: [
           BoxShadow(
@@ -3862,6 +4307,7 @@ class _RichBlockInsertMenu extends StatelessWidget {
                     SizedBox(
                       width: (menuWidth - 12) / 2,
                       child: _RichMenuRow(
+                        key: ValueKey('rich-insert-${kind.name}'),
                         icon: kind.icon,
                         label: kind.labelKey.l10n(context),
                         compact: true,
@@ -3917,7 +4363,7 @@ class _RichAnchoredMenu extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: 6),
               decoration: BoxDecoration(
                 color: c.card,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(AppRadius.card),
                 border: Border.all(color: c.divider, width: 0.5),
                 boxShadow: [
                   BoxShadow(
@@ -3983,6 +4429,7 @@ class _RichMenuRow extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: compact ? 14 : 16,
+                      fontWeight: AppTextWeight.regular,
                       color: onTap == null
                           ? context.colors.textTertiary
                           : destructive
@@ -4032,7 +4479,7 @@ class _RichValueDialogState extends State<_RichValueDialog> {
         padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
           color: c.card,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppRadius.card),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,

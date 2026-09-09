@@ -1,6 +1,8 @@
 import 'package:flutter/widgets.dart';
+import 'package:mithka/l10n/app_localizations.dart';
 
 import '../chat/stretchable_message_bubble_background.dart';
+import '../theme/app_theme.dart';
 import '../theme/message_bubble_background.dart';
 
 const _canvasColor = Color(0xFF17181C);
@@ -92,26 +94,26 @@ class _PreviewGallery extends StatelessWidget {
     final items = [..._items.skip(6), ..._items.take(6)];
     return CustomScrollView(
       slivers: [
-        const SliverPadding(
-          padding: EdgeInsets.fromLTRB(18, 18, 18, 6),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 6),
           sliver: SliverToBoxAdapter(
             child: Text(
-              'Message bubble genres',
-              style: TextStyle(
+              AppStrings.t(AppStringKeys.debugBubblePreviewGenres),
+              style: const TextStyle(
                 color: Color(0xFFF4F4F7),
                 fontSize: 19,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w600,
                 decoration: TextDecoration.none,
               ),
             ),
           ),
         ),
-        const SliverPadding(
-          padding: EdgeInsets.fromLTRB(18, 0, 18, 14),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
           sliver: SliverToBoxAdapter(
             child: Text(
-              'Experimental — styles may change at any time.',
-              style: TextStyle(
+              AppStrings.t(AppStringKeys.debugBubblePreviewExperimental),
+              style: const TextStyle(
                 color: Color(0xFFA9ABB6),
                 fontSize: 11,
                 decoration: TextDecoration.none,
@@ -134,7 +136,7 @@ class _PreviewGallery extends StatelessWidget {
               return DecoratedBox(
                 decoration: BoxDecoration(
                   color: const Color(0xFF24252B),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadius.card),
                   border: Border.all(color: const Color(0xFF363840)),
                 ),
                 child: Padding(
@@ -148,7 +150,9 @@ class _PreviewGallery extends StatelessWidget {
                             background: item.background,
                             constraints: const BoxConstraints.expand(),
                             fallbackColor: const Color(0xFF33343A),
-                            fallbackBorderRadius: BorderRadius.circular(10),
+                            fallbackBorderRadius: BorderRadius.circular(
+                              AppRadius.control,
+                            ),
                             fallbackPadding: EdgeInsets.zero,
                             child: const SizedBox.shrink(),
                           ),

@@ -14,6 +14,7 @@ import '../components/app_icons.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../l10n/app_localizations.dart';
+import '../security/sensitive_clipboard.dart';
 import '../tdlib/td_client.dart';
 import '../theme/app_theme.dart';
 
@@ -164,7 +165,7 @@ class _AccountBackupViewState extends State<AccountBackupView> {
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: c.card,
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: BorderRadius.circular(AppRadius.card),
                 boxShadow: const [
                   BoxShadow(
                     color: Color(0x44000000),
@@ -253,7 +254,7 @@ class _AccountBackupViewState extends State<AccountBackupView> {
     setState(() => _working = true);
     try {
       final backup = await _service.exportActiveSession();
-      await Clipboard.setData(ClipboardData(text: backup.sessionString));
+      await SensitiveClipboard.shared.copy(backup.sessionString);
       if (mounted) {
         showToast(context, AppStrings.t(AppStringKeys.accountBackupCopied));
       }
@@ -399,7 +400,6 @@ class _AccountBackupViewState extends State<AccountBackupView> {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     return PopScope(
       canPop: !widget.returnToPhoneOnBack,
       onPopInvokedWithResult: (didPop, _) {
@@ -407,97 +407,36 @@ class _AccountBackupViewState extends State<AccountBackupView> {
           _close();
         }
       },
-      child: DefaultTextStyle(
-        style: AppTextStyle.body(c.textPrimary),
-        child: ColoredBox(
-          color: c.groupedBackground,
-          child: SafeArea(
-            bottom: false,
-            child: Column(
-              children: [
-                _backupHeader(),
-                Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(12, 14, 12, 24),
-                    children: [
-                      if (widget.showCreateAction) ...[
-                        _enabledSwitch(),
-                        const SizedBox(height: 12),
-                        _actionButton(),
-                        const SizedBox(height: 8),
-                        _localBackupButton(),
-                        const SizedBox(height: 8),
-                        _copyPyrogramButton(),
-                        const SizedBox(height: 8),
-                        _loadPyrogramButton(),
-                      ] else
-                        _loadPyrogramButton(),
-                      const SizedBox(height: 12),
-                      _notice(),
-                      const SizedBox(height: 18),
-                      _sectionTitle(AppStringKeys.accountBackupSessions),
-                      if (_loading)
-                        const Padding(
-                          padding: EdgeInsets.only(top: 24),
-                          child: Center(child: AppActivityIndicator()),
-                        )
-                      else if (!_supported)
-                        _empty(AppStringKeys.accountBackupUnavailable)
-                      else if (_backups.isEmpty)
-                        _empty(AppStringKeys.accountBackupEmpty)
-                      else
-                        _backupList(),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _backupHeader() {
-    final c = context.colors;
-    return SizedBox(
-      key: const ValueKey('account-backup-header'),
-      height: 56,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        child: Row(
+      child: SettingsPageScaffold(
+        title: AppStrings.t(AppStringKeys.accountBackupTitle),
+        onBack: _close,
+        child: SettingsListView(
           children: [
-            Semantics(
-              button: true,
-              label: AppStrings.t(AppStringKeys.loginBackToAccount, {
-                'value1': AppStrings.t(AppStringKeys.accountBackupTitle),
-              }),
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _close,
-                child: const SizedBox(
-                  width: 40,
-                  height: 40,
-                  child: Center(
-                    child: AppIcon(HeroAppIcons.chevronLeft, size: 24),
-                  ),
-                ),
+            if (widget.showCreateAction) ...[
+              SettingsCard.rows(
+                rows: [
+                  _enabledSwitch(),
+                  _actionButton(),
+                  _localBackupButton(),
+                  _copyPyrogramButton(),
+                  _loadPyrogramButton(),
+                ],
               ),
-            ),
-            const SizedBox(width: 4),
-            Expanded(
-              child: Text(
-                AppStrings.t(AppStringKeys.accountBackupTitle),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 21,
-                  fontWeight: FontWeight.w600,
-                  color: c.textPrimary,
-                ),
-              ),
-            ),
-            const SizedBox(width: 40),
+            ] else
+              SettingsCard.rows(rows: [_loadPyrogramButton()]),
+            _notice(),
+            const SettingsSectionHeader(AppStringKeys.accountBackupSessions),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.only(top: 24),
+                child: Center(child: AppActivityIndicator()),
+              )
+            else if (!_supported)
+              _empty(AppStringKeys.accountBackupUnavailable)
+            else if (_backups.isEmpty)
+              _empty(AppStringKeys.accountBackupEmpty)
+            else
+              _backupList(),
           ],
         ),
       ),
@@ -505,44 +444,16 @@ class _AccountBackupViewState extends State<AccountBackupView> {
   }
 
   Widget _actionButton() {
-    final c = context.colors;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: _working || !_consented || !_supported
-          ? null
-          : () => _backupActive(AccountSessionBackupStorage.synced),
-      child: Container(
-        height: 52,
-        decoration: BoxDecoration(
-          color: c.card,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          children: [
-            AppIcon(HeroAppIcons.key, size: 20, color: AppTheme.brand),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                AppStrings.t(
-                  Platform.isIOS
-                      ? AppStringKeys.accountBackupLoginICloud
-                      : AppStringKeys.accountBackupLoginAndroid,
-                ),
-                style: TextStyle(fontSize: 16, color: c.textPrimary),
-              ),
-            ),
-            if (_working)
-              const AppActivityIndicator(size: 18)
-            else
-              AppIcon(
-                HeroAppIcons.chevronRight,
-                size: 14,
-                color: c.textTertiary,
-              ),
-          ],
-        ),
+    return SettingsRow(
+      title: AppStrings.t(
+        Platform.isIOS
+            ? AppStringKeys.accountBackupLoginICloud
+            : AppStringKeys.accountBackupLoginAndroid,
       ),
+      leading: const SettingsLeadingIcon(icon: HeroAppIcons.key),
+      enabled: !_working && _consented && _supported,
+      trailing: _working ? const AppActivityIndicator(size: 18) : null,
+      onTap: () => _backupActive(AccountSessionBackupStorage.synced),
     );
   }
 
@@ -577,92 +488,38 @@ class _AccountBackupViewState extends State<AccountBackupView> {
     required String title,
     required VoidCallback? onTap,
   }) {
-    final c = context.colors;
     final enabled = onTap != null;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
+    return SettingsRow(
+      title: title,
+      leading: SettingsLeadingIcon(icon: icon),
+      enabled: enabled,
+      trailing: _working ? const AppActivityIndicator(size: 18) : null,
       onTap: onTap,
-      child: Opacity(
-        opacity: enabled ? 1 : 0.45,
-        child: Container(
-          height: 52,
-          decoration: BoxDecoration(
-            color: c.card,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              AppIcon(icon, size: 20, color: AppTheme.brand),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  title.l10n(context),
-                  style: TextStyle(fontSize: 16, color: c.textPrimary),
-                ),
-              ),
-              if (_working)
-                const AppActivityIndicator(size: 18)
-              else
-                AppIcon(
-                  HeroAppIcons.chevronRight,
-                  size: 14,
-                  color: c.textTertiary,
-                ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 
   Widget _enabledSwitch() {
-    final c = context.colors;
-    return Container(
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: SettingsSwitchRow(
-        title: Platform.isIOS
-            ? AppStringKeys.accountBackupLoginICloud
-            : AppStringKeys.accountBackupLoginAndroid,
-        value: _consented,
-        onChanged: _supported && !_working ? _setEnabled : (_) {},
-        leading: AppIcon(HeroAppIcons.key, size: 20, color: AppTheme.brand),
-      ),
+    return SettingsSwitchRow(
+      title: Platform.isIOS
+          ? AppStringKeys.accountBackupLoginICloud
+          : AppStringKeys.accountBackupLoginAndroid,
+      value: _consented,
+      enabled: _supported && !_working,
+      onChanged: _setEnabled,
+      leading: const SettingsLeadingIcon(icon: HeroAppIcons.key),
     );
   }
 
   Widget _notice() {
-    final c = context.colors;
-    return Text(
-      AppStrings.t(AppStringKeys.accountBackupNoticeWithLocal),
-      style: TextStyle(fontSize: 13, height: 1.35, color: c.textTertiary),
-    );
-  }
-
-  Widget _sectionTitle(String title) {
-    final c = context.colors;
-    return Padding(
-      padding: const EdgeInsets.only(left: 16, bottom: 6),
-      child: Text(
-        title.l10n(context),
-        style: TextStyle(fontSize: 13, color: c.textTertiary),
-      ),
+    return SettingsNote(
+      text: AppStrings.t(AppStringKeys.accountBackupNoticeWithLocal),
     );
   }
 
   Widget _empty(String message) {
     final c = context.colors;
-    return Container(
-      alignment: Alignment.center,
+    return SettingsPanel(
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(12),
-      ),
       child: Text(
         message.l10n(context),
         textAlign: TextAlign.center,
@@ -672,32 +529,22 @@ class _AccountBackupViewState extends State<AccountBackupView> {
   }
 
   Widget _backupList() {
-    final c = context.colors;
-    return Container(
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          for (final backup in _backups) ...[
-            _BackupRow(
-              backup: backup,
-              subtitle:
-                  '${_storageLabel(backup.storage)} · ${_dateFormat.format(backup.createdAt.toLocal())} · ${_formatBytes(backup.sizeBytes)}',
-              userIdLabel: backup.userId == null
-                  ? null
-                  : AppStrings.t(AppStringKeys.accountBackupUserId, {
-                      'value1': backup.userId,
-                    }),
-              onRestore: () => _restore(backup),
-              onDelete: () => _delete(backup),
-            ),
-            if (backup != _backups.last) const InsetDivider(leadingInset: 56),
-          ],
-        ],
-      ),
+    return SettingsCard.rows(
+      rows: [
+        for (final backup in _backups)
+          _BackupRow(
+            backup: backup,
+            subtitle:
+                '${_storageLabel(backup.storage)} · ${_dateFormat.format(backup.createdAt.toLocal())} · ${_formatBytes(backup.sizeBytes)}',
+            userIdLabel: backup.userId == null
+                ? null
+                : AppStrings.t(AppStringKeys.accountBackupUserId, {
+                    'value1': backup.userId,
+                  }),
+            onRestore: () => _restore(backup),
+            onDelete: () => _delete(backup),
+          ),
+      ],
     );
   }
 
@@ -783,7 +630,7 @@ class _PyrogramSessionImportSheetState
                         ),
                         style: TextStyle(
                           fontSize: 18,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w600,
                           color: c.textPrimary,
                         ),
                       ),
@@ -819,7 +666,7 @@ class _PyrogramSessionImportSheetState
                   ),
                   decoration: BoxDecoration(
                     color: c.card,
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(AppRadius.card),
                     border: Border.all(color: c.divider),
                   ),
                   padding: const EdgeInsets.symmetric(

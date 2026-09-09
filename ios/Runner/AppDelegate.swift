@@ -28,6 +28,7 @@ import UserNotifications
   private var premiumAuthPurchaseBridge: PremiumAuthPurchaseBridge?
   private var mithkaProBridge: MithkaProBridge?
   private var applePCCBridge: ApplePCCBridge?
+  private var privacyShieldView: UIView?
 
   override func application(
     _ application: UIApplication,
@@ -45,6 +46,49 @@ import UserNotifications
       pendingNotificationTap = Self.stringKeyed(userInfo)
     }
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  override func application(
+    _ application: UIApplication,
+    continue userActivity: NSUserActivity,
+    restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void
+  ) -> Bool {
+    if HandoffBridge.shared.accept(userActivity) {
+      return true
+    }
+    return super.application(
+      application,
+      continue: userActivity,
+      restorationHandler: restorationHandler
+    )
+  }
+
+  private func setPrivacyShieldVisible(_ visible: Bool) {
+    guard let window = Self.keyWindow() else { return }
+    if visible {
+      let shield = privacyShieldView ?? {
+        let view = UIView(frame: window.bounds)
+        view.backgroundColor = window.backgroundColor ?? .systemBackground
+        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        return view
+      }()
+      if shield.superview !== window {
+        shield.removeFromSuperview()
+        window.addSubview(shield)
+      }
+      privacyShieldView = shield
+      window.bringSubviewToFront(shield)
+    } else {
+      privacyShieldView?.removeFromSuperview()
+      privacyShieldView = nil
+    }
+  }
+
+  private static func keyWindow() -> UIWindow? {
+    UIApplication.shared.connectedScenes
+      .compactMap { $0 as? UIWindowScene }
+      .flatMap { $0.windows }
+      .first { $0.isKeyWindow }
   }
 
   private func configureNativeSentryIfNeeded() {
@@ -127,6 +171,9 @@ import UserNotifications
     guard !didRegisterFlutterPlugins else { return }
     didRegisterFlutterPlugins = true
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    HandoffBridge.shared.register(
+      messenger: engineBridge.applicationRegistrar.messenger()
+    )
     let clipboardChannel = FlutterMethodChannel(
       name: "mithka/clipboard",
       binaryMessenger: engineBridge.applicationRegistrar.messenger()
@@ -377,6 +424,21 @@ import UserNotifications
       }
     }
 
+    let appLockPrivacyChannel = FlutterMethodChannel(
+      name: "mithka/app_lock_privacy",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    appLockPrivacyChannel.setMethodCallHandler { [weak self] call, result in
+      guard call.method == "setPrivacyShieldVisible" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      let arguments = call.arguments as? [String: Any]
+      let visible = arguments?["visible"] as? Bool ?? false
+      self?.setPrivacyShieldVisible(visible)
+      result(nil)
+    }
+
     let firebaseConfigurationChannel = FlutterMethodChannel(
       name: "mithka/firebase_configuration",
       binaryMessenger: engineBridge.applicationRegistrar.messenger()
@@ -406,6 +468,13 @@ import UserNotifications
       case "get":
         result(Double(UIScreen.main.brightness))
       case "set":
+        guard let value = call.arguments as? NSNumber else {
+          result(FlutterError(code: "invalid_brightness", message: "Expected a numeric value", details: nil))
+          return
+        }
+        UIScreen.main.brightness = CGFloat(max(0.01, min(1, value.doubleValue)))
+        result(nil)
+      case "restore":
         guard let value = call.arguments as? NSNumber else {
           result(FlutterError(code: "invalid_brightness", message: "Expected a numeric value", details: nil))
           return

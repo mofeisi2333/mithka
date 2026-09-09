@@ -5,18 +5,22 @@ import '../tdlib/td_models.dart';
 class VideoPlaybackItem {
   const VideoPlaybackItem({
     required this.video,
+    this.accountSlot,
     this.thumb,
     this.width,
     this.height,
+    this.durationSeconds,
     this.sourceChatId,
     this.messageId,
     this.title = '',
   });
 
   final TdFileRef video;
+  final int? accountSlot;
   final TdFileRef? thumb;
   final int? width;
   final int? height;
+  final int? durationSeconds;
   final int? sourceChatId;
   final int? messageId;
   final String title;
@@ -59,6 +63,12 @@ class VideoPlaybackQueue {
     return VideoPlaybackQueue(items: items, index: target, revision: revision);
   }
 
+  VideoPlaybackQueue? moveTo(int target) {
+    if (target < 0 || target >= items.length) return null;
+    if (target == index) return this;
+    return VideoPlaybackQueue(items: items, index: target, revision: revision);
+  }
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -79,17 +89,21 @@ class VideoPlaybackQueue {
 class _VideoPlaybackItemSnapshot {
   _VideoPlaybackItemSnapshot(VideoPlaybackItem item)
     : video = _TdFileSnapshot(item.video),
+      accountSlot = item.accountSlot,
       thumb = item.thumb == null ? null : _TdFileSnapshot(item.thumb!),
       width = item.width,
       height = item.height,
+      durationSeconds = item.durationSeconds,
       sourceChatId = item.sourceChatId,
       messageId = item.messageId,
       title = item.title;
 
   final _TdFileSnapshot video;
+  final int? accountSlot;
   final _TdFileSnapshot? thumb;
   final int? width;
   final int? height;
+  final int? durationSeconds;
   final int? sourceChatId;
   final int? messageId;
   final String title;
@@ -99,16 +113,27 @@ class _VideoPlaybackItemSnapshot {
       identical(this, other) ||
       other is _VideoPlaybackItemSnapshot &&
           video == other.video &&
+          accountSlot == other.accountSlot &&
           thumb == other.thumb &&
           width == other.width &&
           height == other.height &&
+          durationSeconds == other.durationSeconds &&
           sourceChatId == other.sourceChatId &&
           messageId == other.messageId &&
           title == other.title;
 
   @override
-  int get hashCode =>
-      Object.hash(video, thumb, width, height, sourceChatId, messageId, title);
+  int get hashCode => Object.hash(
+    video,
+    accountSlot,
+    thumb,
+    width,
+    height,
+    durationSeconds,
+    sourceChatId,
+    messageId,
+    title,
+  );
 }
 
 @immutable
@@ -116,6 +141,8 @@ class _TdFileSnapshot {
   _TdFileSnapshot(TdFileRef file)
     : id = file.id,
       localPath = file.localPath,
+      fileName = file.fileName,
+      mimeType = file.mimeType,
       hasAnimation = file.hasAnimation,
       photoId = file.photoId,
       miniThumb = file.miniThumb == null
@@ -127,6 +154,8 @@ class _TdFileSnapshot {
 
   final int id;
   final String? localPath;
+  final String? fileName;
+  final String? mimeType;
   final bool hasAnimation;
   final int? photoId;
   final List<int>? miniThumb;
@@ -138,6 +167,8 @@ class _TdFileSnapshot {
       other is _TdFileSnapshot &&
           id == other.id &&
           localPath == other.localPath &&
+          fileName == other.fileName &&
+          mimeType == other.mimeType &&
           hasAnimation == other.hasAnimation &&
           photoId == other.photoId &&
           listEquals(miniThumb, other.miniThumb) &&
@@ -147,6 +178,8 @@ class _TdFileSnapshot {
   int get hashCode => Object.hash(
     id,
     localPath,
+    fileName,
+    mimeType,
     hasAnimation,
     photoId,
     miniThumb == null ? null : Object.hashAll(miniThumb!),

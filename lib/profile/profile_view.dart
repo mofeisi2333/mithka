@@ -2,7 +2,7 @@
 //  profile_view.dart
 //
 //  The "我" side menu (slides in from the left, ~88% width). Redesigned to match
-//  the reference app's drawer: an azure avatar banner → an edit-profile card → a vertical list
+//  the reference app's drawer: a themed avatar banner → a vertical list
 //  of rows (Calls / Saved Messages / Files / Videos) → account switcher →
 //  an icon-only bottom
 //  bar. Backed by real TDLib via ProfileViewModel + AccountStore.
@@ -15,20 +15,22 @@ import 'package:flutter/material.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
-import '../app/app_navigator.dart';
+import '../app/ipad_window_chrome.dart';
+import '../app/primary_chat_launcher.dart';
 import '../auth/account_store.dart';
 import '../auth/auth_manager.dart';
 import '../call/calls_view.dart';
-import '../chat/chat_view.dart';
+import '../chat/chat_wallpaper.dart';
 import '../chat/custom_emoji.dart';
 import '../chat/shared_media_view.dart';
 import '../components/app_icons.dart';
 import '../components/confirm_dialog.dart';
+import '../components/desktop_row_actions.dart';
 import '../components/drawer_controller.dart' as dc;
 import '../components/photo_avatar.dart';
 import '../components/ui_components.dart';
 import '../components/vip_badge.dart';
-import '../l10n/telegram_language_controller.dart';
+import '../platform/adaptive_platform.dart';
 import '../settings/edit_profile_view.dart';
 import '../settings/settings_view.dart';
 import '../tdlib/json_helpers.dart';
@@ -38,6 +40,8 @@ import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import 'emoji_status_picker.dart';
 import 'profile_detail_view.dart';
+import 'profile_theme_backdrop.dart';
+import 'profile_username_pill.dart';
 import 'profile_username_summary.dart';
 import 'qr_code_view.dart';
 
@@ -54,8 +58,7 @@ class ProfileViewModel extends ChangeNotifier {
     // Keep the profile (and the "我" drawer, which is this same view) live: when
     // our own user changes — e.g. after editing the name — TDLib emits updateUser
     // for us, so re-parse instead of waiting for an app restart.
-    _sub = TdClient.shared.subscribe().listen((u) {
-      if (u.type != 'updateUser') return;
+    _sub = TdClient.shared.updatesOf('updateUser').listen((u) {
       final usr = u.obj('user');
       if (usr != null && usr.int64('id') == user?.id) _applyUser(usr);
     });
@@ -162,6 +165,7 @@ class ProfileView extends StatefulWidget {
 
 class _ProfileViewState extends State<ProfileView> {
   final _vm = ProfileViewModel();
+  final _wallpaperController = ChatWallpaperController.shared;
 
   @override
   void initState() {
@@ -171,7 +175,14 @@ class _ProfileViewState extends State<ProfileView> {
     });
     _vm.onAppear();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) context.read<AccountStore>().refresh();
+      if (!mounted) return;
+      // Loading global themes notifies every open chat. Starting that work
+      // from initState can synchronously dirty an ancestor while this profile
+      // subtree is still being built, so begin it after the frame is complete.
+      unawaited(_wallpaperController.loadGlobalChatThemes());
+      unawaited(_wallpaperController.loadDefaultWallpaper(dark: false));
+      unawaited(_wallpaperController.loadDefaultWallpaper(dark: true));
+      context.read<AccountStore>().refresh();
     });
   }
 
@@ -185,12 +196,7 @@ class _ProfileViewState extends State<ProfileView> {
 
   void _openSaved(String title) {
     final cid = _vm.savedChatId ?? _vm.user?.id ?? 0;
-    pushAppChatRoute(
-      context,
-      AppChatPageRoute<void>(
-        builder: (_) => ChatView(chatId: cid, title: title),
-      ),
-    );
+    unawaited(openChatFromCurrentWindow(context, chatId: cid, title: title));
   }
 
   void _openStatusPicker() {
@@ -234,11 +240,31 @@ class _ProfileViewState extends State<ProfileView> {
     );
   }
 
-  // MARK: - Azure avatar banner
+  // MARK: - Themed profile banner
 
-  Widget _banner() {
+  Widget _banner() => AnimatedBuilder(
+    animation: _wallpaperController,
+    builder: (context, _) => _themedBanner(),
+  );
+
+  Widget _themedBanner() {
     final user = _vm.user;
-    final foreground = context.colors.onAccent;
+    final colors = context.colors;
+    final foreground = colors.textPrimary;
+    final brightness = Theme.of(context).brightness;
+    final dark = brightness == Brightness.dark;
+    final themeController = context.watch<ThemeController>();
+    final selectedWallpaper = selectProfileThemeWallpaper(
+      themingEnabled: themeController.themingEnabled,
+      defaultWallpaper: _wallpaperController.defaultWallpaper(dark: dark),
+      cloudThemeWallpaper: themeController.cloudThemeFor(brightness)?.wallpaper,
+      globalThemeWallpaper: _wallpaperController.globalThemeWallpaperFor(
+        dark: dark,
+      ),
+    );
+    final wallpaper = selectedWallpaper == null
+        ? null
+        : _wallpaperController.resolvedWallpaper(selectedWallpaper);
     final hidePhone = context.watch<ThemeController>().hideSidebarPhone;
     final identities = _vm.usernames.isNotEmpty
         ? compactProfileUsernameLabels(_vm.usernames)
@@ -246,143 +272,157 @@ class _ProfileViewState extends State<ProfileView> {
             if (!hidePhone && (user?.phoneNumber ?? '').isNotEmpty)
               user!.phoneNumber,
           ];
-    return Container(
-      padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
-      decoration: BoxDecoration(gradient: AppTheme.brandGradient),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 8, 16, 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Top controls: QR + close.
-            Row(
-              children: [
-                const Spacer(),
-                GestureDetector(
-                  onTap: _openMyProfile,
-                  child: AppIcon(
-                    HeroAppIcons.circleUser,
-                    size: 22,
-                    color: foreground,
+    return Stack(
+      children: [
+        Positioned.fill(child: ProfileThemeBackdrop(wallpaper: wallpaper)),
+        Padding(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            MediaQuery.of(context).padding.top +
+                iPadWindowChromeInsetOf(context) +
+                8,
+            16,
+            20,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Top controls: QR + close.
+              Row(
+                children: [
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: _openMyProfile,
+                    child: AppIcon(
+                      HeroAppIcons.circleUser,
+                      size: 22,
+                      color: foreground,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 16),
-                GestureDetector(
-                  onTap: () => _root.push(
-                    MaterialPageRoute(
-                      builder: (_) => QRCodeView(
-                        name:
+                  const SizedBox(width: 16),
+                  GestureDetector(
+                    onTap: () => _root.push(
+                      MaterialPageRoute(
+                        builder: (_) => QRCodeView(
+                          name:
+                              user?.name ??
+                              AppStrings.t(AppStringKeys.chatMeLabel),
+                        ),
+                      ),
+                    ),
+                    child: AppIcon(
+                      HeroAppIcons.qrcode,
+                      size: 22,
+                      color: foreground,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  GestureDetector(
+                    onTap: () => context.read<dc.DrawerController>().close(),
+                    child: AppIcon(
+                      HeroAppIcons.xmark,
+                      size: 22,
+                      color: foreground,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _openMyProfile,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: colors.divider, width: 2),
+                      ),
+                      child: PhotoAvatar(
+                        title:
                             user?.name ??
                             AppStrings.t(AppStringKeys.chatMeLabel),
+                        photo: user?.photo,
+                        size: 64,
                       ),
                     ),
                   ),
-                  child: AppIcon(
-                    HeroAppIcons.qrcode,
-                    size: 22,
-                    color: foreground,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                GestureDetector(
-                  onTap: () => context.read<dc.DrawerController>().close(),
-                  child: AppIcon(
-                    HeroAppIcons.xmark,
-                    size: 22,
-                    color: foreground,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _openMyProfile,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: foreground, width: 2),
-                    ),
-                    child: PhotoAvatar(
-                      title:
-                          user?.name ?? AppStrings.t(AppStringKeys.chatMeLabel),
-                      photo: user?.photo,
-                      size: 64,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              user?.name ??
-                                  AppStrings.t(AppStringKeys.contactsLoading),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
-                                color: foreground,
-                              ),
-                            ),
-                          ),
-                          _nameStatusIcon(user),
-                          if (user?.isPremium ?? false) ...[
-                            const SizedBox(width: 6),
-                            const VipBadge(),
-                          ],
-                        ],
-                      ),
-                      if (identities.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Wrap(
-                          spacing: 10,
-                          runSpacing: 2,
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
                           children: [
-                            for (final identity in identities)
-                              Text(
-                                identity,
+                            Flexible(
+                              child: Text(
+                                user?.name ??
+                                    AppStrings.t(AppStringKeys.contactsLoading),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                  fontSize: 13,
-                                  height: 1.25,
-                                  color: foreground.withValues(alpha: 0.78),
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w600,
+                                  color: foreground,
                                 ),
                               ),
+                            ),
+                            _nameStatusIcon(user),
+                            if (user?.isPremium ?? false) ...[
+                              const SizedBox(width: 6),
+                              const VipBadge(),
+                            ],
                           ],
                         ),
+                        if (identities.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: 10,
+                            runSpacing: 2,
+                            children: [
+                              for (final identity in identities)
+                                identity.startsWith('@')
+                                    ? ProfileUsernamePill(username: identity)
+                                    : Text(
+                                        identity,
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          height: 1.25,
+                                          color: colors.textSecondary,
+                                        ),
+                                      ),
+                            ],
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                // Edit profile — replaces the old duplicate 编辑资料 card.
-                GestureDetector(
-                  onTap: () => _root.push(
-                    MaterialPageRoute(builder: (_) => const EditProfileView()),
+                  const SizedBox(width: 8),
+                  // Edit profile — replaces the old duplicate 编辑资料 card.
+                  GestureDetector(
+                    key: const ValueKey('profile-banner-edit'),
+                    onTap: () => _root.push(
+                      MaterialPageRoute(
+                        builder: (_) => const EditProfileView(),
+                      ),
+                    ),
+                    child: AppIcon(
+                      HeroAppIcons.penToSquare,
+                      size: 22,
+                      color: foreground,
+                    ),
                   ),
-                  child: AppIcon(
-                    HeroAppIcons.penToSquare,
-                    size: 22,
-                    color: foreground,
-                  ),
-                ),
-              ],
-            ),
-          ],
+                ],
+              ),
+            ],
+          ),
         ),
-      ),
+      ],
     );
   }
 
   Widget _nameStatusIcon(CurrentUser? user) {
-    final foreground = context.colors.onAccent;
+    final foreground = context.colors.textPrimary;
     final hasStatus = (user?.emojiStatusId ?? 0) != 0;
     final premium = user?.isPremium ?? false;
     if (!hasStatus && !premium) return const SizedBox.shrink();
@@ -441,13 +481,13 @@ class _ProfileViewState extends State<ProfileView> {
           _row(
             HeroAppIcons.folder,
             const Color(0xFF3C8CF0),
-            telegramText(AppStringKeys.topicPostContentFile),
+            AppStrings.t(AppStringKeys.topicPostContentFile),
             () {
               _root.push(
                 MaterialPageRoute(
                   builder: (_) => SharedMediaView(
                     chatId: 0,
-                    title: telegramText(AppStringKeys.topicPostContentFile),
+                    title: AppStrings.t(AppStringKeys.topicPostContentFile),
                     initialTab: 1,
                     displayTitle: AppStringKeys.topicPostContentFile,
                   ),
@@ -458,13 +498,13 @@ class _ProfileViewState extends State<ProfileView> {
           _row(
             HeroAppIcons.video,
             const Color(0xFF7B61FF),
-            telegramText(AppStringKeys.sharedMediaVideos),
+            AppStrings.t(AppStringKeys.sharedMediaVideos),
             () {
               _root.push(
                 MaterialPageRoute(
                   builder: (_) => SharedMediaView(
                     chatId: 0,
-                    title: telegramText(AppStringKeys.sharedMediaVideos),
+                    title: AppStrings.t(AppStringKeys.sharedMediaVideos),
                     initialTab: 4,
                     displayTitle: AppStringKeys.sharedMediaVideos,
                     lockedTab: true,
@@ -527,14 +567,14 @@ class _ProfileViewState extends State<ProfileView> {
       margin: const EdgeInsets.symmetric(),
       decoration: BoxDecoration(
         color: c.card,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppRadius.card),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
           const InsetDivider(leadingInset: 0),
           for (final s in accounts.summaries) ...[
-            _SwipeAccountRow(
+            AccountActionRow(
               onTap: () =>
                   accounts.switchTo(s.slot, context.read<AuthManager>()),
               onLongPress: () => _confirmRemoveAccount(accounts, s),
@@ -636,8 +676,10 @@ class _ProfileViewState extends State<ProfileView> {
     final c = context.colors;
     final avatarCacheSize = (36 * MediaQuery.devicePixelRatioOf(context))
         .ceil();
-    return SizedBox(
-      height: 56,
+    return ConstrainedBox(
+      // A minimum rather than a fixed height: the two stacked lines grow with
+      // the text scale and would otherwise clip out of the row.
+      constraints: const BoxConstraints(minHeight: 56),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Row(
@@ -658,6 +700,7 @@ class _ProfileViewState extends State<ProfileView> {
             const SizedBox(width: 12),
             Expanded(
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -754,8 +797,9 @@ class _ProfileViewState extends State<ProfileView> {
   }
 }
 
-class _SwipeAccountRow extends StatefulWidget {
-  const _SwipeAccountRow({
+class AccountActionRow extends StatefulWidget {
+  const AccountActionRow({
+    super.key,
     required this.child,
     required this.onTap,
     required this.onLongPress,
@@ -770,13 +814,19 @@ class _SwipeAccountRow extends StatefulWidget {
   final VoidCallback onLogout;
 
   @override
-  State<_SwipeAccountRow> createState() => _SwipeAccountRowState();
+  State<AccountActionRow> createState() => _AccountActionRowState();
 }
 
-class _SwipeAccountRowState extends State<_SwipeAccountRow> {
+class _AccountActionRowState extends State<AccountActionRow> {
   static const double _actionWidth = 78;
   static const double _actionsWidth = _actionWidth * 2;
   double _offset = 0;
+
+  // The swipe actions sit behind the row, so the row has to be a bounded box
+  // rather than one that sizes to its content. Grow it with the name and
+  // phone lines it holds instead.
+  double _rowExtent(BuildContext context) =>
+      AppMetric.rowExtentFor(context, base: 56, lines: const [15, 12]);
 
   void _close() {
     if (_offset == 0) return;
@@ -791,8 +841,56 @@ class _SwipeAccountRowState extends State<_SwipeAccountRow> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    if (isDesktopTargetPlatform()) {
+      final actions = <DesktopRowAction>[
+        DesktopRowAction(
+          id: 'remove-account',
+          label: AppStringKeys.profileRemoveAccount,
+          icon: HeroAppIcons.circleMinus,
+          color: const Color(0xFFFF9500),
+          onInvoke: widget.onRemove,
+        ),
+        DesktopRowAction(
+          id: 'log-out-account',
+          label: AppStringKeys.profileLogOutAccount,
+          icon: HeroAppIcons.rightFromBracket,
+          color: AppTheme.tagRed,
+          onInvoke: widget.onLogout,
+        ),
+      ];
+      return SizedBox(
+        height: _rowExtent(context),
+        child: DesktopRowActionRegion(
+          actions: actions,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: widget.onTap,
+            child: ColoredBox(
+              color: c.card,
+              child: Stack(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(right: 44),
+                    child: widget.child,
+                  ),
+                  Positioned(
+                    right: 10,
+                    top: 13,
+                    child: DesktopRowActionButton(
+                      key: const ValueKey('account-row-actions'),
+                      actions: actions,
+                      semanticLabel: AppStringKeys.notificationOptions,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     return SizedBox(
-      height: 56,
+      height: _rowExtent(context),
       child: Stack(
         children: [
           Positioned.fill(
@@ -866,7 +964,7 @@ class _SwipeActionButton extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: Container(
-        width: _SwipeAccountRowState._actionWidth,
+        width: _AccountActionRowState._actionWidth,
         height: double.infinity,
         alignment: Alignment.center,
         color: color,

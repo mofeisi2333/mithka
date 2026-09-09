@@ -1,10 +1,49 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mithka/chat/video_player_view.dart';
+import 'package:mithka/chat/td_video_stream_server.dart';
 
 void main() {
+  test('detached windows receive sanitized live byte progress', () async {
+    final fixture = await _VideoServerFixture.create(
+      bytes: List<int>.generate(64, (index) => index),
+      totalBytes: 4 * 1024 * 1024,
+      maxResponseBytes: 16,
+      reportedReadableBytes: 2 * 1024 * 1024,
+    );
+    try {
+      final progressUri = tdVideoStreamProgressUri(fixture.uri);
+      expect(progressUri.path, '${fixture.uri.path}.progress.json');
+
+      final response = await fixture.getUri(progressUri);
+      final payload = jsonDecode(utf8.decode(await _readBody(response)));
+
+      expect(response.statusCode, HttpStatus.ok);
+      expect(response.headers.contentType?.mimeType, 'application/json');
+      expect(
+        response.headers.value(HttpHeaders.cacheControlHeader),
+        'no-store',
+      );
+      expect(payload, containsPair('prefix_downloaded', 2 * 1024 * 1024));
+      expect(payload, containsPair('downloaded', 2 * 1024 * 1024));
+      expect(payload, containsPair('total', 4 * 1024 * 1024));
+      expect(
+        payload['downloaded_ranges'],
+        contains(
+          allOf(containsPair('start', 0), containsPair('end', 2 * 1024 * 1024)),
+        ),
+      );
+      expect(payload, containsPair('is_completed', false));
+      expect(payload, isNot(contains('path')));
+      expect(payload, isNot(contains('account')));
+    } finally {
+      await fixture.close();
+    }
+  });
+
   test(
     'a large request without Range returns one bounded exact body',
     () async {
@@ -72,6 +111,58 @@ void main() {
         'bytes 16-31/1000000',
       );
       expect(await _readBody(response), fixture.bytes.sublist(16, 32));
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  test('served seek ranges keep their non-contiguous byte offsets', () async {
+    late _SparseRangeBackend backend;
+    final fixture = await _VideoServerFixture.create(
+      bytes: List<int>.generate(128, (index) => index),
+      totalBytes: 128,
+      maxResponseBytes: 16,
+      queryBuilder: (file) {
+        backend = _SparseRangeBackend(file: file, totalBytes: 128);
+        return backend.query;
+      },
+    );
+    try {
+      final seekResponse = await fixture.get(range: 'bytes=64-79');
+      expect(await _readBody(seekResponse), fixture.bytes.sublist(64, 80));
+
+      final progressResponse = await fixture.getUri(
+        tdVideoStreamProgressUri(fixture.uri),
+      );
+      final payload = jsonDecode(
+        utf8.decode(await _readBody(progressResponse)),
+      );
+      expect(
+        payload['downloaded_ranges'],
+        contains(allOf(containsPair('start', 64), containsPair('end', 80))),
+      );
+      expect(
+        payload['downloaded_ranges'],
+        isNot(contains(containsPair('start', 0))),
+      );
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  test('the loopback source preserves the video container metadata', () async {
+    final fixture = await _VideoServerFixture.create(
+      bytes: List<int>.generate(64, (index) => index),
+      totalBytes: 64,
+      maxResponseBytes: 64,
+      fileName: 'sample.webm',
+      mimeType: 'video/webm',
+    );
+    try {
+      expect(fixture.uri.path, '/video/42.webm');
+      final response = await fixture.get();
+      expect(response.headers.contentType?.mimeType, 'video/webm');
+      await _readBody(response);
     } finally {
       await fixture.close();
     }
@@ -403,6 +494,53 @@ void main() {
       await fixture.close();
     }
   });
+
+  test('a held server answers only once its preparation settles', () async {
+    final fixture = await _VideoServerFixture.create(
+      bytes: List<int>.generate(64, (index) => index),
+      totalBytes: 64,
+      maxResponseBytes: 16,
+    );
+    final preparation = Completer<bool>();
+    try {
+      fixture.server.holdRequestsUntilPrepared(preparation.future);
+
+      var answered = false;
+      final response = fixture.get(range: 'bytes=0-15')
+        ..then((_) => answered = true).ignore();
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(
+        answered,
+        isFalse,
+        reason: 'the window opens first, so early probes must wait',
+      );
+
+      preparation.complete(true);
+      final resolved = await response.timeout(const Duration(seconds: 2));
+      expect(resolved.statusCode, HttpStatus.partialContent);
+      expect(await _readBody(resolved), fixture.bytes.sublist(0, 16));
+    } finally {
+      if (!preparation.isCompleted) preparation.complete(false);
+      await fixture.close();
+    }
+  });
+
+  test('a failed preparation still serves the range it can read', () async {
+    final fixture = await _VideoServerFixture.create(
+      bytes: List<int>.generate(64, (index) => index),
+      totalBytes: 64,
+      maxResponseBytes: 16,
+    );
+    try {
+      fixture.server.holdRequestsUntilPrepared(Future<bool>.value(false));
+
+      final response = await fixture.get(range: 'bytes=0-15');
+      expect(response.statusCode, HttpStatus.partialContent);
+      expect(await _readBody(response), fixture.bytes.sublist(0, 16));
+    } finally {
+      await fixture.close();
+    }
+  });
 }
 
 Future<List<int>> _readBody(HttpClientResponse response) =>
@@ -438,6 +576,8 @@ final class _VideoServerFixture {
     required int maxResponseBytes,
     int? expectedBytes,
     int? reportedReadableBytes,
+    String? fileName,
+    String? mimeType,
     TdVideoStreamQuery Function(File file)? queryBuilder,
   }) async {
     final directory = await Directory.systemTemp.createTemp(
@@ -454,6 +594,8 @@ final class _VideoServerFixture {
     final server = TdVideoStreamServer(
       42,
       query: queryBuilder?.call(file) ?? backend.query,
+      fileName: fileName,
+      mimeType: mimeType,
       maxResponseBytes: maxResponseBytes,
       rangeWaitTimeout: const Duration(milliseconds: 20),
       rangePollInterval: const Duration(milliseconds: 1),
@@ -472,10 +614,14 @@ final class _VideoServerFixture {
   }
 
   Future<HttpClientResponse> get({String? range}) async {
+    return getUri(uri, range: range);
+  }
+
+  Future<HttpClientResponse> getUri(Uri target, {String? range}) async {
     final client = HttpClient();
     _clients.add(client);
     try {
-      final request = await client.getUrl(uri);
+      final request = await client.getUrl(target);
       if (range != null) {
         request.headers.set(HttpHeaders.rangeHeader, range);
       }
@@ -539,6 +685,67 @@ final class _FakeTdVideoBackend {
       'is_downloading_completed': false,
     },
   };
+}
+
+final class _SparseRangeBackend {
+  _SparseRangeBackend({required this.file, required this.totalBytes});
+
+  final File file;
+  final int totalBytes;
+  final List<({int start, int end})> ranges = [];
+  ({int start, int end})? lastRange;
+
+  Future<Map<String, dynamic>> query(Map<String, dynamic> request) async {
+    switch (request['@type']) {
+      case 'getFile':
+        return _fileInfo();
+      case 'getFileDownloadedPrefixSize':
+        final offset = request['offset'] as int? ?? 0;
+        var size = 0;
+        for (final range in ranges) {
+          if (range.start <= offset && offset < range.end) {
+            size = range.end - offset;
+            break;
+          }
+        }
+        return {'@type': 'fileDownloadedPrefixSize', 'size': size};
+      case 'downloadFile':
+        final offset = request['offset'] as int? ?? 0;
+        final limit = request['limit'] as int? ?? 0;
+        if (limit > 0) {
+          final range = (
+            start: offset,
+            end: math.min(totalBytes, offset + limit),
+          );
+          ranges.add(range);
+          lastRange = range;
+        }
+        return _fileInfo();
+      default:
+        throw UnsupportedError('Unexpected TDLib query ${request['@type']}');
+    }
+  }
+
+  Map<String, dynamic> _fileInfo() {
+    final range = lastRange;
+    return {
+      '@type': 'file',
+      'id': 42,
+      'size': totalBytes,
+      'expected_size': totalBytes,
+      'local': {
+        '@type': 'localFile',
+        'path': file.path,
+        'download_offset': range?.start ?? 0,
+        'downloaded_prefix_size': range == null ? 0 : range.end - range.start,
+        'downloaded_size': ranges.fold<int>(
+          0,
+          (sum, value) => sum + value.end - value.start,
+        ),
+        'is_downloading_completed': false,
+      },
+    };
+  }
 }
 
 final class _ControlledRangeBackend {

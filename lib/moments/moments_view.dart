@@ -12,15 +12,20 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:provider/provider.dart';
 
 import '../app/app_navigator.dart';
+import '../app/ipad_window_chrome.dart';
 import '../chat/chat_picker_view.dart';
 import '../chat/chat_view.dart';
+import '../chat/custom_emoji.dart';
 import '../chat/forward_options.dart';
-import '../chat/full_image_viewer.dart';
+import '../chat/image_preview.dart';
 import '../chat/media_album_layout.dart';
+import '../chat/message_reaction_availability.dart';
 import '../chat/outgoing_attachment.dart';
+import '../chat/quick_reaction_choice.dart';
 import '../chat/rich_text_composer_view.dart';
 import '../chat/rich_text_format.dart';
 import '../chat/shared_media_view.dart';
@@ -29,13 +34,15 @@ import '../chat/video_playback_queue.dart';
 import '../chat/video_player_view.dart';
 import '../chats/chat_list_view_model.dart';
 import '../components/app_icons.dart';
+import '../components/app_interactive_surface.dart';
+import '../components/desktop_content_constraint.dart';
 import '../components/photo_avatar.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../l10n/app_localizations.dart';
-import '../l10n/telegram_language_controller.dart';
 import '../media/app_asset_picker.dart';
-import '../profile/profile_detail_view.dart';
+import '../platform/adaptive_platform.dart';
+import '../profile/adaptive_profile_launcher.dart';
 import '../settings/accent_color_picker_view.dart';
 import '../tdlib/chat_membership.dart';
 import '../tdlib/json_helpers.dart';
@@ -45,6 +52,7 @@ import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import '../theme/date_text.dart';
 import '../theme/theme_controller.dart';
+import 'short_video_availability.dart';
 import 'short_video_view.dart';
 import 'story_authoring_view.dart';
 import 'story_management_view.dart';
@@ -79,6 +87,7 @@ class ChannelPost {
   ChannelPost({
     required this.channel,
     required this.message,
+    required this.accountSlot,
     this.threadTarget,
     this.authorName,
     this.authorPhoto,
@@ -89,12 +98,18 @@ class ChannelPost {
 
   final ChatSummary channel;
   final ChatMessage message;
+  final int accountSlot;
   final List<ChatMessage> messages;
   ChannelPostThreadTarget? threadTarget;
   String? authorName;
   TdFileRef? authorPhoto;
   List<String>? likeNames;
   List<ChannelPostComment>? comments;
+
+  /// Bumped when metadata hydration fills this post in place. The feed row
+  /// listens to it, so a resolved author/like/comment rebuilds that one row
+  /// instead of every visible row through a feed-wide setState.
+  final ValueNotifier<int> revision = ValueNotifier<int>(0);
 }
 
 class ChannelPostThreadTarget {
@@ -105,6 +120,24 @@ class ChannelPostThreadTarget {
 
   final int chatId;
   final int messageThreadId;
+}
+
+class _MomentsFeedScrollAnchor {
+  const _MomentsFeedScrollAnchor({required this.key, required this.leading});
+
+  final GlobalKey key;
+  final double leading;
+}
+
+final Map<String, double> _channelMomentsScrollOffsets = {};
+
+String _channelMomentsScrollKey({
+  required int accountSlot,
+  required bool isRootTab,
+  required List<ChatSummary> initialChannels,
+}) {
+  final ids = initialChannels.map((channel) => channel.id).toList()..sort();
+  return '$accountSlot:$isRootTab:${ids.join(',')}';
 }
 
 class ChannelPostComment {
@@ -168,11 +201,54 @@ Future<bool> _canPostToChannel(ChatSummary channel, int meId) async {
 Color _momentQuoteFill(AppColors c) =>
     c.groupedBackground.withValues(alpha: 0.88);
 
+@visibleForTesting
+enum MomentsReactionAction { hidden, sendThumbsUp, openSelector }
+
+@visibleForTesting
+MomentsReactionAction momentsReactionAction(
+  MessageReactionAvailability? availability,
+) {
+  if (availability == null || !availability.canAdd) {
+    return MomentsReactionAction.hidden;
+  }
+  return availability.allows(const QuickReactionChoice.emoji('👍'))
+      ? MomentsReactionAction.sendThumbsUp
+      : MomentsReactionAction.openSelector;
+}
+
+const double desktopMomentsFeedMaxWidth = 760;
+
+/// Keeps the desktop timeline readable without changing phone/tablet sizing.
+class MomentsDesktopFeedLane extends StatelessWidget {
+  const MomentsDesktopFeedLane({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isDesktopTargetPlatform()) return child;
+    return ColoredBox(
+      key: const ValueKey('desktop-moments-feed-lane'),
+      color: context.colors.groupedBackground,
+      child: DesktopContentConstraint(
+        maxWidth: desktopMomentsFeedMaxWidth,
+        child: child,
+      ),
+    );
+  }
+}
+
 class MomentsView extends StatefulWidget {
-  const MomentsView({super.key, this.onOpenDetail, this.storyService});
+  const MomentsView({
+    super.key,
+    this.onOpenDetail,
+    this.storyService,
+    this.desktopSidebar = false,
+  });
 
   final ValueChanged<Widget>? onOpenDetail;
   final StoryService? storyService;
+  final bool desktopSidebar;
 
   @override
   State<MomentsView> createState() => _MomentsViewState();
@@ -287,15 +363,55 @@ class _MomentsViewState extends State<MomentsView> {
     }
   }
 
+  void _openChannelMoments() {
+    _openDetail(
+      ChannelMomentsView(
+        isRootTab: widget.onOpenDetail != null,
+        title: widget.onOpenDetail == null
+            ? AppStrings.t(AppStringKeys.tabMoments)
+            : AppStrings.t(AppStringKeys.tabFriendMoments),
+        initialChannels: _allChannels,
+      ),
+    );
+  }
+
+  void _openMusic() {
+    _openDetail(
+      SharedMediaView(
+        chatId: 0,
+        title: AppStrings.t(AppStringKeys.momentsMusic),
+        initialTab: 5,
+        displayTitle: AppStringKeys.momentsMusic,
+        lockedTab: true,
+      ),
+    );
+  }
+
+  void _openVideos() {
+    _openDetail(
+      SharedMediaView(
+        chatId: 0,
+        title: AppStrings.t(AppStringKeys.sharedMediaVideos),
+        initialTab: 4,
+        displayTitle: AppStringKeys.sharedMediaVideos,
+        lockedTab: true,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
     final theme = context.watch<ThemeController>();
+    final useDesktopSidebar =
+        widget.desktopSidebar && isDesktopTargetPlatform();
+    if (useDesktopSidebar) return _desktopSidebar(c);
     return Material(
       color: c.groupedBackground,
       child: Column(
         children: [
-          const NavHeader(title: AppStringKeys.tabMoments),
+          if (!widget.desktopSidebar)
+            const NavHeader(title: AppStringKeys.tabMoments),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.only(top: AppSpacing.md),
@@ -316,15 +432,7 @@ class _MomentsViewState extends State<MomentsView> {
                         iconColor: const Color(0xFFFFBE00),
                         title: AppStrings.t(AppStringKeys.tabMoments),
                         trailing: _channelActivity(),
-                        onTap: () => _openDetail(
-                          ChannelMomentsView(
-                            isRootTab: widget.onOpenDetail != null,
-                            title: widget.onOpenDetail == null
-                                ? AppStrings.t(AppStringKeys.tabMoments)
-                                : AppStrings.t(AppStringKeys.tabFriendMoments),
-                            initialChannels: _allChannels,
-                          ),
-                        ),
+                        onTap: _openChannelMoments,
                       ),
                     ],
                   ),
@@ -338,36 +446,19 @@ class _MomentsViewState extends State<MomentsView> {
                         icon: HeroAppIcons.music.data,
                         iconColor: const Color(0xFFFF8A2A),
                         title: AppStrings.t(AppStringKeys.momentsMusic),
-                        onTap: () => _openDetail(
-                          SharedMediaView(
-                            chatId: 0,
-                            title: AppStrings.t(AppStringKeys.momentsMusic),
-                            initialTab: 5,
-                            displayTitle: AppStringKeys.momentsMusic,
-                            lockedTab: true,
-                          ),
-                        ),
+                        onTap: _openMusic,
                       ),
                       _menuRow(
                         icon: HeroAppIcons.video.data,
                         iconColor: const Color(0xFF7B61FF),
-                        title: telegramText(AppStringKeys.sharedMediaVideos),
-                        onTap: () => _openDetail(
-                          SharedMediaView(
-                            chatId: 0,
-                            title: telegramText(
-                              AppStringKeys.sharedMediaVideos,
-                            ),
-                            initialTab: 4,
-                            displayTitle: AppStringKeys.sharedMediaVideos,
-                            lockedTab: true,
-                          ),
-                        ),
+                        title: AppStrings.t(AppStringKeys.sharedMediaVideos),
+                        onTap: _openVideos,
                       ),
                     ],
                   ),
                 ),
-                if (theme.showShortVideos) ...[
+                if (theme.showShortVideos &&
+                    shortVideosAvailableOnPlatform()) ...[
                   const SizedBox(height: AppSpacing.md),
                   Container(
                     color: c.background,
@@ -383,6 +474,155 @@ class _MomentsViewState extends State<MomentsView> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _desktopSidebar(AppColors c) {
+    return Material(
+      key: const ValueKey('desktop-moments-sidebar'),
+      color: c.groupedBackground,
+      child: Column(
+        children: [
+          Container(
+            key: const ValueKey('desktop-moments-header'),
+            height: 58,
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
+            alignment: Alignment.centerLeft,
+            decoration: BoxDecoration(
+              color: c.background,
+              border: Border(
+                bottom: BorderSide(color: c.divider, width: AppMetric.divider),
+              ),
+            ),
+            child: Text(
+              AppStringKeys.tabMoments.l10n(context),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: c.textPrimary,
+                fontSize: 19,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(AppRadius.card),
+                  child: StoryShelf(
+                    model: _stories,
+                    canPublish: _canPublishStories,
+                    onCreate: _createStory,
+                    onManage: _manageStories,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                _desktopMenuCard([
+                  _desktopMenuRow(
+                    key: const ValueKey('desktop-moments-friends'),
+                    icon: HeroAppIcons.star,
+                    iconColor: const Color(0xFFFFBE00),
+                    title: AppStringKeys.tabFriendMoments.l10n(context),
+                    trailing: _channelActivity(),
+                    onTap: _openChannelMoments,
+                  ),
+                ]),
+                const SizedBox(height: AppSpacing.md),
+                _desktopMenuCard([
+                  _desktopMenuRow(
+                    key: const ValueKey('desktop-moments-music'),
+                    icon: HeroAppIcons.music,
+                    iconColor: const Color(0xFFFF8A2A),
+                    title: AppStringKeys.momentsMusic.l10n(context),
+                    onTap: _openMusic,
+                  ),
+                  Divider(height: 1, indent: 58, color: c.divider),
+                  _desktopMenuRow(
+                    key: const ValueKey('desktop-moments-videos'),
+                    icon: HeroAppIcons.video,
+                    iconColor: const Color(0xFF7B61FF),
+                    title: AppStrings.t(
+                      AppStringKeys.sharedMediaVideos,
+                    ).l10n(context),
+                    onTap: _openVideos,
+                  ),
+                ]),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _desktopMenuCard(List<Widget> children) {
+    final c = context.colors;
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: c.background,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        border: Border.all(color: c.divider, width: AppMetric.divider),
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, children: children),
+    );
+  }
+
+  Widget _desktopMenuRow({
+    required Key key,
+    required AppIconData icon,
+    required Color iconColor,
+    required String title,
+    required VoidCallback onTap,
+    Widget? trailing,
+  }) {
+    final c = context.colors;
+    return AppInteractiveSurface(
+      key: key,
+      semanticLabel: title,
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadius.card),
+      child: SizedBox(
+        height: 58,
+        child: Row(
+          children: [
+            const SizedBox(width: AppSpacing.md),
+            Container(
+              width: 34,
+              height: 34,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: iconColor.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: AppIcon(icon, size: 20, color: iconColor),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                  color: c.textPrimary,
+                ),
+              ),
+            ),
+            if (trailing != null)
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 132),
+                child: trailing,
+              ),
+            const SizedBox(width: AppSpacing.sm),
+            AppIcon(HeroAppIcons.chevronRight, size: 16, color: c.textTertiary),
+            const SizedBox(width: AppSpacing.md),
+          ],
+        ),
       ),
     );
   }
@@ -499,6 +739,10 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
   final _replyController = TextEditingController();
   final _replyFocus = FocusNode();
   final _scroll = ScrollController();
+  late final String _scrollSessionKey;
+  final Map<String, GlobalKey> _postWidgetKeys = {};
+  double? _pendingScrollOffset;
+  bool _scrollRestoreScheduled = false;
   StreamSubscription? _tdSub;
   Timer? _refreshTimer;
   Timer? _metadataHydrationTimer;
@@ -523,6 +767,7 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
   bool _loadingPosts = false;
   bool _loadingPostableChannels = false;
   bool _refreshingLiveUpdates = false;
+  bool _refreshingLatest = false;
   bool _nonMutedOnly = false;
   int _feedLoadGeneration = 0;
   static const _perChannelPageSize = 30;
@@ -532,6 +777,12 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
   @override
   void initState() {
     super.initState();
+    _scrollSessionKey = _channelMomentsScrollKey(
+      accountSlot: TdClient.shared.activeSlot,
+      isRootTab: widget.isRootTab,
+      initialChannels: widget.initialChannels,
+    );
+    _pendingScrollOffset = _channelMomentsScrollOffsets[_scrollSessionKey];
     _model.addListener(_onModel);
     _scroll.addListener(_onScroll);
     _tdSub = TdClient.shared.subscribe().listen(_handleTdUpdate);
@@ -542,10 +793,14 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
         if (mounted) _loadChannelPosts();
       });
     }
+    _scheduleScrollRestore();
   }
 
   @override
   void dispose() {
+    if (_scroll.hasClients) {
+      _channelMomentsScrollOffsets[_scrollSessionKey] = _scroll.offset;
+    }
     _model.removeListener(_onModel);
     _model.dispose();
     _scroll.removeListener(_onScroll);
@@ -560,13 +815,87 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
 
   void _onScroll() {
     if (!_scroll.hasClients) return;
+    _channelMomentsScrollOffsets[_scrollSessionKey] = _scroll.offset;
     if (_scroll.position.extentAfter < 600) _loadChannelPosts(loadOlder: true);
+  }
+
+  void _scheduleScrollRestore() {
+    if (_pendingScrollOffset == null || _scrollRestoreScheduled) return;
+    _scrollRestoreScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollRestoreScheduled = false;
+      if (!mounted || !_scroll.hasClients) return;
+      final pending = _pendingScrollOffset;
+      if (pending == null) return;
+      final position = _scroll.position;
+      // Initial history loads arrive asynchronously. Do not clamp a saved
+      // position to the first short page; wait for the feed to finish loading
+      // so reopening lands at the same history location.
+      if (pending > position.maxScrollExtent &&
+          (_loadingPosts || (_posts.isEmpty && _channels.isNotEmpty))) {
+        _scheduleScrollRestore();
+        return;
+      }
+      if (pending > position.maxScrollExtent &&
+          _channels.any(
+            (channel) => !_exhaustedChannels.contains(channel.id),
+          )) {
+        _loadChannelPosts(loadOlder: true);
+        _scheduleScrollRestore();
+        return;
+      }
+      final next = pending.clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      );
+      _scroll.jumpTo(next);
+      _pendingScrollOffset = null;
+      _channelMomentsScrollOffsets[_scrollSessionKey] = next;
+    });
+  }
+
+  _MomentsFeedScrollAnchor? _captureFeedScrollAnchor() {
+    if (!_scroll.hasClients) return null;
+    final current = _scroll.offset;
+    final viewportExtent = _scroll.position.viewportDimension;
+    for (final post in _posts) {
+      final key = _postKey(post);
+      final render = key.currentContext?.findRenderObject();
+      if (render == null || !render.attached) continue;
+      final viewport = RenderAbstractViewport.of(render);
+      final leading = viewport.getOffsetToReveal(render, 0).offset - current;
+      final extent = render.paintBounds.height;
+      if (leading + extent > 0 && leading < viewportExtent) {
+        return _MomentsFeedScrollAnchor(key: key, leading: leading);
+      }
+    }
+    return null;
+  }
+
+  void _restoreFeedScrollAnchor(
+    _MomentsFeedScrollAnchor? anchor,
+    double fallbackOffset,
+  ) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      var next = fallbackOffset;
+      final render = anchor?.key.currentContext?.findRenderObject();
+      if (render != null && render.attached) {
+        final viewport = RenderAbstractViewport.of(render);
+        next = viewport.getOffsetToReveal(render, 0).offset - anchor!.leading;
+      }
+      final position = _scroll.position;
+      next = next.clamp(position.minScrollExtent, position.maxScrollExtent);
+      _scroll.jumpTo(next);
+      _channelMomentsScrollOffsets[_scrollSessionKey] = next;
+    });
   }
 
   void _onModel() {
     _feedChatIds = null; // channel set may have changed
     _invalidateChannels();
     if (mounted) setState(() {});
+    _scheduleScrollRestore();
     _loadChannelPosts();
     _loadPostableChannels();
   }
@@ -598,6 +927,7 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
       case 'updateDeleteMessages':
         if (!_touchesMomentsFeed(update)) return;
         _invalidateCachedInteractions(update);
+        _markChatDirty(update);
         _scheduleLiveRefresh();
 
       // Membership changed: the joined/exhausted caches for that chat are
@@ -654,23 +984,67 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
     }
   }
 
+  // Which chats changed during the debounce window. A single incoming message
+  // used to refetch 30 messages of history for EVERY joined channel and
+  // re-parse them all; only the chats that actually moved need a refetch.
+  final Set<int> _dirtyChatIds = {};
+  bool _dirtyAllChannels = false;
+
+  void _markChatDirty(Map<String, dynamic> update) {
+    final chatId =
+        update.int64('chat_id') ?? update.obj('message')?.int64('chat_id');
+    if (chatId == null) {
+      _dirtyAllChannels = true;
+      return;
+    }
+    _dirtyChatIds.add(chatId);
+  }
+
   void _scheduleLiveRefresh() {
     _refreshTimer?.cancel();
     _refreshTimer = Timer(const Duration(milliseconds: 450), _refreshFeedNow);
   }
 
   Future<void> _refreshFeedNow() async {
-    if (_refreshingLiveUpdates || !mounted) return;
+    if (!mounted) return;
+    if (_refreshingLiveUpdates) {
+      // A refresh now only covers the chats it drained, so dropping this tick
+      // would strand whatever was marked dirty while it was in flight.
+      if (_dirtyAllChannels || _dirtyChatIds.isNotEmpty) _scheduleLiveRefresh();
+      return;
+    }
     final channels = _channels;
     if (channels.isEmpty) return;
+    final List<ChatSummary> targets;
+    if (_dirtyAllChannels) {
+      targets = channels;
+    } else {
+      final dirty = Set<int>.of(_dirtyChatIds);
+      targets = channels
+          .where((channel) => dirty.contains(channel.id))
+          .toList(growable: false);
+    }
+    _dirtyChatIds.clear();
+    _dirtyAllChannels = false;
+    if (targets.isEmpty) {
+      // The update landed in a discussion chat, not a feed channel: the cached
+      // likes/comments were already dropped, so a rehydrate is the whole job.
+      _schedulePostMetadataHydration();
+      if (mounted) setState(() {});
+      return;
+    }
+    final anchor = _captureFeedScrollAnchor();
+    final fallbackOffset = _scroll.hasClients ? _scroll.offset : 0.0;
     _refreshingLiveUpdates = true;
     _loadingPosts = true;
     if (mounted) setState(() {});
     final futures = <Future<void>>[];
-    for (final channel in channels) {
+    for (final channel in targets) {
       if (!await _isJoinedChannel(channel)) continue;
       if (!_loadingChannels.add(channel.id)) continue;
-      futures.add(_loadPostsForChannel(channel, fromMessageId: 0));
+      futures.add(
+        _loadPostsForChannel(channel, fromMessageId: 0, notify: false),
+      );
     }
     try {
       await Future.wait(futures);
@@ -678,6 +1052,35 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
       _refreshingLiveUpdates = false;
       _loadingPosts = _loadingChannels.isNotEmpty;
       if (mounted) setState(() {});
+      _restoreFeedScrollAnchor(anchor, fallbackOffset);
+    }
+  }
+
+  Future<void> _refreshLatest() async {
+    if (_refreshingLatest || _refreshingLiveUpdates) return;
+    final channels = _channels;
+    if (channels.isEmpty) return;
+    final anchor = _captureFeedScrollAnchor();
+    final fallbackOffset = _scroll.hasClients ? _scroll.offset : 0.0;
+    _refreshingLatest = true;
+    _loadingPosts = true;
+    if (mounted) setState(() {});
+    final futures = <Future<void>>[];
+    for (final channel in channels) {
+      if (!await _isJoinedChannel(channel)) continue;
+      if (!_loadingChannels.add(channel.id)) continue;
+      futures.add(
+        _loadPostsForChannel(channel, fromMessageId: 0, notify: false),
+      );
+    }
+    try {
+      await Future.wait(futures);
+      _schedulePostMetadataHydration();
+    } finally {
+      _refreshingLatest = false;
+      _loadingPosts = _loadingChannels.isNotEmpty;
+      if (mounted) setState(() {});
+      _restoreFeedScrollAnchor(anchor, fallbackOffset);
     }
   }
 
@@ -730,8 +1133,10 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
     return _postsCache = _groupPostAlbums(posts).take(_feedLimit).toList();
   }
 
-  static Key _postKey(ChannelPost post) =>
-      ValueKey('post-${post.channel.id}-${post.message.id}');
+  GlobalKey _postKey(ChannelPost post) {
+    final identity = 'post-${post.channel.id}-${post.message.id}';
+    return _postWidgetKeys.putIfAbsent(identity, GlobalKey.new);
+  }
 
   static const _composerHeaderKey = ValueKey('moments-composer-header');
 
@@ -773,6 +1178,7 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
         ChannelPost(
           channel: primary.channel,
           message: primary.message,
+          accountSlot: primary.accountSlot,
           threadTarget: primary.threadTarget,
           authorName: primary.authorName,
           authorPhoto: primary.authorPhoto,
@@ -856,7 +1262,11 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
         ),
       );
     }
-    _loadingPosts = _loadingChannels.isNotEmpty;
+    // Near the bottom of the feed the scroll listener calls this on every
+    // tick; only a changed spinner state is worth a rebuild.
+    final loading = _loadingChannels.isNotEmpty;
+    if (loading == _loadingPosts) return;
+    _loadingPosts = loading;
     if (mounted) setState(() {});
   }
 
@@ -881,22 +1291,30 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
     ChatSummary channel, {
     required int fromMessageId,
     int? generation,
+    bool notify = true,
   }) async {
+    final accountSlot = TdClient.shared.activeSlot;
     try {
-      final response = await TdClient.shared.query({
+      final response = await TdClient.shared.queryForSlot({
         '@type': 'getChatHistory',
         'chat_id': channel.id,
         'from_message_id': fromMessageId,
         'offset': 0,
         'limit': _perChannelPageSize,
         'only_local': false,
-      });
+      }, accountSlot);
       final messages =
           (response.objects('messages') ?? const <Map<String, dynamic>>[])
               .map(TDParse.message)
               .whereType<ChatMessage>()
               .where((message) => !message.isService)
-              .map((message) => ChannelPost(channel: channel, message: message))
+              .map(
+                (message) => ChannelPost(
+                  channel: channel,
+                  message: message,
+                  accountSlot: accountSlot,
+                ),
+              )
               .toList();
       if (generation != null && generation != _feedLoadGeneration) return;
       if (messages.isEmpty) {
@@ -912,7 +1330,9 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
       if (generation == null || generation == _feedLoadGeneration) {
         _loadingChannels.remove(channel.id);
         _loadingPosts = _loadingChannels.isNotEmpty;
-        if (mounted) setState(() {});
+        // A batched refresh rebuilds once when the whole batch lands.
+        if (notify && mounted) setState(() {});
+        _scheduleScrollRestore();
       }
     }
   }
@@ -932,6 +1352,14 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
     });
     _loadChannelPosts();
     _loadPostableChannels();
+  }
+
+  // Hydration resolves one post at a time; a setState here rebuilt every
+  // visible row (each one re-laying out its rich text) on nearly every frame
+  // of the settle window. Bumping the revision repaints just that row.
+  void _notifyPost(ChannelPost post) {
+    if (!mounted) return;
+    post.revision.value++;
   }
 
   void _schedulePostMetadataHydration() {
@@ -986,7 +1414,7 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
       message.replyToSender ??= post.channel.title;
     } finally {
       _loadingReplyQuotes.remove(key);
-      if (mounted) setState(() {});
+      _notifyPost(post);
     }
   }
 
@@ -1045,7 +1473,7 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
       return null;
     } finally {
       _loadingThreadTargets.remove(key);
-      if (shouldNotify && mounted) setState(() {});
+      if (shouldNotify) _notifyPost(post);
     }
   }
 
@@ -1100,7 +1528,7 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
       post.comments = const [];
     } finally {
       _loadingComments.remove(key);
-      if (mounted) setState(() {});
+      _notifyPost(post);
     }
   }
 
@@ -1115,13 +1543,13 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
       });
     }
     if (message.voice != null) {
-      return telegramText(AppStringKeys.composerVoicePreview);
+      return AppStrings.t(AppStringKeys.composerVoicePreview);
     }
     if (message.location != null) {
-      return telegramText(AppStringKeys.composerLocationPreview);
+      return AppStrings.t(AppStringKeys.composerLocationPreview);
     }
     if (message.animatedSticker != null) {
-      return telegramText(AppStringKeys.composerAnimatedEmojiPreview);
+      return AppStrings.t(AppStringKeys.composerAnimatedEmojiPreview);
     }
     if (message.video != null) {
       return message.text;
@@ -1131,7 +1559,7 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
     }
     final text = message.text.trim();
     return text.isEmpty
-        ? telegramText(AppStringKeys.chatSearchMessageResultLabel)
+        ? AppStrings.t(AppStringKeys.chatSearchMessageResultLabel)
         : text;
   }
 
@@ -1213,6 +1641,8 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
       return;
     }
     final senderId = post.message.senderId;
+    final previousName = post.authorName;
+    final previousPhoto = post.authorPhoto;
     try {
       if (senderId != null && senderId > 0) {
         final user = await TdClient.shared.query({
@@ -1237,7 +1667,11 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
         }
       }
     } catch (_) {}
-    if (mounted) setState(() {});
+    // Anonymous channel posts resolve to the same nothing they started with.
+    if (post.authorName == previousName && post.authorPhoto == previousPhoto) {
+      return;
+    }
+    _notifyPost(post);
   }
 
   Future<void> _loadLikeNamesForPost(ChannelPost post, String key) async {
@@ -1264,7 +1698,7 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
       post.likeNames = const [];
     } finally {
       _loadingLikeNames.remove(key);
-      if (mounted) setState(() {});
+      _notifyPost(post);
     }
   }
 
@@ -1488,6 +1922,7 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
   Widget build(BuildContext context) {
     final c = context.colors;
     final posts = _posts;
+    final useDesktopLayout = isDesktopTargetPlatform();
     return Material(
       color: c.groupedBackground,
       child: Column(
@@ -1514,6 +1949,20 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
                 ),
                 const SizedBox(width: AppSpacing.lg),
                 GestureDetector(
+                  key: const ValueKey('moments-refresh-latest'),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _refreshingLatest ? null : _refreshLatest,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 8, 0, 8),
+                    child: AppIcon(
+                      HeroAppIcons.arrowsRotate,
+                      size: 22,
+                      color: _refreshingLatest ? c.textTertiary : c.textPrimary,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.lg),
+                GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: _openSearch,
                   child: Padding(
@@ -1528,54 +1977,117 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
               ],
             ),
           ),
-          Expanded(
-            child: Container(
-              color: c.background,
-              child: ListView.builder(
-                controller: _scroll,
-                padding: EdgeInsets.zero,
-                itemCount: posts.isEmpty ? 2 : posts.length + 1,
-                findChildIndexCallback: (key) => _feedIndexByKey[key],
-                itemBuilder: (context, i) {
-                  if (i == 0) {
-                    return KeyedSubtree(
-                      key: _composerHeaderKey,
-                      child: _MomentsComposerHeader(
-                        meName: _meName,
-                        mePhoto: _mePhoto,
-                        backgroundColor: _profileHeaderColor(context),
-                        canCompose: _postableChannels.isNotEmpty,
-                        onCompose: _openNewPostComposer,
-                      ),
-                    );
-                  }
-                  if (posts.isEmpty) {
-                    return SizedBox(height: 260, child: _empty());
-                  }
-                  final post = posts[i - 1];
-                  return KeyedSubtree(
-                    key: _postKey(post),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        ChannelPostRow(
-                          post: post,
-                          meName: _meName,
-                          mePhoto: _mePhoto,
-                          onOpenPost: _openPostDetail,
-                          onComment: _beginReplyFromInline,
-                        ),
-                        if (i != posts.length)
-                          const InsetDivider(leadingInset: 0),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
+          Expanded(child: _feed(posts, useDesktopLayout: useDesktopLayout)),
           if (_replyPost != null) _quickReplyBar(),
         ],
+      ),
+    );
+  }
+
+  Widget _feed(List<ChannelPost> posts, {required bool useDesktopLayout}) {
+    final c = context.colors;
+    final list = ListView.builder(
+      controller: _scroll,
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: useDesktopLayout
+          ? const EdgeInsets.symmetric(vertical: AppSpacing.lg)
+          : EdgeInsets.zero,
+      itemCount: posts.isEmpty ? 2 : posts.length + 1,
+      findChildIndexCallback: (key) => _feedIndexByKey[key],
+      itemBuilder: (context, i) {
+        if (i == 0) {
+          final composer = _MomentsComposerHeader(
+            meName: _meName,
+            mePhoto: _mePhoto,
+            backgroundColor: _profileHeaderColor(context),
+            canCompose: _postableChannels.isNotEmpty,
+            onCompose: _openNewPostComposer,
+          );
+          return KeyedSubtree(
+            key: _composerHeaderKey,
+            child: useDesktopLayout ? _desktopFeedCard(composer) : composer,
+          );
+        }
+        if (posts.isEmpty) {
+          final empty = SizedBox(height: 260, child: _empty());
+          return useDesktopLayout ? _desktopFeedCard(empty) : empty;
+        }
+        final post = posts[i - 1];
+        // Listening to the post's own revision keeps metadata hydration from
+        // rebuilding (and re-laying out the rich text of) every other row.
+        final row = ValueListenableBuilder<int>(
+          valueListenable: post.revision,
+          builder: (context, _, _) => ChannelPostRow(
+            post: post,
+            meName: _meName,
+            mePhoto: _mePhoto,
+            onOpenPost: _openPostDetail,
+            onComment: _beginReplyFromInline,
+          ),
+        );
+        return KeyedSubtree(
+          key: _postKey(post),
+          child: useDesktopLayout
+              ? _desktopFeedCard(row)
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    row,
+                    if (i != posts.length) const InsetDivider(leadingInset: 0),
+                  ],
+                ),
+        );
+      },
+    );
+    final refreshable = RefreshIndicator(
+      onRefresh: _refreshLatest,
+      color: AppTheme.brand,
+      backgroundColor: c.background,
+      notificationPredicate: (notification) => notification.depth == 0,
+      child: list,
+    );
+    if (!useDesktopLayout) {
+      return ColoredBox(color: c.background, child: refreshable);
+    }
+    return MomentsDesktopFeedLane(child: refreshable);
+  }
+
+  Widget _desktopFeedCard(Widget child) {
+    final c = context.colors;
+    final media = MediaQuery.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        0,
+        AppSpacing.lg,
+        AppSpacing.md,
+      ),
+      child: Container(
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: c.background,
+          borderRadius: BorderRadius.circular(AppRadius.card),
+          border: Border.all(color: c.divider, width: AppMetric.divider),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(
+                alpha: Theme.of(context).brightness == Brightness.dark
+                    ? 0.16
+                    : 0.035,
+              ),
+              blurRadius: 14,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) => MediaQuery(
+            data: media.copyWith(
+              size: Size(constraints.maxWidth, media.size.height),
+            ),
+            child: child,
+          ),
+        ),
       ),
     );
   }
@@ -1630,7 +2142,7 @@ class _ChannelMomentsViewState extends State<ChannelMomentsView> {
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 decoration: BoxDecoration(
                   color: c.searchFill,
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(AppRadius.md),
                 ),
                 child: Row(
                   children: [
@@ -1794,7 +2306,7 @@ class _MomentsComposerHeader extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: c.background,
                   border: Border.all(color: c.divider),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadius.card),
                 ),
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
@@ -1910,8 +2422,9 @@ class _ChannelMomentsSearchViewState extends State<ChannelMomentsSearchView> {
     ChatSummary channel,
     String query,
   ) async {
+    final accountSlot = TdClient.shared.activeSlot;
     try {
-      final response = await TdClient.shared.query({
+      final response = await TdClient.shared.queryForSlot({
         '@type': 'searchChatMessages',
         'chat_id': channel.id,
         'query': query,
@@ -1920,7 +2433,7 @@ class _ChannelMomentsSearchViewState extends State<ChannelMomentsSearchView> {
         'offset': 0,
         'limit': 30,
         'filter': {'@type': 'searchMessagesFilterEmpty'},
-      });
+      }, accountSlot);
       final rawMessages =
           response.objects('messages') ?? const <Map<String, dynamic>>[];
       return [
@@ -1928,7 +2441,11 @@ class _ChannelMomentsSearchViewState extends State<ChannelMomentsSearchView> {
           if ((raw.int64('chat_id') ?? channel.id) == channel.id)
             if (TDParse.message(raw) case final message?)
               if (!message.isService)
-                ChannelPost(channel: channel, message: message),
+                ChannelPost(
+                  channel: channel,
+                  message: message,
+                  accountSlot: accountSlot,
+                ),
       ];
     } catch (_) {
       return const [];
@@ -2004,7 +2521,11 @@ class _ChannelMomentsSearchViewState extends State<ChannelMomentsSearchView> {
   Widget _header() {
     final c = context.colors;
     return Container(
-      padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
+      padding: EdgeInsets.only(
+        top:
+            MediaQuery.of(context).padding.top +
+            iPadWindowChromeInsetOf(context),
+      ),
       decoration: BoxDecoration(
         color: c.navBar,
         border: Border(bottom: BorderSide(color: c.divider, width: 0.5)),
@@ -2186,7 +2707,9 @@ Future<void> showChannelPostMenu(BuildContext context, ChannelPost post) {
     position: RelativeRect.fromRect(anchorRect, Offset.zero & overlay.size),
     color: context.colors.card,
     elevation: 8,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(AppRadius.card),
+    ),
     items: [
       PopupMenuItem<_ChannelPostMenuAction>(
         value: _ChannelPostMenuAction.openOriginal,
@@ -2364,7 +2887,7 @@ class _ChannelPostDetailViewState extends State<ChannelPostDetailView> {
       });
       final rawMessages =
           response.objects('messages') ?? const <Map<String, dynamic>>[];
-      final comments = <ChannelPostComment>[];
+      final kept = <_LoadedPostComment>[];
       for (final raw in rawMessages) {
         final message = TDParse.message(raw);
         if (message == null ||
@@ -2374,10 +2897,37 @@ class _ChannelPostDetailViewState extends State<ChannelPostDetailView> {
             _commentText(message).isEmpty) {
           continue;
         }
-        final sender = await _commentSender(message);
+        kept.add(
+          _LoadedPostComment(
+            chatId: raw.int64('chat_id') ?? target.chatId,
+            message: message,
+          ),
+        );
+      }
+      // One query per distinct sender, in parallel. Resolving inline below
+      // serialized up to 120 getUser/getChat round-trips, mostly repeats.
+      final firstBySender = <int, ChatMessage>{};
+      for (final entry in kept) {
+        final senderId = entry.message.senderId;
+        if (senderId != null) {
+          firstBySender.putIfAbsent(senderId, () => entry.message);
+        }
+      }
+      final senders = <int, _CommentSender>{};
+      await Future.wait(
+        firstBySender.entries.map((entry) async {
+          senders[entry.key] = await _commentSender(entry.value);
+        }),
+      );
+      final comments = <ChannelPostComment>[];
+      for (final entry in kept) {
+        final message = entry.message;
+        final senderId = message.senderId;
+        final cached = senderId == null ? null : senders[senderId];
+        final sender = cached ?? await _commentSender(message);
         comments.add(
           ChannelPostComment(
-            chatId: raw.int64('chat_id') ?? target.chatId,
+            chatId: entry.chatId,
             messageId: message.id,
             senderName: sender.name,
             senderPhoto: sender.photo,
@@ -2521,27 +3071,6 @@ class _ChannelPostDetailViewState extends State<ChannelPostDetailView> {
     }
   }
 
-  Future<void> _likeComment(ChannelPostComment comment) async {
-    try {
-      await TdClient.shared.query({
-        '@type': 'addMessageReaction',
-        'chat_id': comment.chatId,
-        'message_id': comment.messageId,
-        'reaction_type': {'@type': 'reactionTypeEmoji', 'emoji': '👍'},
-        'is_big': false,
-        'update_recent_reactions': true,
-      });
-      unawaited(_loadComments());
-    } catch (e) {
-      if (mounted) {
-        showToast(
-          context,
-          AppStrings.t(AppStringKeys.momentsLikeFailed, {'value1': e}),
-        );
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
@@ -2572,27 +3101,32 @@ class _ChannelPostDetailViewState extends State<ChannelPostDetailView> {
             ),
           ),
           Expanded(
-            child: ListView(
-              padding: EdgeInsets.zero,
-              children: [
-                ChannelPostRow(
-                  post: post,
-                  meName: '',
-                  showInlineReply: false,
-                  showInlineComments: false,
+            // Slivers, not a Column of every comment: a thread of 120 rebuilt
+            // and laid out all of its tiles on each incoming-comment refresh.
+            child: CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: ChannelPostRow(
+                    post: post,
+                    meName: '',
+                    showInlineReply: false,
+                    showInlineComments: false,
+                  ),
                 ),
-                const InsetDivider(leadingInset: 14),
+                const SliverToBoxAdapter(child: InsetDivider(leadingInset: 14)),
                 if (_loading && _comments.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 32),
-                    child: Center(child: CircularProgressIndicator()),
+                  const SliverToBoxAdapter(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(vertical: 32),
+                      child: Center(child: CircularProgressIndicator()),
+                    ),
                   )
                 else
                   _CommentThreadList(
                     post: post,
                     comments: _comments,
                     onReply: _beginReply,
-                    onLike: _likeComment,
+                    onReactionSent: () => unawaited(_loadComments()),
                   ),
               ],
             ),
@@ -2650,7 +3184,7 @@ class _ChannelPostDetailViewState extends State<ChannelPostDetailView> {
               padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
                 color: _momentQuoteFill(c),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(AppRadius.card),
               ),
               child: Row(
                 children: [
@@ -2712,28 +3246,51 @@ class _CommentSender {
   final TdFileRef? photo;
 }
 
+/// One flattened row of the comment thread: a root or one of its replies.
+class _ThreadEntry {
+  const _ThreadEntry({
+    required this.comment,
+    required this.endsGroup,
+    this.prefix,
+    this.nested = false,
+  });
+
+  final ChannelPostComment comment;
+  final String? prefix;
+  final bool nested;
+
+  /// Last tile of a root-plus-replies group — carries the gap that used to be
+  /// a SizedBox between groups.
+  final bool endsGroup;
+}
+
 class _CommentThreadList extends StatelessWidget {
   const _CommentThreadList({
     required this.post,
     required this.comments,
     required this.onReply,
-    required this.onLike,
+    required this.onReactionSent,
   });
 
   final ChannelPost post;
   final List<ChannelPostComment> comments;
   final ValueChanged<ChannelPostComment> onReply;
-  final ValueChanged<ChannelPostComment> onLike;
+  final VoidCallback onReactionSent;
 
   @override
   Widget build(BuildContext context) {
     if (comments.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 28),
-        child: Center(
-          child: Text(
-            AppStringKeys.momentsNoComments.l10n(context),
-            style: TextStyle(fontSize: 14, color: context.colors.textTertiary),
+      return SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 28),
+          child: Center(
+            child: Text(
+              AppStringKeys.momentsNoComments.l10n(context),
+              style: TextStyle(
+                fontSize: 14,
+                color: context.colors.textTertiary,
+              ),
+            ),
           ),
         ),
       );
@@ -2746,25 +3303,43 @@ class _CommentThreadList extends StatelessWidget {
       final rootId = _rootId(comment, byId);
       childrenByRoot.putIfAbsent(rootId, () => []).add(comment);
     }
-    return Padding(
+    // Flattened once per build so the tiles themselves can be built lazily.
+    final entries = <_ThreadEntry>[];
+    for (final root in roots) {
+      final children =
+          childrenByRoot[root.messageId] ?? const <ChannelPostComment>[];
+      entries.add(_ThreadEntry(comment: root, endsGroup: children.isEmpty));
+      for (var i = 0; i < children.length; i++) {
+        entries.add(
+          _ThreadEntry(
+            comment: children[i],
+            prefix: _replyPrefix(children[i], root, byId),
+            nested: true,
+            endsGroup: i == children.length - 1,
+          ),
+        );
+      }
+    }
+    return SliverPadding(
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 96),
-      child: Column(
-        children: [
-          for (final root in roots) ...[
-            _DetailCommentTile(comment: root, onReply: onReply, onLike: onLike),
-            for (final child
-                in childrenByRoot[root.messageId] ??
-                    const <ChannelPostComment>[])
-              _DetailCommentTile(
-                comment: child,
-                prefix: _replyPrefix(child, root, byId),
-                nested: true,
-                onReply: onReply,
-                onLike: onLike,
-              ),
-            const SizedBox(height: 14),
-          ],
-        ],
+      sliver: SliverList.builder(
+        itemCount: entries.length,
+        itemBuilder: (context, index) {
+          final entry = entries[index];
+          final tile = _DetailCommentTile(
+            comment: entry.comment,
+            accountSlot: post.accountSlot,
+            prefix: entry.prefix,
+            nested: entry.nested,
+            onReply: onReply,
+            onReactionSent: onReactionSent,
+          );
+          if (!entry.endsGroup) return tile;
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 14),
+            child: tile,
+          );
+        },
       ),
     );
   }
@@ -2808,17 +3383,19 @@ class _CommentThreadList extends StatelessWidget {
 class _DetailCommentTile extends StatelessWidget {
   const _DetailCommentTile({
     required this.comment,
+    required this.accountSlot,
     required this.onReply,
-    required this.onLike,
+    required this.onReactionSent,
     this.prefix,
     this.nested = false,
   });
 
   final ChannelPostComment comment;
+  final int accountSlot;
   final String? prefix;
   final bool nested;
   final ValueChanged<ChannelPostComment> onReply;
-  final ValueChanged<ChannelPostComment> onLike;
+  final VoidCallback onReactionSent;
 
   @override
   Widget build(BuildContext context) {
@@ -2885,10 +3462,11 @@ class _DetailCommentTile extends StatelessWidget {
                           color: c.textPrimary,
                         ),
                         onMentionTap: (userId, name) {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  ProfileDetailView(userId: userId, name: name),
+                          unawaited(
+                            openAdaptiveUserProfile(
+                              context,
+                              userId: userId,
+                              name: name,
                             ),
                           );
                         },
@@ -2899,32 +3477,40 @@ class _DetailCommentTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => onLike(comment),
-              child: SizedBox(
-                width: 34,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    AppIcon(
-                      HeroAppIcons.thumbsUp,
-                      size: 21,
-                      color: c.textTertiary,
-                    ),
-                    if (comment.reactionCount > 0) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        _compactCount(comment.reactionCount),
-                        style: TextStyle(fontSize: 12, color: c.textTertiary),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
+            _MomentsReactionControl(
+              accountSlot: accountSlot,
+              chatId: comment.chatId,
+              messageId: comment.messageId,
+              keyNamespace: 'moments-comment-reaction-${comment.messageId}',
+              onReactionSent: onReactionSent,
+              hiddenBuilder: _reactionContent,
+              contentBuilder: _reactionContent,
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _reactionContent(BuildContext context, [AppIconData? icon]) {
+    final c = context.colors;
+    return SizedBox(
+      width: 34,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) AppIcon(icon, size: 21, color: c.textTertiary),
+          if (comment.reactionCount > 0) ...[
+            if (icon != null) const SizedBox(height: 3),
+            Text(
+              _compactCount(comment.reactionCount),
+              key: ValueKey(
+                'moments-comment-reaction-count-${comment.messageId}',
+              ),
+              style: TextStyle(fontSize: 12, color: c.textTertiary),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -3001,12 +3587,16 @@ class _ChannelPostComposerViewState extends State<ChannelPostComposerView> {
     final c = context.colors;
     return Container(
       padding: EdgeInsets.only(
-        top: MediaQuery.of(context).padding.top,
+        top:
+            MediaQuery.of(context).padding.top +
+            iPadWindowChromeInsetOf(context),
         left: AppSpacing.xxl,
         right: AppSpacing.xxl,
       ),
       height:
-          MediaQuery.of(context).padding.top + AppMetric.composerHeaderHeight,
+          MediaQuery.of(context).padding.top +
+          iPadWindowChromeInsetOf(context) +
+          AppMetric.composerHeaderHeight,
       color: c.groupedBackground,
       child: Row(
         children: [
@@ -3497,6 +4087,7 @@ class ChannelPostRow extends StatelessWidget {
                   photo: channel.photo,
                   size: 48,
                   square: true,
+                  allowAnimation: false,
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -3527,6 +4118,7 @@ class ChannelPostRow extends StatelessWidget {
                               title: post.authorName!,
                               photo: post.authorPhoto,
                               size: 16,
+                              allowAnimation: false,
                             ),
                             const SizedBox(width: 5),
                             Flexible(
@@ -3568,10 +4160,11 @@ class ChannelPostRow extends StatelessWidget {
                   color: c.textPrimary,
                 ),
                 onMentionTap: (userId, name) {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          ProfileDetailView(userId: userId, name: name),
+                  unawaited(
+                    openAdaptiveUserProfile(
+                      context,
+                      userId: userId,
+                      name: name,
                     ),
                   );
                 },
@@ -3586,6 +4179,7 @@ class ChannelPostRow extends StatelessWidget {
               _PostImageGroup(
                 messages: _imageMessages,
                 sourceChatId: channel.id,
+                accountSlot: post.accountSlot,
               ),
             ],
             const SizedBox(height: 12),
@@ -3639,7 +4233,8 @@ class ChannelPostRow extends StatelessWidget {
 
   bool get _hasReplyQuote =>
       message.replyToMessageId != null &&
-      (message.replyToPreview?.trim().isNotEmpty ?? false);
+      ((message.replyToPreview?.trim().isNotEmpty ?? false) ||
+          message.replyToImage != null);
 }
 
 class _PostReplyQuote extends StatelessWidget {
@@ -3652,30 +4247,60 @@ class _PostReplyQuote extends StatelessWidget {
     final c = context.colors;
     final sender = message.replyToSender?.trim();
     final preview = message.replyToPreview?.trim() ?? '';
+    final image = message.replyToImage;
+    final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+    final hasText = (sender?.isNotEmpty ?? false) || preview.isNotEmpty;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(13, 10, 13, 10),
       decoration: BoxDecoration(
         color: _momentQuoteFill(c),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadius.card),
       ),
-      child: RichText(
-        maxLines: 4,
-        overflow: TextOverflow.ellipsis,
-        text: TextSpan(
-          style: TextStyle(fontSize: 15, height: 1.35, color: c.textPrimary),
-          children: [
-            if (sender != null && sender.isNotEmpty)
-              TextSpan(
-                text: '$sender: ',
-                style: TextStyle(
-                  color: c.linkBlue,
-                  fontWeight: FontWeight.w500,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (image != null) ...[
+            SizedBox(
+              key: const ValueKey('momentsReplyMediaPreview'),
+              width: 52,
+              height: 52,
+              child: TDImage(
+                photo: image,
+                cornerRadius: 6,
+                cacheWidth: (52 * pixelRatio).round(),
+                cacheHeight: (52 * pixelRatio).round(),
+              ),
+            ),
+            if (hasText) const SizedBox(width: 10),
+          ],
+          if (hasText)
+            Expanded(
+              child: RichText(
+                textScaler: MediaQuery.textScalerOf(context),
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+                text: TextSpan(
+                  style: TextStyle(
+                    fontSize: 15,
+                    height: 1.35,
+                    color: c.textPrimary,
+                  ),
+                  children: [
+                    if (sender != null && sender.isNotEmpty)
+                      TextSpan(
+                        text: '$sender: ',
+                        style: TextStyle(
+                          color: c.linkBlue,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    TextSpan(text: preview.replaceAll('\n', ' ')),
+                  ],
                 ),
               ),
-            TextSpan(text: preview.replaceAll('\n', ' ')),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -3703,11 +4328,16 @@ class _InlineQuickReply extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
           color: _momentQuoteFill(c),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppRadius.card),
         ),
         child: Row(
           children: [
-            PhotoAvatar(title: meName, photo: mePhoto, size: 26),
+            PhotoAvatar(
+              title: meName,
+              photo: mePhoto,
+              size: 26,
+              allowAnimation: false,
+            ),
             const SizedBox(width: 9),
             Text(
               AppStringKeys.momentsCommentPlaceholder.l10n(context),
@@ -3731,9 +4361,10 @@ class _InlineComments extends StatelessWidget {
     final comments = post.comments ?? const <ChannelPostComment>[];
     if (comments.isEmpty) {
       return Text(
-        AppStrings.t(AppStringKeys.momentsCommentCount, {
-          'value1': post.message.commentCount,
-        }),
+        AppStrings.plural(
+          AppStringKeys.momentsCommentCount,
+          post.message.commentCount,
+        ),
         style: TextStyle(fontSize: 13, color: c.linkBlue),
       );
     }
@@ -3778,10 +4409,11 @@ class _InlineComments extends StatelessWidget {
                       color: c.textPrimary,
                     ),
                     onMentionTap: (userId, name) {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              ProfileDetailView(userId: userId, name: name),
+                      unawaited(
+                        openAdaptiveUserProfile(
+                          context,
+                          userId: userId,
+                          name: name,
                         ),
                       );
                     },
@@ -3804,14 +4436,21 @@ class _InlineComments extends StatelessWidget {
 }
 
 class _PostImageGroup extends StatelessWidget {
-  const _PostImageGroup({required this.messages, required this.sourceChatId});
+  const _PostImageGroup({
+    required this.messages,
+    required this.sourceChatId,
+    required this.accountSlot,
+  });
 
   final List<ChatMessage> messages;
   final int sourceChatId;
+  final int accountSlot;
 
   @override
   Widget build(BuildContext context) {
-    final width = MediaQuery.of(context).size.width - 28;
+    // sizeOf, not of: depending on the whole MediaQueryData rebuilt every
+    // album in the viewport on each frame of the keyboard animation.
+    final width = MediaQuery.sizeOf(context).width - 28;
     final visible = messages.take(9).toList();
     if (visible.isEmpty) return const SizedBox.shrink();
     final layout = buildTelegramMediaAlbumLayout(
@@ -3845,6 +4484,7 @@ class _PostImageGroup extends StatelessWidget {
                     message: visible[i],
                     width: layout.tiles[i].width,
                     height: layout.tiles[i].height,
+                    accountSlot: accountSlot,
                     extraCount: i == visible.length - 1
                         ? math.max(0, messages.length - visible.length)
                         : 0,
@@ -3875,7 +4515,7 @@ class _PostImageGroup extends StatelessWidget {
       Navigator.of(context).push(
         MaterialPageRoute(
           fullscreenDialog: true,
-          builder: (_) => VideoPlaylistPlayerView(queue: _videoQueue(message)),
+          builder: (_) => VideoOnDemandPlayerView(queue: _videoQueue(message)),
         ),
       );
       return;
@@ -3892,9 +4532,11 @@ class _PostImageGroup extends StatelessWidget {
         for (final message in videos)
           VideoPlaybackItem(
             video: message.video!,
+            accountSlot: accountSlot,
             thumb: message.image,
             width: message.imageWidth,
             height: message.imageHeight,
+            durationSeconds: message.videoDuration,
             sourceChatId: sourceChatId,
             messageId: message.id,
             title: message.text.trim().replaceAll('\n', ' '),
@@ -3913,15 +4555,11 @@ class _PostImageGroup extends StatelessWidget {
     final startIndex = photoMessages.indexWhere(
       (message) => message.id == startMessage.id,
     );
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => FullImageViewer(
-          items: refs,
-          startIndex: (startIndex < 0 ? 0 : startIndex).clamp(
-            0,
-            refs.length - 1,
-          ),
-        ),
+    unawaited(
+      openImagePreview(
+        context,
+        items: refs,
+        startIndex: (startIndex < 0 ? 0 : startIndex).clamp(0, refs.length - 1),
       ),
     );
   }
@@ -3932,16 +4570,19 @@ class _PostImageTile extends StatelessWidget {
     required this.message,
     required this.width,
     required this.height,
+    required this.accountSlot,
     this.extraCount = 0,
   });
 
   final ChatMessage message;
   final double width;
   final double height;
+  final int accountSlot;
   final int extraCount;
 
   @override
   Widget build(BuildContext context) {
+    final pixelRatio = MediaQuery.devicePixelRatioOf(context);
     return ClipRRect(
       borderRadius: BorderRadius.circular(3),
       child: SizedBox(
@@ -3953,10 +4594,10 @@ class _PostImageTile extends StatelessWidget {
             TDImage(
               photo: message.image,
               cornerRadius: 3,
-              cacheWidth: (width * MediaQuery.of(context).devicePixelRatio)
-                  .round(),
-              cacheHeight: (height * MediaQuery.of(context).devicePixelRatio)
-                  .round(),
+              cacheWidth: (width * pixelRatio).round(),
+              cacheHeight: (height * pixelRatio).round(),
+              showProgress: true,
+              accountSlot: accountSlot,
             ),
             if (message.video != null)
               Center(
@@ -3984,7 +4625,7 @@ class _PostImageTile extends StatelessWidget {
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 24,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
@@ -4022,10 +4663,21 @@ class _PostActions extends StatelessWidget {
       children: [
         Text(likeText, style: TextStyle(fontSize: 13, color: c.linkBlue)),
         const Spacer(),
-        _actionButton(
-          context,
-          HeroAppIcons.thumbsUp,
-          onTap: () => _react(context),
+        _MomentsReactionControl(
+          accountSlot: post.accountSlot,
+          chatId: channel.id,
+          messageId: message.id,
+          keyNamespace: 'moments-reaction',
+          contentBuilder: (context, icon) => SizedBox.square(
+            dimension: _actionSize,
+            child: Center(
+              child: AppIcon(
+                icon,
+                size: _iconSize,
+                color: context.colors.textPrimary,
+              ),
+            ),
+          ),
         ),
         if (canComment) ...[
           const SizedBox(width: _actionGap),
@@ -4038,7 +4690,7 @@ class _PostActions extends StatelessWidget {
         const SizedBox(width: _actionGap),
         _actionButton(
           context,
-          HeroAppIcons.share,
+          HeroAppIcons.forward,
           onTap: () => _forward(context),
         ),
       ],
@@ -4090,29 +4742,6 @@ class _PostActions extends StatelessWidget {
     return AppStrings.t(AppStringKeys.momentsUserLiked, {'value1': shown});
   }
 
-  Future<void> _react(BuildContext context) async {
-    try {
-      await TdClient.shared.query({
-        '@type': 'addMessageReaction',
-        'chat_id': channel.id,
-        'message_id': message.id,
-        'reaction_type': {'@type': 'reactionTypeEmoji', 'emoji': '👍'},
-        'is_big': false,
-        'update_recent_reactions': true,
-      });
-      if (context.mounted) {
-        showToast(context, AppStringKeys.momentsLiked);
-      }
-    } catch (e) {
-      if (context.mounted) {
-        showToast(
-          context,
-          AppStrings.t(AppStringKeys.momentsLikeFailed, {'value1': e}),
-        );
-      }
-    }
-  }
-
   Future<void> _forward(BuildContext context) async {
     final result = await Navigator.of(context).push<ChatPickerResult>(
       MaterialPageRoute(
@@ -4153,6 +4782,394 @@ class _PostActions extends StatelessWidget {
   }
 }
 
+class _MomentsReactionControl extends StatefulWidget {
+  const _MomentsReactionControl({
+    required this.accountSlot,
+    required this.chatId,
+    required this.messageId,
+    required this.keyNamespace,
+    required this.contentBuilder,
+    this.hiddenBuilder,
+    this.onReactionSent,
+  });
+
+  final int accountSlot;
+  final int chatId;
+  final int messageId;
+  final String keyNamespace;
+  final Widget Function(BuildContext context, AppIconData icon) contentBuilder;
+  final WidgetBuilder? hiddenBuilder;
+  final VoidCallback? onReactionSent;
+
+  @override
+  State<_MomentsReactionControl> createState() =>
+      _MomentsReactionControlState();
+}
+
+class _MomentsReactionControlState extends State<_MomentsReactionControl> {
+  static const _thumbsUp = QuickReactionChoice.emoji('👍');
+
+  MessageReactionAvailability? _availability;
+  List<QuickReactionChoice> _arbitraryCustomChoices = const [];
+  int _availabilityGeneration = 0;
+  bool _sending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAvailability();
+  }
+
+  @override
+  void didUpdateWidget(_MomentsReactionControl oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_matchesTarget(
+      oldWidget.accountSlot,
+      oldWidget.chatId,
+      oldWidget.messageId,
+    )) {
+      _availability = null;
+      _arbitraryCustomChoices = const [];
+      _sending = false;
+      _loadAvailability();
+    }
+  }
+
+  bool _matchesTarget(int accountSlot, int chatId, int messageId) =>
+      widget.accountSlot == accountSlot &&
+      widget.chatId == chatId &&
+      widget.messageId == messageId;
+
+  Future<MessageReactionAvailability> _fetchAvailability({
+    required int accountSlot,
+    required int chatId,
+    required int messageId,
+  }) async {
+    final client = TdClient.shared;
+    final responses = await Future.wait([
+      client.queryForSlot({
+        '@type': 'getMessageAvailableReactions',
+        'chat_id': chatId,
+        'message_id': messageId,
+        'row_size': 25,
+      }, accountSlot),
+      client.queryForSlot({
+        '@type': 'getOption',
+        'name': 'is_premium',
+      }, accountSlot),
+    ]);
+    return MessageReactionAvailability.fromTd(
+      responses.first,
+      isPremium: responses.last.boolean('value') ?? false,
+    );
+  }
+
+  Future<void> _loadAvailability() async {
+    final accountSlot = widget.accountSlot;
+    final chatId = widget.chatId;
+    final messageId = widget.messageId;
+    final generation = ++_availabilityGeneration;
+    MessageReactionAvailability? availability;
+    var arbitraryCustomChoices = const <QuickReactionChoice>[];
+    try {
+      availability = await _fetchAvailability(
+        accountSlot: accountSlot,
+        chatId: chatId,
+        messageId: messageId,
+      );
+      if (availability.allowArbitraryCustom) {
+        arbitraryCustomChoices = await _cachedInstalledCustomReactionChoices(
+          accountSlot,
+        );
+      }
+    } catch (_) {
+      // Fail closed: global reaction defaults are not authoritative for this
+      // particular message and can trigger MESSAGE_REACTION_INVALID.
+    }
+    if (!mounted ||
+        !_matchesTarget(accountSlot, chatId, messageId) ||
+        generation != _availabilityGeneration) {
+      return;
+    }
+    setState(() {
+      _availability = availability;
+      _arbitraryCustomChoices = arbitraryCustomChoices;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    var action = momentsReactionAction(_availability);
+    if (action == MomentsReactionAction.openSelector &&
+        _availability!.choices.isEmpty &&
+        _arbitraryCustomChoices.isEmpty) {
+      // TDLib permits arbitrary custom emoji, but this account has none to
+      // present. Do not expose a selector that contains zero choices.
+      action = MomentsReactionAction.hidden;
+    }
+    if (action == MomentsReactionAction.hidden) {
+      return widget.hiddenBuilder?.call(context) ?? const SizedBox.shrink();
+    }
+    final icon = action == MomentsReactionAction.sendThumbsUp
+        ? HeroAppIcons.thumbsUp
+        : HeroAppIcons.solidFaceSmile;
+    return GestureDetector(
+      key: ValueKey('${widget.keyNamespace}-action'),
+      behavior: HitTestBehavior.opaque,
+      onTap: _sending
+          ? null
+          : action == MomentsReactionAction.sendThumbsUp
+          ? () => unawaited(_sendReaction(_thumbsUp))
+          : () => unawaited(_openSelector()),
+      onLongPress: _sending ? null : () => unawaited(_openSelector()),
+      child: widget.contentBuilder(context, icon),
+    );
+  }
+
+  Future<void> _openSelector() async {
+    final accountSlot = widget.accountSlot;
+    final chatId = widget.chatId;
+    final messageId = widget.messageId;
+    final generation = _availabilityGeneration;
+    final availability = _availability;
+    if (availability == null) return;
+    final choices = <QuickReactionChoice>[
+      ...availability.choices,
+      for (final choice in _arbitraryCustomChoices)
+        if (!availability.choices.contains(choice)) choice,
+    ];
+    if (choices.isEmpty) return;
+    final selected = await showAppModalSheet<QuickReactionChoice>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _MomentsReactionSelector(choices: choices),
+    );
+    if (selected == null ||
+        !mounted ||
+        !_matchesTarget(accountSlot, chatId, messageId) ||
+        generation != _availabilityGeneration) {
+      return;
+    }
+    await _sendReaction(selected);
+  }
+
+  Future<void> _sendReaction(QuickReactionChoice requested) async {
+    if (_sending) return;
+    final accountSlot = widget.accountSlot;
+    final chatId = widget.chatId;
+    final messageId = widget.messageId;
+    final generation = _availabilityGeneration;
+    setState(() => _sending = true);
+    try {
+      // Availability can change while a row or selector is onscreen. Re-read
+      // it immediately before mutation and send TDLib's canonical value.
+      final fresh = await _fetchAvailability(
+        accountSlot: accountSlot,
+        chatId: chatId,
+        messageId: messageId,
+      );
+      final freshArbitraryCustomChoices = fresh.allowArbitraryCustom
+          ? await _cachedInstalledCustomReactionChoices(accountSlot)
+          : const <QuickReactionChoice>[];
+      if (!mounted ||
+          !_matchesTarget(accountSlot, chatId, messageId) ||
+          generation != _availabilityGeneration) {
+        return;
+      }
+      setState(() {
+        _availability = fresh;
+        // A message can become restricted while its selector is open. Never
+        // retain account-wide custom choices after the authoritative response
+        // stops allowing them for this message.
+        _arbitraryCustomChoices = freshArbitraryCustomChoices;
+      });
+      final reaction = fresh.canonicalChoice(requested);
+      if (reaction == null) return;
+      await TdClient.shared.queryForSlot({
+        '@type': 'addMessageReaction',
+        'chat_id': chatId,
+        'message_id': messageId,
+        'reaction_type': reaction.isCustom
+            ? {
+                '@type': 'reactionTypeCustomEmoji',
+                'custom_emoji_id': reaction.customEmojiId,
+              }
+            : {'@type': 'reactionTypeEmoji', 'emoji': reaction.emoji},
+        'is_big': false,
+        'update_recent_reactions': true,
+      }, accountSlot);
+      if (!mounted || !_matchesTarget(accountSlot, chatId, messageId)) return;
+      widget.onReactionSent?.call();
+      showToast(context, AppStringKeys.momentsLiked);
+    } catch (_) {
+      if (mounted && _matchesTarget(accountSlot, chatId, messageId)) {
+        showToast(context, AppStringKeys.topicPostContentActionFailed);
+      }
+    } finally {
+      if (mounted && _matchesTarget(accountSlot, chatId, messageId)) {
+        setState(() => _sending = false);
+      }
+    }
+  }
+}
+
+class _MomentsReactionSelector extends StatelessWidget {
+  const _MomentsReactionSelector({required this.choices});
+
+  final List<QuickReactionChoice> choices;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return SafeArea(
+      child: Container(
+        key: const ValueKey('moments-reaction-selector'),
+        constraints: const BoxConstraints(maxWidth: 420, maxHeight: 320),
+        margin: const EdgeInsets.all(AppSpacing.md),
+        padding: const EdgeInsets.all(AppSpacing.md),
+        decoration: BoxDecoration(
+          color: c.card,
+          borderRadius: BorderRadius.circular(AppRadius.xl),
+          border: Border.all(color: c.divider, width: AppMetric.divider),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.18),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: GridView.builder(
+          shrinkWrap: true,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 7,
+            mainAxisSpacing: AppSpacing.xs,
+            crossAxisSpacing: AppSpacing.xs,
+          ),
+          itemCount: choices.length,
+          itemBuilder: (context, index) {
+            final reaction = choices[index];
+            return GestureDetector(
+              key: ValueKey('moments-reaction-choice-${reaction.storageValue}'),
+              behavior: HitTestBehavior.opaque,
+              onTap: () => Navigator.of(context).pop(reaction),
+              child: SizedBox.square(
+                dimension: 42,
+                child: Center(
+                  child: reaction.isCustom
+                      ? CustomEmojiView(
+                          id: reaction.customEmojiId,
+                          size: 29,
+                          color: c.textPrimary,
+                        )
+                      : Text(
+                          reaction.emoji,
+                          textScaler: TextScaler.noScaling,
+                          style: const TextStyle(fontSize: 29),
+                        ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+const _installedCustomReactionClientCacheLimit = 8;
+const _installedCustomReactionSetLimit = 24;
+const _installedCustomReactionChoiceLimit = 280;
+const _installedCustomReactionCacheLifetime = Duration(minutes: 10);
+
+class _InstalledCustomReactionChoiceCacheEntry {
+  const _InstalledCustomReactionChoiceCacheEntry({
+    required this.createdAt,
+    required this.value,
+  });
+
+  final DateTime createdAt;
+  final Future<List<QuickReactionChoice>> value;
+}
+
+final Map<int, _InstalledCustomReactionChoiceCacheEntry>
+_installedCustomReactionChoiceCache = {};
+
+@visibleForTesting
+void resetMomentsInstalledCustomReactionChoiceCache() {
+  _installedCustomReactionChoiceCache.clear();
+}
+
+Future<List<QuickReactionChoice>> _cachedInstalledCustomReactionChoices(
+  int accountSlot,
+) {
+  final clientId = TdClient.shared.clientId(accountSlot);
+  if (clientId == null) return Future.value(const <QuickReactionChoice>[]);
+  final now = DateTime.now();
+  final cached = _installedCustomReactionChoiceCache.remove(clientId);
+  if (cached != null &&
+      now.difference(cached.createdAt) <
+          _installedCustomReactionCacheLifetime) {
+    _installedCustomReactionChoiceCache[clientId] = cached;
+    return cached.value;
+  }
+
+  // Store the in-flight future before issuing pack requests. Every visible
+  // post/comment for this client then joins the same bounded load.
+  final value = _loadInstalledCustomReactionChoices(
+    accountSlot,
+  ).then((choices) => choices, onError: (_) => const <QuickReactionChoice>[]);
+  _installedCustomReactionChoiceCache[clientId] =
+      _InstalledCustomReactionChoiceCacheEntry(createdAt: now, value: value);
+  while (_installedCustomReactionChoiceCache.length >
+      _installedCustomReactionClientCacheLimit) {
+    _installedCustomReactionChoiceCache.remove(
+      _installedCustomReactionChoiceCache.keys.first,
+    );
+  }
+  return value;
+}
+
+Future<List<QuickReactionChoice>> _loadInstalledCustomReactionChoices(
+  int accountSlot,
+) async {
+  final client = TdClient.shared;
+  final installed = await client.queryForSlot({
+    '@type': 'getInstalledStickerSets',
+    'sticker_type': {'@type': 'stickerTypeCustomEmoji'},
+  }, accountSlot);
+  final infos = installed.objects('sets') ?? const <Map<String, dynamic>>[];
+  final sets = await Future.wait(
+    infos.take(_installedCustomReactionSetLimit).map((info) async {
+      final setId = info.int64('id');
+      if (setId == null) return null;
+      try {
+        return await client.queryForSlot({
+          '@type': 'getStickerSet',
+          'set_id': setId,
+        }, accountSlot);
+      } catch (_) {
+        return null;
+      }
+    }),
+  );
+  final choices = <QuickReactionChoice>[];
+  final seen = <int>{};
+  for (final set in sets.whereType<Map<String, dynamic>>()) {
+    for (final sticker
+        in set.objects('stickers') ?? const <Map<String, dynamic>>[]) {
+      final id = sticker.obj('full_type')?.int64('custom_emoji_id') ?? 0;
+      if (id != 0 && seen.add(id)) {
+        choices.add(QuickReactionChoice.custom(id));
+        if (choices.length >= _installedCustomReactionChoiceLimit) {
+          return List.unmodifiable(choices);
+        }
+      }
+    }
+  }
+  return List.unmodifiable(choices);
+}
+
 class StoryShelf extends StatelessWidget {
   const StoryShelf({
     super.key,
@@ -4170,6 +5187,8 @@ class StoryShelf extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final groups = model.groups;
+    final showLoader = model.loading && groups.isEmpty;
     return Container(
       color: c.background,
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -4185,7 +5204,7 @@ class StoryShelf extends StatelessWidget {
                   style: TextStyle(
                     color: c.textPrimary,
                     fontSize: 17,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
@@ -4194,34 +5213,41 @@ class StoryShelf extends StatelessWidget {
           const SizedBox(height: 4),
           SizedBox(
             height: 91,
-            child: ListView(
+            // Lazy: the eager children form built a tile per friend with active
+            // stories on every rebuild, and paging emits one update per friend.
+            child: ListView.builder(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 12),
-              children: [
-                _StoryActionTile(
-                  key: const ValueKey('my-story-action'),
-                  label: AppStringKeys.storiesMy.l10n(context),
-                  icon: HeroAppIcons.inbox,
-                  photo: model.selfPhoto,
-                  photoTitle: model.selfName,
-                  onTap: model.ownGroup == null
-                      ? onManage
-                      : () => _openStory(context, model.ownGroup!),
-                  onBadgeTap: canPublish ? onCreate : null,
-                  showBadge: canPublish,
-                  prominent: model.ownGroup == null && canPublish,
-                ),
-                for (final group in model.groups)
-                  _StoryGroupTile(
-                    group: group,
-                    onTap: () => _openStory(context, group),
-                  ),
-                if (model.loading && model.groups.isEmpty)
-                  const SizedBox(
+              itemCount: 1 + groups.length + (showLoader ? 1 : 0),
+              itemBuilder: (context, i) {
+                if (i == 0) {
+                  return _StoryActionTile(
+                    key: const ValueKey('my-story-action'),
+                    label: AppStringKeys.storiesMy.l10n(context),
+                    icon: HeroAppIcons.inbox,
+                    photo: model.selfPhoto,
+                    photoTitle: model.selfName,
+                    onTap: model.ownGroup == null
+                        ? onManage
+                        : () => _openStory(context, model.ownGroup!),
+                    onBadgeTap: canPublish ? onCreate : null,
+                    showBadge: canPublish,
+                    prominent: model.ownGroup == null && canPublish,
+                  );
+                }
+                if (i > groups.length) {
+                  return const SizedBox(
                     width: 66,
                     child: Center(child: AppActivityIndicator(size: 24)),
-                  ),
-              ],
+                  );
+                }
+                final group = groups[i - 1];
+                return _StoryGroupTile(
+                  key: ValueKey('story-group-${group.chatId}'),
+                  group: group,
+                  onTap: () => _openStory(context, group),
+                );
+              },
             ),
           ),
         ],
@@ -4297,6 +5323,7 @@ class _StoryActionTile extends StatelessWidget {
                               title: photoTitle,
                               photo: photo,
                               size: 57,
+                              allowAnimation: false,
                             )
                           : DecoratedBox(
                               decoration: BoxDecoration(
@@ -4332,7 +5359,9 @@ class _StoryActionTile extends StatelessWidget {
                             alignment: Alignment.center,
                             decoration: BoxDecoration(
                               color: AppTheme.brand,
-                              borderRadius: BorderRadius.circular(11),
+                              borderRadius: BorderRadius.circular(
+                                AppRadius.card,
+                              ),
                               border: Border.all(color: c.background, width: 2),
                             ),
                             child: const AppIcon(
@@ -4363,7 +5392,7 @@ class _StoryActionTile extends StatelessWidget {
 }
 
 class _StoryGroupTile extends StatelessWidget {
-  const _StoryGroupTile({required this.group, required this.onTap});
+  const _StoryGroupTile({super.key, required this.group, required this.onTap});
 
   final StoryGroup group;
   final VoidCallback onTap;
@@ -4403,6 +5432,7 @@ class _StoryGroupTile extends StatelessWidget {
                     title: group.name,
                     photo: group.photo,
                     size: 53,
+                    allowAnimation: false,
                   ),
                 ),
               ),
@@ -4594,7 +5624,7 @@ class _StoriesViewState extends State<StoriesView> {
               style: TextStyle(
                 color: c.textPrimary,
                 fontSize: 16,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w600,
               ),
             ),
             const Spacer(),
@@ -4635,7 +5665,7 @@ class _StoriesViewState extends State<StoriesView> {
           decoration: BoxDecoration(
             gradient: prominent ? AppTheme.brandGradient : null,
             color: prominent ? null : c.background,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(AppRadius.lg),
             border: prominent ? null : Border.all(color: c.divider),
           ),
           child: Row(
@@ -4669,7 +5699,7 @@ class _StoriesViewState extends State<StoriesView> {
                       style: TextStyle(
                         color: prominent ? Colors.white : c.textPrimary,
                         fontSize: 14,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                     const SizedBox(height: 3),
@@ -4704,7 +5734,7 @@ class _StoriesViewState extends State<StoriesView> {
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           color: AppTheme.brand.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(AppRadius.card),
           border: Border.all(color: AppTheme.brand.withValues(alpha: 0.22)),
         ),
         child: Row(
@@ -4725,7 +5755,7 @@ class _StoriesViewState extends State<StoriesView> {
                     style: TextStyle(
                       color: c.textPrimary,
                       fontSize: 14,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -4750,7 +5780,7 @@ class _StoriesViewState extends State<StoriesView> {
     alignment: Alignment.center,
     decoration: BoxDecoration(
       color: context.colors.background,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(AppRadius.lg),
     ),
     child: const AppActivityIndicator(size: 30),
   );
@@ -4761,7 +5791,7 @@ class _StoriesViewState extends State<StoriesView> {
       padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
       decoration: BoxDecoration(
         color: c.background,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
       ),
       child: Column(
         children: [
@@ -4785,7 +5815,7 @@ class _StoriesViewState extends State<StoriesView> {
             style: TextStyle(
               color: c.textPrimary,
               fontSize: 16,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
             ),
           ),
           const SizedBox(height: 6),
@@ -4809,14 +5839,14 @@ class _StoriesViewState extends State<StoriesView> {
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 decoration: BoxDecoration(
                   color: AppTheme.brand,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadius.card),
                 ),
                 child: Text(
                   AppStringKeys.storiesCreate.l10n(context),
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 14,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
@@ -4836,12 +5866,12 @@ class _StoriesViewState extends State<StoriesView> {
         height: 78,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         foregroundDecoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(15),
+          borderRadius: BorderRadius.circular(AppRadius.lg),
           border: Border.all(color: c.divider),
         ),
         decoration: BoxDecoration(
           color: c.background,
-          borderRadius: BorderRadius.circular(15),
+          borderRadius: BorderRadius.circular(AppRadius.lg),
         ),
         child: Row(
           children: [
@@ -4860,7 +5890,11 @@ class _StoriesViewState extends State<StoriesView> {
                   color: c.background,
                   shape: BoxShape.circle,
                 ),
-                child: PhotoAvatar(title: group.name, photo: group.photo),
+                child: PhotoAvatar(
+                  title: group.name,
+                  photo: group.photo,
+                  allowAnimation: false,
+                ),
               ),
             ),
             const SizedBox(width: 12),

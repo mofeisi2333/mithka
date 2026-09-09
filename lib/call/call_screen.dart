@@ -20,6 +20,7 @@ import 'package:mithka/l10n/app_localizations.dart';
 import '../components/app_icons.dart';
 import '../components/app_interactive_surface.dart';
 import '../components/photo_avatar.dart'; // PhotoAvatar + TDImage
+import '../theme/app_theme.dart';
 import 'call_manager.dart';
 
 class CallScreen extends StatefulWidget {
@@ -31,7 +32,6 @@ class CallScreen extends StatefulWidget {
 }
 
 class _CallScreenState extends State<CallScreen> {
-  Timer? _ticker;
   Timer? _overlayTimer;
   bool _videoWasActive = false;
   bool _overlayVisible = true;
@@ -49,9 +49,6 @@ class _CallScreenState extends State<CallScreen> {
     widget.manager.addListener(_handleManagerChanged);
     _videoWasActive = _isActiveVideo;
     if (_videoWasActive) _scheduleOverlayHide();
-    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() {});
-    });
   }
 
   @override
@@ -69,7 +66,6 @@ class _CallScreenState extends State<CallScreen> {
   @override
   void dispose() {
     widget.manager.removeListener(_handleManagerChanged);
-    _ticker?.cancel();
     _overlayTimer?.cancel();
     super.dispose();
   }
@@ -220,9 +216,14 @@ class _CallScreenState extends State<CallScreen> {
       fit: StackFit.expand,
       children: [
         if (hasPhoto)
-          ImageFiltered(
-            imageFilter: ImageFilter.blur(sigmaX: 32, sigmaY: 32),
-            child: TDImage(photo: call.peerPhoto, cornerRadius: 0),
+          // Boundary outside the filter: every manager notification repaints
+          // this screen, and without it the full-viewport gaussian is rastered
+          // again on each one instead of being re-composited.
+          RepaintBoundary(
+            child: ImageFiltered(
+              imageFilter: ImageFilter.blur(sigmaX: 32, sigmaY: 32),
+              child: TDImage(photo: call.peerPhoto, cornerRadius: 0),
+            ),
           )
         else
           const DecoratedBox(
@@ -271,7 +272,7 @@ class _CallScreenState extends State<CallScreen> {
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: Colors.black.withValues(alpha: 0.4),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppRadius.card),
           border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
         ),
         child: showVideo
@@ -353,9 +354,9 @@ class _CallScreenState extends State<CallScreen> {
         color: Colors.white,
       ),
     );
-    final status = Text(
-      _statusLine(call),
-      style: TextStyle(
+    final status = _statusLine(
+      call,
+      TextStyle(
         fontSize: compact ? 13 : 15,
         color: Colors.white.withValues(alpha: 0.75),
       ),
@@ -382,33 +383,29 @@ class _CallScreenState extends State<CallScreen> {
     );
   }
 
-  String _statusLine(ActiveCall call) {
-    switch (call.phase) {
-      case CallPhase.requesting:
-      case CallPhase.ringingOutgoing:
-        return AppStrings.t(AppStringKeys.callWaitingForInviteAccept);
-      case CallPhase.ringingIncoming:
-        return AppStrings.t(AppStringKeys.callIncomingCallInvite, {
+  Widget _statusLine(ActiveCall call, TextStyle style) {
+    final text = switch (call.phase) {
+      CallPhase.requesting || CallPhase.ringingOutgoing => AppStrings.t(
+        AppStringKeys.callWaitingForInviteAccept,
+      ),
+      CallPhase.ringingIncoming =>
+        AppStrings.t(AppStringKeys.callIncomingCallInvite, {
           'value1': AppStrings.t(
             call.isVideo
                 ? AppStringKeys.sharedMediaVideos
                 : AppStringKeys.sharedMediaVoice,
           ),
-        });
-      case CallPhase.exchangingKeys:
-        return AppStrings.t(AppStringKeys.callConnecting);
-      case CallPhase.active:
-        return _durationText(call.startedAt);
-      case CallPhase.ending:
-        return AppStrings.t(AppStringKeys.callEnded);
+        }),
+      CallPhase.exchangingKeys => AppStrings.t(AppStringKeys.callConnecting),
+      // The elapsed time is the only line that changes on its own; it owns the
+      // 1 Hz tick so the rest of the call screen isn't relaid out every second.
+      CallPhase.active => null,
+      CallPhase.ending => AppStrings.t(AppStringKeys.callEnded),
+    };
+    if (text == null) {
+      return _CallDuration(startedAt: call.startedAt, style: style);
     }
-  }
-
-  String _durationText(DateTime? startedAt) {
-    if (startedAt == null) return '00:00';
-    final e = DateTime.now().difference(startedAt).inSeconds;
-    final s = e < 0 ? 0 : e;
-    return '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
+    return Text(text, style: style);
   }
 
   Widget _secureRow(List<String> emojis) {
@@ -416,7 +413,7 @@ class _CallScreenState extends State<CallScreen> {
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 14),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppRadius.card),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -589,6 +586,63 @@ class _CallScreenState extends State<CallScreen> {
         const SizedBox(height: 30),
         buildHangUp(compact: false),
       ],
+    );
+  }
+}
+
+/// Elapsed call time, ticking on its own. Keeping the timer here instead of on
+/// the screen state is what stops the 1 Hz tick from rebuilding the video
+/// platform views, the scrim and every control once a second for the whole call.
+class _CallDuration extends StatefulWidget {
+  const _CallDuration({required this.startedAt, required this.style});
+
+  final DateTime? startedAt;
+  final TextStyle style;
+
+  @override
+  State<_CallDuration> createState() => _CallDurationState();
+}
+
+class _CallDurationState extends State<_CallDuration> {
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncTicker();
+  }
+
+  @override
+  void didUpdateWidget(covariant _CallDuration oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.startedAt != widget.startedAt) _syncTicker();
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  void _syncTicker() {
+    _ticker?.cancel();
+    _ticker = null;
+    if (widget.startedAt == null) return;
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final startedAt = widget.startedAt;
+    final elapsed = startedAt == null
+        ? 0
+        : DateTime.now().difference(startedAt).inSeconds;
+    final s = elapsed < 0 ? 0 : elapsed;
+    return Text(
+      '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}',
+      style: widget.style,
     );
   }
 }

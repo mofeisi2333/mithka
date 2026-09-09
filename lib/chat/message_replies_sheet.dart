@@ -12,7 +12,7 @@ import '../tdlib/td_models.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import 'emoji_catalog.dart';
-import 'full_image_viewer.dart';
+import 'image_preview.dart';
 import 'message_action_menu.dart';
 import 'message_bubble.dart';
 import 'outgoing_attachment.dart';
@@ -46,6 +46,67 @@ Map<String, dynamic> buildReplySheetTextRequest({
   };
 }
 
+List<Map<String, dynamic>> replySheetSendCandidates(
+  Map<String, dynamic> request,
+) {
+  final candidates = <Map<String, dynamic>>[Map<String, dynamic>.from(request)];
+  if (request.containsKey('message_thread_id')) {
+    candidates.add(
+      Map<String, dynamic>.from(request)..remove('message_thread_id'),
+    );
+  }
+  // A forum topic is an explicit destination, not optional metadata. If a
+  // scoped request is rejected, fail closed instead of replying in the chat's
+  // root conversation.
+  if (request.obj('topic_id')?.type == 'messageTopicForum') {
+    return candidates;
+  }
+  if (request.containsKey('topic_id') && request.containsKey('reply_to')) {
+    candidates.add(
+      Map<String, dynamic>.from(request)
+        ..remove('topic_id')
+        ..remove('message_thread_id'),
+    );
+  }
+  return candidates;
+}
+
+class MessageRepliesViewTarget {
+  const MessageRepliesViewTarget({
+    required this.chatId,
+    required this.messageId,
+    required this.title,
+  });
+
+  final int chatId;
+  final int messageId;
+  final String title;
+}
+
+@visibleForTesting
+MessageRepliesViewTarget resolveMessageRepliesViewTarget({
+  required int sourceChatId,
+  required int sourceMessageId,
+  required String sourceTitle,
+  int? threadChatId,
+  int? threadRootMessageId,
+  int? rootReplyToMessageId,
+  String? threadTitle,
+}) {
+  final hasThreadRoot = threadRootMessageId != null;
+  final resolvedChatId = hasThreadRoot
+      ? threadChatId ?? sourceChatId
+      : sourceChatId;
+  final resolvedTitle = (threadTitle ?? '').trim();
+  return MessageRepliesViewTarget(
+    chatId: resolvedChatId,
+    messageId: threadRootMessageId ?? rootReplyToMessageId ?? sourceMessageId,
+    title: resolvedChatId == sourceChatId || resolvedTitle.isEmpty
+        ? sourceTitle
+        : resolvedTitle,
+  );
+}
+
 Future<void> showMessageRepliesSheet({
   required BuildContext context,
   required int chatId,
@@ -62,7 +123,7 @@ Future<void> showMessageRepliesSheet({
   void Function(ChatMessage message, MessageButton button)? onButtonTap,
   ValueChanged<String>? onBotCommandTap,
   ValueChanged<String>? onHashtagTap,
-  ValueChanged<int>? onViewInChat,
+  ValueChanged<MessageRepliesViewTarget>? onViewInChat,
 }) {
   return showAppModalSheet<void>(
     context: context,
@@ -122,7 +183,7 @@ class _MessageRepliesSheet extends StatefulWidget {
   final void Function(ChatMessage message, MessageButton button)? onButtonTap;
   final ValueChanged<String>? onBotCommandTap;
   final ValueChanged<String>? onHashtagTap;
-  final ValueChanged<int>? onViewInChat;
+  final ValueChanged<MessageRepliesViewTarget>? onViewInChat;
 
   @override
   State<_MessageRepliesSheet> createState() => _MessageRepliesSheetState();
@@ -134,6 +195,7 @@ class _MessageRepliesSheetState extends State<_MessageRepliesSheet> {
   final _messages = <ChatMessage>[];
   final _senders = <int, _ReplySender>{};
   _ReplyThreadTarget? _replyTarget;
+  String? _replyTargetTitle;
   ChatMessage? _replyTo;
   bool _loading = true;
   bool _unavailable = false;
@@ -178,9 +240,10 @@ class _MessageRepliesSheetState extends State<_MessageRepliesSheet> {
       } catch (_) {}
 
       final replyTarget = await _resolveReplyTarget();
-      final chatCanSend = replyTarget == null
-          ? false
-          : await _targetChatCanSend(replyTarget.chatId);
+      final targetChatInfo = replyTarget == null
+          ? null
+          : await _targetChatInfo(replyTarget.chatId);
+      final chatCanSend = replyTarget == null ? false : targetChatInfo?.canSend;
       final linkedDiscussion =
           replyTarget != null && replyTarget.chatId != widget.chatId;
       final canReply =
@@ -228,6 +291,7 @@ class _MessageRepliesSheetState extends State<_MessageRepliesSheet> {
             quoted.senderName ?? quoted.senderTitle ?? widget.peerTitle;
         message.replyToPreview ??= quoted.text;
         message.replyToDate ??= quoted.date;
+        message.replyToEntities = quoted.textEntities;
         message.replyToImage ??= quoted.image;
         message.replyToImageWidth ??= quoted.imageWidth;
         message.replyToImageHeight ??= quoted.imageHeight;
@@ -235,6 +299,7 @@ class _MessageRepliesSheetState extends State<_MessageRepliesSheet> {
       if (!mounted) return;
       setState(() {
         _replyTarget = replyTarget;
+        _replyTargetTitle = targetChatInfo?.title;
         _canReply = canReply;
         _messages
           ..clear()
@@ -245,6 +310,7 @@ class _MessageRepliesSheetState extends State<_MessageRepliesSheet> {
       if (!mounted) return;
       setState(() {
         _replyTarget = null;
+        _replyTargetTitle = null;
         _replyTo = null;
         _canReply = false;
         _loading = false;
@@ -254,6 +320,7 @@ class _MessageRepliesSheetState extends State<_MessageRepliesSheet> {
       if (!mounted) return;
       setState(() {
         _replyTarget = null;
+        _replyTargetTitle = null;
         _replyTo = null;
         _canReply = false;
         _loading = false;
@@ -297,17 +364,33 @@ class _MessageRepliesSheetState extends State<_MessageRepliesSheet> {
     );
   }
 
-  Future<bool?> _targetChatCanSend(int chatId) async {
+  Future<_ReplyTargetChatInfo?> _targetChatInfo(int chatId) async {
     try {
       final chat = await TdClient.shared.query({
         '@type': 'getChat',
         'chat_id': chatId,
       });
-      return chat.obj('permissions')?.boolean('can_send_basic_messages') ??
-          true;
+      return _ReplyTargetChatInfo(
+        canSend:
+            chat.obj('permissions')?.boolean('can_send_basic_messages') ?? true,
+        title: chat.str('title'),
+      );
     } catch (_) {
       return null;
     }
+  }
+
+  MessageRepliesViewTarget _viewInChatTarget() {
+    final target = _replyTarget;
+    return resolveMessageRepliesViewTarget(
+      sourceChatId: widget.chatId,
+      sourceMessageId: widget.message.id,
+      sourceTitle: widget.peerTitle,
+      threadChatId: target?.chatId,
+      threadRootMessageId: target?.historyRootMessageId,
+      rootReplyToMessageId: target?.rootReplyToMessageId,
+      threadTitle: _replyTargetTitle,
+    );
   }
 
   Future<_ReplySender?> _resolveSender(int senderId) async {
@@ -476,27 +559,18 @@ class _MessageRepliesSheetState extends State<_MessageRepliesSheet> {
   Future<void> _sendRequestWithCompatibility(
     Map<String, dynamic> request,
   ) async {
-    try {
-      await TdClient.shared.query(request);
-      return;
-    } catch (_) {
-      if (request.containsKey('message_thread_id')) {
-        final withoutLegacyThread = Map<String, dynamic>.from(request)
-          ..remove('message_thread_id');
-        try {
-          await TdClient.shared.query(withoutLegacyThread);
-          return;
-        } catch (_) {}
-      }
-      if (request.containsKey('topic_id') && request.containsKey('reply_to')) {
-        final replyOnly = Map<String, dynamic>.from(request)
-          ..remove('topic_id')
-          ..remove('message_thread_id');
-        await TdClient.shared.query(replyOnly);
+    Object? lastError;
+    StackTrace? lastStackTrace;
+    for (final candidate in replySheetSendCandidates(request)) {
+      try {
+        await TdClient.shared.query(candidate);
         return;
+      } catch (error, stackTrace) {
+        lastError = error;
+        lastStackTrace = stackTrace;
       }
-      rethrow;
     }
+    Error.throwWithStackTrace(lastError!, lastStackTrace!);
   }
 
   @override
@@ -521,7 +595,7 @@ class _MessageRepliesSheetState extends State<_MessageRepliesSheet> {
                 height: 6,
                 decoration: BoxDecoration(
                   color: c.divider,
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(AppRadius.md),
                 ),
               ),
               Padding(
@@ -543,13 +617,14 @@ class _MessageRepliesSheetState extends State<_MessageRepliesSheet> {
                         ),
                       ),
                     ),
-                    if (widget.onViewInChat != null)
+                    if (widget.onViewInChat != null && _replyTarget != null)
                       GestureDetector(
                         key: const ValueKey('messageRepliesViewInChat'),
                         behavior: HitTestBehavior.opaque,
                         onTap: () {
+                          final target = _viewInChatTarget();
                           Navigator.of(context).pop();
-                          widget.onViewInChat!(widget.message.id);
+                          widget.onViewInChat!(target);
                         },
                         child: Padding(
                           padding: const EdgeInsets.fromLTRB(12, 6, 0, 6),
@@ -676,7 +751,7 @@ class _MessageRepliesSheetState extends State<_MessageRepliesSheet> {
                       ),
                       border: OutlineInputBorder(
                         borderSide: BorderSide.none,
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(AppRadius.control),
                       ),
                       hintText: replyTo == null
                           ? null
@@ -1031,6 +1106,7 @@ class _MessageRepliesSheetState extends State<_MessageRepliesSheet> {
               widget.onOpenReply!(messageId);
             },
       onOpenImage: _openImage,
+      onOpenImageGallery: _openImageGallery,
       onOpenSticker: widget.onOpenSticker,
       onPlayVideo: widget.onPlayVideo,
       onPlayMusic: widget.onPlayMusic,
@@ -1054,13 +1130,20 @@ class _MessageRepliesSheetState extends State<_MessageRepliesSheet> {
     }
     final images = imageMessages.map((candidate) => candidate.image!).toList();
     final start = images.indexWhere((image) => image.id == selected.id);
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) =>
-            FullImageViewer(items: images, startIndex: start < 0 ? 0 : start),
+    unawaited(
+      openImagePreview(
+        context,
+        items: images,
+        startIndex: start < 0 ? 0 : start,
       ),
     );
+  }
+
+  void _openImageGallery({
+    required List<TdFileRef> items,
+    required int startIndex,
+  }) {
+    unawaited(openImagePreview(context, items: items, startIndex: startIndex));
   }
 }
 
@@ -1079,6 +1162,7 @@ class MessageReplySheetItem extends StatelessWidget {
     this.onAvatarTap,
     this.onOpenReply,
     this.onOpenImage,
+    this.onOpenImageGallery,
     this.onOpenSticker,
     this.onPlayVideo,
     this.onPlayMusic,
@@ -1101,6 +1185,7 @@ class MessageReplySheetItem extends StatelessWidget {
   final ValueChanged<ChatMessage>? onAvatarTap;
   final ValueChanged<int>? onOpenReply;
   final ValueChanged<ChatMessage>? onOpenImage;
+  final ImageGalleryOpenCallback? onOpenImageGallery;
   final ValueChanged<ChatMessage>? onOpenSticker;
   final ValueChanged<ChatMessage>? onPlayVideo;
   final ValueChanged<ChatMessage>? onPlayMusic;
@@ -1123,6 +1208,7 @@ class MessageReplySheetItem extends StatelessWidget {
       onAvatarTap: onAvatarTap,
       onOpenReply: onOpenReply,
       onOpenImage: onOpenImage,
+      onOpenImageGallery: onOpenImageGallery,
       onOpenSticker: onOpenSticker,
       onPlayVideo: onPlayVideo,
       onPlayMusic: onPlayMusic,
@@ -1140,6 +1226,13 @@ class _ReplySender {
 
   final String name;
   final TdFileRef? photo;
+}
+
+class _ReplyTargetChatInfo {
+  const _ReplyTargetChatInfo({required this.canSend, this.title});
+
+  final bool canSend;
+  final String? title;
 }
 
 class _ReplyThreadTarget {

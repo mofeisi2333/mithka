@@ -793,7 +793,7 @@ class _ReactionConfigurationViewState extends State<ReactionConfigurationView> {
                                   ? AppTheme.brand
                                   : context.colors.divider,
                             ),
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(AppRadius.card),
                           ),
                           child: Text(
                             emoji,
@@ -828,7 +828,7 @@ class _ReactionConfigurationViewState extends State<ReactionConfigurationView> {
                           decoration: BoxDecoration(
                             color: AppTheme.brand.withValues(alpha: 0.14),
                             border: Border.all(color: AppTheme.brand),
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(AppRadius.card),
                           ),
                           child: CustomEmojiView(
                             id: id,
@@ -846,7 +846,7 @@ class _ReactionConfigurationViewState extends State<ReactionConfigurationView> {
                         decoration: BoxDecoration(
                           color: context.colors.searchFill,
                           border: Border.all(color: context.colors.divider),
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(AppRadius.card),
                         ),
                         child: AppIcon(
                           HeroAppIcons.plus,
@@ -959,7 +959,12 @@ class _DiscussionGroupPickerViewState extends State<DiscussionGroupPickerView> {
                   ),
                   for (final id in _ids)
                     _AdminChoiceRow(
-                      title: _titles[id] ?? 'Chat $id',
+                      title:
+                          _titles[id] ??
+                          AppStrings.t(
+                            AppStringKeys.groupAdministrationChatValue1,
+                            {'value1': id},
+                          ),
                       selected: widget.selectedChatId == id,
                       onTap: () => _select(id),
                     ),
@@ -1351,7 +1356,11 @@ class _ChatInviteLinkEditorViewState extends State<ChatInviteLinkEditorView> {
 
   @override
   Widget build(BuildContext context) => _AdminPage(
-    title: widget.existing == null ? 'New invite link' : 'Edit invite link',
+    title: AppStrings.t(
+      widget.existing == null
+          ? AppStringKeys.groupAdministrationNewInviteLink
+          : AppStringKeys.groupAdministrationEditInviteLink,
+    ),
     trailing: _AdminSaveButton(onTap: _save, saving: _saving),
     child: ListView(
       padding: const EdgeInsets.all(14),
@@ -1376,7 +1385,9 @@ class _ChatInviteLinkEditorViewState extends State<ChatInviteLinkEditorView> {
             _AdminNavRow(
               title: AppStrings.t(AppStringKeys.groupAdministrationExpiration),
               value: _expiration == 0
-                  ? 'Never'
+                  ? AppStrings.t(
+                      AppStringKeys.groupAdministrationExpirationNever,
+                    )
                   : DateTime.fromMillisecondsSinceEpoch(
                       _expiration * 1000,
                     ).toLocal().toString().substring(0, 16),
@@ -1452,7 +1463,10 @@ class _InviteLinkAnalyticsViewState extends State<InviteLinkAnalyticsView> {
                 .getUser(id)
                 .then(
                   (user) => _names[id] = _userName(user, id),
-                  onError: (_) => _names[id] = 'User $id',
+                  onError: (_) => _names[id] = AppStrings.t(
+                    AppStringKeys.groupAdministrationUserValue1,
+                    {'value1': id},
+                  ),
                 ),
       ]);
       if (mounted) {
@@ -1479,41 +1493,56 @@ class _InviteLinkAnalyticsViewState extends State<InviteLinkAnalyticsView> {
     title: AppStrings.t(AppStringKeys.groupAdministrationInviteLinkAnalytics),
     child: _loading
         ? const Center(child: AppActivityIndicator())
-        : ListView(
-            padding: const EdgeInsets.all(14),
-            children: [
-              _AdminSection(
-                title: AppStrings.t(
-                  AppStringKeys.groupAdministrationValue1JoinedMembers,
-                  {'value1': _members.length},
-                ),
-                children: _members.isEmpty
-                    ? [
-                        _AdminEmptyRow(
-                          AppStrings.t(
-                            AppStringKeys
-                                .groupAdministrationNoMembersJoinedThroughLink,
-                          ),
+        : CustomScrollView(
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.all(14),
+                sliver: _members.isEmpty
+                    ? SliverToBoxAdapter(
+                        child: _AdminSection(
+                          title: _membersTitle,
+                          children: [
+                            _AdminEmptyRow(
+                              AppStrings.t(
+                                AppStringKeys
+                                    .groupAdministrationNoMembersJoinedThroughLink,
+                              ),
+                            ),
+                          ],
                         ),
-                      ]
-                    : [
-                        for (final member in _members)
-                          _AdminNavRow(
+                      )
+                    // The member list is whatever the link produced — the old
+                    // Column inflated every row of it.
+                    : _AdminSectionSliver(
+                        title: _membersTitle,
+                        itemCount: _members.length,
+                        itemBuilder: (context, index) {
+                          final member = _members[index];
+                          return _AdminNavRow(
                             title:
                                 _names[member.int64('user_id')] ??
                                 'User ${member.int64('user_id') ?? ''}',
                             value:
                                 member.boolean('via_chat_folder_invite_link') ==
                                     true
-                                ? 'Via shared folder'
+                                ? AppStrings.t(
+                                    AppStringKeys
+                                        .groupAdministrationViaSharedFolder,
+                                  )
                                 : _dateLabel(
                                     member.integer('joined_chat_date') ?? 0,
                                   ),
-                          ),
-                      ],
+                          );
+                        },
+                      ),
               ),
             ],
           ),
+  );
+
+  String get _membersTitle => AppStrings.t(
+    AppStringKeys.groupAdministrationValue1JoinedMembers,
+    {'value1': _members.length},
   );
 }
 
@@ -1550,7 +1579,10 @@ class _ChatJoinRequestsAdministrationViewState
                 .getUser(id)
                 .then(
                   (user) => _names[id] = _userName(user, id),
-                  onError: (_) => _names[id] = 'User $id',
+                  onError: (_) => _names[id] = AppStrings.t(
+                    AppStringKeys.groupAdministrationUserValue1,
+                    {'value1': id},
+                  ),
                 ),
       ]);
       if (mounted) {
@@ -1620,55 +1652,77 @@ class _ChatJoinRequestsAdministrationViewState
     title: AppStrings.t(AppStringKeys.groupAdministrationJoinRequests),
     child: _loading
         ? const Center(child: AppActivityIndicator())
-        : ListView(
-            padding: const EdgeInsets.all(14),
-            children: [
-              if (_requests.isNotEmpty) ...[
-                Row(
-                  children: [
-                    Expanded(
-                      child: _AdminActionButton(
-                        label: AppStrings.t(
-                          AppStringKeys.groupAdministrationApproveAll,
+        : CustomScrollView(
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.all(14),
+                sliver: SliverMainAxisGroup(
+                  slivers: [
+                    if (_requests.isNotEmpty)
+                      SliverToBoxAdapter(
+                        child: Column(
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _AdminActionButton(
+                                    label: AppStrings.t(
+                                      AppStringKeys
+                                          .groupAdministrationApproveAll,
+                                    ),
+                                    onTap: () => _processAll(true),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: _AdminActionButton(
+                                    label: AppStrings.t(
+                                      AppStringKeys
+                                          .groupAdministrationDeclineAll,
+                                    ),
+                                    destructive: true,
+                                    onTap: () => _processAll(false),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                          ],
                         ),
-                        onTap: () => _processAll(true),
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _AdminActionButton(
-                        label: AppStrings.t(
-                          AppStringKeys.groupAdministrationDeclineAll,
+                    if (_requests.isEmpty)
+                      SliverToBoxAdapter(
+                        child: _AdminSection(
+                          title: _pendingTitle,
+                          children: [
+                            _AdminEmptyRow(
+                              AppStrings.t(
+                                AppStringKeys
+                                    .groupAdministrationNoPendingJoinRequests,
+                              ),
+                            ),
+                          ],
                         ),
-                        destructive: true,
-                        onTap: () => _processAll(false),
+                      )
+                    else
+                      // A channel can hold thousands of pending requests; the
+                      // old Column inflated a row for every one of them.
+                      _AdminSectionSliver(
+                        title: _pendingTitle,
+                        itemCount: _requests.length,
+                        itemBuilder: (context, index) =>
+                            _joinRequestRow(_requests[index]),
                       ),
-                    ),
                   ],
                 ),
-                const SizedBox(height: 16),
-              ],
-              _AdminSection(
-                title: AppStrings.t(
-                  AppStringKeys.groupAdministrationValue1Pending,
-                  {'value1': _requests.length},
-                ),
-                children: _requests.isEmpty
-                    ? [
-                        _AdminEmptyRow(
-                          AppStrings.t(
-                            AppStringKeys
-                                .groupAdministrationNoPendingJoinRequests,
-                          ),
-                        ),
-                      ]
-                    : [
-                        for (final request in _requests)
-                          _joinRequestRow(request),
-                      ],
               ),
             ],
           ),
+  );
+
+  String get _pendingTitle => AppStrings.t(
+    AppStringKeys.groupAdministrationValue1Pending,
+    {'value1': _requests.length},
   );
 
   Widget _joinRequestRow(Map<String, dynamic> request) {
@@ -1682,7 +1736,11 @@ class _ChatJoinRequestsAdministrationViewState
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _names[id] ?? 'User $id',
+                  _names[id] ??
+                      AppStrings.t(
+                        AppStringKeys.groupAdministrationUserValue1,
+                        {'value1': id},
+                      ),
                   style: AppTextStyle.bodyLarge(context.colors.textPrimary),
                 ),
                 if ((request.str('bio') ?? '').isNotEmpty)
@@ -1788,7 +1846,7 @@ class _ForumTopicsAdministrationViewState
     final value = await showGeneralDialog<_ForumTopicDraft>(
       context: context,
       barrierDismissible: true,
-      barrierLabel: 'Cancel',
+      barrierLabel: AppStrings.t(AppStringKeys.confirmCancel),
       barrierColor: const Color(0x99000000),
       pageBuilder: (dialogContext, _, _) => StatefulBuilder(
         builder: (dialogContext, setDialogState) => _AdminDialog(
@@ -1895,7 +1953,7 @@ class _ForumTopicsAdministrationViewState
 
   Future<void> _create() async {
     final draft = await _askTopic(
-      'New topic',
+      AppStrings.t(AppStringKeys.groupAdministrationNewTopic),
       initialName: '',
       initialColor: _colors[_topics.length % _colors.length],
       initialCustomEmojiId: 0,
@@ -1929,7 +1987,7 @@ class _ForumTopicsAdministrationViewState
     if (id == null || info?.boolean('is_general') == true) return;
     final icon = info?.obj('icon');
     final draft = await _askTopic(
-      'Edit topic',
+      AppStrings.t(AppStringKeys.groupAdministrationEditTopic),
       initialName: info?.str('name') ?? '',
       initialColor: icon?.integer('color') ?? _colors.first,
       initialCustomEmojiId: icon?.int64('custom_emoji_id') ?? 0,
@@ -2076,7 +2134,7 @@ class _ForumTopicsAdministrationViewState
                   Container(
                     decoration: BoxDecoration(
                       color: context.colors.card,
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(AppRadius.card),
                     ),
                     child: ReorderableListView(
                       shrinkWrap: true,
@@ -2278,21 +2336,49 @@ class _ChatStatisticsAdministrationViewState
 
     if (value.type == 'chatStatisticsChannel') {
       return [
-        ('Members', current('member_count')),
-        ('Average message views', current('mean_message_view_count')),
-        ('Average shares', current('mean_message_share_count')),
-        ('Average reactions', current('mean_message_reaction_count')),
         (
-          'Notifications enabled',
+          AppStrings.t(AppStringKeys.groupAdministrationStatMembers),
+          current('member_count'),
+        ),
+        (
+          AppStrings.t(
+            AppStringKeys.groupAdministrationStatAverageMessageViews,
+          ),
+          current('mean_message_view_count'),
+        ),
+        (
+          AppStrings.t(AppStringKeys.groupAdministrationStatAverageShares),
+          current('mean_message_share_count'),
+        ),
+        (
+          AppStrings.t(AppStringKeys.groupAdministrationStatAverageReactions),
+          current('mean_message_reaction_count'),
+        ),
+        (
+          AppStrings.t(
+            AppStringKeys.groupAdministrationStatNotificationsEnabled,
+          ),
           '${value.dbl('enabled_notifications_percentage')?.toStringAsFixed(1) ?? '—'}%',
         ),
       ];
     }
     return [
-      ('Members', current('member_count')),
-      ('Messages', current('message_count')),
-      ('Viewers', current('viewer_count')),
-      ('Senders', current('sender_count')),
+      (
+        AppStrings.t(AppStringKeys.groupAdministrationStatMembers),
+        current('member_count'),
+      ),
+      (
+        AppStrings.t(AppStringKeys.groupAdministrationStatMessages),
+        current('message_count'),
+      ),
+      (
+        AppStrings.t(AppStringKeys.groupAdministrationStatViewers),
+        current('viewer_count'),
+      ),
+      (
+        AppStrings.t(AppStringKeys.groupAdministrationStatSenders),
+        current('sender_count'),
+      ),
     ];
   }
 }
@@ -2501,7 +2587,7 @@ class _AdminSection extends StatelessWidget {
       Container(
         decoration: BoxDecoration(
           color: context.colors.card,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppRadius.card),
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
@@ -2515,6 +2601,63 @@ class _AdminSection extends StatelessWidget {
       ),
     ],
   );
+}
+
+/// Sliver twin of [_AdminSection] for the two pages whose row count is
+/// network-sized. Same card, but only the visible rows are inflated.
+class _AdminSectionSliver extends StatelessWidget {
+  const _AdminSectionSliver({
+    required this.title,
+    required this.itemCount,
+    required this.itemBuilder,
+  });
+
+  final String title;
+  final int itemCount;
+  final IndexedWidgetBuilder itemBuilder;
+
+  @override
+  Widget build(BuildContext context) {
+    const radius = Radius.circular(AppRadius.card);
+    return SliverMainAxisGroup(
+      slivers: [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 7),
+            child: Text(
+              title,
+              style: AppTextStyle.footnote(context.colors.textTertiary),
+            ),
+          ),
+        ),
+        SliverList.builder(
+          itemCount: itemCount,
+          itemBuilder: (context, index) {
+            final body = ColoredBox(
+              color: context.colors.card,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (index > 0) const InsetDivider(leadingInset: 14),
+                  itemBuilder(context, index),
+                ],
+              ),
+            );
+            final first = index == 0;
+            final last = index == itemCount - 1;
+            if (!first && !last) return body;
+            return ClipRRect(
+              borderRadius: BorderRadius.vertical(
+                top: first ? radius : Radius.zero,
+                bottom: last ? radius : Radius.zero,
+              ),
+              child: body,
+            );
+          },
+        ),
+      ],
+    );
+  }
 }
 
 class _AdminNavRow extends StatelessWidget {
@@ -2748,7 +2891,7 @@ class _AdminDialog extends StatelessWidget {
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: context.colors.card,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(AppRadius.lg),
             border: Border.all(color: context.colors.divider, width: 0.5),
             boxShadow: const [
               BoxShadow(
@@ -2903,7 +3046,7 @@ class _AdminActionButton extends StatelessWidget {
         color: destructive
             ? const Color(0xFFFF3B30).withValues(alpha: 0.12)
             : AppTheme.brand.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(11),
+        borderRadius: BorderRadius.circular(AppRadius.card),
       ),
       child: Text(
         label,
@@ -2926,5 +3069,9 @@ String _dateLabel(int unix) {
 String _userName(Map<String, dynamic> user, int id) {
   final name = '${user.str('first_name') ?? ''} ${user.str('last_name') ?? ''}'
       .trim();
-  return name.isEmpty ? 'User $id' : name;
+  return name.isEmpty
+      ? AppStrings.t(AppStringKeys.groupAdministrationUserValue1, {
+          'value1': id,
+        })
+      : name;
 }

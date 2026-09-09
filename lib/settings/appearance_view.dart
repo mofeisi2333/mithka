@@ -2,30 +2,33 @@
 //  appearance_view.dart
 //
 
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
-import 'dart:math' as math;
 
 //  外观 is the hub for theme, interface, font, and app-icon settings. Each
 //  interface surface owns its controls and a live account-backed preview.
 //
 
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:mithka/l10n/preview_texts.dart';
-import 'package:mithka/l10n/telegram_language_controller.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
-import '../app/unread_badge_model.dart';
+import '../chat/chat_appearance_preview.dart';
+import '../chat/chat_wallpaper.dart';
 import '../chat/chat_wallpaper_view.dart';
+import '../chat/emoji_store.dart';
+import '../chat/image_media_album_bubble.dart';
+import '../chat/message_action_menu.dart';
 import '../chat/message_bubble.dart';
+import '../chat/message_bubble_chat_preview.dart';
+import '../chat/quick_reaction_choice.dart';
 import '../components/app_icons.dart';
-import '../components/desktop_content_constraint.dart';
-import '../components/photo_avatar.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../platform/adaptive_platform.dart';
@@ -35,11 +38,10 @@ import '../theme/app_theme.dart';
 import '../theme/emoji_font_catalog.dart';
 import '../theme/global_theme_view.dart';
 import '../theme/message_bubble_background.dart';
+import '../theme/message_name_colors.dart';
 import '../theme/system_font_catalog.dart';
 import '../theme/theme_controller.dart';
 import 'app_icon_controller.dart';
-import 'appearance_preview_repository.dart';
-import 'chat_folder_management_view.dart';
 import 'message_bubble_settings_view.dart';
 import 'quick_reaction_settings_view.dart';
 
@@ -48,128 +50,104 @@ class AppearanceView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     final theme = context.watch<ThemeController>();
-    final appIcons = context.watch<AppIconController>();
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
+    final platform = Theme.of(context).platform;
+    final showAppIconPicker = appIconPickerAvailableForPlatform(platform);
+    final appIcons = showAppIconPicker
+        ? context.watch<AppIconController>()
+        : null;
+    // The icon assets are 1024x1024; the row preview is 22 px wide, so the
+    // undecoded-size default would hold a 4 MiB bitmap in the image cache.
+    final appIconPreviewPx =
+        (AppIconSize.nav * MediaQuery.devicePixelRatioOf(context)).ceil();
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.appearanceTitle),
+      onBack: () => Navigator.of(context).pop(),
+      child: SettingsListView(
         children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.appearanceTitle),
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: DesktopContentConstraint(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.lg,
-                  AppSpacing.xl,
-                  AppSpacing.lg,
-                  AppSpacing.section,
+          // What the app looks like as a whole. No heading: it is the
+          // first card, and a "Theme" heading over a "Theme" row only
+          // says it twice.
+          if (showAppIconPicker)
+            _card(context, [
+              _navigationRow(
+                context,
+                AppStrings.t(AppStringKeys.appIconTitle),
+                null,
+                () => Navigator.of(context).push(
+                  AppPageRoute<void>(
+                    pageBuilder: (_, _, _) => const AppIconSettingsView(),
+                  ),
                 ),
-                children: [
-                  _card(context, [
-                    KeyedSubtree(
-                      key: const ValueKey('appearance-theme-settings-row'),
-                      child: _navigationRow(
-                        context,
-                        AppStrings.t(AppStringKeys.appearanceTheme),
-                        AppStrings.t(theme.mode.label),
-                        () => Navigator.of(context).push(
-                          AppPageRoute<void>(
-                            pageBuilder: (_, _, _) => const ThemeSettingsView(),
-                          ),
-                        ),
-                        icon: HeroAppIcons.palette.data,
-                      ),
-                    ),
-                    KeyedSubtree(
-                      key: const ValueKey('appearance-interface-settings-row'),
-                      child: _navigationRow(
-                        context,
-                        AppStrings.t(AppStringKeys.appearanceSize),
-                        null,
-                        () => Navigator.of(context).push(
-                          AppPageRoute<void>(
-                            pageBuilder: (_, _, _) =>
-                                const DisplaySettingsView(),
-                          ),
-                        ),
-                        icon: HeroAppIcons.tableCells.data,
-                      ),
-                    ),
-                    KeyedSubtree(
-                      key: const ValueKey('appearance-scaling-settings-row'),
-                      child: _navigationRow(
-                        context,
-                        AppStrings.t(AppStringKeys.appearanceInterfaceSize),
-                        '${(theme.interfaceScale * 100).round()}%',
-                        () => Navigator.of(context).push(
-                          AppPageRoute<void>(
-                            pageBuilder: (_, _, _) =>
-                                const InterfaceSizeSettingsView(),
-                          ),
-                        ),
-                        icon: HeroAppIcons.expand.data,
-                      ),
-                    ),
-                    KeyedSubtree(
-                      key: const ValueKey('appearance-font-settings-row'),
-                      child: _navigationRow(
-                        context,
-                        AppStrings.t(AppStringKeys.appearanceFont),
-                        theme.effectiveFontChainLabel,
-                        () => Navigator.of(context).push(
-                          AppPageRoute<void>(
-                            pageBuilder: (_, _, _) => const FontSettingsView(),
-                          ),
-                        ),
-                        icon: HeroAppIcons.font.data,
-                      ),
-                    ),
-                  ]),
-                  const SizedBox(height: AppSpacing.xl),
-                  _card(context, [
-                    KeyedSubtree(
-                      key: const ValueKey('appearance-message-bubbles-row'),
-                      child: _navigationRow(
-                        context,
-                        AppStrings.t(AppStringKeys.appearanceMessageBubbles),
-                        _messageBubbleBackgroundLabel(theme),
-                        () => Navigator.of(context).push(
-                          AppPageRoute<void>(
-                            pageBuilder: (_, _, _) =>
-                                const MessageBubbleSettingsView(),
-                          ),
-                        ),
-                        icon: HeroAppIcons.message.data,
-                      ),
-                    ),
-                  ]),
-                  const SizedBox(height: AppSpacing.xl),
-                  _label(context, AppStrings.t(AppStringKeys.appIconTitle)),
-                  _card(context, [
-                    _navigationRow(
-                      context,
-                      AppStrings.t(AppStringKeys.appIconTitle),
-                      null,
-                      () => Navigator.of(context).push(
-                        AppPageRoute<void>(
-                          pageBuilder: (_, _, _) => const AppIconSettingsView(),
-                        ),
-                      ),
-                      preview: Image.asset(
-                        appIcons.variant.asset,
-                        width: AppIconSize.nav,
-                        height: AppIconSize.nav,
-                      ),
-                    ),
-                  ]),
-                ],
+                preview: Image.asset(
+                  appIcons!.variant.asset,
+                  width: AppIconSize.nav,
+                  height: AppIconSize.nav,
+                  cacheWidth: appIconPreviewPx,
+                ),
+              ),
+            ]),
+          _label(context, AppStrings.t(AppStringKeys.appearanceSectionText)),
+          _card(context, [
+            KeyedSubtree(
+              key: const ValueKey('appearance-scaling-settings-row'),
+              child: _navigationRow(
+                context,
+                AppStrings.t(AppStringKeys.appearanceInterfaceSize),
+                '${(theme.interfaceScale * 100).round()}%',
+                () => Navigator.of(context).push(
+                  AppPageRoute<void>(
+                    pageBuilder: (_, _, _) => const InterfaceSizeSettingsView(),
+                  ),
+                ),
+                icon: HeroAppIcons.expand.data,
               ),
             ),
+            KeyedSubtree(
+              key: const ValueKey('appearance-font-settings-row'),
+              child: _navigationRow(
+                context,
+                AppStrings.t(AppStringKeys.appearanceFont),
+                theme.effectiveFontChainLabel,
+                () => Navigator.of(context).push(
+                  AppPageRoute<void>(
+                    pageBuilder: (_, _, _) => const FontSettingsView(),
+                  ),
+                ),
+                icon: HeroAppIcons.font.data,
+              ),
+            ),
+          ]),
+          _label(context, AppStrings.t(AppStringKeys.appearanceSectionChat)),
+          // Message Bubbles used to sit alone in an unlabelled card;
+          // it belongs with the rest of what a conversation looks like.
+          _card(context, [
+            _chatViewNavigationRow(context),
+            KeyedSubtree(
+              key: const ValueKey('appearance-message-bubbles-row'),
+              child: _navigationRow(
+                context,
+                AppStrings.t(AppStringKeys.appearanceMessageBubbles),
+                _messageBubbleBackgroundLabel(theme),
+                () => Navigator.of(context).push(
+                  AppPageRoute<void>(
+                    pageBuilder: (_, _, _) => const MessageBubbleSettingsView(),
+                  ),
+                ),
+                icon: HeroAppIcons.message.data,
+              ),
+            ),
+          ]),
+          _label(
+            context,
+            AppStrings.t(AppStringKeys.appearanceSectionChatList),
           ),
+          _card(context, _chatListNavigationRows(context)),
+          _label(
+            context,
+            AppStrings.t(AppStringKeys.appearanceAvatarsAndSidebar),
+          ),
+          _avatarsAndSidebarControls(context),
         ],
       ),
     );
@@ -181,98 +159,120 @@ class ThemeSettingsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     final theme = context.watch<ThemeController>();
     const appearance = AppearanceView();
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.appearanceTheme),
+      onBack: () => Navigator.of(context).pop(),
+      child: SettingsListView(
         children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.appearanceTheme),
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.xl,
-                AppSpacing.lg,
-                AppSpacing.section,
-              ),
-              children: [
-                appearance._card(context, [
-                  appearance._toggleRow(
-                    context,
-                    HeroAppIcons.wandMagicSparkles.data,
-                    AppStrings.t(AppStringKeys.appearanceEnableTheming),
-                    theme.themingEnabled,
-                    (value) => theme.themingEnabled = value,
-                  ),
-                  appearance._toggleRow(
-                    context,
-                    HeroAppIcons.users.data,
-                    AppStrings.t(AppStringKeys.appearancePerAccountTheming),
-                    theme.usePerAccountTheming,
-                    (value) => theme.usePerAccountTheming = value,
-                  ),
-                ]),
-                if (theme.themingEnabled) ...[
-                  const SizedBox(height: AppSpacing.xl),
-                  appearance._label(
-                    context,
-                    AppStrings.t(AppStringKeys.appearanceTheme),
-                  ),
-                  appearance._card(context, [
-                    appearance._navigationRow(
-                      context,
-                      AppStrings.t(AppStringKeys.appearanceTheme),
-                      theme.cloudTheme?.displayTitle ??
-                          AppStrings.t(AppStringKeys.globalThemeDefault),
-                      () => Navigator.of(context).push(
-                        AppPageRoute<void>(
-                          pageBuilder: (_, _, _) => const GlobalThemeView(),
-                        ),
-                      ),
-                      icon: HeroAppIcons.palette.data,
-                    ),
-                    appearance._navigationRow(
-                      context,
-                      AppStrings.t(AppStringKeys.groupAppearanceWallpaper),
-                      null,
-                      () => Navigator.of(context).push(
-                        AppPageRoute<void>(
-                          pageBuilder: (_, _, _) => ChatWallpaperView.global(
-                            chatTitle: AppStrings.t(
-                              AppStringKeys.chatWallpaperGlobalPreview,
-                            ),
-                            forDarkTheme:
-                                Theme.of(context).brightness == Brightness.dark,
-                          ),
-                        ),
-                      ),
-                      icon: HeroAppIcons.image.data,
-                    ),
-                  ]),
-                ],
-                const SizedBox(height: AppSpacing.xl),
-                appearance._label(
-                  context,
-                  AppStrings.t(AppStringKeys.appearanceMode),
-                ),
-                appearance._card(context, [
-                  for (final mode in AppearanceMode.values)
-                    appearance._choiceRow(
-                      context,
-                      mode.icon,
-                      mode.label,
-                      theme.mode == mode,
-                      () => theme.mode = mode,
-                    ),
-                ]),
-              ],
+          appearance._card(context, [
+            appearance._toggleRow(
+              context,
+              HeroAppIcons.wandMagicSparkles.data,
+              AppStrings.t(AppStringKeys.appearanceEnableTheming),
+              theme.themingEnabled,
+              (value) => theme.themingEnabled = value,
             ),
+            appearance._toggleRow(
+              context,
+              HeroAppIcons.users.data,
+              AppStrings.t(AppStringKeys.appearancePerAccountTheming),
+              theme.usePerAccountTheming,
+              (value) => theme.usePerAccountTheming = value,
+            ),
+          ]),
+          if (theme.themingEnabled) ...[
+            appearance._label(
+              context,
+              AppStrings.t(AppStringKeys.appearanceTheme),
+            ),
+            // Theme and background are judged together, so they preview
+            // together — the same call Telegram makes, where the chat
+            // preview sits between the theme picker and the background
+            // row rather than each hiding behind its own screen.
+            AnimatedBuilder(
+              animation: ChatWallpaperController.shared,
+              builder: (context, _) {
+                final dark = Theme.of(context).brightness == Brightness.dark;
+                final bubbles = context.watch<ThemeController>();
+                final wallpaperController = ChatWallpaperController.shared;
+                final selectedWallpaper = selectGlobalChatWallpaper(
+                  defaultWallpaper: wallpaperController.defaultWallpaper(
+                    dark: dark,
+                  ),
+                  cloudThemeWallpaper: bubbles
+                      .cloudThemeFor(dark ? Brightness.dark : Brightness.light)
+                      ?.wallpaper,
+                  globalThemeWallpaper: wallpaperController
+                      .globalThemeWallpaperFor(dark: dark),
+                );
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+                  child: MessageBubbleChatPreview(
+                    incomingBackground: bubbles
+                        .effectiveMessageBubbleBackgroundSpecFor(
+                          outgoing: false,
+                        ),
+                    outgoingBackground: bubbles
+                        .effectiveMessageBubbleBackgroundSpecFor(
+                          outgoing: true,
+                        ),
+                    wallpaper: selectedWallpaper == null
+                        ? null
+                        : wallpaperController.resolvedWallpaper(
+                            selectedWallpaper,
+                          ),
+                  ),
+                );
+              },
+            ),
+            appearance._card(context, [
+              appearance._navigationRow(
+                context,
+                AppStrings.t(AppStringKeys.appearanceTheme),
+                theme.cloudTheme?.displayTitle ??
+                    AppStrings.t(AppStringKeys.globalThemeDefault),
+                () => Navigator.of(context).push(
+                  AppPageRoute<void>(
+                    pageBuilder: (_, _, _) => const GlobalThemeView(),
+                  ),
+                ),
+                icon: HeroAppIcons.palette.data,
+              ),
+              appearance._navigationRow(
+                context,
+                AppStrings.t(AppStringKeys.groupAppearanceWallpaper),
+                null,
+                () => Navigator.of(context).push(
+                  AppPageRoute<void>(
+                    pageBuilder: (_, _, _) => ChatWallpaperView.global(
+                      chatTitle: AppStrings.t(
+                        AppStringKeys.chatWallpaperGlobalPreview,
+                      ),
+                      forDarkTheme:
+                          Theme.of(context).brightness == Brightness.dark,
+                    ),
+                  ),
+                ),
+                icon: HeroAppIcons.image.data,
+              ),
+            ]),
+          ],
+          appearance._label(
+            context,
+            AppStrings.t(AppStringKeys.appearanceMode),
           ),
+          appearance._card(context, [
+            for (final mode in AppearanceMode.values)
+              appearance._choiceRow(
+                context,
+                mode.icon,
+                mode.label,
+                theme.mode == mode,
+                () => theme.mode = mode,
+              ),
+          ]),
         ],
       ),
     );
@@ -284,26 +284,15 @@ class _TextSizeSettingsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     final theme = context.watch<ThemeController>();
-    return ColoredBox(
-      color: c.groupedBackground,
-      child: Column(
+    return SettingsPageScaffold(
+      title: AppStringKeys.appearanceFontSize,
+      onBack: () => Navigator.of(context).pop(),
+      child: SettingsListView(
         children: [
-          NavHeader(
-            title: AppStringKeys.appearanceFontSize,
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              children: [
-                const AppearanceView()._fontSizeCard(context, theme),
-                const SizedBox(height: AppSpacing.xl),
-                const AppearanceView()._fontSizePreview(context, theme),
-              ],
-            ),
-          ),
+          const AppearanceView()._fontSizeCard(context, theme),
+          const SizedBox(height: AppSpacing.xl),
+          const AppearanceView()._fontSizePreview(context, theme),
         ],
       ),
     );
@@ -315,62 +304,33 @@ class AppIconSettingsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     final controller = context.watch<AppIconController>();
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.appIconTitle),
+      onBack: () => Navigator.of(context).pop(),
+      child: Column(
         children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.appIconTitle),
-            onBack: () => Navigator.of(context).pop(),
-          ),
+          if (!controller.supported)
+            SettingsNote(text: AppStrings.t(AppStringKeys.appIconUnsupported)),
           Expanded(
-            child: Column(
-              children: [
-                if (!controller.supported)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      AppSpacing.xl,
-                      AppSpacing.xl,
-                      AppSpacing.xl,
-                      0,
-                    ),
-                    child: Text(
-                      AppStrings.t(AppStringKeys.appIconUnsupported),
-                      style: TextStyle(
-                        fontSize: AppTextSize.footnote,
-                        color: c.textTertiary,
-                      ),
-                    ),
-                  ),
-                Expanded(
-                  child: GridView.builder(
-                    padding: const EdgeInsets.fromLTRB(
-                      AppSpacing.xl,
-                      AppSpacing.xl,
-                      AppSpacing.xl,
-                      AppSpacing.section,
-                    ),
-                    gridDelegate:
-                        const SliverGridDelegateWithMaxCrossAxisExtent(
-                          maxCrossAxisExtent: 132,
-                          mainAxisExtent: 116,
-                          mainAxisSpacing: AppSpacing.xl,
-                          crossAxisSpacing: AppSpacing.xl,
-                        ),
-                    itemCount: AppIconVariant.values.length,
-                    itemBuilder: (context, index) {
-                      final variant = AppIconVariant.values[index];
-                      return _AppIconVariantTile(
-                        variant: variant,
-                        selected: controller.variant == variant,
-                        loading: controller.loading,
-                      );
-                    },
-                  ),
-                ),
-              ],
+            child: GridView.builder(
+              padding: AppInsets.screen,
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 132,
+                mainAxisExtent: 116,
+                mainAxisSpacing: AppSpacing.xl,
+                crossAxisSpacing: AppSpacing.xl,
+              ),
+              itemCount: AppIconVariant.values.length,
+              itemBuilder: (context, index) {
+                final variant = AppIconVariant.values[index];
+                return _AppIconVariantTile(
+                  variant: variant,
+                  selected: controller.variant == variant,
+                  loading: controller.loading,
+                  enabled: controller.supported,
+                );
+              },
             ),
           ),
         ],
@@ -384,23 +344,29 @@ class _AppIconVariantTile extends StatelessWidget {
     required this.variant,
     required this.selected,
     required this.loading,
+    required this.enabled,
   });
 
   final AppIconVariant variant;
   final bool selected;
   final bool loading;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
     final controller = context.read<AppIconController>();
+    // The icon assets are 1024x1024: decoding all eight at full size holds
+    // 32 MiB of image cache for tiles that are drawn at 96 px.
+    final tilePx = (96 * MediaQuery.devicePixelRatioOf(context)).ceil();
     return Semantics(
       button: true,
+      enabled: enabled,
       selected: selected,
       label: AppStrings.t(variant.labelKey),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: loading
+        onTap: loading || !enabled
             ? null
             : () async {
                 final ok = await controller.setVariant(variant);
@@ -419,15 +385,19 @@ class _AppIconVariantTile extends StatelessWidget {
                 padding: const EdgeInsets.all(3),
                 decoration: BoxDecoration(
                   color: c.card,
-                  borderRadius: BorderRadius.circular(23),
+                  borderRadius: BorderRadius.circular(AppRadius.card),
                   border: Border.all(
                     color: selected ? AppTheme.brand : c.divider,
                     width: selected ? 3 : 1,
                   ),
                 ),
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(18),
-                  child: Image.asset(variant.asset, fit: BoxFit.cover),
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                  child: Image.asset(
+                    variant.asset,
+                    fit: BoxFit.cover,
+                    cacheWidth: tilePx,
+                  ),
                 ),
               ),
               if (selected)
@@ -463,31 +433,15 @@ class InterfaceSizeSettingsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     final theme = context.watch<ThemeController>();
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.appearanceInterfaceSize),
+      onBack: () => Navigator.of(context).pop(),
+      child: SettingsListView(
         children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.appearanceInterfaceSize),
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.xl,
-                AppSpacing.lg,
-                AppSpacing.section,
-              ),
-              children: [
-                const AppearanceView()._interfaceSizeCard(context, theme),
-                const SizedBox(height: AppSpacing.xl),
-                const AppearanceView()._interfaceSizePreview(context, theme),
-              ],
-            ),
-          ),
+          const AppearanceView()._interfaceSizeCard(context, theme),
+          const SizedBox(height: AppSpacing.xl),
+          const AppearanceView()._interfaceSizePreview(context, theme),
         ],
       ),
     );
@@ -499,55 +453,123 @@ class SenderNameReadabilitySettingsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     final theme = context.watch<ThemeController>();
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.appearanceSenderNameReadability),
+      onBack: () => Navigator.of(context).pop(),
+      child: SettingsListView(
         children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.appearanceSenderNameReadability),
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.xl,
-                AppSpacing.lg,
-                AppSpacing.section,
+          const _SenderNameReadabilityPreview(),
+          const SizedBox(height: AppSpacing.xl),
+          const AppearanceView()._card(context, [
+            for (final mode in SenderNameReadabilityMode.values)
+              const AppearanceView()._choiceRow(
+                context,
+                switch (mode) {
+                  SenderNameReadabilityMode.background =>
+                    HeroAppIcons.idBadge.data,
+                  SenderNameReadabilityMode.blend => HeroAppIcons.droplet.data,
+                  SenderNameReadabilityMode.none => HeroAppIcons.eyeSlash.data,
+                },
+                switch (mode) {
+                  SenderNameReadabilityMode.background =>
+                    AppStringKeys.appearanceSenderNameReadabilityBackground,
+                  SenderNameReadabilityMode.blend =>
+                    AppStringKeys.appearanceSenderNameReadabilityBlend,
+                  SenderNameReadabilityMode.none =>
+                    AppStringKeys.appearanceSenderNameReadabilityNone,
+                },
+                theme.senderNameReadabilityMode == mode,
+                () => theme.senderNameReadabilityMode = mode,
               ),
-              children: [
-                const AppearanceView()._card(context, [
-                  for (final mode in SenderNameReadabilityMode.values)
-                    const AppearanceView()._choiceRow(
-                      context,
-                      switch (mode) {
-                        SenderNameReadabilityMode.background =>
-                          HeroAppIcons.idBadge.data,
-                        SenderNameReadabilityMode.shadow =>
-                          HeroAppIcons.wandMagicSparkles.data,
-                        SenderNameReadabilityMode.none =>
-                          HeroAppIcons.eyeSlash.data,
-                      },
-                      switch (mode) {
-                        SenderNameReadabilityMode.background =>
-                          AppStringKeys
-                              .appearanceSenderNameReadabilityBackground,
-                        SenderNameReadabilityMode.shadow =>
-                          AppStringKeys.appearanceSenderNameReadabilityShadow,
-                        SenderNameReadabilityMode.none =>
-                          AppStringKeys.appearanceSenderNameReadabilityNone,
-                      },
-                      theme.senderNameReadabilityMode == mode,
-                      () => theme.senderNameReadabilityMode = mode,
-                    ),
-                ]),
-              ],
-            ),
-          ),
+          ]),
         ],
       ),
+    );
+  }
+}
+
+/// Every name colour a sender can be assigned, over the background they will
+/// actually be read on.
+///
+/// One treatment can be legible on the palette's dark blue and lost on its
+/// yellow, so the choice is only answerable by seeing all of them at once
+/// against the current wallpaper rather than one sample name.
+class _SenderNameReadabilityPreview extends StatelessWidget {
+  const _SenderNameReadabilityPreview();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final theme = context.watch<ThemeController>();
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return AnimatedBuilder(
+      animation: ChatWallpaperController.shared,
+      builder: (context, _) {
+        final wallpaperController = ChatWallpaperController.shared;
+        final cloudTheme = theme.cloudThemeFor(
+          dark ? Brightness.dark : Brightness.light,
+        );
+        final selected = selectGlobalChatWallpaper(
+          defaultWallpaper: wallpaperController.defaultWallpaper(dark: dark),
+          cloudThemeWallpaper: cloudTheme?.wallpaper,
+          globalThemeWallpaper: wallpaperController.globalThemeWallpaperFor(
+            dark: dark,
+          ),
+        );
+        final incomingBackground = theme
+            .effectiveMessageBubbleBackgroundSpecFor(outgoing: false);
+        final bubbleColor =
+            incomingBackground.backgroundColor ??
+            cloudTheme?.incomingColor ??
+            c.bubbleIncoming;
+        // Blend meets this halfway, so the preview has to read it from the
+        // same place a real incoming bubble does.
+        final bubbleTextColor =
+            incomingBackground.foregroundColor ?? c.bubbleIncomingText;
+        final colors = messageNameColorsForTheme(cloudTheme);
+        final sample = AppStrings.t(AppStringKeys.appearancePreviewUsersSample);
+        return ClipRRect(
+          key: const ValueKey('senderNameReadabilityPreview'),
+          borderRadius: BorderRadius.circular(AppRadius.card),
+          child: ChatWallpaperBackground(
+            wallpaper: selected == null
+                ? null
+                : wallpaperController.resolvedWallpaper(selected),
+            fallbackColor: c.chatBackground,
+            brightness: Theme.of(context).brightness,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.xl,
+                vertical: AppSpacing.xxl,
+              ),
+              child: Wrap(
+                spacing: AppSpacing.lg,
+                runSpacing: AppSpacing.lg,
+                alignment: WrapAlignment.center,
+                children: [
+                  for (final color in colors)
+                    SenderIdentityPills(
+                      readabilityMode: theme.senderNameReadabilityMode,
+                      bubbleColor: bubbleColor,
+                      textColor: bubbleTextColor,
+                      name: sample,
+                      nameStyle: TextStyle(fontSize: 12, color: color),
+                      // The background treatment is a tag joined to the name,
+                      // so previewing it without a tag would hide half of what
+                      // is being chosen.
+                      role:
+                          theme.senderNameReadabilityMode ==
+                              SenderNameReadabilityMode.background
+                          ? MemberRole.admin
+                          : null,
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -557,124 +579,62 @@ class DisplaySettingsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     const appearance = AppearanceView();
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.appearanceSize),
+      onBack: () => Navigator.of(context).pop(),
+      child: SettingsListView(
         children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.appearanceSize),
-            onBack: () => Navigator.of(context).pop(),
+          appearance._card(context, [
+            appearance._chatViewNavigationRow(context),
+          ]),
+          appearance._label(
+            context,
+            AppStrings.t(AppStringKeys.appearanceSectionChatList),
           ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.xl,
-                AppSpacing.lg,
-                AppSpacing.section,
-              ),
-              children: [
-                appearance._card(context, [
-                  KeyedSubtree(
-                    key: const ValueKey('avatars-sidebar-settings-row'),
-                    child: appearance._navigationRow(
-                      context,
-                      AppStrings.t(AppStringKeys.appearanceAvatarsAndSidebar),
-                      null,
-                      () => Navigator.of(context).push(
-                        AppPageRoute<void>(
-                          pageBuilder: (_, _, _) =>
-                              const AvatarsAndSidebarSettingsView(),
-                        ),
-                      ),
-                      icon: HeroAppIcons.users.data,
-                    ),
-                  ),
-                  KeyedSubtree(
-                    key: const ValueKey('chat-view-settings-row'),
-                    child: appearance._navigationRow(
-                      context,
-                      AppStrings.t(AppStringKeys.appearanceChatView),
-                      null,
-                      () => Navigator.of(context).push(
-                        AppPageRoute<void>(
-                          pageBuilder: (_, _, _) =>
-                              const ChatViewAppearanceSettingsView(),
-                        ),
-                      ),
-                      icon: HeroAppIcons.message.data,
-                    ),
-                  ),
-                  KeyedSubtree(
-                    key: const ValueKey('chat-list-settings-row'),
-                    child: appearance._navigationRow(
-                      context,
-                      AppStrings.t(AppStringKeys.appearanceChatList),
-                      null,
-                      () => Navigator.of(context).push(
-                        AppPageRoute<void>(
-                          pageBuilder: (_, _, _) =>
-                              const ChatListAppearanceSettingsView(),
-                        ),
-                      ),
-                      icon: HeroAppIcons.listCheck.data,
-                    ),
-                  ),
-                  KeyedSubtree(
-                    key: const ValueKey('unread-badge-settings-row'),
-                    child: appearance._navigationRow(
-                      context,
-                      AppStrings.t(AppStringKeys.appearanceUnreadBadge),
-                      null,
-                      () => Navigator.of(context).push(
-                        AppPageRoute<void>(
-                          pageBuilder: (_, _, _) =>
-                              const UnreadBadgeSettingsView(),
-                        ),
-                      ),
-                      icon: HeroAppIcons.solidBell.data,
-                    ),
-                  ),
-                ]),
-              ],
-            ),
+          appearance._card(
+            context,
+            appearance._chatListNavigationRows(context),
           ),
+          appearance._label(
+            context,
+            AppStrings.t(AppStringKeys.appearanceAvatarsAndSidebar),
+          ),
+          appearance._avatarsAndSidebarControls(context),
         ],
       ),
     );
   }
 }
 
-class AvatarsAndSidebarSettingsView extends StatelessWidget {
-  const AvatarsAndSidebarSettingsView({super.key});
+class MobileMessageActionMenuSettingsView extends StatelessWidget {
+  const MobileMessageActionMenuSettingsView({super.key});
 
   @override
   Widget build(BuildContext context) {
     final theme = context.watch<ThemeController>();
-    return _DisplaySectionPage(
-      title: AppStrings.t(AppStringKeys.appearanceAvatarsAndSidebar),
-      preview: _SurfacePreviewCard(
-        title: AppStrings.t(AppStringKeys.appearanceAvatarsAndSidebar),
-        child: _AvatarsAndSidebarPreview(theme: theme),
+    const appearance = AppearanceView();
+    return SettingsPageScaffold(
+      key: const ValueKey('mobile-message-action-menu-style-page'),
+      title: AppStrings.t(AppStringKeys.appearanceMessageActionMenu),
+      onBack: () => Navigator.of(context).pop(),
+      child: SettingsListView(
+        children: [
+          appearance._card(context, [
+            for (final style in MobileMessageActionMenuStyle.values)
+              KeyedSubtree(
+                key: ValueKey('mobile-message-action-menu-style-${style.name}'),
+                child: appearance._choiceRow(
+                  context,
+                  style.icon.data,
+                  AppStrings.t(style.label),
+                  theme.mobileMessageActionMenuStyle == style,
+                  () => theme.mobileMessageActionMenuStyle = style,
+                ),
+              ),
+          ]),
+        ],
       ),
-      controls: const AppearanceView()._card(context, [
-        const AppearanceView()._toggleRow(
-          context,
-          HeroAppIcons.users.data,
-          AppStrings.t(AppStringKeys.appearanceRoundGroupAvatars),
-          theme.circularGroupAvatars,
-          (value) => theme.circularGroupAvatars = value,
-        ),
-        const AppearanceView()._toggleRow(
-          context,
-          HeroAppIcons.play.data,
-          AppStrings.t(AppStringKeys.appearanceAnimateAvatars),
-          theme.animateAvatars,
-          (value) => theme.animateAvatars = value,
-        ),
-      ]),
     );
   }
 }
@@ -685,13 +645,11 @@ class ChatViewAppearanceSettingsView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = context.watch<ThemeController>();
+    final desktop = isDesktopTargetPlatform(Theme.of(context).platform);
     const appearance = AppearanceView();
     return _DisplaySectionPage(
       title: AppStrings.t(AppStringKeys.appearanceChatView),
-      preview: _SurfacePreviewCard(
-        title: AppStrings.t(AppStringKeys.appearanceChatView),
-        child: const _ChatViewSettingsPreview(),
-      ),
+      preview: const _ChatViewSettingsPreview(),
       controls: appearance._card(context, [
         appearance._toggleRow(
           context,
@@ -720,8 +678,8 @@ class ChatViewAppearanceSettingsView extends StatelessWidget {
           AppStrings.t(switch (theme.senderNameReadabilityMode) {
             SenderNameReadabilityMode.background =>
               AppStringKeys.appearanceSenderNameReadabilityBackground,
-            SenderNameReadabilityMode.shadow =>
-              AppStringKeys.appearanceSenderNameReadabilityShadow,
+            SenderNameReadabilityMode.blend =>
+              AppStringKeys.appearanceSenderNameReadabilityBlend,
             SenderNameReadabilityMode.none =>
               AppStringKeys.appearanceSenderNameReadabilityNone,
           }),
@@ -756,6 +714,22 @@ class ChatViewAppearanceSettingsView extends StatelessWidget {
           theme.alwaysShowMessageTime,
           (value) => theme.alwaysShowMessageTime = value,
         ),
+        if (!desktop)
+          KeyedSubtree(
+            key: const ValueKey('mobile-message-action-menu-style-row'),
+            child: appearance._navigationRow(
+              context,
+              AppStrings.t(AppStringKeys.appearanceMessageActionMenu),
+              AppStrings.t(theme.mobileMessageActionMenuStyle.label),
+              () => Navigator.of(context).push(
+                AppPageRoute<void>(
+                  pageBuilder: (_, _, _) =>
+                      const MobileMessageActionMenuSettingsView(),
+                ),
+              ),
+              icon: HeroAppIcons.listCheck.data,
+            ),
+          ),
         appearance._navigationRow(
           context,
           AppStrings.t(AppStringKeys.quickReactionsTitle),
@@ -781,104 +755,106 @@ class ChatListAppearanceSettingsView extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = context.watch<ThemeController>();
     const appearance = AppearanceView();
+    final platform = Theme.of(context).platform;
+    final desktop = isDesktopTargetPlatform(platform);
+    final archiveMode = theme.archivedChatsDisplayMode.effectiveForPlatform(
+      platform: platform,
+    );
     return _DisplaySectionPage(
       title: AppStrings.t(AppStringKeys.appearanceChatList),
-      preview: _SurfacePreviewCard(
-        title: AppStrings.t(AppStringKeys.appearanceChatList),
-        child: _ChatListSettingsPreview(theme: theme),
-      ),
-      controls: appearance._card(context, [
-        appearance._navigationRow(
-          context,
-          AppStrings.t(AppStringKeys.appearanceChatFolders),
-          AppStrings.t(theme.chatFolderDisplayMode.label),
-          () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const ChatFolderSettingsView()),
-          ),
-          icon: HeroAppIcons.folder.data,
-        ),
-        KeyedSubtree(
-          key: const ValueKey('chat-list-swipe-settings-row'),
-          child: appearance._navigationRow(
+      controls: Column(
+        key: const ValueKey('chat-list-merged-controls'),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          appearance._card(context, [
+            appearance._navigationRow(
+              context,
+              AppStrings.t(AppStringKeys.appearanceChatFolders),
+              AppStrings.t(theme.chatFolderDisplayMode.label),
+              () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const ChatFolderSettingsView(),
+                ),
+              ),
+              icon: HeroAppIcons.folder.data,
+            ),
+            if (!desktop)
+              KeyedSubtree(
+                key: const ValueKey('chat-list-swipe-settings-row'),
+                child: appearance._navigationRow(
+                  context,
+                  AppStrings.t(AppStringKeys.gesturesChatListSwipe),
+                  AppStrings.t(theme.chatListSwipeMode.label),
+                  () => Navigator.of(context).push(
+                    AppPageRoute<void>(
+                      pageBuilder: (_, _, _) =>
+                          const ChatListGestureSettingsView(),
+                    ),
+                  ),
+                  icon: HeroAppIcons.arrowsRightLeft.data,
+                ),
+              ),
+            appearance._navigationRow(
+              context,
+              AppStrings.t(AppStringKeys.appearanceArchivedChats),
+              AppStrings.t(archiveMode.label),
+              () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const ArchivedChatsSettingsView(),
+                ),
+              ),
+              icon: HeroAppIcons.inbox.data,
+            ),
+            if (!desktop)
+              appearance._toggleRow(
+                context,
+                HeroAppIcons.magnifyingGlass.data,
+                AppStrings.t(AppStringKeys.appearanceShowChatListSearch),
+                theme.showChatListSearch,
+                (value) => theme.showChatListSearch = value,
+              ),
+            appearance._navigationRow(
+              context,
+              AppStrings.t(AppStringKeys.appearanceShowNameColors),
+              _nameColorSummary(
+                theme.chatListNameColorAudience,
+                theme.chatListStatusEmojiMode,
+              ),
+              () => Navigator.of(context).push(
+                AppPageRoute<void>(
+                  pageBuilder: (_, _, _) => const NameColorSettingsView(
+                    surface: NameColorSettingsSurface.chatList,
+                  ),
+                ),
+              ),
+              icon: HeroAppIcons.wandMagicSparkles.data,
+            ),
+          ]),
+          appearance._label(
             context,
-            AppStrings.t(AppStringKeys.gesturesChatListSwipe),
-            AppStrings.t(theme.chatListSwipeMode.label),
-            () => Navigator.of(context).push(
-              AppPageRoute<void>(
-                pageBuilder: (_, _, _) => const ChatListGestureSettingsView(),
+            AppStrings.t(AppStringKeys.appearanceUnreadBadge),
+          ),
+          KeyedSubtree(
+            key: const ValueKey('unread-badge-controls'),
+            child: appearance._card(context, [
+              appearance._toggleRow(
+                context,
+                HeroAppIcons.message.data,
+                AppStrings.t(AppStringKeys.appearanceShowUnreadChatCount),
+                theme.unreadBadgeShowsChatCount,
+                (value) => theme.unreadBadgeShowsChatCount = value,
               ),
-            ),
-            icon: HeroAppIcons.arrowsRightLeft.data,
-          ),
-        ),
-        appearance._navigationRow(
-          context,
-          telegramText(AppStringKeys.appearanceArchivedChats),
-          AppStrings.t(theme.archivedChatsDisplayMode.label),
-          () => Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => const ArchivedChatsSettingsView(),
-            ),
-          ),
-          icon: HeroAppIcons.inbox.data,
-        ),
-        appearance._toggleRow(
-          context,
-          HeroAppIcons.magnifyingGlass.data,
-          AppStrings.t(AppStringKeys.appearanceShowChatListSearch),
-          theme.showChatListSearch,
-          (value) => theme.showChatListSearch = value,
-        ),
-        appearance._navigationRow(
-          context,
-          AppStrings.t(AppStringKeys.appearanceShowNameColors),
-          _nameColorSummary(
-            theme.chatListNameColorAudience,
-            theme.chatListStatusEmojiMode,
-          ),
-          () => Navigator.of(context).push(
-            AppPageRoute<void>(
-              pageBuilder: (_, _, _) => const NameColorSettingsView(
-                surface: NameColorSettingsSurface.chatList,
+              appearance._toggleRow(
+                context,
+                HeroAppIcons.solidBell.data,
+                AppStrings.t(AppStringKeys.appearanceCapUnreadCountAt99),
+                theme.capUnreadBadgeAt99,
+                (value) => theme.capUnreadBadgeAt99 = value,
               ),
-            ),
+            ]),
           ),
-          icon: HeroAppIcons.wandMagicSparkles.data,
-        ),
-      ]),
-    );
-  }
-}
-
-class UnreadBadgeSettingsView extends StatelessWidget {
-  const UnreadBadgeSettingsView({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = context.watch<ThemeController>();
-    const appearance = AppearanceView();
-    return _DisplaySectionPage(
-      title: AppStrings.t(AppStringKeys.appearanceUnreadBadge),
-      preview: _SurfacePreviewCard(
-        title: AppStrings.t(AppStringKeys.appearanceUnreadBadge),
-        child: _UnreadBadgeSettingsPreview(theme: theme),
+        ],
       ),
-      controls: appearance._card(context, [
-        appearance._toggleRow(
-          context,
-          HeroAppIcons.message.data,
-          AppStrings.t(AppStringKeys.appearanceShowUnreadChatCount),
-          theme.unreadBadgeShowsChatCount,
-          (value) => theme.unreadBadgeShowsChatCount = value,
-        ),
-        appearance._toggleRow(
-          context,
-          HeroAppIcons.solidBell.data,
-          AppStrings.t(AppStringKeys.appearanceCapUnreadCountAt99),
-          theme.capUnreadBadgeAt99,
-          (value) => theme.capUnreadBadgeAt99 = value,
-        ),
-      ]),
     );
   }
 }
@@ -886,37 +862,26 @@ class UnreadBadgeSettingsView extends StatelessWidget {
 class _DisplaySectionPage extends StatelessWidget {
   const _DisplaySectionPage({
     required this.title,
-    required this.preview,
     required this.controls,
+    this.preview,
   });
 
   final String title;
-  final Widget preview;
+  final Widget? preview;
   final Widget controls;
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
+    return SettingsPageScaffold(
+      title: title,
+      onBack: () => Navigator.of(context).pop(),
+      child: SettingsListView(
         children: [
-          NavHeader(title: title, onBack: () => Navigator.of(context).pop()),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.xl,
-                AppSpacing.lg,
-                AppSpacing.section,
-              ),
-              children: [
-                preview,
-                const SizedBox(height: AppSpacing.xl),
-                controls,
-              ],
-            ),
-          ),
+          if (preview != null) ...[
+            preview!,
+            const SizedBox(height: AppSpacing.xl),
+          ],
+          controls,
         ],
       ),
     );
@@ -928,274 +893,99 @@ String _nameColorSummary(
   StatusEmojiDisplayMode status,
 ) => '${AppStrings.t(audience.label)} · ${AppStrings.t(status.label)}';
 
-String _messageBubbleBackgroundLabel(
-  ThemeController theme,
-) => AppStrings.t(switch (theme.messageBubbleBackground) {
-  MessageBubbleBackground.standard => AppStringKeys.messageBubbleDefault,
-  MessageBubbleBackground.midnightAurora =>
-    AppStringKeys.messageBubbleMidnightAurora,
-  MessageBubbleBackground.solarPorcelain =>
-    AppStringKeys.messageBubbleSolarPorcelain,
-  MessageBubbleBackground.berryOrbit => AppStringKeys.messageBubbleBerryOrbit,
-  MessageBubbleBackground.arcticBlueprint =>
-    AppStringKeys.messageBubbleArcticBlueprint,
-  MessageBubbleBackground.emberArcade => AppStringKeys.messageBubbleEmberArcade,
-  MessageBubbleBackground.lilacConstellation =>
-    AppStringKeys.messageBubbleLilacConstellation,
-  MessageBubbleBackground.forestFamiliar =>
-    AppStringKeys.messageBubbleForestFamiliar,
-  MessageBubbleBackground.inkWanderer => AppStringKeys.messageBubbleInkWanderer,
-  MessageBubbleBackground.pixelCadet => AppStringKeys.messageBubblePixelCadet,
-  MessageBubbleBackground.cosmicMechanic =>
-    AppStringKeys.messageBubbleCosmicMechanic,
-  MessageBubbleBackground.pastryPal => AppStringKeys.messageBubblePastryPal,
-  MessageBubbleBackground.noirDetective =>
-    AppStringKeys.messageBubbleNoirDetective,
-  MessageBubbleBackground.custom => AppStringKeys.messageBubbleCustom,
-});
-
-class _SurfacePreviewCard extends StatelessWidget {
-  const _SurfacePreviewCard({required this.title, required this.child});
-
-  final String title;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.xxl),
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: AppTextSize.footnote,
-              fontWeight: FontWeight.w600,
-              color: c.textSecondary,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.xl),
-          child,
-        ],
-      ),
-    );
+String _messageBubbleBackgroundLabel(ThemeController theme) {
+  if (!theme.messageBubblesEnabled) {
+    return AppStrings.t(AppStringKeys.privacyDisabled);
   }
-}
-
-class _AppearanceSnapshotBuilder extends StatefulWidget {
-  const _AppearanceSnapshotBuilder({required this.builder});
-
-  final Widget Function(BuildContext context, AppearancePreviewSnapshot data)
-  builder;
-
-  @override
-  State<_AppearanceSnapshotBuilder> createState() =>
-      _AppearanceSnapshotBuilderState();
-}
-
-class _AppearanceSnapshotBuilderState
-    extends State<_AppearanceSnapshotBuilder> {
-  late final Future<AppearancePreviewSnapshot?> _snapshot =
-      AppearancePreviewRepository.shared.load();
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<AppearancePreviewSnapshot?>(
-      future: _snapshot,
-      builder: (context, state) {
-        if (state.connectionState != ConnectionState.done) {
-          return const SizedBox(
-            key: ValueKey('appearance-live-preview-loading'),
-            height: 72,
-            child: Center(
-              child: SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            ),
-          );
-        }
-        final data = state.data;
-        return data == null
-            ? const _LivePreviewUnavailable()
-            : widget.builder(context, data);
-      },
-    );
-  }
-}
-
-class _LivePreviewUnavailable extends StatelessWidget {
-  const _LivePreviewUnavailable();
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return Padding(
-      key: const ValueKey('appearance-live-preview-unavailable'),
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xxl),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          AppIcon(
-            HeroAppIcons.eyeSlash,
-            size: AppIconSize.sm,
-            color: c.textTertiary,
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          Flexible(
-            child: Text(
-              AppStrings.t(AppStringKeys.appearanceLivePreviewUnavailable),
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: AppTextSize.footnote,
-                color: c.textTertiary,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AvatarsAndSidebarPreview extends StatelessWidget {
-  const _AvatarsAndSidebarPreview({required this.theme});
-
-  final ThemeController theme;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return Container(
-      key: const ValueKey('avatars-sidebar-preview'),
-      padding: const EdgeInsets.all(AppSpacing.xl),
-      decoration: BoxDecoration(
-        color: c.groupedBackground,
-        borderRadius: BorderRadius.circular(AppRadius.control),
-        border: Border.all(color: c.divider),
-      ),
-      child: _AppearanceSnapshotBuilder(
-        builder: (context, data) {
-          final group = data.groupChat;
-          if (data.meName.trim().isEmpty && group == null) {
-            return const _LivePreviewUnavailable();
-          }
-          return Column(
-            children: [
-              if (data.meName.trim().isNotEmpty)
-                _LiveAvatarRow(
-                  key: const ValueKey('avatars-sidebar-preview-account'),
-                  avatarKey: const ValueKey('avatars-sidebar-preview-avatar'),
-                  title: data.meName,
-                  subtitle: theme.hideSidebarPhone ? '' : data.mePhone,
-                  photo: data.mePhoto,
-                  allowAnimation: theme.animateAvatars,
-                  phoneKey: const ValueKey('avatars-sidebar-preview-phone'),
-                ),
-              if (data.meName.trim().isNotEmpty && group != null)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
-                  child: InsetDivider(leadingInset: 64),
-                ),
-              if (group != null)
-                _LiveAvatarRow(
-                  key: const ValueKey('avatars-sidebar-preview-group'),
-                  avatarKey: const ValueKey(
-                    'avatars-sidebar-preview-group-avatar',
-                  ),
-                  title: group.title,
-                  photo: group.photo,
-                  square: !theme.circularGroupAvatars,
-                  allowAnimation: theme.animateAvatars,
-                ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _LiveAvatarRow extends StatelessWidget {
-  const _LiveAvatarRow({
-    super.key,
-    required this.title,
-    required this.photo,
-    required this.allowAnimation,
-    required this.avatarKey,
-    this.subtitle = '',
-    this.square = false,
-    this.phoneKey,
+  return AppStrings.t(switch (theme.messageBubbleBackground) {
+    MessageBubbleBackground.standard => AppStringKeys.messageBubbleDefault,
+    MessageBubbleBackground.midnightAurora =>
+      AppStringKeys.messageBubbleMidnightAurora,
+    MessageBubbleBackground.solarPorcelain =>
+      AppStringKeys.messageBubbleSolarPorcelain,
+    MessageBubbleBackground.berryOrbit => AppStringKeys.messageBubbleBerryOrbit,
+    MessageBubbleBackground.arcticBlueprint =>
+      AppStringKeys.messageBubbleArcticBlueprint,
+    MessageBubbleBackground.emberArcade =>
+      AppStringKeys.messageBubbleEmberArcade,
+    MessageBubbleBackground.lilacConstellation =>
+      AppStringKeys.messageBubbleLilacConstellation,
+    MessageBubbleBackground.forestFamiliar =>
+      AppStringKeys.messageBubbleForestFamiliar,
+    MessageBubbleBackground.inkWanderer =>
+      AppStringKeys.messageBubbleInkWanderer,
+    MessageBubbleBackground.pixelCadet => AppStringKeys.messageBubblePixelCadet,
+    MessageBubbleBackground.cosmicMechanic =>
+      AppStringKeys.messageBubbleCosmicMechanic,
+    MessageBubbleBackground.pastryPal => AppStringKeys.messageBubblePastryPal,
+    MessageBubbleBackground.noirDetective =>
+      AppStringKeys.messageBubbleNoirDetective,
+    MessageBubbleBackground.custom => AppStringKeys.messageBubbleCustom,
   });
-
-  final String title;
-  final String subtitle;
-  final TdFileRef? photo;
-  final Key avatarKey;
-  final bool square;
-  final bool allowAnimation;
-  final Key? phoneKey;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return Row(
-      children: [
-        PhotoAvatar(
-          key: avatarKey,
-          title: title,
-          photo: photo,
-          size: 52,
-          square: square,
-          allowAnimation: allowAnimation,
-        ),
-        const SizedBox(width: AppSpacing.xl),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: AppTextSize.bodyLarge,
-                  fontWeight: FontWeight.w600,
-                  color: c.textPrimary,
-                ),
-              ),
-              if (subtitle.isNotEmpty) ...[
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  subtitle,
-                  key: phoneKey,
-                  style: TextStyle(
-                    fontSize: AppTextSize.footnote,
-                    color: c.textSecondary,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ],
-    );
-  }
 }
 
-class _ChatViewSettingsPreview extends StatelessWidget {
+class _ChatViewSettingsPreview extends StatefulWidget {
   const _ChatViewSettingsPreview();
 
   @override
+  State<_ChatViewSettingsPreview> createState() =>
+      _ChatViewSettingsPreviewState();
+}
+
+class _ChatViewSettingsPreviewState extends State<_ChatViewSettingsPreview> {
+  static final List<ChatMessage> _albumMessages = [
+    ChatMessage(
+      id: -9101,
+      isOutgoing: false,
+      text: '',
+      date: 1785862260,
+      senderId: 42,
+      senderName: AppStrings.t(AppStringKeys.appearancePreviewAlbumSenderName),
+      senderRole: MemberRole.member,
+      senderTitle: AppStrings.t(
+        AppStringKeys.appearancePreviewAlbumSenderTitle,
+      ),
+      senderAccentColorId: 3,
+      contentType: 'messagePhoto',
+      mediaAlbumId: 91,
+      imageWidth: 1600,
+      imageHeight: 1200,
+      image: TdFileRef(
+        id: -9101,
+        miniThumb: base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAADAAAAAkCAYAAADPRbkKAAABoElEQVR42tXPDWsMABzH8f/LQ0Ye8pCHPOQhjzNmbYZ7vt3D7mH3uNt2u+127nbNJIkkkkjakkQSSSStSSKJ9PV/G7938PkYiwH+XQ3ydyHIn26I3/MhfnXC/GyH+dGK8H0uwrdmlK+zUVYbMVamY3ypx/k8FefTxAgfayN8GE/wvprgXTnJ21KSN8UUrwspXuXTvMyleZEd5XlmlGfpDMupDEvJLE8TWZ7EczyO5XgUzfMwkudBaIz7wTHuBQrcvVzgzsUit4eL3LpQ4uZQmRuDZa4PVLh2vsJif5WFc1VMGd/tG8eU8Z0zHlDGt3trmDK+ddoDyvjmyQlMGT9zwgPK+MbxSUwZXz/mAWX85NEpTBlfO+IBZXz1cB1TxlcOeUAZXzo4jSnjCwc8oIzP729gyvjcPg8o4zN7ZzBlfHqPB5Txyd2zmDI+scsDyvj4ziamjI/u8IAyPrx9DlPGB7d5QBkf2NrClPGXtnhAGT+8+QqmjB/a5AFl/ODGNqaMH9jgAWV8f08HU8afXe8BZXzfunlMGd+71gPK+FNruvwHhyS2QTVTO4sAAAAASUVORK5CYII=',
+        ),
+      ),
+    ),
+    ChatMessage(
+      id: -9102,
+      isOutgoing: false,
+      text: AppStrings.t(AppStringKeys.appearancePreviewAlbumCaption),
+      date: 1785862260,
+      senderId: 42,
+      senderName: AppStrings.t(AppStringKeys.appearancePreviewAlbumSenderName),
+      senderRole: MemberRole.member,
+      senderTitle: AppStrings.t(
+        AppStringKeys.appearancePreviewAlbumSenderTitle,
+      ),
+      senderAccentColorId: 3,
+      contentType: 'messagePhoto',
+      mediaAlbumId: 91,
+      imageWidth: 1200,
+      imageHeight: 1600,
+      image: TdFileRef(
+        id: -9102,
+        miniThumb: base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAADAAAAAkCAYAAADPRbkKAAABh0lEQVR42tXP5y7DYQCF8f/V0Gq1WrP26l0QI0aMIEaMIEaMGEGMUKu0qCpapaUown0d572M8+H5/nss/18W/t8sGn8+0fj9iYavDzRk2cc76t9ZJoP6twzq0iz1htoX9vyK2qdX1CTSqImzhzSq71OojqVQdfeCqlsWeUblDbtOojKcREWIXT6hPMjOEyg/S8B3GofvmAXiKDt6RNnhI0oPHlC6z/buUbLLdmIo2Y6heItt3qFog61HUbQWReHqLSxlfOEKB5Tx3uUIB4Tx3iUOKOO9i2ZAGO9ZuOGAMN4zzwFlvGfumgPC+IJZMyCML5i5gqWMd0+bAWG8e4oDynj3ZJgDwnjXhBkQxrvGQ7CU8a4xMyCMzx+95IAwPn+EA8p45/AFB4TxziEOKOOdg2ZAGO8YCHJAGO/o54Ay3tF3zgFhfF6vGRDG5/WcwVLG27vNgDDe3sUBZby985QDwnhbhxkQxtvaT2Ap421tZkAYn9t6zAFhfG4LB5TxOc0BDgjjc5oC+Acf2nhjj5N6ogAAAABJRU5ErkJggg==',
+        ),
+      ),
+    ),
+  ];
+
+  @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final theme = context.watch<ThemeController>();
     return Container(
       key: const ValueKey('chat-view-preview'),
       decoration: BoxDecoration(
@@ -1204,81 +994,181 @@ class _ChatViewSettingsPreview extends StatelessWidget {
         border: Border.all(color: c.divider),
       ),
       clipBehavior: Clip.antiAlias,
-      child: _AppearanceSnapshotBuilder(
-        builder: (context, data) {
-          if (data.messages.isEmpty || data.transcriptChat == null) {
-            return const _LivePreviewUnavailable();
-          }
-          return RepaintBoundary(
-            child: ExcludeSemantics(
-              child: IgnorePointer(
-                child: TickerMode(
-                  enabled: false,
-                  child: SizedBox(
-                    height: 280,
-                    child: ListView(
-                      physics: const NeverScrollableScrollPhysics(),
-                      padding: const EdgeInsets.symmetric(
-                        vertical: AppSpacing.md,
-                      ),
-                      children: [
-                        for (final entry in data.messages)
-                          MessageBubble(
-                            key: ValueKey(
-                              'chat-view-preview-message-${entry.message.id}',
+      child: RepaintBoundary(
+        child: ExcludeSemantics(
+          child: TickerMode(
+            enabled: false,
+            child: SizedBox(
+              height: 280,
+              child: SingleChildScrollView(
+                physics: const NeverScrollableScrollPhysics(),
+                padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+                child: theme.groupImageMessages
+                    ? ImageMediaAlbumBubble(
+                        key: const ValueKey('chat-view-preview-album'),
+                        messages: _albumMessages,
+                        peerTitle: AppStrings.t(
+                          AppStringKeys.appearancePreviewGroupTitle,
+                        ),
+                        isGroup: true,
+                        meName: 'You',
+                        imageBuilder: _previewAlbumImage,
+                        onLongPress: _showQuickReactions,
+                      )
+                    : Column(
+                        children: [
+                          for (final message in _albumMessages)
+                            MessageBubble(
+                              key: ValueKey(
+                                'chat-view-preview-message-${message.id}',
+                              ),
+                              message: message,
+                              peerTitle: AppStrings.t(
+                                AppStringKeys.appearancePreviewGroupTitle,
+                              ),
+                              isGroup: true,
+                              meName: 'You',
+                              onLongPress: _showQuickReactions,
                             ),
-                            message: entry.message,
-                            peerTitle: data.peerTitle,
-                            peerPhoto: data.peerPhoto,
-                            isGroup: data.isGroup,
-                            meName: data.meName,
-                            mePhoto: data.mePhoto,
-                            meId: data.meId,
-                            isRead: entry.isRead,
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
+                        ],
+                      ),
               ),
             ),
-          );
-        },
+          ),
+        ),
       ),
     );
   }
+
+  OverlayEntry? _quickReactionOverlay;
+
+  void _showQuickReactions(
+    ChatMessage message,
+    Rect? globalBounds,
+    MessageActionSource _,
+  ) {
+    _dismissQuickReactions();
+    EmojiStore.shared.loadIfNeeded();
+
+    final overlay = Overlay.of(context, rootOverlay: true);
+    final overlayBox = overlay.context.findRenderObject() as RenderBox?;
+    final anchorRect = globalBounds != null && overlayBox?.hasSize == true
+        ? MessageActionMenu.rectInOverlay(
+            globalBounds,
+            globalToLocal: overlayBox!.globalToLocal,
+          )
+        : null;
+    late final OverlayEntry entry;
+    void dismiss() {
+      if (_quickReactionOverlay != entry) return;
+      entry.remove();
+      _quickReactionOverlay = null;
+    }
+
+    entry = OverlayEntry(
+      builder: (context) => _ChatViewQuickReactionOverlay(
+        anchorRect: anchorRect,
+        outgoing: message.isOutgoing,
+        onDismiss: dismiss,
+        onReaction: (_) => dismiss(),
+        onExpand: dismiss,
+      ),
+    );
+    _quickReactionOverlay = entry;
+    overlay.insert(entry);
+  }
+
+  void _dismissQuickReactions() {
+    _quickReactionOverlay?.remove();
+    _quickReactionOverlay = null;
+  }
+
+  @override
+  void dispose() {
+    _dismissQuickReactions();
+    super.dispose();
+  }
+
+  static Widget _previewAlbumImage(
+    BuildContext context,
+    ChatMessage message,
+    double width,
+    double height,
+  ) => Image.memory(
+    message.image!.miniThumb!,
+    fit: BoxFit.cover,
+    gaplessPlayback: true,
+  );
 }
 
-class _ChatListSettingsPreview extends StatelessWidget {
-  const _ChatListSettingsPreview({required this.theme});
+class _ChatViewQuickReactionOverlay extends StatelessWidget {
+  const _ChatViewQuickReactionOverlay({
+    required this.anchorRect,
+    required this.outgoing,
+    required this.onDismiss,
+    required this.onReaction,
+    required this.onExpand,
+  });
 
-  final ThemeController theme;
+  final Rect? anchorRect;
+  final bool outgoing;
+  final VoidCallback onDismiss;
+  final ValueChanged<QuickReactionChoice> onReaction;
+  final VoidCallback onExpand;
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
-    return Container(
-      key: const ValueKey('chat-list-preview'),
-      decoration: BoxDecoration(
-        color: c.background,
-        borderRadius: BorderRadius.circular(AppRadius.control),
-        border: Border.all(color: c.divider),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: ExcludeSemantics(
-        child: IgnorePointer(
-          child: _RepresentativeChatListRow(
-            key: const ValueKey('chat-list-representative-row'),
-            theme: theme,
+    final media = MediaQuery.of(context);
+    final topSafe = media.padding.top + AppSpacing.sm;
+    final bottomSafe = media.size.height - media.padding.bottom - AppSpacing.sm;
+    const barHeight = 46.0;
+    final top = anchorRect == null
+        ? (media.size.height - barHeight) / 2
+        : (anchorRect!.top - barHeight - AppSpacing.sm).clamp(
+            topSafe,
+            bottomSafe - barHeight,
+          );
+    final alignment = outgoing ? Alignment.centerRight : Alignment.centerLeft;
+
+    return Material(
+      type: MaterialType.transparency,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              key: const ValueKey('chat-view-preview-reaction-dismiss'),
+              behavior: HitTestBehavior.opaque,
+              onTap: onDismiss,
+              child: const SizedBox.expand(),
+            ),
           ),
-        ),
+          Positioned(
+            top: top,
+            left: 10,
+            right: 10,
+            child: AnimatedBuilder(
+              animation: EmojiStore.shared,
+              builder: (context, _) => Align(
+                alignment: alignment,
+                child: QuickReactionBar(
+                  reactions: effectiveQuickReactions(
+                    context.watch<ThemeController>().quickReactions,
+                    allowCustomEmoji: EmojiStore.shared.isPremium,
+                  ),
+                  onReaction: onReaction,
+                  onExpand: onExpand,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _RepresentativeChatListRow extends StatelessWidget {
-  const _RepresentativeChatListRow({super.key, required this.theme});
+  const _RepresentativeChatListRow({required this.theme});
 
   final ThemeController theme;
 
@@ -1309,7 +1199,7 @@ class _RepresentativeChatListRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Mithka Users',
+                  AppStrings.t(AppStringKeys.appearancePreviewUsersSample),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -1320,7 +1210,7 @@ class _RepresentativeChatListRow extends StatelessWidget {
                 ),
                 const SizedBox(height: AppSpacing.xxs),
                 Text(
-                  'Jennie: See you in the chat',
+                  AppStrings.t(AppStringKeys.appearancePreviewMessageSample),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -1356,7 +1246,7 @@ class _RepresentativeChatListRow extends StatelessWidget {
                   style: TextStyle(
                     color: Color(0xFFFFFFFF),
                     fontSize: AppTextSize.caption,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
@@ -1393,7 +1283,7 @@ class _RepresentativeMessageBubble extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'This is how chat text will look.',
+              AppStrings.t(AppStringKeys.appearancePreviewChatTextSample),
               style: TextStyle(
                 fontSize: AppTextSize.bodyLarge,
                 color: c.bubbleIncomingText,
@@ -1417,87 +1307,6 @@ class _RepresentativeMessageBubble extends StatelessWidget {
   }
 }
 
-class _UnreadBadgeSettingsPreview extends StatelessWidget {
-  const _UnreadBadgeSettingsPreview({required this.theme});
-
-  final ThemeController theme;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    final unread = context.watch<UnreadBadgeModel?>();
-    final count = unread?.countFor(theme.unreadBadgeMode);
-    return Container(
-      key: const ValueKey('unread-badge-preview'),
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.section,
-        vertical: AppSpacing.xxl,
-      ),
-      decoration: BoxDecoration(
-        color: c.navBar,
-        borderRadius: BorderRadius.circular(AppRadius.control),
-        border: Border.all(color: c.divider),
-      ),
-      child: count == null
-          ? const _LivePreviewUnavailable()
-          : IgnorePointer(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _PreviewNavigationItem(
-                    icon: HeroAppIcons.solidMessage,
-                    label: AppStrings.t(theme.unreadBadgeMode.label),
-                    badge: UnreadBadge(count: count),
-                  ),
-                  _PreviewNavigationItem(
-                    icon: HeroAppIcons.users,
-                    label: AppStrings.t(AppStringKeys.tabContacts),
-                  ),
-                ],
-              ),
-            ),
-    );
-  }
-}
-
-class _PreviewNavigationItem extends StatelessWidget {
-  const _PreviewNavigationItem({
-    required this.icon,
-    required this.label,
-    this.badge,
-  });
-
-  final AppIconData icon;
-  final String label;
-  final Widget? badge;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            AppIcon(icon, size: AppIconSize.xl, color: c.textPrimary),
-            if (badge != null)
-              PositionedDirectional(end: -18, top: -10, child: badge!),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: AppTextSize.caption,
-            color: c.textSecondary,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 enum NameColorSettingsSurface { chat, chatList }
 
 class NameColorSettingsView extends StatelessWidget {
@@ -1507,7 +1316,6 @@ class NameColorSettingsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
     final theme = context.watch<ThemeController>();
     final isChatList = surface == NameColorSettingsSurface.chatList;
     final audience = isChatList
@@ -1517,71 +1325,55 @@ class NameColorSettingsView extends StatelessWidget {
         ? theme.chatListStatusEmojiMode
         : theme.chatStatusEmojiMode;
 
-    return Scaffold(
-      backgroundColor: colors.groupedBackground,
-      body: Column(
+    return SettingsPageScaffold(
+      title: AppStrings.t(
+        isChatList
+            ? AppStringKeys.appearanceChatListNameColorsTitle
+            : AppStringKeys.appearanceChatNameColorsTitle,
+      ),
+      onBack: () => Navigator.of(context).pop(),
+      child: SettingsListView(
         children: [
-          NavHeader(
-            title: AppStrings.t(
-              isChatList
-                  ? AppStringKeys.appearanceChatListNameColorsTitle
-                  : AppStringKeys.appearanceChatNameColorsTitle,
-            ),
-            onBack: () => Navigator.of(context).pop(),
+          const AppearanceView()._label(
+            context,
+            AppStrings.t(AppStringKeys.appearanceNameColorAudience),
           ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.xl,
-                AppSpacing.lg,
-                AppSpacing.section,
+          const AppearanceView()._card(context, [
+            for (final option in NameColorAudience.values)
+              const AppearanceView()._choiceRow(
+                context,
+                option.icon,
+                option.label,
+                audience == option,
+                () {
+                  if (isChatList) {
+                    theme.chatListNameColorAudience = option;
+                  } else {
+                    theme.chatNameColorAudience = option;
+                  }
+                },
               ),
-              children: [
-                const AppearanceView()._label(
-                  context,
-                  AppStrings.t(AppStringKeys.appearanceNameColorAudience),
-                ),
-                const AppearanceView()._card(context, [
-                  for (final option in NameColorAudience.values)
-                    const AppearanceView()._choiceRow(
-                      context,
-                      option.icon,
-                      option.label,
-                      audience == option,
-                      () {
-                        if (isChatList) {
-                          theme.chatListNameColorAudience = option;
-                        } else {
-                          theme.chatNameColorAudience = option;
-                        }
-                      },
-                    ),
-                ]),
-                const SizedBox(height: AppSpacing.xl),
-                const AppearanceView()._label(
-                  context,
-                  AppStrings.t(AppStringKeys.appearanceStatusDisplay),
-                ),
-                const AppearanceView()._card(context, [
-                  for (final option in StatusEmojiDisplayMode.values)
-                    const AppearanceView()._choiceRow(
-                      context,
-                      option.icon,
-                      option.label,
-                      status == option,
-                      () {
-                        if (isChatList) {
-                          theme.chatListStatusEmojiMode = option;
-                        } else {
-                          theme.chatStatusEmojiMode = option;
-                        }
-                      },
-                    ),
-                ]),
-              ],
-            ),
+          ]),
+          const AppearanceView()._label(
+            context,
+            AppStrings.t(AppStringKeys.appearanceStatusDisplay),
           ),
+          const AppearanceView()._card(context, [
+            for (final option in StatusEmojiDisplayMode.values)
+              const AppearanceView()._choiceRow(
+                context,
+                option.icon,
+                option.label,
+                status == option,
+                () {
+                  if (isChatList) {
+                    theme.chatListStatusEmojiMode = option;
+                  } else {
+                    theme.chatStatusEmojiMode = option;
+                  }
+                },
+              ),
+          ]),
         ],
       ),
     );
@@ -1593,52 +1385,22 @@ class ChatFolderSettingsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     final theme = context.watch<ThemeController>();
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.appearanceChatFolders),
+      onBack: () => Navigator.of(context).pop(),
+      child: SettingsListView(
         children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.appearanceChatFolders),
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.xl,
-                AppSpacing.lg,
-                AppSpacing.section,
+          const AppearanceView()._card(context, [
+            for (final mode in ChatFolderDisplayMode.values)
+              const AppearanceView()._choiceRow(
+                context,
+                mode.icon,
+                mode.label,
+                theme.chatFolderDisplayMode == mode,
+                () => theme.chatFolderDisplayMode = mode,
               ),
-              children: [
-                const AppearanceView()._card(context, [
-                  for (final mode in ChatFolderDisplayMode.values)
-                    const AppearanceView()._choiceRow(
-                      context,
-                      mode.icon,
-                      mode.label,
-                      theme.chatFolderDisplayMode == mode,
-                      () => theme.chatFolderDisplayMode = mode,
-                    ),
-                ]),
-                const SizedBox(height: AppSpacing.xl),
-                const AppearanceView()._card(context, [
-                  const AppearanceView()._navigationRow(
-                    context,
-                    'Manage folders',
-                    '',
-                    () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => const ChatFolderManagementView(),
-                      ),
-                    ),
-                    icon: HeroAppIcons.folder.data,
-                  ),
-                ]),
-              ],
-            ),
-          ),
+          ]),
         ],
       ),
     );
@@ -1650,33 +1412,17 @@ class ChatListGestureSettingsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     final theme = context.watch<ThemeController>();
     const appearance = AppearanceView();
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.gesturesChatListSwipe),
+      onBack: () => Navigator.of(context).pop(),
+      child: SettingsListView(
         children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.gesturesChatListSwipe),
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.xl,
-                AppSpacing.lg,
-                AppSpacing.section,
-              ),
-              children: [
-                appearance._card(context, [
-                  for (final mode in ChatListSwipeMode.values)
-                    _modeRow(context, theme, mode),
-                ]),
-              ],
-            ),
-          ),
+          appearance._card(context, [
+            for (final mode in ChatListSwipeMode.values)
+              _modeRow(context, theme, mode),
+          ]),
         ],
       ),
     );
@@ -1755,54 +1501,28 @@ class ArchivedChatsSettingsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     final theme = context.watch<ThemeController>();
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
+    final platform = Theme.of(context).platform;
+    final desktop = isDesktopTargetPlatform(platform);
+    final selectedMode = theme.archivedChatsDisplayMode.effectiveForPlatform(
+      platform: platform,
+    );
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.appearanceArchivedChats),
+      onBack: () => Navigator.of(context).pop(),
+      child: SettingsListView(
         children: [
-          NavHeader(
-            title: telegramText(AppStringKeys.appearanceArchivedChats),
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: DesktopContentConstraint(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.lg,
-                  AppSpacing.xl,
-                  AppSpacing.lg,
-                  AppSpacing.section,
+          const AppearanceView()._card(context, [
+            for (final mode in ArchivedChatsDisplayMode.values)
+              if (!desktop || mode != ArchivedChatsDisplayMode.pullDown)
+                const AppearanceView()._choiceRow(
+                  context,
+                  mode.icon,
+                  mode.label,
+                  selectedMode == mode,
+                  () => theme.archivedChatsDisplayMode = mode,
                 ),
-                children: [
-                  const AppearanceView()._card(context, [
-                    for (final mode in ArchivedChatsDisplayMode.values)
-                      const AppearanceView()._choiceRow(
-                        context,
-                        mode.icon,
-                        mode.label,
-                        theme.archivedChatsDisplayMode == mode,
-                        () => theme.archivedChatsDisplayMode = mode,
-                      ),
-                  ]),
-                  if (!kIsWeb && isDesktopTargetPlatform()) ...[
-                    const SizedBox(height: AppSpacing.md),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.md,
-                      ),
-                      child: Text(
-                        AppStringKeys.appearanceArchivedChatsDesktopHint.l10n(
-                          context,
-                        ),
-                        style: AppTextStyle.footnote(c.textSecondary),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
+          ]),
         ],
       ),
     );
@@ -1810,13 +1530,65 @@ class ArchivedChatsSettingsView extends StatelessWidget {
 }
 
 extension _DisplayAppearanceHelpers on AppearanceView {
+  /// What a single conversation looks like.
+  Widget _chatViewNavigationRow(BuildContext context) => KeyedSubtree(
+    key: const ValueKey('chat-view-settings-row'),
+    child: _navigationRow(
+      context,
+      AppStrings.t(AppStringKeys.appearanceChatView),
+      null,
+      () => Navigator.of(context).push(
+        AppPageRoute<void>(
+          pageBuilder: (_, _, _) => const ChatViewAppearanceSettingsView(),
+        ),
+      ),
+      icon: HeroAppIcons.message.data,
+    ),
+  );
+
+  List<Widget> _chatListNavigationRows(BuildContext context) => [
+    KeyedSubtree(
+      key: const ValueKey('chat-list-settings-row'),
+      child: _navigationRow(
+        context,
+        AppStrings.t(AppStringKeys.appearanceChatList),
+        null,
+        () => Navigator.of(context).push(
+          AppPageRoute<void>(
+            pageBuilder: (_, _, _) => const ChatListAppearanceSettingsView(),
+          ),
+        ),
+        icon: HeroAppIcons.listCheck.data,
+      ),
+    ),
+  ];
+
+  Widget _avatarsAndSidebarControls(BuildContext context) {
+    final theme = context.watch<ThemeController>();
+    return KeyedSubtree(
+      key: const ValueKey('avatars-sidebar-controls'),
+      child: _card(context, [
+        _toggleRow(
+          context,
+          HeroAppIcons.users.data,
+          AppStrings.t(AppStringKeys.appearanceRoundGroupAvatars),
+          theme.circularGroupAvatars,
+          (value) => theme.circularGroupAvatars = value,
+        ),
+        _toggleRow(
+          context,
+          HeroAppIcons.play.data,
+          AppStrings.t(AppStringKeys.appearanceAnimateAvatars),
+          theme.animateAvatars,
+          (value) => theme.animateAvatars = value,
+        ),
+      ]),
+    );
+  }
+
   Widget _fontSizeCard(BuildContext context, ThemeController theme) {
     final c = context.colors;
-    return Container(
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
+    return SettingsPanel(
       clipBehavior: Clip.antiAlias,
       child: _scaleSlider(
         context,
@@ -1847,11 +1619,7 @@ extension _DisplayAppearanceHelpers on AppearanceView {
 
   Widget _interfaceSizeCard(BuildContext context, ThemeController theme) {
     final c = context.colors;
-    return Container(
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
+    return SettingsPanel(
       clipBehavior: Clip.antiAlias,
       child: _scaleSlider(
         context,
@@ -2027,12 +1795,8 @@ extension _DisplayAppearanceHelpers on AppearanceView {
     required Widget child,
   }) {
     final c = context.colors;
-    return Container(
+    return SettingsPanel(
       padding: const EdgeInsets.all(AppSpacing.xxl),
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -2203,77 +1967,31 @@ extension _DisplayAppearanceHelpers on AppearanceView {
     );
   }
 
-  Widget _label(BuildContext context, String t) => Padding(
-    padding: const EdgeInsets.only(left: AppSpacing.xxl, bottom: AppSpacing.sm),
-    child: Text(
-      t,
-      style: TextStyle(
-        fontSize: AppTextSize.footnote,
-        color: context.colors.textTertiary,
-      ),
-    ),
-  );
+  Widget _label(BuildContext _, String t) => SettingsSectionHeader.text(t);
 
-  Widget _card(BuildContext context, List<Widget> rows) {
-    final c = context.colors;
-    return Container(
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          for (var i = 0; i < rows.length; i++) ...[
-            rows[i],
-            if (i < rows.length - 1) const InsetDivider(leadingInset: 52),
-          ],
-        ],
-      ),
-    );
+  Widget _card(BuildContext _, List<Widget> rows) {
+    return SettingsCard.rows(rows: rows);
   }
 
   Widget _choiceRow(
-    BuildContext context,
+    BuildContext _,
     IconData icon,
     String label,
     bool selected,
     VoidCallback onTap,
   ) {
-    final c = context.colors;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
+    return SettingsRow(
+      title: label,
+      leading: SettingsLeadingIcon(icon: AppIconData(icon)),
       onTap: onTap,
-      child: SizedBox(
-        height: AppMetric.menuRowHeight + AppSpacing.xxs,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxl),
-          child: Row(
-            children: [
-              Icon(icon, size: AppIconSize.xl, color: AppTheme.brand),
-              const SizedBox(width: AppSpacing.xl),
-              Expanded(
-                child: Text(
-                  label.l10n(context),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: AppTextSize.bodyLarge,
-                    color: c.textPrimary,
-                  ),
-                ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              if (selected)
-                AppIcon(
-                  HeroAppIcons.check,
-                  size: AppIconSize.lg,
-                  color: AppTheme.brand,
-                ),
-            ],
-          ),
-        ),
-      ),
+      showChevron: false,
+      trailing: selected
+          ? AppIcon(
+              HeroAppIcons.check,
+              size: AppIconSize.lg,
+              color: AppTheme.brand,
+            )
+          : null,
     );
   }
 
@@ -2284,113 +2002,41 @@ extension _DisplayAppearanceHelpers on AppearanceView {
     bool value,
     ValueChanged<bool>? onChanged,
   ) {
-    final c = context.colors;
     final enabled = onChanged != null;
-    return SizedBox(
-      height: AppMetric.menuRowHeight + AppSpacing.xxs,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxl),
-        child: Row(
-          children: [
-            Icon(
-              icon,
-              size: AppIconSize.xl,
-              color: enabled ? AppTheme.brand : c.textTertiary,
-            ),
-            const SizedBox(width: AppSpacing.xl),
-            Expanded(
-              child: Text(
-                label,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: AppTextSize.bodyLarge,
-                  color: enabled ? c.textPrimary : c.textTertiary,
-                ),
-              ),
-            ),
-            const SizedBox(width: AppSpacing.md),
-            AppSwitch(
-              value: value,
-              enabled: enabled,
-              onChanged: onChanged ?? (_) {},
-            ),
-          ],
-        ),
+    return SettingsSwitchRow(
+      title: label,
+      value: value,
+      leading: SettingsLeadingIcon(
+        icon: AppIconData(icon),
+        color: enabled ? AppTheme.brand : context.colors.textTertiary,
       ),
+      enabled: enabled,
+      onChanged: onChanged ?? (_) {},
     );
   }
 
   Widget _navigationRow(
-    BuildContext context,
+    BuildContext _,
     String label,
     String? value,
     VoidCallback onTap, {
     IconData? icon,
     Widget? preview,
   }) {
-    final c = context.colors;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
+    Widget? leading;
+    if (icon != null) {
+      leading = SettingsLeadingIcon(icon: AppIconData(icon));
+    } else if (preview != null) {
+      leading = ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        child: preview,
+      );
+    }
+    return SettingsRow(
+      title: label,
+      value: value ?? '',
+      leading: leading,
       onTap: onTap,
-      child: SizedBox(
-        height: AppMetric.menuRowHeight + AppSpacing.xxs,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxl),
-          child: Row(
-            children: [
-              if (icon != null) ...[
-                Icon(icon, size: AppIconSize.xl, color: AppTheme.brand),
-                const SizedBox(width: AppSpacing.xl),
-              ] else if (preview != null) ...[
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(AppRadius.sm),
-                  child: preview,
-                ),
-                const SizedBox(width: AppSpacing.xl),
-              ],
-              Expanded(
-                child: Text(
-                  label,
-                  maxLines: value == null ? 2 : 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: AppTextSize.bodyLarge,
-                    color: c.textPrimary,
-                  ),
-                ),
-              ),
-              if (value != null) ...[
-                const SizedBox(width: AppSpacing.lg),
-                ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxWidth: math.min(
-                      MediaQuery.sizeOf(context).width * 0.42,
-                      190,
-                    ),
-                  ),
-                  child: Text(
-                    value,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      fontSize: AppTextSize.body,
-                      color: c.textTertiary,
-                    ),
-                  ),
-                ),
-              ],
-              const SizedBox(width: AppSpacing.sm),
-              AppIcon(
-                HeroAppIcons.chevronRight,
-                size: AppIconSize.lg,
-                color: c.textTertiary,
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }
@@ -2400,99 +2046,62 @@ class FontSettingsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     final theme = context.watch<ThemeController>();
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.appearanceFont),
+      onBack: () => Navigator.of(context).pop(),
+      child: SettingsListView(
         children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.appearanceFont),
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.xl,
-                AppSpacing.lg,
-                AppSpacing.section,
+          SettingsCard.rows(
+            dividerInset: AppMetric.settingsTextDividerInset,
+            rows: [
+              SettingsRow(
+                title: AppStrings.t(AppStringKeys.appearanceFontSize),
+                value: '${(theme.fontScale * 100).round()}%',
+                onTap: () => Navigator.of(context).push(
+                  AppPageRoute<void>(
+                    pageBuilder: (_, _, _) => const _TextSizeSettingsView(),
+                  ),
+                ),
               ),
-              children: [
-                SettingsCard(
-                  children: [
-                    SettingsRow(
-                      title: AppStrings.t(AppStringKeys.appearanceFontSize),
-                      value: '${(theme.fontScale * 100).round()}%',
-                      height: AppMetric.compactSettingsRowHeight,
-                      onTap: () => Navigator.of(context).push(
-                        AppPageRoute<void>(
-                          pageBuilder: (_, _, _) =>
-                              const _TextSizeSettingsView(),
-                        ),
-                      ),
-                    ),
-                    const InsetDivider(leadingInset: AppSpacing.xxl),
-                    SettingsRow(
-                      title: AppStrings.t(AppStringKeys.appearanceTextFont),
-                      value: theme.effectiveFontChainLabel,
-                      height: AppMetric.compactSettingsRowHeight,
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const TextFontView()),
-                      ),
-                    ),
-                    const InsetDivider(leadingInset: AppSpacing.xxl),
-                    SettingsRow(
-                      title: AppStrings.t(
-                        AppStringKeys.appearanceMonospaceFont,
-                      ),
-                      value: theme.effectiveMonospaceFontLabel,
-                      height: AppMetric.compactSettingsRowHeight,
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const MonospaceFontPickerView(),
-                        ),
-                      ),
-                    ),
-                    const InsetDivider(leadingInset: AppSpacing.xxl),
-                    SettingsRow(
-                      title: AppStrings.t(AppStringKeys.appearanceEmojiFont),
-                      value: theme.emojiFontChoice.label,
-                      height: AppMetric.compactSettingsRowHeight,
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const EmojiFontPickerView(),
-                        ),
-                      ),
-                    ),
-                    const InsetDivider(leadingInset: AppSpacing.xxl),
-                    SettingsRow(
-                      title: AppStrings.t(AppStringKeys.appearanceFontCache),
-                      value: AppStrings.t(AppStringKeys.appearanceManage),
-                      height: AppMetric.compactSettingsRowHeight,
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const FontCacheManagementView(),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.xxl,
-                  ),
-                  child: Text(
-                    AppStrings.t(AppStringKeys.appearanceFontChainDescription),
-                    style: TextStyle(
-                      fontSize: AppTextSize.footnote,
-                      color: c.textTertiary,
-                    ),
+              SettingsRow(
+                title: AppStrings.t(AppStringKeys.appearanceTextFont),
+                value: theme.effectiveFontChainLabel,
+                onTap: () => Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const TextFontView())),
+              ),
+              SettingsRow(
+                title: AppStrings.t(AppStringKeys.appearanceMonospaceFont),
+                value: theme.effectiveMonospaceFontLabel,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const MonospaceFontPickerView(),
                   ),
                 ),
-              ],
-            ),
+              ),
+              SettingsRow(
+                title: AppStrings.t(AppStringKeys.appearanceEmojiFont),
+                value: theme.emojiFontChoice.label,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const EmojiFontPickerView(),
+                  ),
+                ),
+              ),
+              SettingsRow(
+                title: AppStrings.t(AppStringKeys.appearanceFontCache),
+                value: AppStrings.t(AppStringKeys.appearanceManage),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const FontCacheManagementView(),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          SettingsNote(
+            text: AppStrings.t(AppStringKeys.appearanceFontChainDescription),
           ),
         ],
       ),
@@ -2514,57 +2123,31 @@ class _FontCacheManagementViewState extends State<FontCacheManagementView> {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
-        children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.appearanceFontCache),
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: FutureBuilder<_FontCacheSnapshot>(
-              future: _snapshot,
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final data = snapshot.data!;
-                return ListView(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.lg,
-                    AppSpacing.xl,
-                    AppSpacing.lg,
-                    AppSpacing.section,
-                  ),
-                  children: [
-                    _summaryCard(context, data),
-                    const SizedBox(height: AppSpacing.xl),
-                    _actionCard(context, data),
-                    const SizedBox(height: AppSpacing.xl),
-                    _fontFilesCard(context, data),
-                    const SizedBox(height: AppSpacing.md),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.xxl,
-                      ),
-                      child: Text(
-                        AppStrings.t(
-                          AppStringKeys.appearanceFontCacheDescription,
-                        ),
-                        style: TextStyle(
-                          fontSize: AppTextSize.footnote,
-                          color: c.textTertiary,
-                        ),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
-        ],
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.appearanceFontCache),
+      onBack: () => Navigator.of(context).pop(),
+      child: FutureBuilder<_FontCacheSnapshot>(
+        future: _snapshot,
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Center(child: AppActivityIndicator(size: 24));
+          }
+          final data = snapshot.data!;
+          return SettingsListView(
+            children: [
+              _summaryCard(context, data),
+              const SizedBox(height: AppSpacing.xl),
+              _actionCard(context, data),
+              const SizedBox(height: AppSpacing.xl),
+              _fontFilesCard(context, data),
+              SettingsNote(
+                text: AppStrings.t(
+                  AppStringKeys.appearanceFontCacheDescription,
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -2675,11 +2258,7 @@ class _FontCacheManagementViewState extends State<FontCacheManagementView> {
   Widget _fontFilesCard(BuildContext context, _FontCacheSnapshot data) {
     final c = context.colors;
     if (data.entries.isEmpty) {
-      return Container(
-        decoration: BoxDecoration(
-          color: c.card,
-          borderRadius: BorderRadius.circular(AppRadius.card),
-        ),
+      return SettingsPanel(
         padding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.xxl,
           vertical: AppSpacing.xxl,
@@ -2696,22 +2275,14 @@ class _FontCacheManagementViewState extends State<FontCacheManagementView> {
   }
 
   Widget _cacheCard(BuildContext context, List<Widget> rows) {
-    final c = context.colors;
-    return Container(
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          for (var i = 0; i < rows.length; i++) ...[
-            rows[i],
-            if (i < rows.length - 1)
-              const InsetDivider(leadingInset: AppSpacing.xxl),
-          ],
+    return SettingsCard(
+      children: [
+        for (var i = 0; i < rows.length; i++) ...[
+          rows[i],
+          if (i < rows.length - 1)
+            const InsetDivider(leadingInset: AppSpacing.xxl),
         ],
-      ),
+      ],
     );
   }
 
@@ -3261,44 +2832,18 @@ class TextFontView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     final theme = context.watch<ThemeController>();
     final fonts = theme.fontFallbackChain;
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.appearanceTextFont),
+      onBack: () => Navigator.of(context).pop(),
+      child: SettingsListView(
         children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.appearanceTextFont),
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.xl,
-                AppSpacing.lg,
-                AppSpacing.section,
-              ),
-              children: [
-                _chainCard(context, fonts),
-                const SizedBox(height: AppSpacing.xl),
-                _actionCard(context, theme),
-                const SizedBox(height: AppSpacing.md),
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.xxl,
-                  ),
-                  child: Text(
-                    AppStrings.t(AppStringKeys.appearanceTextFontOrderHint),
-                    style: TextStyle(
-                      fontSize: AppTextSize.footnote,
-                      color: c.textTertiary,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+          _chainCard(context, fonts),
+          const SizedBox(height: AppSpacing.xl),
+          _actionCard(context, theme),
+          SettingsNote(
+            text: AppStrings.t(AppStringKeys.appearanceTextFontOrderHint),
           ),
         ],
       ),
@@ -3308,11 +2853,7 @@ class TextFontView extends StatelessWidget {
   Widget _chainCard(BuildContext context, List<String> fonts) {
     final c = context.colors;
     if (fonts.isEmpty) {
-      return Container(
-        decoration: BoxDecoration(
-          color: c.card,
-          borderRadius: BorderRadius.circular(AppRadius.card),
-        ),
+      return SettingsPanel(
         padding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.xxl,
           vertical: AppSpacing.xxl,
@@ -3323,11 +2864,7 @@ class TextFontView extends StatelessWidget {
         ),
       );
     }
-    return Container(
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
+    return SettingsPanel(
       clipBehavior: Clip.antiAlias,
       child: ReorderableListView.builder(
         shrinkWrap: true,
@@ -3436,40 +2973,33 @@ class TextFontView extends StatelessWidget {
   }
 
   Widget _actionCard(BuildContext context, ThemeController theme) {
-    return Container(
-      decoration: BoxDecoration(
-        color: context.colors.card,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
+    return SettingsCard(
+      children: [
+        _actionRow(
+          context,
+          AppStrings.t(AppStringKeys.appearanceAddTextFont),
+          HeroAppIcons.plus.data,
+          () async {
+            final family = await Navigator.of(context).push<String>(
+              MaterialPageRoute(builder: (_) => const FontAddView()),
+            );
+            if (family == null || !context.mounted) return;
+            context.read<ThemeController>().addFontToFallbackChain(family);
+          },
+        ),
+        if (theme.fontFallbackChain.isNotEmpty) ...[
+          const InsetDivider(leadingInset: AppSpacing.xxl),
           _actionRow(
             context,
-            AppStrings.t(AppStringKeys.appearanceAddTextFont),
-            HeroAppIcons.plus.data,
-            () async {
-              final family = await Navigator.of(context).push<String>(
-                MaterialPageRoute(builder: (_) => const FontAddView()),
-              );
-              if (family == null || !context.mounted) return;
-              context.read<ThemeController>().addFontToFallbackChain(family);
-            },
-          ),
-          if (theme.fontFallbackChain.isNotEmpty) ...[
-            const InsetDivider(leadingInset: AppSpacing.xxl),
-            _actionRow(
-              context,
-              AppStrings.t(AppStringKeys.appearanceClearTextFonts),
-              HeroAppIcons.xmark.data,
-              () => context.read<ThemeController>().setFontFallbackChain(
-                const <String>[],
-              ),
-              destructive: true,
+            AppStrings.t(AppStringKeys.appearanceClearTextFonts),
+            HeroAppIcons.xmark.data,
+            () => context.read<ThemeController>().setFontFallbackChain(
+              const <String>[],
             ),
-          ],
+            destructive: true,
+          ),
         ],
-      ),
+      ],
     );
   }
 
@@ -3521,7 +3051,6 @@ class EmojiFontPickerView extends StatefulWidget {
 class _EmojiFontPickerViewState extends State<EmojiFontPickerView> {
   static const _fallbackPreviewAsset = 'assets/emoji_preview/noto.svg';
   static const _previewAssets = {
-    'system': 'assets/emoji_preview/noto.svg',
     'noto': 'assets/emoji_preview/noto.svg',
     'noto-mono': 'assets/emoji_preview/noto-mono.svg',
     'blobmoji': 'assets/emoji_preview/blobmoji.svg',
@@ -3544,82 +3073,44 @@ class _EmojiFontPickerViewState extends State<EmojiFontPickerView> {
   Widget build(BuildContext context) {
     final c = context.colors;
     final theme = context.watch<ThemeController>();
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
-        children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.appearanceEmojiFont),
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: FutureBuilder<List<EmojiFontManifestEntry>>(
-              future: _fonts,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState != ConnectionState.done) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snapshot.hasError && !snapshot.hasData) {
-                  return Center(
-                    child: Text(
-                      AppStrings.t(AppStringKeys.appearanceFontLoadFailed),
-                      style: TextStyle(
-                        fontSize: AppTextSize.bodyLarge,
-                        color: c.textSecondary,
-                      ),
-                    ),
-                  );
-                }
-                final entries =
-                    snapshot.data ?? const <EmojiFontManifestEntry>[];
-                return ListView(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.lg,
-                    AppSpacing.xl,
-                    AppSpacing.lg,
-                    AppSpacing.section,
-                  ),
-                  children: [
-                    Container(
-                      decoration: BoxDecoration(
-                        color: c.card,
-                        borderRadius: BorderRadius.circular(AppRadius.card),
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      child: Column(
-                        children: [
-                          _systemRow(context, theme),
-                          if (entries.isNotEmpty)
-                            const InsetDivider(leadingInset: AppSpacing.xxl),
-                          for (var i = 0; i < entries.length; i++) ...[
-                            _entryRow(context, entries[i], theme),
-                            if (i < entries.length - 1)
-                              const InsetDivider(leadingInset: AppSpacing.xxl),
-                          ],
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.xxl,
-                      ),
-                      child: Text(
-                        AppStrings.t(
-                          AppStringKeys.appearanceEmojiFontCatalogDescription,
-                        ),
-                        style: TextStyle(
-                          fontSize: AppTextSize.footnote,
-                          color: c.textTertiary,
-                        ),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
-        ],
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.appearanceEmojiFont),
+      onBack: () => Navigator.of(context).pop(),
+      child: FutureBuilder<List<EmojiFontManifestEntry>>(
+        future: _fonts,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: AppActivityIndicator(size: 24));
+          }
+          if (snapshot.hasError && !snapshot.hasData) {
+            return Center(
+              child: Text(
+                AppStrings.t(AppStringKeys.appearanceFontLoadFailed),
+                style: TextStyle(
+                  fontSize: AppTextSize.bodyLarge,
+                  color: c.textSecondary,
+                ),
+              ),
+            );
+          }
+          final entries = snapshot.data ?? const <EmojiFontManifestEntry>[];
+          return SettingsListView(
+            children: [
+              SettingsCard.rows(
+                dividerInset: AppMetric.settingsTextDividerInset,
+                rows: [
+                  _systemRow(context, theme),
+                  for (final entry in entries) _entryRow(context, entry, theme),
+                ],
+              ),
+              SettingsNote(
+                text: AppStrings.t(
+                  AppStringKeys.appearanceEmojiFontCatalogDescription,
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -3629,7 +3120,7 @@ class _EmojiFontPickerViewState extends State<EmojiFontPickerView> {
       context,
       title: EmojiFontChoice.system.label,
       subtitle: AppStrings.t(AppStringKeys.appearanceSystemEmojiFont),
-      previewAsset: _previewAssetForKey(EmojiFontChoice.system.key),
+      preview: const _SystemEmojiPreview(),
       selected: theme.emojiFontChoice.isSystem,
       loading: false,
       failed: false,
@@ -3655,7 +3146,7 @@ class _EmojiFontPickerViewState extends State<EmojiFontPickerView> {
         entry.license,
         if (entry.emojiVersion.isNotEmpty) 'Emoji ${entry.emojiVersion}',
       ].where((part) => part.isNotEmpty).join(' · '),
-      previewAsset: _previewAssetForKey(entry.key),
+      preview: _EmojiPreviewImage(asset: _previewAssetForKey(entry.key)),
       selected: theme.emojiFontChoice.key == entry.key,
       loading: _loadingKey == entry.key,
       failed: _failedKey == entry.key,
@@ -3680,7 +3171,7 @@ class _EmojiFontPickerViewState extends State<EmojiFontPickerView> {
     BuildContext context, {
     required String title,
     required String subtitle,
-    required String previewAsset,
+    required Widget preview,
     required bool selected,
     required bool loading,
     required bool failed,
@@ -3703,7 +3194,7 @@ class _EmojiFontPickerViewState extends State<EmojiFontPickerView> {
                     context,
                   ),
                   image: true,
-                  child: _EmojiPreviewImage(asset: previewAsset),
+                  child: ExcludeSemantics(child: preview),
                 ),
               ),
               const SizedBox(width: AppSpacing.lg),
@@ -3761,6 +3252,36 @@ class _EmojiFontPickerViewState extends State<EmojiFontPickerView> {
 
   String _previewAssetForKey(String key) =>
       _previewAssets[key] ?? _fallbackPreviewAsset;
+}
+
+/// Draws the preview glyph with the platform emoji font itself, so the row
+/// shows what the system default actually looks like instead of a bundled
+/// picture of somebody else's emoji set.
+class _SystemEmojiPreview extends StatelessWidget {
+  const _SystemEmojiPreview();
+
+  static const _faceWithTearsOfJoy = '\u{1F602}';
+
+  @override
+  Widget build(BuildContext context) {
+    final families = EmojiFontChoice.platformEmojiFontFallback();
+    return SizedBox(
+      width: 26,
+      height: 26,
+      child: Center(
+        child: Text(
+          _faceWithTearsOfJoy,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 22,
+            height: 1,
+            fontFamily: families.firstOrNull,
+            fontFamilyFallback: families.skip(1).toList(),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _EmojiPreviewImage extends StatelessWidget {
@@ -3884,6 +3405,15 @@ class _FontAddViewState extends State<FontAddView> {
   String _query = '';
   String? _loadingGoogleFamily;
   String? _failedGoogleFamily;
+  Timer? _searchDebounce;
+  final TextEditingController _searchController = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _searchController.dispose();
+    super.dispose();
+  }
 
   Future<List<_FontCandidate>> _loadFonts() async {
     final systemFonts = await SystemFontCatalog.loadFonts();
@@ -3912,42 +3442,33 @@ class _FontAddViewState extends State<FontAddView> {
       if (sourceCompare != 0) return sourceCompare;
       final priorityCompare = a.priority.compareTo(b.priority);
       if (priorityCompare != 0) return priorityCompare;
-      return a.label.toLowerCase().compareTo(b.label.toLowerCase());
+      return a.lowerLabel.compareTo(b.lowerLabel);
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.appearanceAddFont),
+      onBack: () => Navigator.of(context).pop(),
+      child: Column(
         children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.appearanceAddFont),
-            onBack: () => Navigator.of(context).pop(),
-          ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              AppSpacing.lg,
-              AppSpacing.lg,
-              AppSpacing.sm,
-            ),
-            child: CupertinoSearchTextField(
-              placeholder: AppStrings.t(AppStringKeys.appearanceSearchFont),
-              itemColor: c.textTertiary,
-              prefixIcon: AppIcon(
-                HeroAppIcons.magnifyingGlass,
-                size: AppIconSize.lg,
-                color: c.textTertiary,
-              ),
-              suffixIcon: Icon(
-                HeroAppIcons.circleXmark.data,
-                size: AppIconSize.lg,
-                color: c.textTertiary,
-              ),
-              onChanged: (value) => setState(() => _query = value.trim()),
+            padding: AppInsets.screen.copyWith(bottom: AppSpacing.sm),
+            child: SettingsSearchField(
+              controller: _searchController,
+              hintText: AppStringKeys.appearanceSearchFont,
+              // Each filter pass scans the ~1900 Google families; a keystroke
+              // burst should only pay for the query the user settles on.
+              onChanged: (value) {
+                final next = value.trim();
+                _searchDebounce?.cancel();
+                if (next == _query) return;
+                _searchDebounce = Timer(
+                  const Duration(milliseconds: 150),
+                  () => setState(() => _query = next),
+                );
+              },
             ),
           ),
           Expanded(
@@ -3955,15 +3476,15 @@ class _FontAddViewState extends State<FontAddView> {
               future: _fonts,
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
+                  return const Center(child: AppActivityIndicator(size: 24));
                 }
                 final query = _query.toLowerCase();
                 final fonts = snapshot.data!
                     .where(
                       (font) =>
                           query.isEmpty ||
-                          font.label.toLowerCase().contains(query) ||
-                          font.family.toLowerCase().contains(query),
+                          font.lowerLabel.contains(query) ||
+                          font.lowerFamily.contains(query),
                     )
                     .toList();
                 return _fontList(context, fonts);
@@ -3979,18 +3500,9 @@ class _FontAddViewState extends State<FontAddView> {
     final c = context.colors;
     if (fonts.isEmpty) {
       return ListView(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.lg,
-          AppSpacing.sm,
-          AppSpacing.lg,
-          AppSpacing.section,
-        ),
+        padding: AppInsets.screen.copyWith(top: AppSpacing.sm),
         children: [
-          Container(
-            decoration: BoxDecoration(
-              color: c.card,
-              borderRadius: BorderRadius.circular(AppRadius.card),
-            ),
+          SettingsPanel(
             padding: const EdgeInsets.all(AppSpacing.xxl),
             child: Text(
               AppStrings.t(AppStringKeys.appearanceNoMatchingFonts),
@@ -4004,12 +3516,7 @@ class _FontAddViewState extends State<FontAddView> {
       );
     }
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.lg,
-        AppSpacing.sm,
-        AppSpacing.lg,
-        AppSpacing.section,
-      ),
+      padding: AppInsets.screen.copyWith(top: AppSpacing.sm),
       itemCount: fonts.length,
       itemBuilder: (context, index) => _virtualRow(
         context,
@@ -4142,7 +3649,7 @@ class _FontAddViewState extends State<FontAddView> {
 }
 
 class _FontCandidate {
-  const _FontCandidate({
+  _FontCandidate({
     required this.label,
     required this.family,
     required this.preview,
@@ -4150,10 +3657,15 @@ class _FontCandidate {
     this.google = false,
     this.downloaded = false,
     this.priority = 0,
-  });
+  }) : lowerLabel = label.toLowerCase(),
+       lowerFamily = family.toLowerCase();
 
   final String label;
   final String family;
+  // Search keys for the ~1900 candidates, folded once at construction instead
+  // of twice per candidate per keystroke.
+  final String lowerLabel;
+  final String lowerFamily;
   final String preview;
   final String source;
   final bool google;
@@ -4249,29 +3761,19 @@ class _MonospaceFontPickerViewState extends State<MonospaceFontPickerView> {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     final theme = context.watch<ThemeController>();
     final selectedKey = _selectedKey(theme);
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
-        children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.appearanceMonospaceFont),
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: FutureBuilder<List<_MonoFontCandidate>>(
-              future: _fonts,
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                return _fontList(context, snapshot.data!, selectedKey);
-              },
-            ),
-          ),
-        ],
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.appearanceMonospaceFont),
+      onBack: () => Navigator.of(context).pop(),
+      child: FutureBuilder<List<_MonoFontCandidate>>(
+        future: _fonts,
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Center(child: AppActivityIndicator(size: 24));
+          }
+          return _fontList(context, snapshot.data!, selectedKey);
+        },
       ),
     );
   }

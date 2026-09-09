@@ -10,7 +10,6 @@ import 'dart:convert';
 import 'package:dlibphonenumber/dlibphonenumber.dart';
 import 'package:flutter/foundation.dart';
 import 'package:mithka/l10n/app_localizations.dart';
-import 'package:mithka/l10n/telegram_language_controller.dart';
 import 'package:mithka/notifications/scope_notification_settings.dart';
 
 import 'json_helpers.dart';
@@ -20,6 +19,8 @@ class TdFileRef {
   TdFileRef({
     required this.id,
     this.localPath,
+    this.fileName,
+    this.mimeType,
     this.miniThumb,
     this.thumbnail,
     this.hasAnimation = false,
@@ -27,6 +28,8 @@ class TdFileRef {
   });
   final int id;
   final String? localPath;
+  final String? fileName;
+  final String? mimeType;
   final bool hasAnimation;
   final int? photoId;
   Uint8List? miniThumb; // decoded JPEG for instant placeholder
@@ -36,6 +39,8 @@ class TdFileRef {
     return TdFileRef(
       id: id,
       localPath: _usablePath(localPath) ?? _usablePath(previous?.localPath),
+      fileName: _usablePath(fileName) ?? _usablePath(previous?.fileName),
+      mimeType: _usablePath(mimeType) ?? _usablePath(previous?.mimeType),
       miniThumb: miniThumb ?? previous?.miniThumb,
       hasAnimation: hasAnimation || (previous?.hasAnimation ?? false),
       photoId: photoId ?? previous?.photoId,
@@ -62,12 +67,12 @@ enum ChatMediaCategory {
   member; // 群成员
 
   String get title => switch (this) {
-    ChatMediaCategory.media => telegramText(AppStringKeys.tdMessagePhotoVideo),
-    ChatMediaCategory.file => telegramText(AppStringKeys.topicPostContentFile),
-    ChatMediaCategory.audio => telegramText(AppStringKeys.composerAudio),
-    ChatMediaCategory.link => telegramText(AppStringKeys.sharedMediaLinks),
-    ChatMediaCategory.sticker => telegramText(AppStringKeys.tdMessageSticker),
-    ChatMediaCategory.voice => telegramText(AppStringKeys.sharedMediaVoice),
+    ChatMediaCategory.media => AppStrings.t(AppStringKeys.tdMessagePhotoVideo),
+    ChatMediaCategory.file => AppStrings.t(AppStringKeys.topicPostContentFile),
+    ChatMediaCategory.audio => AppStrings.t(AppStringKeys.composerAudio),
+    ChatMediaCategory.link => AppStrings.t(AppStringKeys.sharedMediaLinks),
+    ChatMediaCategory.sticker => AppStrings.t(AppStringKeys.tdMessageSticker),
+    ChatMediaCategory.voice => AppStrings.t(AppStringKeys.sharedMediaVoice),
     ChatMediaCategory.member => AppStrings.t(
       AppStringKeys.chatInfoGroupMembers,
     ),
@@ -85,17 +90,17 @@ enum ChatMediaCategory {
   };
 
   String get emptyText => switch (this) {
-    ChatMediaCategory.media => telegramText(
+    ChatMediaCategory.media => AppStrings.t(
       AppStringKeys.tdMessageNoPhotoVideo,
     ),
-    ChatMediaCategory.file => telegramText(AppStringKeys.tdMessageNoFiles),
-    ChatMediaCategory.audio => telegramText(AppStringKeys.tdMessageNoAudio),
-    ChatMediaCategory.link => telegramText(AppStringKeys.tdMessageNoLinks),
-    ChatMediaCategory.sticker => telegramText(
+    ChatMediaCategory.file => AppStrings.t(AppStringKeys.tdMessageNoFiles),
+    ChatMediaCategory.audio => AppStrings.t(AppStringKeys.tdMessageNoAudio),
+    ChatMediaCategory.link => AppStrings.t(AppStringKeys.tdMessageNoLinks),
+    ChatMediaCategory.sticker => AppStrings.t(
       AppStringKeys.tdMessageNoStickers,
     ),
-    ChatMediaCategory.voice => telegramText(AppStringKeys.tdMessageNoVoice),
-    ChatMediaCategory.member => telegramText(AppStringKeys.tdMessageNoMembers),
+    ChatMediaCategory.voice => AppStrings.t(AppStringKeys.tdMessageNoVoice),
+    ChatMediaCategory.member => AppStrings.t(AppStringKeys.tdMessageNoMembers),
   };
 }
 
@@ -121,6 +126,7 @@ class MessageTextEntity {
     this.userId,
     this.customEmojiId,
     this.language,
+    this.button,
     this.typeData = const {},
   });
 
@@ -131,6 +137,7 @@ class MessageTextEntity {
   final int? userId;
   final int? customEmojiId;
   final String? language;
+  final MessageButton? button;
 
   /// Full TDLib `TextEntityType` payload, including fields introduced after
   /// this client was built. Known convenience fields above remain available.
@@ -190,6 +197,7 @@ enum RichMessageBlockKind {
   divider,
   math,
   anchor,
+  buttonRow,
   list,
   blockQuote,
   pullQuote,
@@ -252,6 +260,8 @@ class RichMessageBlock {
     this.captionEntities = const [],
     this.isBordered = false,
     this.isStriped = false,
+    this.buttons = const [],
+    this.horizontalAlignment = 'left',
   });
 
   const RichMessageBlock.text({
@@ -330,6 +340,15 @@ class RichMessageBlock {
   const RichMessageBlock.math(String? expression)
     : this._(kind: RichMessageBlockKind.math, mathExpression: expression);
 
+  const RichMessageBlock.buttonRow(
+    List<MessageButton> buttons, {
+    String horizontalAlignment = 'left',
+  }) : this._(
+         kind: RichMessageBlockKind.buttonRow,
+         buttons: buttons,
+         horizontalAlignment: horizontalAlignment,
+       );
+
   const RichMessageBlock.map({
     required MessageLocation? mapLocation,
     int mapZoom = 16,
@@ -390,6 +409,8 @@ class RichMessageBlock {
   final List<MessageTextEntity> captionEntities;
   final bool isBordered;
   final bool isStriped;
+  final List<MessageButton> buttons;
+  final String horizontalAlignment;
 
   bool get isTable => kind == RichMessageBlockKind.table;
   bool get isMath => kind == RichMessageBlockKind.math;
@@ -436,6 +457,7 @@ class _RichTextBuilder {
     int? userId,
     int? customEmojiId,
     String? language,
+    MessageButton? button,
     Map<String, dynamic> typeData = const {},
   }) {
     final length = this.length - start;
@@ -449,6 +471,7 @@ class _RichTextBuilder {
         userId: userId,
         customEmojiId: customEmojiId,
         language: language,
+        button: button,
         typeData: typeData,
       ),
     );
@@ -488,7 +511,9 @@ class ChatSummary {
     required this.lastMessageId,
     required this.date,
     required this.unreadCount,
+    this.lastReadInboxMessageId = 0,
     this.unreadMentionCount = 0,
+    this.unreadReactionCount = 0,
     required this.order,
     required this.isMuted,
     this.kind = ChatKind.unknown,
@@ -506,6 +531,7 @@ class ChatSummary {
     this.peerAccentColorId = -1,
     this.peerEmojiStatusId = 0,
     this.isForum = false,
+    this.supportsBotTopics = false,
     this.lastChatMessage,
     this.isSavedMessages = false,
   });
@@ -516,7 +542,9 @@ class ChatSummary {
   int lastMessageId;
   int date;
   int unreadCount;
+  int lastReadInboxMessageId;
   int unreadMentionCount;
+  int unreadReactionCount;
   int order;
   bool isMuted;
   ChatKind kind;
@@ -534,17 +562,98 @@ class ChatSummary {
   int peerAccentColorId;
   int peerEmojiStatusId;
   bool isForum;
+  bool supportsBotTopics;
   ChatMessage? lastChatMessage;
   bool
   isSavedMessages; // true when this is the Saved Messages chat (private chat with yourself)
+
+  /// Chat folders this chat currently sits in, kept from its TDLib chat-list
+  /// positions. Lets a chat-list row draw its folder tags without asking
+  /// TDLib — or recomputing folder filters — once per row.
+  final Set<int> folderIds = {};
 
   /// Groups & channels use a rounded-square avatar unless UI preferences
   /// override them; people use a circle.
   bool get usesSquareAvatar =>
       kind == ChatKind.group || kind == ChatKind.channel;
 
+  /// Whether this chat can be browsed and addressed through forum topics.
+  ///
+  /// TDLib's `chat.view_as_topics` only classifies forum supergroups (and
+  /// Saved Messages presentation). Private bot topics are instead advertised
+  /// by `userTypeBot.has_topics`, so keep the two sources explicit.
+  bool get supportsTopics => isForum || supportsBotTopics;
+
+  bool get isBotTopicChat => supportsBotTopics && !isForum;
+
   bool get showsRedUnreadIndicator =>
       (unreadCount > 0 && !isMuted) || isMarkedUnread;
+}
+
+@immutable
+class MessageAppearancePreview {
+  const MessageAppearancePreview._({
+    required this.contentType,
+    this.chatBackground,
+    this.chatTheme,
+  });
+
+  factory MessageAppearancePreview.background(
+    Map<String, dynamic> chatBackground,
+  ) => MessageAppearancePreview._(
+    contentType: 'messageChatSetBackground',
+    chatBackground: Map<String, dynamic>.unmodifiable(chatBackground),
+  );
+
+  factory MessageAppearancePreview.theme(Map<String, dynamic>? chatTheme) =>
+      MessageAppearancePreview._(
+        contentType: 'messageChatSetTheme',
+        chatTheme: chatTheme == null
+            ? null
+            : Map<String, dynamic>.unmodifiable(chatTheme),
+      );
+
+  static MessageAppearancePreview? fromContent(Map<String, dynamic>? content) {
+    if (content?.type == 'messageChatSetBackground') {
+      final background = content?.obj('background');
+      return background == null
+          ? null
+          : MessageAppearancePreview.background(background);
+    }
+    if (content?.type == 'messageChatSetTheme') {
+      return MessageAppearancePreview.theme(content?.obj('theme'));
+    }
+    return null;
+  }
+
+  final String contentType;
+  final Map<String, dynamic>? chatBackground;
+  final Map<String, dynamic>? chatTheme;
+}
+
+/// Community identity retained by a chat-added service message.
+///
+/// The Bot API intentionally supplies only an id and name. Native TDLib
+/// sessions can enrich the same model with a cached community photo later.
+class MessageCommunityPreview {
+  MessageCommunityPreview({required this.id, required this.name, this.photo});
+
+  static MessageCommunityPreview? fromContent(Map<String, dynamic>? content) {
+    if (content?.type != 'messageChatAddedToCommunity') return null;
+    final community = content?.obj('community');
+    return MessageCommunityPreview(
+      id: content?.int64('community_id') ?? community?.int64('id') ?? 0,
+      name:
+          content?.str('community_name') ??
+          community?.str('name') ??
+          community?.str('title') ??
+          '',
+    );
+  }
+
+  final int id;
+  String name;
+  TdFileRef? photo;
 }
 
 class ChatMessage {
@@ -567,6 +676,7 @@ class ChatMessage {
     this.restrictedContentText,
     this.restrictedContentTextEntities = const [],
     this.containsUnreadMention = false,
+    this.hasUnreadReactions = false,
     this.senderId,
     this.senderPhoto,
     this.image,
@@ -584,6 +694,7 @@ class ChatMessage {
     this.videoSticker,
     this.video,
     this.videoDuration,
+    this.videoFileSize,
     this.videoNoteTranscription = '',
     this.videoNoteTranscriptionPending = false,
     this.videoNoteTranscriptionError,
@@ -604,10 +715,13 @@ class ChatMessage {
     this.canRecognizeSpeech = false,
     this.replyToMessageId,
     this.replyToDate,
+    this.replyToEntities = const [],
     this.replyToImage,
     this.replyToImageWidth,
     this.replyToImageHeight,
     this.serviceUserIds = const [],
+    this.appearancePreview,
+    this.communityPreview,
     this.customEmoji = const [],
     this.textEntities = const [],
     this.linkPreview,
@@ -626,8 +740,13 @@ class ChatMessage {
     this.hasCommentThread = false,
     this.commentCount = 0,
     this.lastCommentMessageId,
+    bool? commentThreadMetadataKnown,
     this.blockedByUser = false,
-  });
+  }) : commentThreadMetadataKnown =
+           commentThreadMetadataKnown ??
+           (hasCommentThread ||
+               commentCount > 0 ||
+               lastCommentMessageId != null);
 
   final int id;
   final bool isOutgoing;
@@ -655,6 +774,7 @@ class ChatMessage {
   String? restrictedContentText;
   List<MessageTextEntity> restrictedContentTextEntities;
   bool containsUnreadMention;
+  bool hasUnreadReactions;
   int? senderId;
   TdFileRef? senderPhoto;
   TdFileRef? image; // photo / sticker / video-thumb / gif
@@ -672,6 +792,7 @@ class ChatMessage {
   TdFileRef? videoSticker; // .webm video sticker file
   TdFileRef? video; // playable video file (messageVideo)
   int? videoDuration; // seconds, for the duration badge
+  int? videoFileSize; // bytes, for the inline autoplay budget
   String videoNoteTranscription;
   bool videoNoteTranscriptionPending;
   String? videoNoteTranscriptionError;
@@ -701,6 +822,7 @@ class ChatMessage {
   int? replyToDate; // unix timestamp of the quoted message
   String? replyToSender; // resolved sender name of the quoted message
   String? replyToPreview; // one-line preview of the quoted message
+  List<MessageTextEntity> replyToEntities;
   TdFileRef? replyToImage; // thumbnail/photo shown inside the quote block
   int? replyToImageWidth;
   int? replyToImageHeight;
@@ -708,6 +830,13 @@ class ChatMessage {
   // Service messages such as member joins may carry affected user ids, resolved
   // by the chat view model once TDLib can provide display names.
   List<int> serviceUserIds;
+
+  /// The visual payload retained only for Telegram's wallpaper/theme service
+  /// messages. Other service content remains text-only.
+  final MessageAppearancePreview? appearancePreview;
+
+  /// Rich identity for community membership service events.
+  final MessageCommunityPreview? communityPreview;
 
   // Inline custom (premium) emoji spans within `text`.
   List<CustomEmojiEntity> customEmoji;
@@ -727,9 +856,16 @@ class ChatMessage {
   int viewCount;
   int forwardCount;
   bool hasCommentThread;
-  int
-  commentCount; // channel discussion replies/comments, when TDLib exposes it
+
+  /// TDLib `reply_info.reply_count`: channel comments or ordinary group
+  /// replies, depending on the containing chat.
+  int commentCount;
   int? lastCommentMessageId;
+
+  /// Whether this instance carries an authoritative reply-info snapshot.
+  /// False means a partial/cached message omitted interaction metadata, so a
+  /// same-ID merge must not erase newer thread information already in memory.
+  bool commentThreadMetadataKnown;
 
   /// When true, this message is from a Telegram-blocked user and the
   /// "hide blocked user messages" feature is on.
@@ -738,6 +874,23 @@ class ChatMessage {
   String? forwardOrigin; // name of the original author when forwarded
   int? forwardFromUserId; // origin user, resolved lazily to forwardOrigin
   int? forwardFromChatId; // origin chat/channel, resolved lazily
+  int? forwardFromMessageId; // original channel message when TDLib exposes it
+
+  /// Whether TDLib supplied enough forwarding metadata to render an
+  /// attribution header, even while the display name is still being resolved.
+  bool get hasForwardAttribution =>
+      (forwardOrigin?.trim().isNotEmpty ?? false) ||
+      (forwardFromUserId != null && forwardFromUserId! > 0) ||
+      (forwardFromChatId != null && forwardFromChatId != 0) ||
+      (forwardFromMessageId != null && forwardFromMessageId! > 0);
+
+  /// Stable text for the header while an asynchronous user/chat lookup is in
+  /// flight or when Telegram intentionally hides the original name.
+  String get forwardDisplayName {
+    final name = forwardOrigin?.trim();
+    if (name != null && name.isNotEmpty) return name;
+    return AppStrings.t(AppStringKeys.groupManagementLogUnknownActor);
+  }
 
   /// A plain text message (messageText) — not an audio/poll/contact placeholder.
   bool get isPlainText => contentType == 'messageText';
@@ -804,6 +957,9 @@ class ChatMessage {
     }
     if ((videoDuration ?? 0) <= 0) {
       videoDuration = previous.videoDuration;
+    }
+    if ((videoFileSize ?? 0) <= 0) {
+      videoFileSize = previous.videoFileSize;
     }
     video = video?.inheritLocalPathFrom(previous.video) ?? previous.video;
     animatedSticker =
@@ -1246,6 +1402,16 @@ class CurrentUser {
 // MARK: - Parsing
 
 abstract final class TDParse {
+  static bool isBotUser(Map<String, dynamic> user) {
+    final type = user.obj('type');
+    return type?.type == 'userTypeBot' ||
+        type?.type == 'userTypeRegularBot' ||
+        user.boolean('is_bot') == true;
+  }
+
+  static bool botUserHasTopics(Map<String, dynamic> user) =>
+      isBotUser(user) && (user.obj('type')?.boolean('has_topics') ?? false);
+
   static ChatKind chatKind(Map<String, dynamic> chat) {
     final t = chat.obj('type');
     switch (t?.type) {
@@ -1308,7 +1474,9 @@ abstract final class TDParse {
       lastMessageId: lastMessageId,
       date: date,
       unreadCount: unread,
+      lastReadInboxMessageId: chat.int64('last_read_inbox_message_id') ?? 0,
       unreadMentionCount: chat.integer('unread_mention_count') ?? 0,
+      unreadReactionCount: chat.integer('unread_reaction_count') ?? 0,
       order: order,
       isMuted: muted,
       kind: chatKind(chat),
@@ -1362,7 +1530,7 @@ abstract final class TDParse {
         ? serviceText(content)
         : (content != null
               ? messageContentText(content)
-              : telegramText(AppStringKeys.chatSearchMessageResultLabel));
+              : AppStrings.t(AppStringKeys.chatSearchMessageResultLabel));
     final text = restrictionReason ?? contentText;
 
     int? senderId;
@@ -1377,9 +1545,11 @@ abstract final class TDParse {
     final media = mediaAttachment(content);
 
     // 转发: forward_info.origin identifies the original author.
-    final origin = message.obj('forward_info')?.obj('origin');
+    final forwardInfo = message.obj('forward_info');
+    final origin = forwardInfo?.obj('origin');
+    final forwardSource = forwardInfo?.obj('source');
     String? fwdName;
-    int? fwdUserId, fwdChatId;
+    int? fwdUserId, fwdChatId, fwdMessageId;
     switch (origin?.type) {
       case 'messageOriginUser':
         fwdUserId = origin?.int64('sender_user_id');
@@ -1388,10 +1558,19 @@ abstract final class TDParse {
         fwdName = origin?.str('author_signature');
       case 'messageOriginChannel':
         fwdChatId = origin?.int64('chat_id');
+        fwdMessageId = origin?.int64('message_id');
         fwdName = origin?.str('author_signature');
       case 'messageOriginHiddenUser':
         fwdName = origin?.str('sender_name');
     }
+    // A few TDLib versions put the navigable source in forward_info.source
+    // instead of repeating it in messageOriginChannel. Keep both forms so a
+    // forwarded channel post remains actionable across cached message shapes.
+    fwdChatId ??=
+        forwardSource?.int64('chat_id') ??
+        forwardSource?.int64('sender_chat_id');
+    fwdMessageId ??= forwardSource?.int64('message_id');
+    if (fwdMessageId != null && fwdMessageId <= 0) fwdMessageId = null;
 
     // 引用: reply_to is messageReplyToMessage { chat_id, message_id, … }.
     final replyTo = message.obj('reply_to');
@@ -1400,7 +1579,8 @@ abstract final class TDParse {
         : null;
 
     final parsedEntities = messageTextEntities(content);
-    final replyInfo = message.obj('interaction_info')?.obj('reply_info');
+    final interactionInfo = message.obj('interaction_info');
+    final replyInfo = interactionInfo?.obj('reply_info');
     var contentDisplayText = contentText;
     var contentDisplayEntities = parsedEntities;
     final contentRichBlocks = <RichMessageBlock>[...richMessageBlocks(content)];
@@ -1443,6 +1623,8 @@ abstract final class TDParse {
             : const [],
         containsUnreadMention:
             message.boolean('contains_unread_mention') ?? false,
+        hasUnreadReactions:
+            (message.objects('unread_reactions') ?? const []).isNotEmpty,
         senderId: senderId,
         senderIsChat: sender?.type == 'messageSenderChat',
         senderTitle:
@@ -1458,6 +1640,7 @@ abstract final class TDParse {
         videoSticker: media.videoSticker,
         video: media.video,
         videoDuration: media.videoDuration,
+        videoFileSize: media.videoFileSize,
         videoNoteTranscription: videoNoteSpeech(content).$1,
         videoNoteTranscriptionPending: videoNoteSpeech(content).$2,
         videoNoteTranscriptionError: videoNoteSpeech(content).$3,
@@ -1485,6 +1668,12 @@ abstract final class TDParse {
         serviceUserIds: isContentRestricted
             ? const []
             : serviceUserIds(content, senderId),
+        appearancePreview: isContentRestricted
+            ? null
+            : MessageAppearancePreview.fromContent(content),
+        communityPreview: isContentRestricted
+            ? null
+            : MessageCommunityPreview.fromContent(content),
         customEmoji: isContentRestricted
             ? const []
             : customEmojiEntitiesFrom(parsedEntities),
@@ -1500,9 +1689,8 @@ abstract final class TDParse {
             (content?.obj('message')?.boolean('is_full') ?? false),
         isEdited: (message.integer('edit_date') ?? 0) > 0,
         isSending: message.obj('sending_state') != null,
-        viewCount: message.obj('interaction_info')?.integer('view_count') ?? 0,
-        forwardCount:
-            message.obj('interaction_info')?.integer('forward_count') ?? 0,
+        viewCount: interactionInfo?.integer('view_count') ?? 0,
+        forwardCount: interactionInfo?.integer('forward_count') ?? 0,
         hasCommentThread: !isContentRestricted && replyInfo != null,
         commentCount: isContentRestricted
             ? 0
@@ -1512,11 +1700,13 @@ abstract final class TDParse {
         lastCommentMessageId: isContentRestricted
             ? null
             : replyInfo?.int64('last_message_id'),
+        commentThreadMetadataKnown: interactionInfo != null,
       )
       ..reactions = reactionsFrom(message)
       ..forwardOrigin = isContentRestricted ? null : fwdName
       ..forwardFromUserId = isContentRestricted ? null : fwdUserId
-      ..forwardFromChatId = isContentRestricted ? null : fwdChatId;
+      ..forwardFromChatId = isContentRestricted ? null : fwdChatId
+      ..forwardFromMessageId = isContentRestricted ? null : fwdMessageId;
   }
 
   /// Returns the server-provided reason that makes a chat or message
@@ -1697,7 +1887,11 @@ abstract final class TDParse {
     final mini = decodeMiniThumb(video.obj('minithumbnail'));
     return MediaAttachment(
       image: fileRef(video.obj('thumbnail')?.obj('file'), miniThumb: mini),
-      video: fileRef(video.obj('video')),
+      video: fileRef(
+        video.obj('video'),
+        fileName: video.str('file_name'),
+        mimeType: video.str('mime_type'),
+      ),
       videoDuration: video.integer('duration') ?? fallback?.integer('duration'),
       width: video.integer('width') ?? fallback?.integer('width'),
       height: video.integer('height') ?? fallback?.integer('height'),
@@ -1800,12 +1994,7 @@ abstract final class TDParse {
       requestId: type?.integer('id'),
       suggestedName: type?.str('suggested_name'),
       suggestedUsername: type?.str('suggested_username'),
-      style: switch (button.obj('style')?.type ?? button['style']) {
-        'buttonStylePrimary' => MessageButtonStyle.primary,
-        'buttonStyleDanger' => MessageButtonStyle.danger,
-        'buttonStyleSuccess' => MessageButtonStyle.success,
-        _ => MessageButtonStyle.standard,
-      },
+      style: _richButtonStyle(button['style']),
       iconCustomEmojiId: button.int64('icon_custom_emoji_id') ?? 0,
       isReplyKeyboard: isReplyKeyboard,
     );
@@ -1911,11 +2100,114 @@ abstract final class TDParse {
     if (parsed != null) out.add(parsed);
   }
 
+  static String? _richBlockType(Map<String, dynamic> block) {
+    final tdType = block.type;
+    if (tdType != null && tdType.isNotEmpty) return tdType;
+    final rawType = block['type'];
+    if (rawType is! String) return null;
+    return switch (rawType) {
+      'paragraph' => 'pageBlockParagraph',
+      'heading' || 'section_heading' => 'pageBlockSectionHeading',
+      'pre' || 'preformatted' => 'pageBlockPreformatted',
+      'footer' => 'pageBlockFooter',
+      'thinking' => 'pageBlockThinking',
+      'divider' => 'pageBlockDivider',
+      'anchor' => 'pageBlockAnchor',
+      'button_row' => 'pageBlockButtonRow',
+      'list' => 'pageBlockList',
+      'blockquote' || 'block_quote' => 'pageBlockBlockQuote',
+      'pullquote' || 'pull_quote' => 'pageBlockPullQuote',
+      'table' => 'pageBlockTable',
+      'mathematical_expression' => 'pageBlockMathematicalExpression',
+      'photo' => 'pageBlockPhoto',
+      'video' => 'pageBlockVideo',
+      'animation' => 'pageBlockAnimation',
+      'audio' => 'pageBlockAudio',
+      'voice_note' => 'pageBlockVoiceNote',
+      'map' => 'pageBlockMap',
+      'collage' => 'pageBlockCollage',
+      'slideshow' => 'pageBlockSlideshow',
+      'details' => 'pageBlockDetails',
+      'cover' => 'pageBlockCover',
+      _ => rawType,
+    };
+  }
+
+  static MessageButton? _richMessageButton(Map<String, dynamic> source) {
+    final nested = source.obj('button');
+    final button = nested ?? source;
+    final label = _richText(button['text']).text.trim();
+    if (label.isEmpty) return null;
+
+    final rawAction = button['type'];
+    final action = rawAction is Map<String, dynamic>
+        ? rawAction
+        : const <String, dynamic>{};
+    final webApp = button.obj('web_app') ?? action.obj('web_app');
+    final copyText = button.obj('copy_text') ?? action.obj('copy_text');
+    final actionType =
+        action.type ??
+        switch (button) {
+          {'url': final Object? url} when '$url'.isNotEmpty =>
+            'inlineKeyboardButtonTypeUrl',
+          {'web_app': final Object? webApp} when webApp != null =>
+            'inlineKeyboardButtonTypeWebApp',
+          {'callback_data': final Object? data} when data != null =>
+            'inlineKeyboardButtonTypeCallback',
+          {'copy_text': final Object? copy} when copy != null =>
+            'inlineKeyboardButtonTypeCopyText',
+          {'switch_inline_query_current_chat': final Object? query}
+              when query != null =>
+            'inlineKeyboardButtonTypeSwitchInline',
+          {'switch_inline_query': final Object? query} when query != null =>
+            'inlineKeyboardButtonTypeSwitchInline',
+          _ => '',
+        };
+    return MessageButton(
+      text: label,
+      type: actionType,
+      url: action.str('url') ?? button.str('url') ?? webApp?.str('url'),
+      data: action.str('data') ?? button.str('callback_data'),
+      userId: action.int64('user_id'),
+      copyText:
+          action.str('text') ??
+          copyText?.str('text') ??
+          button.str('copy_text'),
+      switchInlineQuery:
+          action.str('query') ??
+          button.str('switch_inline_query_current_chat') ??
+          button.str('switch_inline_query'),
+      style: _richButtonStyle(button['style']),
+      iconCustomEmojiId: button.int64('icon_custom_emoji_id') ?? 0,
+    );
+  }
+
+  static MessageButtonStyle _richButtonStyle(Object? value) {
+    final type = value is Map<String, dynamic> ? value.type : value;
+    return switch (type) {
+      'buttonStylePrimary' || 'primary' => MessageButtonStyle.primary,
+      'buttonStyleDanger' || 'danger' => MessageButtonStyle.danger,
+      'buttonStyleSuccess' || 'success' => MessageButtonStyle.success,
+      _ => MessageButtonStyle.standard,
+    };
+  }
+
+  static String _richHorizontalAlignment(Object? value) {
+    final type = value is Map<String, dynamic> ? value.type : value;
+    if (type == 'center' || '$type'.toLowerCase().contains('center')) {
+      return 'center';
+    }
+    if (type == 'right' || '$type'.toLowerCase().contains('right')) {
+      return 'right';
+    }
+    return 'left';
+  }
+
   static RichMessageBlock? _parseRichBlock(Map<String, dynamic> block) {
-    switch (block.type) {
+    switch (_richBlockType(block)) {
       case 'pageBlockParagraph':
       case 'RichBlockParagraph':
-        final text = _richBlockText(block.obj('text'));
+        final text = _richBlockText(block['text']);
         return RichMessageBlock.text(
           kind: RichMessageBlockKind.paragraph,
           text: text.text,
@@ -1923,7 +2215,7 @@ abstract final class TDParse {
         );
       case 'pageBlockSectionHeading':
       case 'RichBlockSectionHeading':
-        final text = _richBlockText(block.obj('text'));
+        final text = _richBlockText(block['text']);
         return RichMessageBlock.text(
           kind: RichMessageBlockKind.heading,
           text: text.text,
@@ -1932,7 +2224,7 @@ abstract final class TDParse {
         );
       case 'pageBlockPreformatted':
       case 'RichBlockPreformatted':
-        final text = _richBlockText(block.obj('text'));
+        final text = _richBlockText(block['text']);
         return RichMessageBlock.text(
           kind: RichMessageBlockKind.preformatted,
           text: text.text,
@@ -1941,7 +2233,7 @@ abstract final class TDParse {
         );
       case 'pageBlockFooter':
       case 'RichBlockFooter':
-        final text = _richBlockText(block.obj('footer') ?? block.obj('text'));
+        final text = _richBlockText(block['footer'] ?? block['text']);
         return RichMessageBlock.text(
           kind: RichMessageBlockKind.footer,
           text: text.text,
@@ -1949,7 +2241,7 @@ abstract final class TDParse {
         );
       case 'pageBlockThinking':
       case 'RichBlockThinking':
-        final text = _richBlockText(block.obj('text'));
+        final text = _richBlockText(block['text']);
         return RichMessageBlock.text(
           kind: RichMessageBlockKind.thinking,
           text: text.text,
@@ -1965,6 +2257,17 @@ abstract final class TDParse {
         return RichMessageBlock.container(
           kind: RichMessageBlockKind.anchor,
           name: block.str('name') ?? '',
+        );
+      case 'pageBlockButtonRow':
+      case 'RichBlockButtonRow':
+        final buttons = (block.objects('buttons') ?? const [])
+            .map(_richMessageButton)
+            .whereType<MessageButton>()
+            .toList(growable: false);
+        if (buttons.isEmpty) return null;
+        return RichMessageBlock.buttonRow(
+          buttons,
+          horizontalAlignment: _richHorizontalAlignment(block['align']),
         );
       case 'pageBlockList':
       case 'RichBlockList':
@@ -1988,7 +2291,7 @@ abstract final class TDParse {
         );
       case 'pageBlockBlockQuote':
       case 'RichBlockBlockQuotation':
-        final credit = _richBlockText(block.obj('credit'));
+        final credit = _richBlockText(block['credit']);
         return RichMessageBlock.container(
           kind: RichMessageBlockKind.blockQuote,
           children: _parseRichChildren(block.objects('blocks')),
@@ -1997,8 +2300,8 @@ abstract final class TDParse {
         );
       case 'pageBlockPullQuote':
       case 'RichBlockPullQuotation':
-        final text = _richBlockText(block.obj('text'));
-        final credit = _richBlockText(block.obj('credit'));
+        final text = _richBlockText(block['text']);
+        final credit = _richBlockText(block['credit']);
         return RichMessageBlock.container(
           kind: RichMessageBlockKind.pullQuote,
           text: text.text,
@@ -2010,7 +2313,7 @@ abstract final class TDParse {
       case 'RichBlockTable':
         final rows = _richTableRows(block['cells'] ?? block['rows']);
         if (rows.isEmpty) return null;
-        final caption = _richBlockCaption(block.obj('caption'));
+        final caption = _richBlockCaption(block['caption']);
         return RichMessageBlock.captionedTable(
           tableRows: rows,
           caption: caption.text,
@@ -2062,7 +2365,7 @@ abstract final class TDParse {
         });
       case 'pageBlockVoiceNote':
       case 'RichBlockVoiceNote':
-        final caption = _richBlockCaption(block.obj('caption'));
+        final caption = _richBlockCaption(block['caption']);
         final voice = voiceAttachment({
           '@type': 'messageVoiceNote',
           'voice_note': block['voice_note'] ?? block['voice'],
@@ -2091,7 +2394,7 @@ abstract final class TDParse {
             block.dbl('long') ??
             block.dbl('lon');
         if (latitude == null || longitude == null) return null;
-        final caption = _richBlockCaption(block.obj('caption'));
+        final caption = _richBlockCaption(block['caption']);
         return RichMessageBlock.map(
           mapLocation: MessageLocation(
             latitude: latitude,
@@ -2106,7 +2409,7 @@ abstract final class TDParse {
         );
       case 'pageBlockCollage':
       case 'RichBlockCollage':
-        final caption = _richBlockCaption(block.obj('caption'));
+        final caption = _richBlockCaption(block['caption']);
         return RichMessageBlock.container(
           kind: RichMessageBlockKind.collage,
           children: _parseRichChildren(block.objects('blocks')),
@@ -2115,7 +2418,7 @@ abstract final class TDParse {
         );
       case 'pageBlockSlideshow':
       case 'RichBlockSlideshow':
-        final caption = _richBlockCaption(block.obj('caption'));
+        final caption = _richBlockCaption(block['caption']);
         return RichMessageBlock.container(
           kind: RichMessageBlockKind.slideshow,
           children: _parseRichChildren(block.objects('blocks')),
@@ -2124,7 +2427,7 @@ abstract final class TDParse {
         );
       case 'pageBlockDetails':
       case 'RichBlockDetails':
-        final header = _richBlockText(block.obj('header'));
+        final header = _richBlockText(block['header'] ?? block['summary']);
         return RichMessageBlock.container(
           kind: RichMessageBlockKind.details,
           text: header.text,
@@ -2147,9 +2450,9 @@ abstract final class TDParse {
     return blocks.map(_parseRichBlock).whereType<RichMessageBlock>().toList();
   }
 
-  static _ParsedMarkdownText _richBlockText(Map<String, dynamic>? value) {
+  static _ParsedMarkdownText _richBlockText(Object? value) {
     if (value == null) return const _ParsedMarkdownText('', []);
-    return _ParsedMarkdownText(richTextText(value), richTextEntities(value));
+    return _richText(value);
   }
 
   static RichMessageBlock _richMediaBlock(
@@ -2158,7 +2461,7 @@ abstract final class TDParse {
     Map<String, dynamic> content,
   ) {
     final media = mediaAttachment(content);
-    final caption = _richBlockCaption(block.obj('caption'));
+    final caption = _richBlockCaption(block['caption']);
     return RichMessageBlock.media(
       kind: kind,
       image: media.image,
@@ -2173,8 +2476,9 @@ abstract final class TDParse {
     );
   }
 
-  static _ParsedMarkdownText _richBlockCaption(Map<String, dynamic>? caption) {
+  static _ParsedMarkdownText _richBlockCaption(Object? caption) {
     if (caption == null) return const _ParsedMarkdownText('', []);
+    if (caption is! Map<String, dynamic>) return _richText(caption);
     final builder = _RichTextBuilder();
     _appendRichText(builder, caption.obj('text') ?? caption);
     _appendCredit(builder, caption.obj('credit'));
@@ -2194,7 +2498,7 @@ abstract final class TDParse {
       final row = <RichMessageTableCell>[];
       for (final rawCell in rawCells) {
         if (rawCell is! Map<String, dynamic>) continue;
-        final parsed = _richText(rawCell.obj('text') ?? rawCell['content']);
+        final parsed = _richText(rawCell['text'] ?? rawCell['content']);
         row.add(
           RichMessageTableCell(
             text: parsed.text,
@@ -2313,6 +2617,7 @@ abstract final class TDParse {
           userId: entity.userId,
           customEmojiId: entity.customEmojiId,
           language: entity.language,
+          button: entity.button,
           typeData: entity.typeData,
         ),
       );
@@ -2395,7 +2700,7 @@ abstract final class TDParse {
     }
     if (value is! Map<String, dynamic>) return;
 
-    final type = value.type;
+    final type = _richTextType(value);
     final normalizedType = _normalizedRichTextType(type);
     switch (type) {
       case 'textEmpty':
@@ -2436,7 +2741,7 @@ abstract final class TDParse {
       case 'richTextIcon':
       case 'RichTextIcon':
       case 'textImage':
-        builder.write(telegramText(AppStringKeys.composerImagePreview));
+        builder.write(AppStrings.t(AppStringKeys.composerImagePreview));
         return;
       case 'richTextMathematicalExpression':
       case 'RichTextMathematicalExpression':
@@ -2448,6 +2753,15 @@ abstract final class TDParse {
         final start = builder.length;
         builder.write(expression);
         builder.entity(start, 'textEntityTypeMathematicalExpression');
+        return;
+      case 'richTextButton':
+      case 'RichTextButton':
+        final buttonSource = value.obj('button') ?? value;
+        final button = _richMessageButton(buttonSource);
+        if (button == null) return;
+        final start = builder.length;
+        builder.write('\uFFFC');
+        builder.entity(start, 'textEntityTypeButton', button: button);
         return;
     }
 
@@ -2467,6 +2781,45 @@ abstract final class TDParse {
       userId: _richTextUserId(value),
       typeData: _richTextEntityTypeData(entityType, value),
     );
+  }
+
+  static String? _richTextType(Map<String, dynamic> value) {
+    final tdType = value.type;
+    if (tdType != null && tdType.isNotEmpty) return tdType;
+    final rawType = value['type'];
+    if (rawType is! String) return null;
+    return switch (rawType) {
+      'empty' => 'textEmpty',
+      'plain' => 'richTextPlain',
+      'concat' => 'richTexts',
+      'bold' => 'richTextBold',
+      'italic' => 'richTextItalic',
+      'underline' => 'richTextUnderline',
+      'strikethrough' => 'richTextStrikethrough',
+      'spoiler' => 'richTextSpoiler',
+      'date_time' => 'richTextDateTime',
+      'text_mention' => 'richTextMentionName',
+      'code' => 'richTextFixed',
+      'url' => 'richTextUrl',
+      'email_address' => 'richTextEmailAddress',
+      'phone_number' => 'richTextPhoneNumber',
+      'bank_card_number' => 'richTextBankCardNumber',
+      'mention' => 'richTextMention',
+      'hashtag' => 'richTextHashtag',
+      'cashtag' => 'richTextCashtag',
+      'bot_command' => 'richTextBotCommand',
+      'marked' => 'richTextMarked',
+      'subscript' => 'richTextSubscript',
+      'superscript' => 'richTextSuperscript',
+      'anchor' => 'richTextAnchor',
+      'anchor_link' => 'richTextAnchorLink',
+      'reference' => 'richTextReference',
+      'reference_link' => 'richTextReferenceLink',
+      'custom_emoji' => 'richTextCustomEmoji',
+      'mathematical_expression' => 'richTextMathematicalExpression',
+      'button' => 'richTextButton',
+      _ => rawType,
+    };
   }
 
   static Map<String, dynamic> _richTextEntityTypeData(
@@ -2643,6 +2996,7 @@ abstract final class TDParse {
             userId: entity.userId,
             customEmojiId: entity.customEmojiId,
             language: entity.language,
+            button: entity.button,
             typeData: entity.typeData,
           ),
         )
@@ -2656,7 +3010,7 @@ abstract final class TDParse {
     Map<String, dynamic> block,
   ) {
     final start = builder.length;
-    switch (block.type) {
+    switch (_richBlockType(block)) {
       case 'pageBlockTitle':
         _appendRichText(builder, block.obj('title'));
       case 'pageBlockSubtitle':
@@ -2670,13 +3024,13 @@ abstract final class TDParse {
       case 'pageBlockSectionHeading':
       case 'pageBlockParagraph':
       case 'pageBlockThinking':
-        _appendRichText(builder, block.obj('text'));
+        _appendRichText(builder, block['text']);
       case 'pageBlockKicker':
         _appendRichText(builder, block.obj('kicker'));
       case 'pageBlockFooter':
-        _appendRichText(builder, block.obj('footer'));
+        _appendRichText(builder, block['footer']);
       case 'pageBlockPreformatted':
-        _appendRichText(builder, block.obj('text'));
+        _appendRichText(builder, block['text']);
         builder.entity(
           start,
           'textEntityTypePreCode',
@@ -2691,7 +3045,7 @@ abstract final class TDParse {
         _appendCredit(builder, block.obj('credit'));
         builder.entity(start, 'textEntityTypeBlockQuote');
       case 'pageBlockPullQuote':
-        _appendRichText(builder, block.obj('text'));
+        _appendRichText(builder, block['text']);
         _appendCredit(builder, block.obj('credit'));
         builder.entity(start, 'textEntityTypeBlockQuote');
       case 'pageBlockAnimation':
@@ -2715,9 +3069,10 @@ abstract final class TDParse {
         _appendPageBlocks(builder, block.objects('blocks'));
         _appendCaption(builder, block.obj('caption'));
       case 'pageBlockTable':
+      case 'pageBlockButtonRow':
         return;
       case 'pageBlockDetails':
-        _appendRichText(builder, block.obj('header'));
+        _appendRichText(builder, block['header'] ?? block['summary']);
         builder.lineBreak();
         _appendPageBlocks(builder, block.objects('blocks'));
       case 'pageBlockRelatedArticles':
@@ -3021,7 +3376,7 @@ abstract final class TDParse {
         final photo = photoAttachment(game.obj('photo'));
         return MessageSummaryCard(
           kind: MessageSummaryKind.game,
-          title: game.str('title') ?? telegramText(AppStringKeys.tdMessageGame),
+          title: game.str('title') ?? AppStrings.t(AppStringKeys.tdMessageGame),
           subtitle:
               game.str('description') ?? game.obj('text')?.str('text') ?? '',
           detail: game.str('short_name') ?? '',
@@ -3036,7 +3391,7 @@ abstract final class TDParse {
           kind: MessageSummaryKind.invoice,
           title:
               product?.str('title') ??
-              telegramText(AppStringKeys.tdMessageProduct),
+              AppStrings.t(AppStringKeys.tdMessageProduct),
           subtitle: product?.obj('description')?.str('text') ?? '',
           detail: currency.isEmpty ? '' : '$currency $amount',
           image: photoAttachment(product?.obj('photo')).image,
@@ -3053,7 +3408,7 @@ abstract final class TDParse {
         };
         return MessageSummaryCard(
           kind: MessageSummaryKind.giveaway,
-          title: telegramText(AppStringKeys.tdMessageGiveaway),
+          title: AppStrings.t(AppStringKeys.tdMessageGiveaway),
           subtitle: prizeLabel,
           detail: '${content.integer('winner_count') ?? 0} winners',
           image: _stickerMedia(content.obj('sticker')).image,
@@ -3061,7 +3416,7 @@ abstract final class TDParse {
       case 'messageGiveawayWinners':
         return MessageSummaryCard(
           kind: MessageSummaryKind.giveaway,
-          title: telegramText(AppStringKeys.tdMessageGiveaway),
+          title: AppStrings.t(AppStringKeys.tdMessageGiveaway),
           subtitle: content.str('prize_description') ?? '',
           detail: '${content.integer('winner_count') ?? 0} winners',
         );
@@ -3069,7 +3424,7 @@ abstract final class TDParse {
       case 'messageGiveawayCreated':
         return MessageSummaryCard(
           kind: MessageSummaryKind.giveaway,
-          title: telegramText(AppStringKeys.tdMessageGiveaway),
+          title: AppStrings.t(AppStringKeys.tdMessageGiveaway),
           detail: content.type == 'messageGiveawayCreated'
               ? '${content.int64('star_count') ?? 0} Telegram Stars'
               : '${content.integer('winner_count') ?? 0} winners',
@@ -3086,7 +3441,7 @@ abstract final class TDParse {
         }
         return MessageSummaryCard(
           kind: MessageSummaryKind.paidMedia,
-          title: telegramText(AppStringKeys.tdMessagePaidContent),
+          title: AppStrings.t(AppStringKeys.tdMessagePaidContent),
           subtitle: content.obj('caption')?.str('text') ?? '',
           detail:
               '${content.int64('star_count') ?? 0} Stars · $mediaCount media',
@@ -3097,7 +3452,7 @@ abstract final class TDParse {
         final gift = content.obj('gift');
         return MessageSummaryCard(
           kind: MessageSummaryKind.gift,
-          title: telegramText(AppStringKeys.tdMessageGift),
+          title: AppStrings.t(AppStringKeys.tdMessageGift),
           subtitle: content.obj('text')?.str('text') ?? '',
           detail: '${gift?.int64('star_count') ?? 0} Telegram Stars',
           image: _stickerMedia(gift?.obj('sticker')).image,
@@ -3106,7 +3461,7 @@ abstract final class TDParse {
       case 'messagePremiumGiftCode':
         return MessageSummaryCard(
           kind: MessageSummaryKind.gift,
-          title: telegramText(AppStringKeys.tdMessageGift),
+          title: AppStrings.t(AppStringKeys.tdMessageGift),
           subtitle: content.obj('text')?.str('text') ?? '',
           detail: '${content.integer('month_count') ?? 0} months Premium',
           image: _stickerMedia(content.obj('sticker')).image,
@@ -3115,14 +3470,14 @@ abstract final class TDParse {
       case 'messageGiveawayPrizeStars':
         return MessageSummaryCard(
           kind: MessageSummaryKind.gift,
-          title: telegramText(AppStringKeys.tdMessageGift),
+          title: AppStrings.t(AppStringKeys.tdMessageGift),
           detail: '${content.int64('star_count') ?? 0} Telegram Stars',
           image: _stickerMedia(content.obj('sticker')).image,
         );
       case 'messageGiftedTon':
         return MessageSummaryCard(
           kind: MessageSummaryKind.gift,
-          title: telegramText(AppStringKeys.tdMessageGift),
+          title: AppStrings.t(AppStringKeys.tdMessageGift),
           detail: '${content.int64('gram_amount') ?? 0} nanoton',
           image: _stickerMedia(content.obj('sticker')).image,
         );
@@ -3134,7 +3489,7 @@ abstract final class TDParse {
         return MessageSummaryCard(
           kind: MessageSummaryKind.gift,
           title:
-              gift?.str('title') ?? telegramText(AppStringKeys.tdMessageGift),
+              gift?.str('title') ?? AppStrings.t(AppStringKeys.tdMessageGift),
           subtitle: gift?.str('name') ?? '',
           detail: gift?.integer('number') == null
               ? ''
@@ -3180,7 +3535,7 @@ abstract final class TDParse {
         };
         return MessageSummaryCard(
           kind: MessageSummaryKind.suggestedPost,
-          title: telegramText(AppStringKeys.tdMessageSubmission),
+          title: AppStrings.t(AppStringKeys.tdMessageSubmission),
           subtitle: eventLabel,
           detail: detail,
         );
@@ -3287,11 +3642,17 @@ abstract final class TDParse {
           final thumb =
               fileRef(anim.obj('thumbnail')?.obj('file'), miniThumb: mini) ??
               fileRef(anim.obj('animation'), miniThumb: mini);
-          final animation = fileRef(anim.obj('animation'), miniThumb: mini);
+          final animation = fileRef(
+            anim.obj('animation'),
+            fileName: anim.str('file_name'),
+            mimeType: anim.str('mime_type'),
+            miniThumb: mini,
+          );
           return MediaAttachment(
             image: thumb,
             video: animation,
             videoDuration: anim.integer('duration'),
+            videoFileSize: _fileSize(anim.obj('animation')),
             width: anim.integer('width'),
             height: anim.integer('height'),
           );
@@ -3305,8 +3666,13 @@ abstract final class TDParse {
               video.obj('thumbnail')?.obj('file'),
               miniThumb: mini,
             ),
-            video: fileRef(video.obj('video')),
+            video: fileRef(
+              video.obj('video'),
+              fileName: video.str('file_name'),
+              mimeType: video.str('mime_type'),
+            ),
             videoDuration: video.integer('duration'),
+            videoFileSize: _fileSize(video.obj('video')),
             width: video.integer('width'),
             height: video.integer('height'),
           );
@@ -3320,6 +3686,7 @@ abstract final class TDParse {
             image: fileRef(note.obj('thumbnail')?.obj('file'), miniThumb: mini),
             video: fileRef(note.obj('video')),
             videoDuration: note.integer('duration'),
+            videoFileSize: _fileSize(note.obj('video')),
             width: length,
             height: length,
           );
@@ -3353,7 +3720,7 @@ abstract final class TDParse {
           final f = doc.obj('document');
           final name =
               doc.str('file_name') ??
-              telegramText(AppStringKeys.topicPostContentFile);
+              AppStrings.t(AppStringKeys.topicPostContentFile);
           final dot = name.lastIndexOf('.');
           final ext = dot >= 0 ? name.substring(dot + 1).toUpperCase() : '';
           return MediaAttachment(
@@ -3376,85 +3743,85 @@ abstract final class TDParse {
         return content.obj('text')?.str('text') ?? '';
       case 'messageRichMessage':
         return _richMessageText(content.obj('message'))?.text ??
-            telegramText(AppStringKeys.chatSearchMessageResultLabel);
+            AppStrings.t(AppStringKeys.chatSearchMessageResultLabel);
       case 'messagePhoto':
         final caption = content.obj('caption')?.str('text') ?? '';
         return caption.isEmpty
-            ? telegramText(AppStringKeys.composerImagePreview)
+            ? AppStrings.t(AppStringKeys.composerImagePreview)
             : caption;
       case 'messageVideo':
         final caption = content.obj('caption')?.str('text') ?? '';
         return caption.isEmpty
-            ? telegramText(AppStringKeys.chatVideoPlaceholder)
+            ? AppStrings.t(AppStringKeys.chatVideoPlaceholder)
             : caption;
       case 'messageVideoNote':
-        return telegramText(AppStringKeys.tdMessageVideoMessage);
+        return AppStrings.t(AppStringKeys.tdMessageVideoMessage);
       case 'messageVoiceNote':
-        return telegramText(AppStringKeys.composerVoicePreview);
+        return AppStrings.t(AppStringKeys.composerVoicePreview);
       case 'messageAudio':
         final caption = content.obj('caption')?.str('text') ?? '';
         return caption.isEmpty
-            ? telegramText(AppStringKeys.tdMessageMusic)
+            ? AppStrings.t(AppStringKeys.tdMessageMusic)
             : caption;
       case 'messageDocument':
         final caption = content.obj('caption')?.str('text') ?? '';
         if (caption.isNotEmpty) return caption;
         final name = content.obj('document')?.str('file_name');
         return name != null
-            ? telegramText(AppStringKeys.tdMessageFileWithName, {
+            ? AppStrings.t(AppStringKeys.tdMessageFileWithName, {
                 'value1': name,
               })
-            : telegramText(AppStringKeys.channelsFileAttachment);
+            : AppStrings.t(AppStringKeys.channelsFileAttachment);
       case 'messageSticker':
         final emoji = content.obj('sticker')?.str('emoji') ?? '';
         return emoji.isEmpty
-            ? telegramText(AppStringKeys.tdMessageStickerPreview)
-            : telegramText(AppStringKeys.tdMessageStickerWithEmoji, {
+            ? AppStrings.t(AppStringKeys.tdMessageStickerPreview)
+            : AppStrings.t(AppStringKeys.tdMessageStickerWithEmoji, {
                 'value1': emoji,
               });
       case 'messageAnimation':
         final caption = content.obj('caption')?.str('text') ?? '';
         return caption.isEmpty
-            ? telegramText(AppStringKeys.tdMessageGif)
+            ? AppStrings.t(AppStringKeys.tdMessageGif)
             : caption;
       case 'messageAnimatedEmoji':
         return content.obj('animated_emoji')?.str('emoji') ??
-            telegramText(AppStringKeys.composerAnimatedEmojiPreview);
+            AppStrings.t(AppStringKeys.composerAnimatedEmojiPreview);
       case 'messageLocation':
-        return telegramText(AppStringKeys.composerLocationPreview);
+        return AppStrings.t(AppStringKeys.composerLocationPreview);
       case 'messageVenue':
-        return telegramText(AppStringKeys.composerLocationPreview);
+        return AppStrings.t(AppStringKeys.composerLocationPreview);
       case 'messageContact':
-        return telegramText(AppStringKeys.tdMessageContactCard);
+        return AppStrings.t(AppStringKeys.tdMessageContactCard);
       case 'messagePoll':
-        return telegramText(AppStringKeys.tdMessagePoll);
+        return AppStrings.t(AppStringKeys.tdMessagePoll);
       case 'messageChecklist':
         final title = content.obj('list')?.obj('title')?.str('text') ?? '';
         return title.isEmpty
-            ? telegramText(AppStringKeys.tdMessageChecklist)
+            ? AppStrings.t(AppStringKeys.tdMessageChecklist)
             : title;
       case 'messageCall':
         return (content.boolean('is_video') ?? false)
-            ? telegramText(AppStringKeys.tdMessageVideoCall)
-            : telegramText(AppStringKeys.tdMessageVoiceCall);
+            ? AppStrings.t(AppStringKeys.tdMessageVideoCall)
+            : AppStrings.t(AppStringKeys.tdMessageVoiceCall);
       case 'messageDice':
         return content.str('emoji') ??
-            telegramText(AppStringKeys.tdMessageDice);
+            AppStrings.t(AppStringKeys.tdMessageDice);
       case 'messageGame':
-        return telegramText(AppStringKeys.tdMessageGame);
+        return AppStrings.t(AppStringKeys.tdMessageGame);
       case 'messageInvoice':
-        return telegramText(AppStringKeys.tdMessageProduct);
+        return AppStrings.t(AppStringKeys.tdMessageProduct);
       case 'messageStory':
-        return telegramText(AppStringKeys.tdMessageForwardedStory);
+        return AppStrings.t(AppStringKeys.tdMessageForwardedStory);
       case 'messageGiveaway':
       case 'messageGiveawayWinners':
       case 'messageGiveawayCompleted':
-        return telegramText(AppStringKeys.tdMessageGiveaway);
+        return AppStrings.t(AppStringKeys.tdMessageGiveaway);
       case 'messagePaidMedia':
-        return telegramText(AppStringKeys.tdMessagePaidContent);
+        return AppStrings.t(AppStringKeys.tdMessagePaidContent);
       case 'messagePaidMessagePriceChanged':
       case 'messageDirectMessagePriceChanged':
-        return telegramText(AppStringKeys.tdMessagePaidMessageSettingsChanged);
+        return AppStrings.t(AppStringKeys.tdMessagePaidMessageSettingsChanged);
       case 'messageGift':
       case 'messagePremiumGiftCode':
       case 'messageGiftedPremium':
@@ -3462,27 +3829,27 @@ abstract final class TDParse {
       case 'messageGiftedTon':
       case 'messageUpgradedGift':
       case 'messageRefundedUpgradedGift':
-        return telegramText(AppStringKeys.tdMessageGift);
+        return AppStrings.t(AppStringKeys.tdMessageGift);
       case 'messageSuggestedPostInfo':
       case 'messageSuggestedPostApproved':
       case 'messageSuggestedPostApprovalFailed':
       case 'messageSuggestedPostDeclined':
       case 'messageSuggestedPostPaid':
       case 'messageSuggestedPostRefunded':
-        return telegramText(AppStringKeys.tdMessageSubmission);
+        return AppStrings.t(AppStringKeys.tdMessageSubmission);
       case 'messageExpiredPhoto':
-        return telegramText(AppStringKeys.tdMessageExpiredPhoto);
+        return AppStrings.t(AppStringKeys.tdMessageExpiredPhoto);
       case 'messageExpiredVideo':
-        return telegramText(AppStringKeys.tdMessageExpiredVideo);
+        return AppStrings.t(AppStringKeys.tdMessageExpiredVideo);
       case 'messageUnsupported':
-        return telegramText(AppStringKeys.tdMessageUnsupportedCurrentVersion);
+        return AppStrings.t(AppStringKeys.tdMessageUnsupportedCurrentVersion);
       default:
         final fallback = _nestedFormattedText(content);
         if (fallback.isNotEmpty) return fallback;
         if (kDebugMode) {
           debugPrint('Unsupported TDLib message content: ${content.type}');
         }
-        return telegramText(AppStringKeys.chatSearchMessageResultLabel);
+        return AppStrings.t(AppStringKeys.chatSearchMessageResultLabel);
     }
   }
 
@@ -3502,7 +3869,7 @@ abstract final class TDParse {
     final text = messageText(content);
     if (content.type == 'messageRichMessage' &&
         richMessageBlocks(content).isNotEmpty &&
-        text == telegramText(AppStringKeys.chatSearchMessageResultLabel)) {
+        text == AppStrings.t(AppStringKeys.chatSearchMessageResultLabel)) {
       return '';
     }
     return text;
@@ -3589,6 +3956,8 @@ abstract final class TDParse {
     'messageVideoChatStarted',
     'messageVideoChatEnded',
     'messageForumTopicCreated',
+    'messageForumTopicEdited',
+    'messageForumTopicIsClosedToggled',
     'messageChatBoost',
     'messageChatAddedToCommunity',
     'messageChatRemovedFromCommunity',
@@ -3600,28 +3969,28 @@ abstract final class TDParse {
   static String serviceText(Map<String, dynamic>? content) {
     switch (content?.type) {
       case 'messageContactRegistered':
-        return telegramText(AppStringKeys.tdMessageUserJoinedTelegram);
+        return AppStrings.t(AppStringKeys.tdMessageUserJoinedTelegram);
       case 'messageChatChangeTitle':
-        return telegramText(AppStringKeys.tdMessageGroupNameChanged, {
+        return AppStrings.t(AppStringKeys.tdMessageGroupNameChanged, {
           'value1': content?.str('title') ?? '',
         });
       case 'messageChatChangePhoto':
-        return telegramText(AppStringKeys.tdMessageGroupPhotoUpdated);
+        return AppStrings.t(AppStringKeys.tdMessageGroupPhotoUpdated);
       case 'messageChatDeletePhoto':
-        return telegramText(AppStringKeys.tdMessageGroupPhotoDeleted);
+        return AppStrings.t(AppStringKeys.tdMessageGroupPhotoDeleted);
       case 'messageChatAddMembers':
-        return telegramText(AppStringKeys.tdMessageNewMemberJoinedGroup);
+        return AppStrings.t(AppStringKeys.tdMessageNewMemberJoinedGroup);
       case 'messageChatJoinByLink':
-        return telegramText(AppStringKeys.tdMessageJoinedGroupByLink);
+        return AppStrings.t(AppStringKeys.tdMessageJoinedGroupByLink);
       case 'messageChatJoinByRequest':
         return AppStrings.t(AppStringKeys.groupManagementLogJoinedGroup);
       case 'messageChatDeleteMember':
-        return telegramText(AppStringKeys.tdMessageMemberLeftGroup);
+        return AppStrings.t(AppStringKeys.tdMessageMemberLeftGroup);
       case 'messagePinMessage':
-        return telegramText(AppStringKeys.tdMessageMessagePinned);
+        return AppStrings.t(AppStringKeys.tdMessageMessagePinned);
       case 'messageCustomServiceAction':
         return _cleanString(content?.str('text')) ??
-            telegramText(AppStringKeys.tdMessageSystemMessage);
+            AppStrings.t(AppStringKeys.tdMessageSystemMessage);
       case 'messagePaidMessagePriceChanged':
       case 'messageDirectMessagePriceChanged':
         final stars =
@@ -3630,10 +3999,10 @@ abstract final class TDParse {
             content?.integer('price') ??
             0;
         return stars > 0
-            ? telegramText(AppStringKeys.tdMessagePaidMessagePriceChanged, {
+            ? AppStrings.t(AppStringKeys.tdMessagePaidMessagePriceChanged, {
                 'value1': stars,
               })
-            : telegramText(AppStringKeys.tdMessagePaidMessagesDisabled);
+            : AppStrings.t(AppStringKeys.tdMessagePaidMessagesDisabled);
       case 'messageChatSetMessageAutoDeleteTime':
         final seconds =
             content?.obj('message_auto_delete_time')?.integer('time') ??
@@ -3642,21 +4011,27 @@ abstract final class TDParse {
             content?.integer('auto_delete_time') ??
             0;
         return seconds > 0
-            ? telegramText(AppStringKeys.tdMessageAutoDeleteTimerChanged, {
+            ? AppStrings.t(AppStringKeys.tdMessageAutoDeleteTimerChanged, {
                 'value1': formatDuration(seconds),
               })
-            : telegramText(AppStringKeys.tdMessageAutoDeleteTimerDisabled);
+            : AppStrings.t(AppStringKeys.tdMessageAutoDeleteTimerDisabled);
       case 'messageBasicGroupChatCreate':
       case 'messageSupergroupChatCreate':
-        return telegramText(AppStringKeys.tdMessageGroupCreated);
+        return AppStrings.t(AppStringKeys.tdMessageGroupCreated);
       case 'messageVideoChatStarted':
-        return telegramText(AppStringKeys.tdMessageGroupVideoChatStarted);
+        return AppStrings.t(AppStringKeys.tdMessageGroupVideoChatStarted);
       case 'messageVideoChatEnded':
-        return telegramText(AppStringKeys.tdMessageGroupVideoChatEnded);
+        return AppStrings.t(AppStringKeys.tdMessageGroupVideoChatEnded);
       case 'messageForumTopicCreated':
         return AppStrings.t(AppStringKeys.groupManagementLogCreatedTopic);
+      case 'messageForumTopicEdited':
+        return AppStrings.t(AppStringKeys.groupManagementLogEditedTopic);
+      case 'messageForumTopicIsClosedToggled':
+        return content?.boolean('is_closed') == true
+            ? AppStrings.t(AppStringKeys.groupManagementLogClosedTopic)
+            : AppStrings.t(AppStringKeys.groupManagementLogReopenedTopic);
       case 'messageChatBoost':
-        return telegramText(AppStringKeys.tdMessageBoostedGroup);
+        return AppStrings.t(AppStringKeys.tdMessageBoostedGroup);
       case 'messageChatAddedToCommunity':
         return AppStrings.t(AppStringKeys.communityChatAddedService);
       case 'messageChatRemovedFromCommunity':
@@ -3666,7 +4041,7 @@ abstract final class TDParse {
       case 'messageChatSetTheme':
         return AppStrings.t(AppStringKeys.chatThemeChanged);
       default:
-        return telegramText(AppStringKeys.tdMessageSystemMessage);
+        return AppStrings.t(AppStringKeys.tdMessageSystemMessage);
     }
   }
 
@@ -3682,6 +4057,8 @@ abstract final class TDParse {
       case 'messageChatJoinByLink':
       case 'messageChatJoinByRequest':
       case 'messageChatBoost':
+      case 'messageChatAddedToCommunity':
+      case 'messageChatRemovedFromCommunity':
         return senderId != null && senderId > 0 ? [senderId] : const <int>[];
       case 'messageChatDeleteMember':
         final userId = content?.int64('user_id');
@@ -3699,21 +4076,21 @@ abstract final class TDParse {
       final days = seconds ~/ 86400;
       return days == 1
           ? AppStrings.t(AppStringKeys.chatInfoAutoDeleteOneDay)
-          : telegramText(AppStringKeys.tdMessageDaysDuration, {'value1': days});
+          : AppStrings.t(AppStringKeys.tdMessageDaysDuration, {'value1': days});
     }
     if (seconds % 3600 == 0) {
       final hours = seconds ~/ 3600;
-      return telegramText(AppStringKeys.tdMessageHoursDuration, {
+      return AppStrings.t(AppStringKeys.tdMessageHoursDuration, {
         'value1': hours,
       });
     }
     if (seconds % 60 == 0) {
       final minutes = seconds ~/ 60;
-      return telegramText(AppStringKeys.tdMessageMinutesDuration, {
+      return AppStrings.t(AppStringKeys.tdMessageMinutesDuration, {
         'value1': minutes,
       });
     }
-    return telegramText(AppStringKeys.tdMessageSecondsDuration, {
+    return AppStrings.t(AppStringKeys.tdMessageSecondsDuration, {
       'value1': seconds,
     });
   }
@@ -3740,18 +4117,40 @@ abstract final class TDParse {
 
   static TdFileRef? fileRef(
     Map<String, dynamic>? file, {
+    String? fileName,
+    String? mimeType,
     Uint8List? miniThumb,
     TdFileRef? thumbnail,
   }) {
     final id = file?.integer('id');
     if (file == null || id == null) return null;
     final normalizedThumbnail = thumbnail?.id == id ? null : thumbnail;
+    final local = file.obj('local');
+    // TDLib exposes `local.path` as soon as any prefix/range exists. That path
+    // is not a decodable whole file until the completion bit is set; treating
+    // it as an outgoing/local source bypasses TdFileCenter's download waiter
+    // and can leave message media displaying a permanently partial image.
+    final completedLocalPath =
+        local?.boolean('is_downloading_completed') == true
+        ? local?.str('path')
+        : null;
     return TdFileRef(
       id: id,
-      localPath: file.obj('local')?.str('path'),
+      localPath: completedLocalPath,
+      fileName: fileName,
+      mimeType: mimeType,
       miniThumb: miniThumb,
       thumbnail: normalizedThumbnail,
     );
+  }
+
+  /// The byte size TDLib knows for a file: `size` once the real value is known,
+  /// otherwise the server's estimate.
+  static int? _fileSize(Map<String, dynamic>? file) {
+    final size = file?.integer('size') ?? 0;
+    if (size > 0) return size;
+    final expected = file?.integer('expected_size') ?? 0;
+    return expected > 0 ? expected : null;
   }
 
   static Map<String, dynamic> bestPhotoSize(List<Map<String, dynamic>> sizes) {
@@ -3791,11 +4190,24 @@ abstract final class TDParse {
     return width * height;
   }
 
+  /// MemoryImage's cache key is the byte list's identity, so a fresh decode per
+  /// parse re-decodes the same thumbnail and burns an ImageCache slot that then
+  /// evicts a genuinely expensive photo. Same base64 in, same instance out.
+  static final Map<String, Uint8List> _miniThumbs = {};
+  static const _maxMiniThumbs = 128;
+
   static Uint8List? decodeMiniThumb(Map<String, dynamic>? mini) {
     final b64 = mini?.str('data');
     if (b64 == null) return null;
+    final interned = _miniThumbs[b64];
+    if (interned != null) return interned;
     try {
-      return base64Decode(b64);
+      final bytes = base64Decode(b64);
+      if (_miniThumbs.length >= _maxMiniThumbs) {
+        _miniThumbs.remove(_miniThumbs.keys.first);
+      }
+      _miniThumbs[b64] = bytes;
+      return bytes;
     } catch (_) {
       return null;
     }
@@ -3873,15 +4285,15 @@ abstract final class TDParse {
   static String userStatus(Map<String, dynamic> user) {
     switch (user.obj('status')?.type) {
       case 'userStatusOnline':
-        return telegramPresenceText(TelegramPresenceLabel.online);
+        return AppStrings.t(AppStringKeys.presenceOnline);
       case 'userStatusRecently':
-        return telegramPresenceText(TelegramPresenceLabel.recently);
+        return AppStrings.t(AppStringKeys.presenceLastSeenRecently);
       case 'userStatusOffline':
         return _lastOnlineText(user.obj('status')?.integer('was_online') ?? 0);
       case 'userStatusLastWeek':
-        return telegramPresenceText(TelegramPresenceLabel.withinWeek);
+        return AppStrings.t(AppStringKeys.presenceLastSeenWithinWeek);
       case 'userStatusLastMonth':
-        return telegramPresenceText(TelegramPresenceLabel.withinMonth);
+        return AppStrings.t(AppStringKeys.presenceLastSeenWithinMonth);
       default:
         return '';
     }
@@ -3892,7 +4304,7 @@ abstract final class TDParse {
 
   static String _lastOnlineText(int unixSeconds) {
     if (unixSeconds <= 0) {
-      return telegramText(AppStringKeys.tdMessageLastSeenUnknown);
+      return AppStrings.t(AppStringKeys.tdMessageLastSeenUnknown);
     }
     final time = DateTime.fromMillisecondsSinceEpoch(
       unixSeconds * 1000,
@@ -3903,24 +4315,24 @@ abstract final class TDParse {
     final hh = time.hour.toString().padLeft(2, '0');
     final mm = time.minute.toString().padLeft(2, '0');
     if (day == today) {
-      return telegramText(AppStringKeys.tdMessageLastSeenTodayTime, {
+      return AppStrings.t(AppStringKeys.tdMessageLastSeenTodayTime, {
         'value1': hh,
         'value2': mm,
       });
     }
     if (day == today.subtract(const Duration(days: 1))) {
-      return telegramText(AppStringKeys.tdMessageLastSeenYesterdayTime, {
+      return AppStrings.t(AppStringKeys.tdMessageLastSeenYesterdayTime, {
         'value1': hh,
         'value2': mm,
       });
     }
     if (time.year == now.year) {
-      return telegramText(AppStringKeys.tdMessageLastSeenMonthDay, {
+      return AppStrings.t(AppStringKeys.tdMessageLastSeenMonthDay, {
         'value1': time.month,
         'value2': time.day,
       });
     }
-    return telegramText(AppStringKeys.tdMessageLastSeenYearMonthDay, {
+    return AppStrings.t(AppStringKeys.tdMessageLastSeenYearMonthDay, {
       'value1': time.year,
       'value2': time.month,
       'value3': time.day,
@@ -3940,6 +4352,7 @@ class MediaAttachment {
     this.videoSticker,
     this.video,
     this.videoDuration,
+    this.videoFileSize,
     this.stickerFileId,
     this.stickerSetId,
     this.isAnimatedEmoji = false,
@@ -3953,6 +4366,7 @@ class MediaAttachment {
   final TdFileRef? videoSticker; // .webm video sticker
   final TdFileRef? video; // playable video file (messageVideo)
   final int? videoDuration; // seconds
+  final int? videoFileSize; // bytes, for the inline autoplay budget
   final int? stickerFileId; // any sticker's file id (for "add to favorites")
   final int? stickerSetId; // the sticker's set id (for 表情详情)
   final bool isAnimatedEmoji; // single-emoji message (messageAnimatedEmoji)

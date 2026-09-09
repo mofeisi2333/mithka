@@ -11,9 +11,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
-import '../app/app_navigator.dart';
+import '../app/primary_chat_launcher.dart';
 import '../call/call_manager.dart';
 import '../call/calls_view.dart';
 import '../chats/search_view.dart';
@@ -52,23 +51,38 @@ import '../theme/app_theme.dart';
 import '../theme/telegram_cloud_theme.dart';
 import '../theme/telegram_cloud_theme_view.dart';
 import '../theme/theme_controller.dart';
-import 'channel_direct_messages_view.dart';
+import 'chat_appearance_message_preview.dart';
 import 'chat_picker_view.dart';
-import 'chat_view.dart';
+import 'chat_wallpaper.dart';
+import 'internal_browser_view.dart';
+import 'internal_chat_link_router.dart';
+import 'link_browser.dart';
 import 'sticker_set_detail_view.dart';
 import 'telegram_ai_service.dart';
 import 'telegram_invoice_checkout_view.dart';
+import 'telegram_link.dart';
 import 'telegram_link_details_view.dart';
 import 'telegram_mini_app_view.dart';
 import 'telegram_payment_service.dart';
+import 'telegram_premium_features.dart';
 import 'telegram_store_purchase_view.dart';
+
+export 'telegram_premium_features.dart';
+
+typedef _TdLinkQuery =
+    Future<Map<String, dynamic>> Function(Map<String, dynamic> request);
 
 Future<void> openLink(BuildContext context, String url) async {
   final nav = Navigator.of(context);
-  final link = _normalizeTelegramLink(url);
+  final sourceChat = InternalChatLinkScope.targetOf(context);
+  final query = sourceChat == null
+      ? TdClient.shared.query
+      : (Map<String, dynamic> request) =>
+            TdClient.shared.queryForSlot(request, sourceChat.accountSlot);
+  final link = normalizeTelegramLink(url);
   final isTelegram = link != null;
   if (!isTelegram) {
-    await _external(url);
+    await _openBrowserLink(context, url);
     return;
   }
 
@@ -78,11 +92,9 @@ Future<void> openLink(BuildContext context, String url) async {
     return;
   }
 
+  var fallbackLink = link;
   try {
-    final type = await TdClient.shared.query({
-      '@type': 'getInternalLinkType',
-      'link': link,
-    });
+    final type = await query({'@type': 'getInternalLinkType', 'link': link});
     switch (type.type) {
       case 'internalLinkTypePublicChat':
         final username = type.str('chat_username') ?? '';
@@ -90,11 +102,20 @@ Future<void> openLink(BuildContext context, String url) async {
           nav,
           username,
           draftText: type.str('draft_text') ?? '',
+          sourceChat: sourceChat,
+          query: query,
         );
       case 'internalLinkTypeMessage':
-        final info = await TdClient.shared.query({
+        // TDLib can canonicalize a message link (notably tg:// variants).
+        // Its contract requires getMessageLinkInfo to receive this returned
+        // URL, rather than the original spelling that was classified.
+        final resolvedUrl = type.str('url')?.trim();
+        if (resolvedUrl != null && resolvedUrl.isNotEmpty) {
+          fallbackLink = resolvedUrl;
+        }
+        final info = await query({
           '@type': 'getMessageLinkInfo',
-          'url': link,
+          'url': fallbackLink,
         });
         final message = info.obj('message');
         final chatId = info.int64('chat_id') ?? message?.int64('chat_id');
@@ -102,39 +123,69 @@ Future<void> openLink(BuildContext context, String url) async {
             info.int64('message_id') ??
             message?.int64('id') ??
             type.int64('message_id');
-        await _openChat(nav, chatId, initialMessageId: messageId);
+        await _openChat(
+          nav,
+          chatId,
+          initialMessageId: messageId,
+          sourceChat: sourceChat,
+          query: query,
+        );
       case 'internalLinkTypeUserPhoneNumber':
-        final user = await TdClient.shared.query({
+        final user = await query({
           '@type': 'searchUserByPhoneNumber',
           'phone_number': type.str('phone_number') ?? '',
         });
         final uid = user.int64('id');
         if (uid != null) {
-          final chat = await TdClient.shared.query({
+          final chat = await query({
             '@type': 'createPrivateChat',
             'user_id': uid,
             'force': false,
           });
-          await _openChat(nav, chat.int64('id'));
+          await _openChat(
+            nav,
+            chat.int64('id'),
+            sourceChat: sourceChat,
+            query: query,
+          );
         }
       case 'internalLinkTypeChatInvite':
         if (context.mounted) await _joinInvite(context, nav, link);
       case 'internalLinkTypeChatFolderInvite':
         if (context.mounted) await _joinFolderInvite(context, nav, link);
       case 'internalLinkTypeBotStart':
-        await _openBotStart(nav, type);
+        await _openBotStart(nav, type, sourceChat: sourceChat, query: query);
       case 'internalLinkTypeBotStartInGroup':
         if (context.mounted) await _openBotStartInGroup(context, nav, type);
       case 'internalLinkTypeAttachmentMenuBot':
         if (context.mounted) {
-          await _openMiniAppLink(context, type, attachmentMenu: true);
+          await _openMiniAppLink(
+            context,
+            type,
+            query: query,
+            sourceChat: sourceChat,
+            attachmentMenu: true,
+          );
         }
       case 'internalLinkTypeMainWebApp':
         if (context.mounted) {
-          await _openMiniAppLink(context, type, mainWebApp: true);
+          await _openMiniAppLink(
+            context,
+            type,
+            query: query,
+            sourceChat: sourceChat,
+            mainWebApp: true,
+          );
         }
       case 'internalLinkTypeWebApp':
-        if (context.mounted) await _openMiniAppLink(context, type);
+        if (context.mounted) {
+          await _openMiniAppLink(
+            context,
+            type,
+            query: query,
+            sourceChat: sourceChat,
+          );
+        }
       case 'internalLinkTypeBackground':
         if (context.mounted) await _applyBackgroundLink(context, type);
       case 'internalLinkTypeLanguagePack':
@@ -159,12 +210,14 @@ Future<void> openLink(BuildContext context, String url) async {
           'code': type.str('code') ?? '',
         });
       case 'internalLinkTypeUserToken':
-        final user = await TdClient.shared.query({
+        final user = await query({
           '@type': 'searchUserByToken',
           'token': type.str('token') ?? '',
         });
         final uid = user.int64('id');
-        if (uid != null) await _openUser(nav, uid);
+        if (uid != null) {
+          await _openUser(nav, uid, sourceChat: sourceChat, query: query);
+        }
       case 'internalLinkTypeDirectMessagesChat':
         await _openDirectMessagesChat(nav, type.str('channel_username') ?? '');
       case 'internalLinkTypeChatAffiliateProgram':
@@ -172,7 +225,7 @@ Future<void> openLink(BuildContext context, String url) async {
       case 'internalLinkTypeChatBoost':
         await _openChatBoost(nav, type);
       case 'internalLinkTypeInstantView':
-        await _openInstantView(type);
+        if (context.mounted) await _openInstantView(context, type);
       case 'internalLinkTypeBusinessChat':
         await _openBusinessChat(nav, type.str('link_name') ?? '');
       case 'internalLinkTypeCallsPage':
@@ -249,7 +302,13 @@ Future<void> openLink(BuildContext context, String url) async {
       case 'internalLinkTypeUpgradedGift':
         await _openUpgradedGift(nav, type.str('name') ?? '');
       case 'internalLinkTypePremiumFeaturesPage':
-        await _openPremiumFeatures(nav, type.str('referrer') ?? '');
+        await pushTelegramPremiumFeatures(
+          nav,
+          source: {
+            '@type': 'premiumSourceLink',
+            'referrer': type.str('referrer') ?? '',
+          },
+        );
       case 'internalLinkTypePremiumGiftCode':
         if (context.mounted) {
           await _applyPremiumGiftCode(context, type.str('code') ?? '');
@@ -292,15 +351,29 @@ Future<void> openLink(BuildContext context, String url) async {
       case 'internalLinkTypeTheme':
         if (context.mounted) await _openCloudTheme(context, nav, link);
       case 'internalLinkTypeUnknownDeepLink':
-        await _showDeepLinkInfoOrExternal(link);
+        if (context.mounted) {
+          await _showDeepLinkInfoOrExternal(context, link);
+        }
       default:
-        if (!await _openTelegramFallback(nav, link) && context.mounted) {
-          await _external(link);
+        if (!await _openTelegramFallback(
+              nav,
+              link,
+              sourceChat: sourceChat,
+              query: query,
+            ) &&
+            context.mounted) {
+          await _openBrowserLink(context, link);
         }
     }
   } catch (_) {
-    if (!await _openTelegramFallback(nav, link) && context.mounted) {
-      await _external(link);
+    if (!await _openTelegramFallback(
+          nav,
+          fallbackLink,
+          sourceChat: sourceChat,
+          query: query,
+        ) &&
+        context.mounted) {
+      await _openBrowserLink(context, fallbackLink);
     }
   }
 }
@@ -372,7 +445,7 @@ class _EnableThemingDialog extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
           decoration: BoxDecoration(
             color: c.card,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(AppRadius.lg),
             boxShadow: const [
               BoxShadow(
                 color: Color(0x30000000),
@@ -393,7 +466,7 @@ class _EnableThemingDialog extends StatelessWidget {
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       color: c.linkBlue.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(11),
+                      borderRadius: BorderRadius.circular(AppRadius.card),
                     ),
                     child: AppIcon(
                       HeroAppIcons.palette,
@@ -502,11 +575,11 @@ Future<bool> _openSettingsLink(
     'settingsSectionDataAndStorage' => const GeneralSettingsView(),
     'settingsSectionDevices' => const ActiveSessionsView(),
     'settingsSectionEditProfile' => const EditProfileView(),
-    'settingsSectionLanguage' => const LanguageSettingsView(),
+    'settingsSectionLanguage' => const AppLanguageSettingsView(),
     'settingsSectionNotifications' => const NotificationSettingsView(),
     'settingsSectionPrivacyAndSecurity' => const PrivacySecurityView(),
     'settingsSectionQrCode' => const QRCodeView(),
-    'settingsSectionSearch' => const SettingsView(),
+    'settingsSectionSearch' => const SettingsView(focusSearch: true),
     _ => null,
   };
   if (destination == null) return false;
@@ -534,49 +607,91 @@ Future<void> _addProxyFromLink(BuildContext context, ProxyConfig config) async {
   }
 }
 
-String? _normalizeTelegramLink(String raw) {
-  final trimmed = raw.trim();
-  if (trimmed.isEmpty) return null;
-  final lower = trimmed.toLowerCase();
-  if (lower.startsWith('tg:')) return trimmed;
-
-  var candidate = trimmed;
-  if (!candidate.contains('://')) candidate = 'https://$candidate';
-  final uri = Uri.tryParse(candidate);
+/// Converts the server-local post number carried by Telegram link syntax to
+/// the TDLib message identifier used by chat/history APIs.
+///
+/// IDs returned by getMessageLinkInfo are already TDLib IDs and must never be
+/// passed through this conversion; this helper is only for the manual fallback
+/// grammars parsed below.
+@visibleForTesting
+int? telegramFallbackMessageId(String link) {
+  final uri = Uri.tryParse(link);
   if (uri == null) return null;
-  final host = uri.host.toLowerCase();
-  if (host == 't.me' ||
-      host == 'telegram.me' ||
-      host == 'telegram.dog' ||
-      host == 'www.t.me' ||
-      host == 'www.telegram.me' ||
-      host == 'www.telegram.dog') {
-    return uri.replace(scheme: 'https').toString();
+  String? post;
+  final scheme = uri.scheme.toLowerCase();
+  if (scheme == 'tg' || scheme == 'mk' || scheme == 'mithka') {
+    final host = uri.host.toLowerCase();
+    if (host == 'resolve' || host == 'privatepost') {
+      post = uri.queryParameters['post'];
+    }
+  } else {
+    final host = uri.host.toLowerCase();
+    final isTelegramHost =
+        host == 't.me' ||
+        host == 'telegram.me' ||
+        host == 'telegram.dog' ||
+        host == 'www.t.me' ||
+        host == 'www.telegram.me' ||
+        host == 'www.telegram.dog';
+    if (!isTelegramHost) return null;
+    final segments = uri.pathSegments
+        .where((segment) => segment.isNotEmpty)
+        .toList();
+    if (segments.isEmpty) return null;
+    post = segments.first.toLowerCase() == 'c'
+        ? (segments.length > 2 ? segments[2] : null)
+        : (segments.length > 1 ? segments[1] : null);
   }
-  return null;
+  final serverPostId = int.tryParse(post ?? '');
+  if (serverPostId == null || serverPostId <= 0) return null;
+  return serverPostId << 20;
 }
 
-Future<bool> _openTelegramFallback(NavigatorState nav, String link) async {
+Future<bool> _openTelegramFallback(
+  NavigatorState nav,
+  String link, {
+  InternalChatLinkTarget? sourceChat,
+  _TdLinkQuery? query,
+}) async {
   final uri = Uri.tryParse(link);
   if (uri == null) return false;
 
-  if (uri.scheme.toLowerCase() == 'tg') {
+  // mk:// and mithka:// are the app's own registered schemes; they carry the
+  // same path/query grammar as tg:// links.
+  const appSchemes = {'tg', 'mk', 'mithka'};
+  if (appSchemes.contains(uri.scheme.toLowerCase())) {
     final host = uri.host.toLowerCase();
     final params = uri.queryParameters;
     final userId = int.tryParse(params['id'] ?? '');
     if (host == 'user' && userId != null) {
-      return _openUser(nav, userId);
+      return _openUser(nav, userId, sourceChat: sourceChat, query: query);
     }
     if (host == 'resolve') {
       final username = params['domain'] ?? params['username'];
-      final messageId = int.tryParse(params['post'] ?? '');
+      final messageId = telegramFallbackMessageId(link);
       if (username != null && username.trim().isNotEmpty) {
         return _openPublicChat(
           nav,
           username.trim(),
           initialMessageId: messageId,
+          sourceChat: sourceChat,
+          query: query,
         );
       }
+    }
+    if (host == 'privatepost') {
+      final channelId = int.tryParse(params['channel'] ?? '');
+      if (channelId == null || channelId <= 0) return false;
+      final chatId = int.tryParse('-100$channelId');
+      if (chatId == null) return false;
+      await _openChat(
+        nav,
+        chatId,
+        initialMessageId: telegramFallbackMessageId(link),
+        sourceChat: sourceChat,
+        query: query,
+      );
+      return true;
     }
     return false;
   }
@@ -598,22 +713,44 @@ Future<bool> _openTelegramFallback(NavigatorState nav, String link) async {
   final lowerFirst = first.toLowerCase();
   if (first.startsWith('+') || lowerFirst == 'joinchat') return false;
   if (lowerFirst == 'c') {
-    return _openPrivateMessageLink(nav, segments);
+    return _openPrivateMessageLink(
+      nav,
+      segments,
+      messageId: telegramFallbackMessageId(link),
+      sourceChat: sourceChat,
+      query: query,
+    );
   }
   if (!_isPublicUsername(first)) return false;
 
-  final messageId = segments.length > 1 ? int.tryParse(segments[1]) : null;
-  return _openPublicChat(nav, first, initialMessageId: messageId);
+  return _openPublicChat(
+    nav,
+    first,
+    initialMessageId: telegramFallbackMessageId(link),
+    sourceChat: sourceChat,
+    query: query,
+  );
 }
 
-Future<bool> _openUser(NavigatorState nav, int userId) async {
+Future<bool> _openUser(
+  NavigatorState nav,
+  int userId, {
+  InternalChatLinkTarget? sourceChat,
+  _TdLinkQuery? query,
+}) async {
+  final queryAccount = query ?? TdClient.shared.query;
   try {
-    final chat = await TdClient.shared.query({
+    final chat = await queryAccount({
       '@type': 'createPrivateChat',
       'user_id': userId,
       'force': false,
     });
-    await _openChat(nav, chat.int64('id'));
+    await _openChat(
+      nav,
+      chat.int64('id'),
+      sourceChat: sourceChat,
+      query: queryAccount,
+    );
     return true;
   } catch (_) {
     return false;
@@ -625,9 +762,12 @@ Future<bool> _openPublicChat(
   String username, {
   int? initialMessageId,
   String draftText = '',
+  InternalChatLinkTarget? sourceChat,
+  _TdLinkQuery? query,
 }) async {
+  final queryAccount = query ?? TdClient.shared.query;
   try {
-    final chat = await TdClient.shared.query({
+    final chat = await queryAccount({
       '@type': 'searchPublicChat',
       'username': username,
     });
@@ -636,9 +776,15 @@ Future<bool> _openPublicChat(
       await _setChatDraft(chatId, {
         '@type': 'formattedText',
         'text': draftText.trim(),
-      });
+      }, query: queryAccount);
     }
-    await _openChat(nav, chatId, initialMessageId: initialMessageId);
+    await _openChat(
+      nav,
+      chatId,
+      initialMessageId: initialMessageId,
+      sourceChat: sourceChat,
+      query: queryAccount,
+    );
     return true;
   } catch (_) {
     return false;
@@ -647,11 +793,14 @@ Future<bool> _openPublicChat(
 
 Future<void> _openBotStart(
   NavigatorState nav,
-  Map<String, dynamic> type,
-) async {
+  Map<String, dynamic> type, {
+  InternalChatLinkTarget? sourceChat,
+  _TdLinkQuery? query,
+}) async {
+  final queryAccount = query ?? TdClient.shared.query;
   final username = type.str('bot_username') ?? '';
   if (username.isEmpty) return;
-  final chat = await TdClient.shared.query({
+  final chat = await queryAccount({
     '@type': 'searchPublicChat',
     'username': username,
   });
@@ -660,37 +809,76 @@ Future<void> _openBotStart(
   final parameter = type.str('start_parameter') ?? '';
   final autostart = type.boolean('autostart') ?? false;
   if (autostart && chatId != null && botUserId != null) {
-    await TdClient.shared.query({
+    await queryAccount({
       '@type': 'sendBotStartMessage',
       'bot_user_id': botUserId,
       'chat_id': chatId,
       'parameter': parameter,
     });
   }
-  await _openChat(nav, chatId);
+  await _openChat(nav, chatId, sourceChat: sourceChat, query: queryAccount);
 }
 
 Future<void> _openMiniAppLink(
   BuildContext context,
   Map<String, dynamic> type, {
+  required _TdLinkQuery query,
+  InternalChatLinkTarget? sourceChat,
   bool mainWebApp = false,
   bool attachmentMenu = false,
 }) async {
   final username = type.str('bot_username')?.trim() ?? '';
   if (username.isEmpty) return;
-  final botChat = await TdClient.shared.query({
+  final botChat = await query({
     '@type': 'searchPublicChat',
     'username': username,
   });
   final botUserId = botChat.obj('type')?.int64('user_id');
   if (botUserId == null || !context.mounted) return;
-  final user = await TdClient.shared.query({
-    '@type': 'getUser',
-    'user_id': botUserId,
-  });
-  if (user.obj('type')?.type != 'userTypeBot' || !context.mounted) return;
+  final user = await query({'@type': 'getUser', 'user_id': botUserId});
+  final botType = user.obj('type');
+  if (botType?.type != 'userTypeBot' || !context.mounted) return;
+  final botTitle = TDParse.userName(user).trim();
+  final title = botTitle.isEmpty ? username : botTitle;
+  if (mainWebApp && !(botType?.boolean('has_main_web_app') ?? false)) {
+    final botChatId = botChat.int64('id');
+    Map<String, dynamic>? menu;
+    try {
+      final full = await query({
+        '@type': 'getUserFullInfo',
+        'user_id': botUserId,
+      });
+      menu = full.obj('bot_info')?.obj('menu_button');
+    } catch (_) {}
+    final menuUrl = menu?.str('url')?.trim() ?? '';
+    if (menu?.type == 'botMenuButton' &&
+        menuUrl.isNotEmpty &&
+        botChatId != null &&
+        context.mounted) {
+      final menuTitle = menu?.str('text')?.trim() ?? '';
+      final opened = await openTelegramMiniApp(
+        context,
+        chatId: botChatId,
+        botUserId: botUserId,
+        url: menuUrl,
+        title: menuTitle.isEmpty ? title : menuTitle,
+        menuWebApp: true,
+        openMode: type.obj('mode'),
+        photo: TDParse.smallPhoto(user.obj('profile_photo')),
+        accountSlot: sourceChat?.accountSlot,
+      );
+      if (opened || !context.mounted) return;
+    }
+    if (context.mounted) {
+      showToast(context, AppStrings.t(AppStringKeys.miniAppCannotStart));
+    }
+    return;
+  }
+  final attachmentMenuConsentRequired =
+      mainWebApp &&
+      (botType?.boolean('can_be_added_to_attachment_menu') ?? false);
 
-  var chatId = 0;
+  var chatId = sourceChat?.chatId ?? 0;
   if (attachmentMenu) {
     final target = await Navigator.of(context).push<ChatSummary>(
       MaterialPageRoute(builder: (_) => const ChatPickerView()),
@@ -698,19 +886,20 @@ Future<void> _openMiniAppLink(
     if (target == null || !context.mounted) return;
     chatId = target.id;
   }
-  final title = TDParse.userName(user).trim();
   await openTelegramMiniApp(
     context,
     chatId: chatId,
     botUserId: botUserId,
     url: attachmentMenu ? type.str('url') ?? '' : '',
-    title: title.isEmpty ? username : title,
+    title: title,
     mainWebApp: mainWebApp,
     attachmentMenuWebApp: attachmentMenu,
     startParameter: type.str('start_parameter') ?? '',
     webAppShortName: type.str('web_app_short_name') ?? '',
     openMode: type.obj('mode'),
     photo: TDParse.smallPhoto(user.obj('profile_photo')),
+    accountSlot: sourceChat?.accountSlot,
+    attachmentMenuConsentRequired: attachmentMenuConsentRequired,
   );
 }
 
@@ -726,22 +915,29 @@ Future<void> _applyBackgroundLink(
   });
   final backgroundId = background.int64('id');
   if (backgroundId == null || !context.mounted) return;
+  final wallpaperController = ChatWallpaperController.shared;
+  final wallpaper = wallpaperController.previewWallpaperFromBackground(
+    background,
+  );
+  if (wallpaper == null) return;
+  final dark = Theme.of(context).brightness == Brightness.dark;
   final accepted = await showAppConfirmDialog(
     context,
     title: AppStrings.t(AppStringKeys.appearanceTitle),
     message: name,
+    content: AnimatedBuilder(
+      animation: wallpaperController,
+      builder: (context, _) => ChatAppearancePreviewCard(
+        key: const ValueKey('background-link-appearance-preview'),
+        wallpaper: wallpaperController.resolvedWallpaper(wallpaper),
+        label: AppStrings.t(AppStringKeys.chatWallpaperTitle),
+        brightness: dark ? Brightness.dark : Brightness.light,
+      ),
+    ),
     confirmText: AppStrings.t(AppStringKeys.chatWallpaperApply),
   );
   if (!accepted || !context.mounted) return;
-  await TdClient.shared.query({
-    '@type': 'setDefaultBackground',
-    'background': {
-      '@type': 'inputBackgroundRemote',
-      'background_id': backgroundId,
-    },
-    'type': background.obj('type'),
-    'for_dark_theme': Theme.of(context).brightness == Brightness.dark,
-  });
+  await wallpaperController.applyDefaultWallpaper(wallpaper, dark: dark);
 }
 
 Future<void> _applyLanguagePackLink(
@@ -793,7 +989,10 @@ Future<void> _addBotToChannel(
   final accepted = await showAppConfirmDialog(
     context,
     title: AppStrings.t(AppStringKeys.chatListCreateChannel),
-    message: 'Add @$username as an administrator of ${picked.title}?',
+    message: AppStrings.t(
+      AppStringKeys.linkHandlerAddBotAsAdministratorValue1Value2,
+      {'value1': username, 'value2': picked.title},
+    ),
     confirmText: AppStrings.t(AppStringKeys.confirmContinue),
   );
   if (!accepted) return;
@@ -873,9 +1072,10 @@ Future<void> _shareDraft(
 
 Future<void> _setChatDraft(
   int chatId,
-  Map<String, dynamic> formattedText,
-) async {
-  await TdClient.shared.query(
+  Map<String, dynamic> formattedText, {
+  _TdLinkQuery? query,
+}) async {
+  await (query ?? TdClient.shared.query)(
     setTextChatDraftRequest(
       chatId: chatId,
       formattedText: formattedText,
@@ -903,13 +1103,7 @@ Future<void> _openSavedMessages(
   final chatId = chat.int64('id');
   if (chatId == null) return;
   if (!nav.mounted) return;
-  final route = AppChatPageRoute<void>(
-    builder: (_) => ChatView(
-      chatId: chatId,
-      title: AppStrings.t(AppStringKeys.savedMessages),
-    ),
-  );
-  unawaited(nav.push(route));
+  await _openChat(nav, chatId);
 }
 
 Future<void> _openStickerSet(NavigatorState nav, String name) async {
@@ -953,7 +1147,6 @@ Future<void> _openDirectMessagesChat(
     'username': username.trim(),
   });
   var chatId = chat.int64('id');
-  final channelTitle = chat.str('title') ?? '';
   final supergroupId = chat.obj('type')?.int64('supergroup_id');
   if (supergroupId != null) {
     final fullInfo = await TdClient.shared.query({
@@ -963,39 +1156,6 @@ Future<void> _openDirectMessagesChat(
     final directMessagesChatId = fullInfo.int64('direct_messages_chat_id');
     if (directMessagesChatId != null && directMessagesChatId != 0) {
       chatId = directMessagesChatId;
-    }
-  }
-  if (chatId != null && chatId != chat.int64('id')) {
-    try {
-      final directChat = await TdClient.shared.query({
-        '@type': 'getChat',
-        'chat_id': chatId,
-      });
-      final directSupergroupId = directChat.obj('type')?.int64('supergroup_id');
-      if (directSupergroupId != null) {
-        final directSupergroup = await TdClient.shared.query({
-          '@type': 'getSupergroup',
-          'supergroup_id': directSupergroupId,
-        });
-        if (directSupergroup.boolean('is_administered_direct_messages_group') ==
-            true) {
-          if (!nav.mounted) return;
-          final chatNavigator = appNavigatorKey.currentState ?? nav;
-          unawaited(
-            chatNavigator.push(
-              MaterialPageRoute(
-                builder: (_) => ChannelDirectMessagesView(
-                  chatId: chatId!,
-                  title: channelTitle,
-                ),
-              ),
-            ),
-          );
-          return;
-        }
-      }
-    } catch (_) {
-      // Fall through to the regular subscriber-side direct-message chat.
     }
   }
   await _openChat(nav, chatId);
@@ -1039,12 +1199,21 @@ Future<void> _openChatBoost(
   await nav.push(
     MaterialPageRoute<void>(
       builder: (_) => TelegramLinkDetailsView(
-        title: title.isEmpty ? 'Boost chat' : title,
+        title: title.isEmpty
+            ? AppStrings.t(AppStringKeys.linkHandlerBoostChat)
+            : title,
         icon: HeroAppIcons.arrowUp,
-        subtitle: info.boolean('is_public') == true
-            ? 'Public boost link'
-            : 'Private boost link',
-        details: [TelegramLinkDetail('Chat', '$chatId')],
+        subtitle: AppStrings.t(
+          info.boolean('is_public') == true
+              ? AppStringKeys.linkHandlerPublicBoostLink
+              : AppStringKeys.linkHandlerPrivateBoostLink,
+        ),
+        details: [
+          TelegramLinkDetail(
+            AppStrings.t(AppStringKeys.linkHandlerDetailChat),
+            '$chatId',
+          ),
+        ],
         trailing: Builder(
           builder: (context) => Semantics(
             button: true,
@@ -1061,7 +1230,7 @@ Future<void> _openChatBoost(
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: AppTheme.brand,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadius.card),
                 ),
                 child: Text(
                   AppStrings.t(AppStringKeys.linkHandlerOpenChat),
@@ -1088,18 +1257,21 @@ Future<void> _selectAndOpenChat(NavigatorState nav) async {
   if (picked != null) await _openChat(nav, picked.id);
 }
 
-Future<void> _openInstantView(Map<String, dynamic> type) async {
+Future<void> _openInstantView(
+  BuildContext context,
+  Map<String, dynamic> type,
+) async {
   final url = type.str('url')?.trim() ?? '';
   if (url.isEmpty) return;
   // Resolve the page through TDLib first so Telegram can warm/cache the
   // canonical Instant View. Mithka doesn't yet include an owned rich-page
-  // renderer, so the canonical page then opens in the system browser.
+  // renderer, so the canonical page then follows the user's browser choice.
   await TdClient.shared.query({
     '@type': 'getWebPageInstantView',
     'url': url,
     'only_local': false,
   });
-  await _external(url);
+  if (context.mounted) await _openBrowserLink(context, url);
 }
 
 Future<void> _processOauthLink(
@@ -1122,7 +1294,7 @@ Future<void> _processOauthLink(
         builder: (_) => EditFieldView(
           title: AppStrings.t(AppStringKeys.linkHandlerAuthorizationCode),
           initial: '',
-          hint: 'Enter the matching code',
+          hint: AppStrings.t(AppStringKeys.linkHandlerEnterMatchingCode),
           maxLength: 64,
         ),
       ),
@@ -1175,7 +1347,7 @@ Future<void> _processOauthLink(
     'allow_phone_number_access': asksPhone,
   });
   final redirect = result.str('url')?.trim() ?? '';
-  if (redirect.isNotEmpty) await _external(redirect);
+  if (redirect.isNotEmpty) await _launchExternal(redirect);
 }
 
 Future<void> _openPassportRequest(
@@ -1198,14 +1370,15 @@ Future<void> _openPassportRequest(
       builder: (_) => TelegramLinkDetailsView(
         title: AppStrings.t(AppStringKeys.linkHandlerTelegramPassportRequest),
         icon: HeroAppIcons.idBadge,
-        subtitle:
-            'Review the requested identity data. Mithka will not share any '
-            'Passport element without a complete authorization flow.',
+        subtitle: AppStrings.t(AppStringKeys.linkHandlerPassportSubtitle),
         details: [
-          TelegramLinkDetail('Requested groups', '${required.length}'),
+          TelegramLinkDetail(
+            AppStrings.t(AppStringKeys.linkHandlerDetailRequestedGroups),
+            '${required.length}',
+          ),
           if ((form.str('privacy_policy_url') ?? '').isNotEmpty)
             TelegramLinkDetail(
-              'Privacy policy',
+              AppStrings.t(AppStringKeys.linkHandlerDetailPrivacyPolicy),
               form.str('privacy_policy_url')!,
             ),
         ],
@@ -1279,7 +1452,10 @@ Future<void> _createManagedBotFromLink(
   final accepted = await showAppConfirmDialog(
     context,
     title: AppStrings.t(AppStringKeys.linkHandlerCreateManagedBot),
-    message: '$name (@$username) will be managed by @$managerUsername.',
+    message: AppStrings.t(
+      AppStringKeys.linkHandlerCreateManagedBotMessageValue1Value2Value3,
+      {'value1': name, 'value2': username, 'value3': managerUsername},
+    ),
     confirmText: AppStrings.t(AppStringKeys.confirmContinue),
   );
   if (!accepted) return;
@@ -1484,8 +1660,10 @@ Future<void> _openPremiumGiftPurchase(
     MaterialPageRoute(
       builder: (_) => TelegramStoreProductPickerView(
         title: AppStrings.t(AppStringKeys.linkHandlerGiftTelegramPremium),
-        subtitle:
-            'Choose a subscription for ${TDParse.userName(user)}. The purchase is completed by the App Store and assigned to this Telegram account.',
+        subtitle: AppStrings.t(
+          AppStringKeys.linkHandlerPremiumGiftPickerSubtitleValue1,
+          {'value1': TDParse.userName(user)},
+        ),
         products: products,
       ),
     ),
@@ -1497,7 +1675,9 @@ Future<void> _openPremiumGiftPurchase(
       await _showStoreDependency(
         nav,
         title: AppStrings.t(AppStringKeys.linkHandlerPremiumGiftUnavailable),
-        operation: 'Premium gift purchase',
+        operation: AppStrings.t(
+          AppStringKeys.linkHandlerOperationPremiumGiftPurchase,
+        ),
       );
     }
     return;
@@ -1512,7 +1692,9 @@ Future<void> _openPremiumGiftPurchase(
     service: service,
     purpose: storePurpose,
     title: AppStrings.t(AppStringKeys.linkHandlerPremiumGiftUnavailable),
-    operation: 'Premium gift purchase',
+    operation: AppStrings.t(
+      AppStringKeys.linkHandlerOperationPremiumGiftPurchase,
+    ),
   )) {
     return;
   }
@@ -1520,8 +1702,10 @@ Future<void> _openPremiumGiftPurchase(
   final confirmed = await showAppConfirmDialog(
     context,
     title: AppStrings.t(AppStringKeys.linkHandlerConfirmPremiumGift),
-    message:
-        '${product.label} will be assigned to ${TDParse.userName(user)} after the App Store verifies the purchase.',
+    message: AppStrings.t(
+      AppStringKeys.linkHandlerConfirmPremiumGiftMessageValue1Value2,
+      {'value1': product.label, 'value2': TDParse.userName(user)},
+    ),
     confirmText: AppStrings.t(AppStringKeys.confirmContinue),
   );
   if (!confirmed || !nav.mounted) return;
@@ -1550,7 +1734,9 @@ Future<void> _restoreStorePurchases(
       await _showStoreDependency(
         nav,
         title: AppStrings.t(AppStringKeys.linkHandlerRestoreUnavailable),
-        operation: 'App Store purchase restore',
+        operation: AppStrings.t(
+          AppStringKeys.linkHandlerOperationRestorePurchases,
+        ),
       );
     }
     return;
@@ -1563,7 +1749,7 @@ Future<void> _restoreStorePurchases(
     service: service,
     purpose: storePurpose,
     title: AppStrings.t(AppStringKeys.linkHandlerRestoreUnavailable),
-    operation: 'App Store purchase restore',
+    operation: AppStrings.t(AppStringKeys.linkHandlerOperationRestorePurchases),
   )) {
     return;
   }
@@ -1571,8 +1757,7 @@ Future<void> _restoreStorePurchases(
   final confirmed = await showAppConfirmDialog(
     context,
     title: AppStrings.t(AppStringKeys.linkHandlerRestoreAppStorePurchases),
-    message:
-        'The App Store will refresh this app’s receipt. Telegram will verify the receipt and restore eligible Premium purchases.',
+    message: AppStrings.t(AppStringKeys.linkHandlerRestoreMessage),
     confirmText: AppStrings.t(AppStringKeys.accountBackupRestore),
   );
   if (!confirmed || !nav.mounted) return;
@@ -1581,7 +1766,7 @@ Future<void> _restoreStorePurchases(
       fullscreenDialog: true,
       builder: (_) => TelegramStorePurchaseProgressView(
         title: AppStrings.t(AppStringKeys.mithkaProRestore),
-        subtitle: 'Telegram Premium',
+        subtitle: AppStrings.t(AppStringKeys.linkHandlerTelegramPremium),
         purchase: service.restorePremiumPurchases,
       ),
     ),
@@ -1617,9 +1802,17 @@ Future<void> _openStarPurchase(
     MaterialPageRoute(
       builder: (_) => TelegramStoreProductPickerView(
         title: AppStrings.t(AppStringKeys.linkHandlerBuyTelegramStars),
-        subtitle: requested > 0
-            ? 'Choose a package containing at least $requested Stars${purposeLabel.isEmpty ? '.' : ' for $purposeLabel.'}'
-            : 'Choose a Telegram Stars package to purchase through the App Store.',
+        subtitle: requested <= 0
+            ? AppStrings.t(AppStringKeys.linkHandlerStarsPickerSubtitleAny)
+            : purposeLabel.isEmpty
+            ? AppStrings.t(AppStringKeys.linkHandlerStarsPickerSubtitleValue1, {
+                'value1': requested,
+              })
+            : AppStrings.t(
+                AppStringKeys
+                    .linkHandlerStarsPickerSubtitleWithPurposeValue1Value2,
+                {'value1': requested, 'value2': purposeLabel},
+              ),
         products: products,
         requestedStarCount: requested,
       ),
@@ -1632,7 +1825,9 @@ Future<void> _openStarPurchase(
       await _showStoreDependency(
         nav,
         title: AppStrings.t(AppStringKeys.linkHandlerStarsPurchaseUnavailable),
-        operation: 'Telegram Stars purchase',
+        operation: AppStrings.t(
+          AppStringKeys.linkHandlerOperationStarsPurchase,
+        ),
       );
     }
     return;
@@ -1647,7 +1842,7 @@ Future<void> _openStarPurchase(
     service: service,
     purpose: storePurpose,
     title: AppStrings.t(AppStringKeys.linkHandlerStarsPurchaseUnavailable),
-    operation: 'Telegram Stars purchase',
+    operation: AppStrings.t(AppStringKeys.linkHandlerOperationStarsPurchase),
   )) {
     return;
   }
@@ -1655,8 +1850,9 @@ Future<void> _openStarPurchase(
   final confirmed = await showAppConfirmDialog(
     context,
     title: AppStrings.t(AppStringKeys.linkHandlerConfirmStarsPurchase),
-    message:
-        '${product.starCount} Stars will be credited after the App Store verifies the purchase.',
+    message: AppStrings.t(AppStringKeys.linkHandlerConfirmStarsMessageValue1, {
+      'value1': product.starCount,
+    }),
     confirmText: AppStrings.t(AppStringKeys.confirmContinue),
   );
   if (!confirmed || !nav.mounted) return;
@@ -1665,7 +1861,9 @@ Future<void> _openStarPurchase(
       fullscreenDialog: true,
       builder: (_) => TelegramStorePurchaseProgressView(
         title: AppStrings.t(AppStringKeys.linkHandlerBuyTelegramStars),
-        subtitle: '${product.starCount} Stars',
+        subtitle: AppStrings.t(AppStringKeys.linkHandlerStarsCountValue1, {
+          'value1': product.starCount,
+        }),
         purchase: () => service.purchaseAndAssign(
           productId: product.productId,
           purpose: storePurpose,
@@ -1685,12 +1883,17 @@ Future<void> _showStoreDependency(
     builder: (_) => TelegramLinkDetailsView(
       title: title,
       icon: HeroAppIcons.triangleExclamation,
-      subtitle:
-          '$operation is stopped before opening StoreKit unless Telegram authorizes this app and returns an App Store product owned by its developer account. Android additionally requires a Google Play Billing purchase-token adapter, which is not bundled in this build.',
+      subtitle: AppStrings.t(
+        AppStringKeys.linkHandlerStoreDependencySubtitleValue1,
+        {'value1': operation},
+      ),
       details: [
-        const TelegramLinkDetail('Charge state', 'No store charge started'),
-        const TelegramLinkDetail(
-          'Authorization',
+        TelegramLinkDetail(
+          AppStrings.t(AppStringKeys.linkHandlerDetailChargeState),
+          AppStrings.t(AppStringKeys.linkHandlerNoStoreChargeStarted),
+        ),
+        TelegramLinkDetail(
+          AppStrings.t(AppStringKeys.linkHandlerDetailAuthorization),
           'Telegram canPurchaseFromStore required',
         ),
         const TelegramLinkDetail('iOS', 'StoreKit 2 receipt assignment'),
@@ -1699,7 +1902,10 @@ Future<void> _showStoreDependency(
           'Google Play Billing adapter required',
         ),
         if (serverError.isNotEmpty)
-          TelegramLinkDetail('Telegram response', serverError),
+          TelegramLinkDetail(
+            AppStrings.t(AppStringKeys.linkHandlerDetailTelegramResponse),
+            serverError,
+          ),
       ],
     ),
   ),
@@ -1774,10 +1980,13 @@ Future<void> _openUnboundGroupCall(
         builder: (_) => TelegramLinkDetailsView(
           title: AppStrings.t(AppStringKeys.privacyCalls),
           icon: HeroAppIcons.phone,
-          subtitle:
-              'This call is not attached to a chat. Review the participant '
-              'count, then join securely with Telegram.',
-          details: [TelegramLinkDetail('Participants', '$count')],
+          subtitle: AppStrings.t(AppStringKeys.linkHandlerCallSubtitle),
+          details: [
+            TelegramLinkDetail(
+              AppStrings.t(AppStringKeys.linkHandlerDetailParticipants),
+              '$count',
+            ),
+          ],
           trailing: Builder(
             builder: (pageContext) => Semantics(
               button: true,
@@ -1803,7 +2012,7 @@ Future<void> _openUnboundGroupCall(
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: AppTheme.brand,
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(AppRadius.card),
                   ),
                   child: Text(
                     AppStrings.t(AppStringKeys.linkHandlerJoinCall),
@@ -1870,13 +2079,21 @@ Future<void> _openGiftCollection(
           icon: HeroAppIcons.solidStar,
           subtitle: chat.str('title') ?? username,
           details: [
-            TelegramLinkDetail('Collection', '#$collectionId'),
             TelegramLinkDetail(
-              'Gifts',
+              AppStrings.t(AppStringKeys.linkHandlerDetailCollection),
+              '#$collectionId',
+            ),
+            TelegramLinkDetail(
+              AppStrings.t(AppStringKeys.linkHandlerDetailGifts),
               '${result.integer('total_count') ?? gifts.length}',
             ),
             for (var index = 0; index < gifts.length; index++)
-              TelegramLinkDetail('Gift ${index + 1}', _giftLabel(gifts[index])),
+              TelegramLinkDetail(
+                AppStrings.t(AppStringKeys.linkHandlerDetailGiftValue1, {
+                  'value1': index + 1,
+                }),
+                _giftLabel(gifts[index]),
+              ),
           ],
         ),
       ),
@@ -1903,15 +2120,21 @@ Future<void> _openUpgradedGift(NavigatorState nav, String name) async {
           icon: HeroAppIcons.solidStar,
           subtitle: '#${gift.integer('number') ?? 0}',
           details: [
-            TelegramLinkDetail('Model', gift.obj('model')?.str('name') ?? ''),
-            TelegramLinkDetail('Symbol', gift.obj('symbol')?.str('name') ?? ''),
             TelegramLinkDetail(
-              'Backdrop',
+              AppStrings.t(AppStringKeys.linkHandlerDetailModel),
+              gift.obj('model')?.str('name') ?? '',
+            ),
+            TelegramLinkDetail(
+              AppStrings.t(AppStringKeys.linkHandlerDetailSymbol),
+              gift.obj('symbol')?.str('name') ?? '',
+            ),
+            TelegramLinkDetail(
+              AppStrings.t(AppStringKeys.linkHandlerDetailBackdrop),
               gift.obj('backdrop')?.str('name') ?? '',
             ),
             if (valueCurrency.isNotEmpty && valueAmount > 0)
               TelegramLinkDetail(
-                'Estimated value',
+                AppStrings.t(AppStringKeys.linkHandlerDetailEstimatedValue),
                 _formatCurrency(valueCurrency, valueAmount),
               ),
           ],
@@ -1937,43 +2160,18 @@ Future<void> _openGiftAuction(NavigatorState nav, String auctionId) async {
         icon: HeroAppIcons.solidStar,
         subtitle: auctionId,
         details: [
-          TelegramLinkDetail('Gift', gift?.str('title') ?? gift?.type ?? '—'),
           TelegramLinkDetail(
-            'Status',
+            AppStrings.t(AppStringKeys.linkHandlerDetailGift),
+            gift?.str('title') ?? gift?.type ?? '—',
+          ),
+          TelegramLinkDetail(
+            AppStrings.t(AppStringKeys.linkHandlerDetailStatus),
             (state?.type ?? 'unknown').replaceFirst('auctionState', ''),
           ),
           if ((state?.int64('minimum_bid_star_count') ?? 0) > 0)
             TelegramLinkDetail(
-              'Minimum bid',
+              AppStrings.t(AppStringKeys.linkHandlerDetailMinimumBid),
               '⭐ ${state?.int64('minimum_bid_star_count')}',
-            ),
-        ],
-      ),
-    ),
-  );
-}
-
-Future<void> _openPremiumFeatures(NavigatorState nav, String referrer) async {
-  final result = await TdClient.shared.query({
-    '@type': 'getPremiumFeatures',
-    'source': {'@type': 'premiumSourceLink', 'referrer': referrer},
-  });
-  if (!nav.mounted) return;
-  final features = result.objects('features') ?? const <Map<String, dynamic>>[];
-  final limits = result.objects('limits') ?? const <Map<String, dynamic>>[];
-  await nav.push(
-    MaterialPageRoute<void>(
-      builder: (_) => TelegramLinkDetailsView(
-        title: AppStrings.t(AppStringKeys.linkHandlerTelegramPremium),
-        icon: HeroAppIcons.solidStar,
-        subtitle: 'Features available for this account',
-        details: [
-          TelegramLinkDetail('Features', '${features.length}'),
-          TelegramLinkDetail('Higher limits', '${limits.length}'),
-          if (result.obj('payment_link')?.type case final String paymentType)
-            TelegramLinkDetail(
-              'Purchase option',
-              paymentType.replaceFirst('internalLinkType', ''),
             ),
         ],
       ),
@@ -2013,7 +2211,9 @@ Future<void> _addTextCompositionStyle(BuildContext context, String name) async {
     if (!context.mounted) return;
     final accepted = await showAppConfirmDialog(
       context,
-      title: style.title.isEmpty ? 'Writing style' : style.title,
+      title: style.title.isEmpty
+          ? AppStrings.t(AppStringKeys.linkHandlerWritingStyle)
+          : style.title,
       message: style.prompt,
       confirmText: AppStrings.t(AppStringKeys.confirmContinue),
     );
@@ -2080,24 +2280,35 @@ Future<void> _confirmQrAuthentication(BuildContext context, String link) async {
   });
 }
 
-Future<void> _showDeepLinkInfoOrExternal(String link) async {
+Future<void> _showDeepLinkInfoOrExternal(
+  BuildContext context,
+  String link,
+) async {
   try {
     await TdClient.shared.query({'@type': 'getDeepLinkInfo', 'link': link});
   } catch (_) {}
-  await _external(link);
+  if (context.mounted) await _openBrowserLink(context, link);
 }
 
 Future<bool> _openPrivateMessageLink(
   NavigatorState nav,
-  List<String> segments,
-) async {
+  List<String> segments, {
+  required int? messageId,
+  InternalChatLinkTarget? sourceChat,
+  _TdLinkQuery? query,
+}) async {
   if (segments.length < 3) return false;
   final internalId = int.tryParse(segments[1]);
-  final messageId = int.tryParse(segments[2]);
   if (internalId == null) return false;
   final chatId = int.tryParse('-100$internalId');
   if (chatId == null) return false;
-  await _openChat(nav, chatId, initialMessageId: messageId);
+  await _openChat(
+    nav,
+    chatId,
+    initialMessageId: messageId,
+    sourceChat: sourceChat,
+    query: query,
+  );
   return true;
 }
 
@@ -2108,28 +2319,42 @@ Future<void> _openChat(
   NavigatorState nav,
   int? chatId, {
   int? initialMessageId,
+  InternalChatLinkTarget? sourceChat,
+  _TdLinkQuery? query,
 }) async {
   if (chatId == null) return;
+  if (sourceChat?.chatId == chatId &&
+      initialMessageId != null &&
+      initialMessageId > 0) {
+    await routeResolvedInternalChatLink(
+      chatId: chatId,
+      title: '',
+      messageId: initialMessageId,
+      source: sourceChat,
+    );
+    return;
+  }
   var title = '';
   try {
-    final chat = await TdClient.shared.query({
+    final chat = await (query ?? TdClient.shared.query)({
       '@type': 'getChat',
       'chat_id': chatId,
     });
     title = chat.str('title') ?? '';
   } catch (_) {}
   if (!nav.mounted) return;
-  final chatNavigator = appNavigatorKey.currentState ?? nav;
-  unawaited(
-    chatNavigator.push(
-      AppChatPageRoute<void>(
-        builder: (_) => ChatView(
-          chatId: chatId,
-          title: title,
-          initialMessageId: initialMessageId,
-        ),
-      ),
-    ),
+  if (await handoffChatToPrimaryWindow(
+    chatId: chatId,
+    title: title,
+    initialMessageId: initialMessageId,
+  )) {
+    return;
+  }
+  await routeResolvedInternalChatLink(
+    chatId: chatId,
+    title: title,
+    messageId: initialMessageId,
+    source: sourceChat,
   );
 }
 
@@ -2201,21 +2426,48 @@ Future<void> _joinFolderInvite(
   }
 }
 
-Future<void> _external(String url) async {
-  var u = url;
-  if (!u.contains('://') && !u.startsWith('tg:')) u = 'https://$u';
-  final uri = Uri.tryParse(u);
+Future<void> _launchExternal(String url) async {
+  final uri = parseLinkUri(url);
   if (uri == null) return;
-  // Open in the external browser. We deliberately do NOT gate on canLaunchUrl():
-  // on Android 11+ it returns false when no browser package is visible to the
-  // query filter, silently swallowing perfectly valid non-Telegram links. Try
-  // the external app first, then fall back to the platform default.
-  for (final mode in const [
-    LaunchMode.externalApplication,
-    LaunchMode.platformDefault,
-  ]) {
-    try {
-      if (await launchUrl(uri, mode: mode)) return;
-    } catch (_) {}
+  await launchInDefaultBrowser(uri);
+}
+
+Future<void> _openBrowserLink(
+  BuildContext context,
+  String url, {
+  LinkOpenTarget? target,
+}) async {
+  final uri = parseLinkUri(url);
+  if (uri == null) return;
+  final platform = Theme.of(context).platform;
+  final theme = Provider.of<ThemeController?>(context, listen: false);
+  target ??= linkOpenTargetFor(
+    mode: theme?.linkOpenMode ?? LinkOpenMode.defaultBrowser,
+    uri: uri,
+    platform: platform,
+  );
+  if (target == null) {
+    if (!context.mounted) return;
+    target = await showLinkBrowserChooser(context);
+  }
+  if (target == null || !context.mounted) return;
+
+  switch (target) {
+    case LinkOpenTarget.internalBrowser:
+      if (!internalBrowserCanOpen(uri) ||
+          !internalBrowserSupported(platform: platform)) {
+        await launchInDefaultBrowser(uri);
+        return;
+      }
+      await Navigator.of(context).push<void>(
+        AppPageRoute<void>(
+          pageBuilder: (browserContext, _, _) => InternalBrowserView(
+            initialUri: uri,
+            onOpenInApp: (link) => openLink(browserContext, link),
+          ),
+        ),
+      );
+    case LinkOpenTarget.defaultBrowser:
+      await launchInDefaultBrowser(uri);
   }
 }

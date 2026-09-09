@@ -6,6 +6,7 @@
 //  state in the chat view model.
 //
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -59,9 +60,18 @@ class PollComposerResult {
 }
 
 class PollComposerView extends StatefulWidget {
-  const PollComposerView({super.key, this.maxOptions = 30});
+  const PollComposerView({
+    super.key,
+    this.maxOptions = 30,
+    this.showBackButton = true,
+    this.onClose,
+    this.onSubmit,
+  });
 
   final int maxOptions;
+  final bool showBackButton;
+  final FutureOr<void> Function()? onClose;
+  final FutureOr<void> Function(PollComposerResult result)? onSubmit;
 
   @override
   State<PollComposerView> createState() => _PollComposerViewState();
@@ -208,24 +218,37 @@ class _PollComposerViewState extends State<PollComposerView> {
         PollOptionDraft(text: text, mediaPath: _options[index].mediaPath),
       );
     }
-    Navigator.of(context).pop(
-      PollComposerResult(
-        question: _question.text.trim(),
-        description: _description.text.trim(),
-        options: options,
-        pollMediaPath: _pollMediaPath,
-        isAnonymous: _anonymous,
-        allowsMultipleAnswers: !_quiz && _multiple,
-        allowsRevoting: _revoting,
-        allowAddingOptions: !_quiz && _allowAdding,
-        shuffleOptions: _shuffle,
-        hideResultsUntilCloses: _hideResults,
-        isQuiz: _quiz,
-        correctOptionIndexes: {for (final index in _correct) ?oldToNew[index]},
-        explanation: _quiz ? _explanation.text.trim() : '',
-        openPeriod: _openPeriod,
-      ),
+    final result = PollComposerResult(
+      question: _question.text.trim(),
+      description: _description.text.trim(),
+      options: options,
+      pollMediaPath: _pollMediaPath,
+      isAnonymous: _anonymous,
+      allowsMultipleAnswers: !_quiz && _multiple,
+      allowsRevoting: _revoting,
+      allowAddingOptions: !_quiz && _allowAdding,
+      shuffleOptions: _shuffle,
+      hideResultsUntilCloses: _hideResults,
+      isQuiz: _quiz,
+      correctOptionIndexes: {for (final index in _correct) ?oldToNew[index]},
+      explanation: _quiz ? _explanation.text.trim() : '',
+      openPeriod: _openPeriod,
     );
+    final callback = widget.onSubmit;
+    if (callback != null) {
+      unawaited(Future<void>.sync(() => callback(result)));
+      return;
+    }
+    Navigator.of(context).pop(result);
+  }
+
+  void _close() {
+    final callback = widget.onClose;
+    if (callback != null) {
+      unawaited(Future<void>.sync(callback));
+      return;
+    }
+    Navigator.of(context).pop();
   }
 
   @override
@@ -237,7 +260,7 @@ class _PollComposerViewState extends State<PollComposerView> {
         children: [
           NavHeader(
             title: AppStrings.t(AppStringKeys.pollComposerCreatePollTitle),
-            onBack: () => Navigator.of(context).pop(),
+            onBack: widget.showBackButton ? _close : null,
             trailing: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: _canSend ? _send : null,
@@ -270,14 +293,16 @@ class _PollComposerViewState extends State<PollComposerView> {
                   const InsetDivider(leadingInset: 16),
                   _field(
                     _description,
-                    'Description (optional)',
+                    AppStrings.t(AppStringKeys.pollComposerDescriptionOptional),
                     multiline: true,
                   ),
                   const InsetDivider(leadingInset: 16),
                   _mediaRow(
-                    title: _pollMediaPath == null
-                        ? 'Add poll media'
-                        : 'Poll media attached',
+                    title: AppStrings.t(
+                      _pollMediaPath == null
+                          ? AppStringKeys.pollComposerAddPollMedia
+                          : AppStringKeys.pollComposerPollMediaAttached,
+                    ),
                     path: _pollMediaPath,
                     onTap: _pickPollMedia,
                     onRemove: _pollMediaPath == null
@@ -312,16 +337,22 @@ class _PollComposerViewState extends State<PollComposerView> {
                 ),
                 const SizedBox(height: 14),
                 _card([
-                  _toggleRow('Quiz mode', _quiz, _setQuiz),
+                  _toggleRow(
+                    AppStrings.t(AppStringKeys.pollComposerQuizMode),
+                    _quiz,
+                    _setQuiz,
+                  ),
                   const InsetDivider(leadingInset: 16),
                   _toggleRow(
-                    'Multiple answers',
+                    AppStrings.t(
+                      AppStringKeys.pollComposerMultipleAnswersToggle,
+                    ),
                     _multiple,
                     _quiz ? null : (value) => setState(() => _multiple = value),
                   ),
                   const InsetDivider(leadingInset: 16),
                   _toggleRow(
-                    'Anonymous voting',
+                    AppStrings.t(AppStringKeys.pollComposerAnonymousVoting),
                     _anonymous,
                     (value) => setState(() {
                       _anonymous = value;
@@ -330,13 +361,13 @@ class _PollComposerViewState extends State<PollComposerView> {
                   ),
                   const InsetDivider(leadingInset: 16),
                   _toggleRow(
-                    'Allow revoting',
+                    AppStrings.t(AppStringKeys.pollComposerAllowRevoting),
                     _revoting,
                     (value) => setState(() => _revoting = value),
                   ),
                   const InsetDivider(leadingInset: 16),
                   _toggleRow(
-                    'Allow people to add options',
+                    AppStrings.t(AppStringKeys.pollComposerAllowAddingOptions),
                     _allowAdding,
                     _quiz || _anonymous
                         ? null
@@ -344,13 +375,15 @@ class _PollComposerViewState extends State<PollComposerView> {
                   ),
                   const InsetDivider(leadingInset: 16),
                   _toggleRow(
-                    'Shuffle options',
+                    AppStrings.t(AppStringKeys.pollComposerShuffleOptions),
                     _shuffle,
                     (value) => setState(() => _shuffle = value),
                   ),
                   const InsetDivider(leadingInset: 16),
                   _toggleRow(
-                    'Hide results until poll closes',
+                    AppStrings.t(
+                      AppStringKeys.pollComposerHideResultsUntilClosed,
+                    ),
                     _hideResults,
                     (value) => setState(() => _hideResults = value),
                   ),
@@ -362,7 +395,10 @@ class _PollComposerViewState extends State<PollComposerView> {
                   _card([
                     _field(
                       _explanation,
-                      'Explanation shown after an incorrect answer',
+                      AppStrings.t(
+                        AppStringKeys
+                            .pollComposerExplanationAfterIncorrectAnswer,
+                      ),
                       multiline: true,
                     ),
                   ]),
@@ -443,7 +479,7 @@ class _PollComposerViewState extends State<PollComposerView> {
           ],
           if (option.mediaPath != null) ...[
             ClipRRect(
-              borderRadius: BorderRadius.circular(7),
+              borderRadius: BorderRadius.circular(AppRadius.md),
               child: Image.file(
                 File(option.mediaPath!),
                 width: 38,
@@ -573,16 +609,19 @@ class _PollComposerViewState extends State<PollComposerView> {
     );
   }
 
+  static const _durations = <(int, String)>[
+    (0, AppStringKeys.pollComposerTimerNone),
+    (300, AppStringKeys.pollComposerTimerFiveMinutes),
+    (3600, AppStringKeys.pollComposerTimerOneHour),
+    (86400, AppStringKeys.pollComposerTimerOneDay),
+    (604800, AppStringKeys.pollComposerTimerOneWeek),
+  ];
+
   Widget _durationRow() {
     final c = context.colors;
-    const values = <(int, String)>[
-      (0, 'No timer'),
-      (300, '5 minutes'),
-      (3600, '1 hour'),
-      (86400, '1 day'),
-      (604800, '1 week'),
-    ];
-    final selected = values.firstWhere((value) => value.$1 == _openPeriod);
+    final selected = _durations.firstWhere(
+      (duration) => duration.$1 == _openPeriod,
+    );
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 10, 10),
       child: Row(
@@ -596,7 +635,7 @@ class _PollComposerViewState extends State<PollComposerView> {
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () async {
-              final value = await _showDurationPicker(values);
+              final value = await _showDurationPicker();
               if (mounted && value != null) {
                 setState(() => _openPeriod = value);
               }
@@ -606,14 +645,14 @@ class _PollComposerViewState extends State<PollComposerView> {
               padding: const EdgeInsets.symmetric(horizontal: 11),
               decoration: BoxDecoration(
                 color: c.searchFill,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(AppRadius.control),
                 border: Border.all(color: c.divider, width: 0.5),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    selected.$2,
+                    AppStrings.t(selected.$2),
                     style: TextStyle(fontSize: 14, color: c.textPrimary),
                   ),
                   const SizedBox(width: 7),
@@ -631,80 +670,79 @@ class _PollComposerViewState extends State<PollComposerView> {
     );
   }
 
-  Future<int?> _showDurationPicker(List<(int, String)> values) =>
-      showAppModalSheet<int>(
-        context: context,
-        backgroundColor: Colors.transparent,
-        builder: (sheetContext) {
-          final c = sheetContext.colors;
-          return SafeArea(
-            top: false,
-            child: Container(
-              margin: const EdgeInsets.all(10),
-              padding: const EdgeInsets.fromLTRB(12, 14, 12, 10),
-              decoration: BoxDecoration(
-                color: c.card,
-                borderRadius: BorderRadius.circular(18),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x33000000),
-                    blurRadius: 20,
-                    offset: Offset(0, 7),
-                  ),
-                ],
+  Future<int?> _showDurationPicker() => showAppModalSheet<int>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    builder: (sheetContext) {
+      final c = sheetContext.colors;
+      return SafeArea(
+        top: false,
+        child: Container(
+          margin: const EdgeInsets.all(10),
+          padding: const EdgeInsets.fromLTRB(12, 14, 12, 10),
+          decoration: BoxDecoration(
+            color: c.card,
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x33000000),
+                blurRadius: 20,
+                offset: Offset(0, 7),
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 2, 8, 10),
-                    child: Text(
-                      AppStrings.t(
-                        AppStringKeys.pollComposerClosePollAutomatically,
-                      ),
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                        color: c.textPrimary,
-                      ),
-                    ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 2, 8, 10),
+                child: Text(
+                  AppStrings.t(
+                    AppStringKeys.pollComposerClosePollAutomatically,
                   ),
-                  for (final value in values)
-                    GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () => Navigator.of(sheetContext).pop(value.$1),
-                      child: SizedBox(
-                        height: 48,
-                        child: Row(
-                          children: [
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                value.$2,
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: c.textPrimary,
-                                ),
-                              ),
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                    color: c.textPrimary,
+                  ),
+                ),
+              ),
+              for (final value in _durations)
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => Navigator.of(sheetContext).pop(value.$1),
+                  child: SizedBox(
+                    height: 48,
+                    child: Row(
+                      children: [
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            value.$2,
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: c.textPrimary,
                             ),
-                            if (value.$1 == _openPeriod)
-                              AppIcon(
-                                HeroAppIcons.check,
-                                size: 18,
-                                color: AppTheme.brand,
-                              ),
-                            const SizedBox(width: 8),
-                          ],
+                          ),
                         ),
-                      ),
+                        if (value.$1 == _openPeriod)
+                          AppIcon(
+                            HeroAppIcons.check,
+                            size: 18,
+                            color: AppTheme.brand,
+                          ),
+                        const SizedBox(width: 8),
+                      ],
                     ),
-                ],
-              ),
-            ),
-          );
-        },
+                  ),
+                ),
+            ],
+          ),
+        ),
       );
+    },
+  );
 
   Widget _mediaRow({
     required String title,
@@ -722,7 +760,7 @@ class _PollComposerViewState extends State<PollComposerView> {
           children: [
             if (path != null) ...[
               ClipRRect(
-                borderRadius: BorderRadius.circular(7),
+                borderRadius: BorderRadius.circular(AppRadius.md),
                 child: Image.file(
                   File(path),
                   width: 38,

@@ -213,6 +213,10 @@ class _CustomEmojiViewState extends State<CustomEmojiView> {
   Widget build(BuildContext context) {
     final s = CustomEmojiCenter.shared.get(widget.id);
     if (s == null) return SizedBox(width: widget.size, height: widget.size);
+    // The glyph box is square and tight, so the decode size is known here —
+    // handing it to TDImage keeps inline emoji off its LayoutBuilder path.
+    final cacheSize = (widget.size * MediaQuery.devicePixelRatioOf(context))
+        .ceil();
     // tgs → animate via Lottie. webm is a video Image.file can't decode, so use
     // its static thumbnail. webp/other → the sticker file (falls back to thumb).
     Widget child;
@@ -220,7 +224,13 @@ class _CustomEmojiViewState extends State<CustomEmojiView> {
       case CustomEmojiPresentation.staticThumbnail:
         // Status emoji can stay entirely on their static TDLib thumbnail when
         // animation is disabled, avoiding Lottie work and video decoders.
-        child = TDImage(photo: s.thumb!, cornerRadius: 0, fit: BoxFit.contain);
+        child = TDImage(
+          photo: s.thumb!,
+          cornerRadius: 0,
+          fit: BoxFit.contain,
+          cacheWidth: cacheSize,
+          cacheHeight: cacheSize,
+        );
         break;
       case CustomEmojiPresentation.tgs:
         // Inline emoji render at text size; 30 fps is indistinguishable there
@@ -239,7 +249,13 @@ class _CustomEmojiViewState extends State<CustomEmojiView> {
         if (img == null) {
           return SizedBox(width: widget.size, height: widget.size);
         }
-        child = TDImage(photo: img, cornerRadius: 0, fit: BoxFit.contain);
+        child = TDImage(
+          photo: img,
+          cornerRadius: 0,
+          fit: BoxFit.contain,
+          cacheWidth: cacheSize,
+          cacheHeight: cacheSize,
+        );
         break;
     }
     // Monochrome (needs_repainting) emoji are white glyphs — tint to the
@@ -252,6 +268,52 @@ class _CustomEmojiViewState extends State<CustomEmojiView> {
     }
     return SizedBox(width: widget.size, height: widget.size, child: child);
   }
+}
+
+/// Keeps the Unicode fallback of a message custom emoji in the surrounding
+/// selection region while rendering its resolved Telegram asset normally.
+///
+/// A bare [WidgetSpan] contributes no text to Flutter selection. The
+/// transparent paragraph is painted above the asset so its selection highlight
+/// remains visible and copying preserves [fallbackText].
+class SelectableCustomEmojiView extends StatelessWidget {
+  const SelectableCustomEmojiView({
+    super.key,
+    required this.id,
+    required this.fallbackText,
+    this.size = 20,
+    this.color,
+  });
+
+  final int id;
+  final String fallbackText;
+  final double size;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) => SizedBox.square(
+    dimension: size,
+    child: Stack(
+      fit: StackFit.expand,
+      children: [
+        IgnorePointer(
+          child: CustomEmojiView(id: id, size: size, color: color),
+        ),
+        Text(
+          fallbackText,
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.clip,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Colors.transparent,
+            fontSize: size * 0.9,
+            height: 1,
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 /// A custom emoji used specifically as an account or chat status. Status

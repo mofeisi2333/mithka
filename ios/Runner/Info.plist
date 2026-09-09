@@ -14,6 +14,18 @@
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER).deeplink</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>mk</string>
+				<string>mithka</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleName</key>
 	<string>Mithka</string>
 	<key>CFBundlePackageType</key>
@@ -51,6 +63,7 @@
 	<string>Mithka needs permission to save images and videos to Photos.</string>
 	<key>NSUserActivityTypes</key>
 	<array>
+		<string>ad.neko.mithka.chat</string>
 		<string>INSendMessageIntent</string>
 	</array>
 	<key>SentryDSNEncoded</key>

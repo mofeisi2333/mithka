@@ -5,10 +5,13 @@
 //  mapped from the reference app's personal album. Tap a photo to view it full-screen.
 //
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 
-import '../chat/full_image_viewer.dart';
+import '../app/ipad_window_chrome.dart';
+import '../chat/image_preview.dart';
 import '../components/app_icons.dart';
 import '../components/photo_avatar.dart';
 import '../tdlib/json_helpers.dart';
@@ -73,7 +76,11 @@ class _MyAlbumViewState extends State<MyAlbumView> {
   Widget _header() {
     final c = context.colors;
     return Container(
-      padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
+      padding: EdgeInsets.only(
+        top:
+            MediaQuery.of(context).padding.top +
+            iPadWindowChromeInsetOf(context),
+      ),
       decoration: BoxDecoration(
         color: c.navBar,
         border: Border(bottom: BorderSide(color: c.divider, width: 0.5)),
@@ -140,12 +147,8 @@ class _MyAlbumViewState extends State<MyAlbumView> {
       ),
       itemCount: _photos.length,
       itemBuilder: (context, i) => GestureDetector(
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(
-            fullscreenDialog: true,
-            builder: (_) => FullImageViewer(items: _photos, startIndex: i),
-          ),
-        ),
+        onTap: () =>
+            unawaited(openImagePreview(context, items: _photos, startIndex: i)),
         child: TDImage(photo: _photos[i]),
       ),
     );

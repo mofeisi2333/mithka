@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mithka/l10n/app_localizations.dart';
@@ -5,11 +7,10 @@ import 'package:mithka/l10n/app_localizations.dart';
 import '../chat/file_detail_view.dart';
 import '../chat/link_handler.dart';
 import '../chat/telegram_rich_text.dart';
-import '../components/app_icons.dart';
+import '../components/document_file_icon.dart';
 import '../components/photo_avatar.dart';
 import '../components/toast.dart';
-import '../l10n/telegram_language_controller.dart';
-import '../profile/profile_detail_view.dart';
+import '../profile/adaptive_profile_launcher.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
@@ -48,10 +49,8 @@ class TopicPostContent extends StatelessWidget {
           overflow: textOverflow,
           style: textStyle,
           onMentionTap: (userId, name) {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => ProfileDetailView(userId: userId, name: name),
-              ),
+            unawaited(
+              openAdaptiveUserProfile(context, userId: userId, name: name),
             );
           },
         ),
@@ -101,7 +100,7 @@ class _TopicContentImage extends StatelessWidget {
     final width = MediaQuery.of(context).size.width - 28;
     final height = _imageHeight(width);
     return ClipRRect(
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(AppRadius.md),
       child: SizedBox(
         width: width,
         height: height,
@@ -151,7 +150,7 @@ class _TopicFileCard extends StatelessWidget {
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: c.card,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(AppRadius.control),
           border: Border.all(color: c.divider, width: 0.5),
         ),
         child: Column(
@@ -178,7 +177,10 @@ class _TopicFileCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 10),
-                _FileGlyph(ext: document.ext),
+                DocumentFileIcon(
+                  fileName: document.fileName,
+                  extension: document.ext,
+                ),
               ],
             ),
             if (caption.isNotEmpty) ...[
@@ -190,10 +192,11 @@ class _TopicFileCard extends StatelessWidget {
                 entities: captionEntities,
                 style: captionStyle,
                 onMentionTap: (userId, name) {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          ProfileDetailView(userId: userId, name: name),
+                  unawaited(
+                    openAdaptiveUserProfile(
+                      context,
+                      userId: userId,
+                      name: name,
                     ),
                   );
                 },
@@ -207,7 +210,7 @@ class _TopicFileCard extends StatelessWidget {
 
   String _byteString(int bytes) {
     if (bytes <= 0) {
-      return telegramText(AppStringKeys.topicPostContentFile);
+      return AppStrings.t(AppStringKeys.topicPostContentFile);
     }
     const units = ['B', 'KB', 'MB', 'GB'];
     var value = bytes.toDouble();
@@ -220,59 +223,6 @@ class _TopicFileCard extends StatelessWidget {
         ? value.toStringAsFixed(0)
         : value.toStringAsFixed(1);
     return '$number ${units[unit]}';
-  }
-}
-
-class _FileGlyph extends StatelessWidget {
-  const _FileGlyph({required this.ext});
-
-  final String ext;
-
-  @override
-  Widget build(BuildContext context) {
-    final normalized = ext.toUpperCase();
-    return SizedBox(
-      width: 42,
-      height: 46,
-      child: Stack(
-        clipBehavior: Clip.none,
-        alignment: Alignment.center,
-        children: [
-          AppIcon(
-            HeroAppIcons.solidFile,
-            size: 40,
-            color: _fileColor(normalized),
-          ),
-          Positioned(
-            bottom: 8,
-            child: Text(
-              _fileBadge(normalized),
-              style: const TextStyle(
-                fontSize: 8,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Color _fileColor(String ext) {
-    return switch (ext) {
-      'PDF' => const Color(0xFFFF3B30),
-      'DOC' || 'DOCX' => const Color(0xFF2F80ED),
-      'XLS' || 'XLSX' => const Color(0xFF22A06B),
-      'PPT' || 'PPTX' => const Color(0xFFFF9500),
-      'ZIP' || 'RAR' || '7Z' => const Color(0xFF8E8E93),
-      _ => AppTheme.brand,
-    };
-  }
-
-  String _fileBadge(String ext) {
-    if (ext.isEmpty) return 'FILE';
-    return ext.length > 4 ? ext.substring(0, 4) : ext;
   }
 }
 
@@ -305,7 +255,7 @@ class _TopicButtonRows extends StatelessWidget {
                       ),
                       decoration: BoxDecoration(
                         color: c.searchFill,
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(AppRadius.control),
                         border: Border.all(color: c.divider, width: 0.5),
                       ),
                       child: Text(

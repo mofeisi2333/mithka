@@ -1,15 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:heroicons_flutter/heroicons_flutter.dart';
 import 'package:mithka/chat/message_action_menu.dart';
+import 'package:mithka/chat/message_reaction_availability.dart';
 import 'package:mithka/chat/quick_reaction_choice.dart';
+import 'package:mithka/components/app_icons.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:mithka/settings/translation_controller.dart';
 import 'package:mithka/tdlib/td_models.dart';
+import 'package:mithka/theme/app_theme.dart';
 import 'package:mithka/theme/theme_controller.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test('message action rows stay balanced', () {
     expect(MessageActionMenu.rowCountsForActionCount(6), (first: 3, second: 3));
     expect(MessageActionMenu.rowCountsForActionCount(7), (first: 4, second: 3));
@@ -22,9 +28,105 @@ void main() {
     }
   });
 
-  test('action menu matches the compact reaction bar width', () {
+  test('mobile action menu uses content width through a two-by-five grid', () {
     expect(MessageActionMenu.widthForAvailable(400), 332);
     expect(MessageActionMenu.widthForAvailable(300), 300);
+    expect(MessageActionMenu.mobileWidthForActionCount(4, 400), 244);
+    expect(MessageActionMenu.mobileWidthForActionCount(3, 400), 186);
+    expect(MessageActionMenu.mobileWidthForActionCount(5, 400), 302);
+    expect(MessageActionMenu.mobileWidthForActionCount(6, 400), 186);
+    expect(MessageActionMenu.mobileWidthForActionCount(8, 400), 244);
+    expect(MessageActionMenu.mobileWidthForActionCount(9, 400), 302);
+    expect(MessageActionMenu.mobileWidthForActionCount(10, 400), 302);
+    expect(MessageActionMenu.mobileWidthForActionCount(11, 400), 332);
+    expect(MessageActionMenu.mobileWidthForActionCount(10, 280), 280);
+  });
+
+  test('grid labels stay within eight characters in every locale', () async {
+    for (final locale in AppLocalizations.supportedLocales) {
+      await AppStrings.ensureLoaded(locale);
+      final localeKey = AppLocalizations.localeKeyFor(locale);
+      for (final action in MessageAction.values) {
+        final fullLabel = AppStrings.tForLocale(localeKey, action.label);
+        final gridLabel = MessageActionMenu.gridLabel(fullLabel);
+        expect(
+          gridLabel.runes.length,
+          lessThanOrEqualTo(MessageActionMenu.maxGridLabelCharacters),
+          reason: '${locale.toLanguageTag()} ${action.name}: $gridLabel',
+        );
+      }
+    }
+    expect(MessageActionMenu.gridLabel('Select multiple'), 'Select…');
+  });
+
+  test('forward has a dedicated curved-right glyph', () {
+    expect(MessageAction.forward.glyph, same(HeroAppIcons.forward));
+    expect(HeroAppIcons.forward.data, HeroiconsOutline.arrowUturnRight);
+    expect(HeroAppIcons.forward.data, isNot(HeroAppIcons.share.data));
+  });
+
+  test('desktop context menu starts at pointer and stays on screen', () {
+    expect(
+      MessageActionMenu.desktopOriginForPointer(
+        pointer: const Offset(180, 120),
+        viewport: const Size(640, 420),
+        menuSize: const Size(220, 240),
+        topSafe: 8,
+        bottomSafe: 412,
+      ),
+      const Offset(180, 120),
+    );
+    expect(
+      MessageActionMenu.desktopOriginForPointer(
+        pointer: const Offset(630, 410),
+        viewport: const Size(640, 420),
+        menuSize: const Size(220, 240),
+        topSafe: 8,
+        bottomSafe: 412,
+      ),
+      const Offset(410, 172),
+    );
+  });
+
+  test('desktop context menu converts a global pointer to its overlay', () {
+    final localRect = MessageActionMenu.rectInOverlay(
+      const Rect.fromLTWH(460, 180, 0, 0),
+      globalToLocal: (point) => point - const Offset(320, 40),
+    );
+
+    expect(localRect, const Rect.fromLTWH(140, 140, 0, 0));
+    expect(
+      MessageActionMenu.desktopOriginForPointer(
+        pointer: localRect.topLeft,
+        viewport: const Size(720, 520),
+        menuSize: const Size(220, 240),
+        topSafe: 8,
+        bottomSafe: 512,
+      ),
+      const Offset(140, 140),
+    );
+  });
+
+  test('mobile dropdown replaces message bounds with the press position', () {
+    const target = Rect.fromLTWH(20, 40, 180, 64);
+    const pointer = Offset(140, 186);
+
+    expect(
+      MessageActionMenu.anchorRectForPresentation(
+        targetRect: target,
+        pointer: pointer,
+        usePointer: true,
+      ),
+      const Rect.fromLTWH(140, 186, 0, 0),
+    );
+    expect(
+      MessageActionMenu.anchorRectForPresentation(
+        targetRect: target,
+        pointer: pointer,
+        usePointer: false,
+      ),
+      target,
+    );
   });
 
   testWidgets('ten or fewer reaction controls fit without overflow', (
@@ -54,6 +156,43 @@ void main() {
     expect(find.byKey(const ValueKey('quick-reaction-expand')), findsOneWidget);
   });
 
+  testWidgets('quick bar renders only reactions allowed for the message', (
+    tester,
+  ) async {
+    final availability = MessageReactionAvailability.fromTd({
+      '@type': 'availableReactions',
+      'top_reactions': [
+        {
+          '@type': 'availableReaction',
+          'type': {'@type': 'reactionTypeEmoji', 'emoji': '👍'},
+          'needs_premium': false,
+        },
+      ],
+      'recent_reactions': <Map<String, dynamic>>[],
+      'popular_reactions': <Map<String, dynamic>>[],
+      'allow_custom_emoji': false,
+      'are_tags': false,
+      'unavailability_reason': null,
+    }, isPremium: false);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: QuickReactionBar(
+          reactions: availability.quickChoices(defaultQuickReactions),
+          onReaction: (_) {},
+          onExpand: () {},
+        ),
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey('quick-reaction-emoji:👍')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('quick-reaction-emoji:❤️')), findsNothing);
+    expect(find.byKey(const ValueKey('quick-reaction-expand')), findsOneWidget);
+  });
+
   test(
     'quick reactions persist order, custom emoji, and the nine-item cap',
     () async {
@@ -70,6 +209,26 @@ void main() {
       expect(restored, hasLength(9));
       expect(restored.first, custom);
       expect(restored[1], const QuickReactionChoice.emoji('👍'));
+    },
+  );
+
+  test(
+    'mobile message action menu style defaults to grid and persists',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final theme = ThemeController(prefs);
+      expect(
+        theme.mobileMessageActionMenuStyle,
+        MobileMessageActionMenuStyle.grid,
+      );
+
+      theme.mobileMessageActionMenuStyle =
+          MobileMessageActionMenuStyle.dropdown;
+      expect(
+        ThemeController(prefs).mobileMessageActionMenuStyle,
+        MobileMessageActionMenuStyle.dropdown,
+      );
     },
   );
 
@@ -114,7 +273,9 @@ void main() {
     expect(ThemeController(prefs).quickRepliesEnabled, isFalse);
   });
 
-  testWidgets('message menu renders +1 at reaction bar width', (tester) async {
+  testWidgets('message menu renders +1 at its action content width', (
+    tester,
+  ) async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
     final translation = TranslationController(prefs);
@@ -150,8 +311,117 @@ void main() {
       tester
           .getSize(find.byKey(const ValueKey('message-action-menu-surface')))
           .width,
-      MessageActionMenu.preferredWidth,
+      244,
     );
+  });
+
+  testWidgets('desktop message actions render as a compact vertical list', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final translation = TranslationController(prefs);
+    await tester.binding.setSurfaceSize(const Size(500, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: translation,
+        child: MaterialApp(
+          theme: ThemeData(platform: TargetPlatform.macOS),
+          locale: const Locale('en'),
+          localizationsDelegates: const [AppLocalizations.delegate],
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.topLeft,
+              child: MessageActionMenu(
+                message: ChatMessage(
+                  id: 18,
+                  isOutgoing: false,
+                  text: 'desktop menu',
+                  date: 1,
+                  contentType: 'messageText',
+                ),
+                isPinned: false,
+                onSelect: (_) {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final surface = find.byKey(const ValueKey('message-action-menu-surface'));
+    expect(
+      tester.getSize(surface).width,
+      MessageActionMenu.desktopPreferredWidth,
+    );
+    final copy = tester.getTopLeft(
+      find.byKey(const ValueKey('message-action-copy')),
+    );
+    final reply = tester.getTopLeft(
+      find.byKey(const ValueKey('message-action-reply')),
+    );
+    final forward = tester.getTopLeft(
+      find.byKey(const ValueKey('message-action-forward')),
+    );
+    expect(reply.dx, copy.dx);
+    expect(forward.dx, copy.dx);
+    expect(reply.dy, greaterThan(copy.dy));
+    expect(forward.dy, greaterThan(reply.dy));
+  });
+
+  testWidgets('mobile dropdown reuses the compact vertical action list', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final translation = TranslationController(prefs);
+    await tester.binding.setSurfaceSize(const Size(400, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: translation,
+        child: MaterialApp(
+          theme: ThemeData(platform: TargetPlatform.iOS),
+          locale: const Locale('en'),
+          localizationsDelegates: const [AppLocalizations.delegate],
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.topLeft,
+              child: MessageActionMenu(
+                message: ChatMessage(
+                  id: 19,
+                  isOutgoing: false,
+                  text: 'mobile dropdown',
+                  date: 1,
+                  contentType: 'messageText',
+                  commentCount: 2,
+                ),
+                isPinned: false,
+                layout: MessageActionMenuLayout.vertical,
+                onSelect: (_) {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey('message-action-menu-vertical-list')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .getSize(find.byKey(const ValueKey('message-action-menu-surface')))
+          .width,
+      MessageActionMenu.desktopPreferredWidth,
+    );
+    expect(find.text('View replies'), findsOneWidget);
   });
 
   testWidgets('captionless outgoing media still exposes edit', (tester) async {
@@ -218,7 +488,11 @@ void main() {
     );
 
     expect(find.text('Reply'), findsOneWidget);
-    expect(find.text('View replies'), findsOneWidget);
+    expect(
+      find.text(MessageActionMenu.gridLabel('View replies')),
+      findsOneWidget,
+    );
+    expect(find.bySemanticsLabel('View replies'), findsOneWidget);
     expect(find.byKey(const ValueKey('message-action-info')), findsNothing);
   });
 
@@ -263,5 +537,234 @@ void main() {
       find.byKey(const ValueKey('message-action-addToPlaylist')),
       findsNothing,
     );
+  });
+
+  testWidgets('translated-only messages expose the original toggle', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final translation = TranslationController(prefs)
+      ..displayStyle = TranslationDisplayStyle.translatedOnly;
+    MessageAction? selected;
+    final message = ChatMessage(
+      id: 5,
+      isOutgoing: false,
+      text: 'Original',
+      date: 1,
+      contentType: 'messageText',
+      translationText: 'Translated',
+      translationLanguageCode: 'en',
+    );
+
+    Future<void> pump({required bool showingOriginal}) => tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: translation,
+        child: MaterialApp(
+          locale: const Locale('en'),
+          localizationsDelegates: const [AppLocalizations.delegate],
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Scaffold(
+            body: MessageActionMenu(
+              message: message,
+              isPinned: false,
+              showingOriginalTranslation: showingOriginal,
+              onSelect: (action) => selected = action,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await pump(showingOriginal: false);
+    expect(find.bySemanticsLabel('Display original'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey('message-action-displayOriginal')),
+    );
+    expect(selected, MessageAction.displayOriginal);
+
+    await pump(showingOriginal: true);
+    expect(find.bySemanticsLabel('Display translation'), findsOneWidget);
+    expect(find.bySemanticsLabel('Display original'), findsNothing);
+  });
+
+  testWidgets('translation action can be hidden when no provider is usable', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({'translation.enabled': true});
+    final prefs = await SharedPreferences.getInstance();
+    final translation = TranslationController(prefs);
+    addTearDown(translation.dispose);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: translation,
+        child: MaterialApp(
+          home: Scaffold(
+            body: MessageActionMenu(
+              message: ChatMessage(
+                id: 9,
+                isOutgoing: false,
+                text: 'Bot message',
+                date: 1,
+                contentType: 'messageText',
+              ),
+              isPinned: false,
+              allowTranslation: false,
+              onSelect: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey('message-action-translate')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('the desktop strip is laid out to the menu it rides on', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: MessageActionMenu.desktopPreferredWidth,
+            child: MenuReactionBar(
+              reactions: const [
+                QuickReactionChoice.emoji('\u{1F44D}'),
+                QuickReactionChoice.emoji('\u2764\uFE0F'),
+                QuickReactionChoice.emoji('\u{1F525}'),
+                QuickReactionChoice.emoji('\u{1F389}'),
+                QuickReactionChoice.emoji('\u{1F601}'),
+                QuickReactionChoice.emoji('\u{1F622}'),
+                QuickReactionChoice.emoji('\u{1F621}'),
+              ],
+              onReaction: (_) {},
+              onExpand: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+    final strip = find.byKey(const ValueKey('menu-reaction-bar'));
+    expect(
+      tester.getSize(strip),
+      const Size(
+        MessageActionMenu.desktopPreferredWidth,
+        MenuReactionBar.height,
+      ),
+    );
+    // The seventh configured reaction lives behind the expand button.
+    expect(
+      find.byKey(const ValueKey('menu-reaction-emoji:\u{1F621}')),
+      findsNothing,
+    );
+    expect(find.byKey(const ValueKey('menu-reaction-expand')), findsOneWidget);
+
+    // Same surface, same corner, same hairline as the menu below it: the two
+    // are one stack, not a pill parked on a card.
+    final decoration =
+        tester.widget<Container>(strip).decoration! as BoxDecoration;
+    expect(decoration.color, MessageActionMenu.surface);
+    expect(decoration.borderRadius, BorderRadius.circular(AppRadius.control));
+    expect(decoration.border, isNotNull);
+  });
+
+  testWidgets('the desktop strip reports the slot that was clicked', (
+    tester,
+  ) async {
+    QuickReactionChoice? reacted;
+    var expanded = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: MessageActionMenu.desktopPreferredWidth,
+            child: MenuReactionBar(
+              reactions: const [
+                QuickReactionChoice.emoji('\u{1F44D}'),
+                QuickReactionChoice.emoji('\u2764\uFE0F'),
+              ],
+              onReaction: (reaction) => reacted = reaction,
+              onExpand: () => expanded += 1,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('menu-reaction-emoji:\u2764\uFE0F')),
+    );
+    await tester.pump();
+    expect(reacted, const QuickReactionChoice.emoji('\u2764\uFE0F'));
+
+    await tester.tap(find.byKey(const ValueKey('menu-reaction-expand')));
+    await tester.pump();
+    expect(expanded, 1);
+  });
+  testWidgets('desktop media offers a save panel instead of the album', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final translation = TranslationController(prefs);
+    await tester.binding.setSurfaceSize(const Size(500, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    Widget menuFor(TargetPlatform platform) => ChangeNotifierProvider.value(
+      value: translation,
+      child: MaterialApp(
+        theme: ThemeData(platform: platform),
+        locale: const Locale('en'),
+        localizationsDelegates: const [AppLocalizations.delegate],
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: MessageActionMenu(
+              message: ChatMessage(
+                id: 42,
+                isOutgoing: false,
+                text: '',
+                date: 1,
+                contentType: 'messagePhoto',
+                image: TdFileRef(id: 42),
+              ),
+              isPinned: false,
+              onSelect: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(menuFor(TargetPlatform.macOS));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('message-action-saveAs')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('message-action-saveToPhotos')),
+      findsNothing,
+    );
+    expect(find.text('Save As…'), findsOneWidget);
+
+    // MaterialApp lerps between themes, so the platform swap only lands once
+    // the theme animation has settled.
+    await tester.pumpWidget(menuFor(TargetPlatform.iOS));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('message-action-saveToPhotos')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('message-action-saveAs')), findsNothing);
   });
 }

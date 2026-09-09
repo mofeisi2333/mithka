@@ -1,19 +1,16 @@
 name: 🚀 Multi-platform Releases
 
-# Builds per-ABI Android APKs and Windows, macOS, and Linux desktop archives
-# from nightly/release. Each Android ABI
+# Builds per-ABI Android APKs, Windows installers, and portable Windows, macOS,
+# and Linux desktop archives plus Linux AppImages from nightly/release. Each Android ABI
 # (arm64-v8a, armeabi-v7a) builds in its OWN parallel matrix job and downloads
-# the pinned prebuilt native TDLib (tdjson) asset from iebb/mithka-tdjson. A
-# desktop job compiles the same pinned, patched TDLib source for its host OS.
+# the pinned prebuilt native TDLib (tdjson) asset from iebb/mithka-tdjson. Each
+# desktop job downloads the matching pinned prebuilt asset for its host OS.
 # A final job creates the version tag from pubspec.yaml and publishes every
 # package: nightly creates a dated pre-release, release creates a stable release.
-# Before 2026-08-01 UTC, each ABI publishes only a compatibility APK whose
-# version code is the normal YYMMDDHH code plus 2000; it is valid for all users.
-# The standard APK remains an internal source/fallback and is published only if
-# compatibility packaging fails. From 2026-08-01 UTC, only standard APKs are
-# produced.
+# Each Android ABI publishes one standard APK using the tracked Android release
+# code, matching the Google Play artifact built from the same release commit.
 #
-# master never builds release packages. The twice-daily sync workflow merges new master
+# master never builds release packages. The daily sync workflow merges new master
 # commits into nightly, increments the patch version once, and dispatches this
 # workflow.
 #
@@ -21,9 +18,9 @@ name: 🚀 Multi-platform Releases
 #   TELEGRAM_API_ID, TELEGRAM_API_HASH   — baked into lib/config/secrets.dart
 #   ANDROID_KEYSTORE_BASE64              — base64 of the upload keystore (.jks)
 #   ANDROID_KEYSTORE_PASSWORD            — store password
-#   ANDROID_KEY_PASSWORD                 — key password
+#   ANDROID_KEY_PASSWORD                 — key password (optional; defaults to store password)
 #   ANDROID_KEY_ALIAS                    — key alias (e.g. nekoko)
-# Without the ANDROID_* secrets the build still runs but is debug-signed.
+# Android release publishing fails closed if the required signing secrets are absent.
 
 on:
   push:
@@ -42,23 +39,25 @@ concurrency:
 
 permissions:
   contents: write
-  models: read
+  copilot-requests: write
 
 env:
-  # Keep each Mithka release reproducible by pinning an immutable TDLib build.
-  TDJSON_RELEASE_TAG: tdlib-1.8.66-1b08c83bc078-rebuild-29623073124-1
-  TDJSON_UPSTREAM_SHA: 1b08c83bc07888e4b0a6150d36c1364ff03cf930
+  FLUTTER_VERSION: '3.44.2'
 
 jobs:
+  quality:
+    name: Required quality gate
+    uses: ./.github/workflows/quality.yml
+
   prepare:
     name: Read pubspec version
+    needs: quality
     runs-on: ubuntu-latest
     outputs:
       app_version: ${{ steps.version.outputs.app_version }}
       version_code: ${{ steps.version.outputs.version_code }}
+      android_version_code: ${{ steps.version.outputs.android_version_code }}
       build_stamp: ${{ steps.version.outputs.build_stamp }}
-      compat_build_stamp: ${{ steps.version.outputs.compat_build_stamp }}
-      produce_compat_apk: ${{ steps.version.outputs.produce_compat_apk }}
       release_date: ${{ steps.version.outputs.release_date }}
       artifact_label: ${{ steps.version.outputs.artifact_label }}
       release_tag: ${{ steps.version.outputs.release_tag }}
@@ -68,7 +67,7 @@ jobs:
       make_latest: ${{ steps.version.outputs.make_latest }}
       short_sha: ${{ steps.version.outputs.short_sha }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Read version from pubspec.yaml
         id: version
@@ -83,16 +82,10 @@ jobs:
           case "$version_code" in
             ''|*[!0-9]*) echo "Invalid Android version code: $version_code" >&2; exit 1 ;;
           esac
-          read -r build_stamp build_day release_date release_title_date <<< "$(
-            date -u '+%y%m%d%H %y%m%d %Y%m%d %Y-%m-%d'
+          android_version_code="$(bash scripts/android-version-code.sh)"
+          read -r build_stamp release_date release_title_date <<< "$(
+            date -u '+%y%m%d%H %Y%m%d %Y-%m-%d'
           )"
-          if [ "$((10#$build_day))" -lt 260801 ]; then
-            compat_build_stamp="$((10#$build_stamp + 2000))"
-            produce_compat_apk="true"
-          else
-            compat_build_stamp=""
-            produce_compat_apk="false"
-          fi
           short_sha="${GITHUB_SHA::7}"
           branch_name="${GITHUB_REF_NAME:-${GITHUB_REF#refs/heads/}}"
           if [ "$DESKTOP_TEST_ONLY" = "true" ]; then
@@ -126,28 +119,24 @@ jobs:
               ;;
             esac
           fi
-          echo "app_version=$app_version" >> "$GITHUB_OUTPUT"
-          echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
-          echo "build_stamp=$build_stamp" >> "$GITHUB_OUTPUT"
-          echo "compat_build_stamp=$compat_build_stamp" >> "$GITHUB_OUTPUT"
-          echo "produce_compat_apk=$produce_compat_apk" >> "$GITHUB_OUTPUT"
-          echo "release_date=$release_date" >> "$GITHUB_OUTPUT"
-          echo "artifact_label=$artifact_label" >> "$GITHUB_OUTPUT"
-          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
-          echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
-          echo "release_channel=$release_channel" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
-          echo "make_latest=$make_latest" >> "$GITHUB_OUTPUT"
-          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
+          {
+            echo "app_version=$app_version"
+            echo "version_code=$version_code"
+            echo "android_version_code=$android_version_code"
+            echo "build_stamp=$build_stamp"
+            echo "release_date=$release_date"
+            echo "artifact_label=$artifact_label"
+            echo "release_tag=$release_tag"
+            echo "release_name=$release_name"
+            echo "release_channel=$release_channel"
+            echo "prerelease=$prerelease"
+            echo "make_latest=$make_latest"
+            echo "short_sha=$short_sha"
+          } >> "$GITHUB_OUTPUT"
           echo "Release tag: $release_tag"
           echo "Release channel: $release_channel"
-          echo "Android version code: $version_code"
+          echo "Android version code: $android_version_code"
           echo "GMT build stamp: $build_stamp"
-          if [ "$produce_compat_apk" = "true" ]; then
-            echo "Compatibility APK version code: $compat_build_stamp"
-          else
-            echo "Compatibility APK disabled from 2026-08-01 UTC"
-          fi
           echo "Release date: $release_date"
 
   build:
@@ -163,22 +152,17 @@ jobs:
             target: android-arm64
           - abi: armeabi-v7a
             target: android-arm
-    env:
-      TDJSON_REPO: iebb/mithka-tdjson
-      # fvp defaults Android MDK downloads to SourceForge nightly builds. Pin a
-      # stable MDK release to avoid native-load crashes from broken nightlies.
-      FVP_DEPS_URL: https://github.com/wang-bin/mdk-sdk/releases/download/v0.36.0
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
 
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.2'
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
 
@@ -210,67 +194,14 @@ jobs:
           yes | sdkmanager "ndk;28.2.13676358" >/dev/null 2>&1 || true
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
 
-      - name: Resolve tdjson release
-        id: tdjson_release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [ -n "${TDJSON_RELEASE_TAG:-}" ]; then
-            tag="$TDJSON_RELEASE_TAG"
-          else
-            tag="$(curl -fsSL \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              "https://api.github.com/repos/$TDJSON_REPO/releases?per_page=100" \
-              | python3 -c '
-          import json, sys
-          required = {
-              "tdjson-android-arm64-v8a.zip",
-              "tdjson-android-armeabi-v7a.zip",
-              "tdjson-android-x86_64.zip",
-          }
-          releases = json.load(sys.stdin)
-          print(next(
-              release["tag_name"]
-              for release in releases
-              if required.issubset({
-                  asset["name"] for asset in release.get("assets", [])
-              })
-          ))
-          ')"
-          fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "asset_url=https://github.com/$TDJSON_REPO/releases/download/$tag/tdjson-android-${{ matrix.abi }}.zip" >> "$GITHUB_OUTPUT"
-          echo "Using tdjson release $tag"
-
-      - name: Cache jniLibs (${{ matrix.abi }})
-        id: jnilibs-cache
-        uses: actions/cache@v5
+      - name: Cache tdjson (${{ matrix.abi }})
+        uses: actions/cache@v6
         with:
           path: android/app/src/main/jniLibs/${{ matrix.abi }}
-          key: jnilibs-${{ runner.os }}-${{ steps.tdjson_release.outputs.tag }}-${{ matrix.abi }}
-          restore-keys: |
-            jnilibs-${{ runner.os }}-
+          key: tdjson-android-${{ runner.os }}-${{ matrix.abi }}-${{ hashFiles('scripts/tdjson-manifest.json') }}
 
-      - name: Check cached tdjson
-        id: tdjson
-        run: |
-          if [ -s "android/app/src/main/jniLibs/${{ matrix.abi }}/libtdjson.so" ]; then
-            echo "cached=true" >> "$GITHUB_OUTPUT"
-            ls -lh "android/app/src/main/jniLibs/${{ matrix.abi }}/libtdjson.so"
-          else
-            echo "cached=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Download prebuilt tdjson (${{ matrix.abi }})
-        if: steps.tdjson.outputs.cached != 'true'
-        run: |
-          mkdir -p "android/app/src/main/jniLibs/${{ matrix.abi }}"
-          curl -fsSL "${{ steps.tdjson_release.outputs.asset_url }}" -o /tmp/tdjson-android.zip
-          unzip -q -o /tmp/tdjson-android.zip -d /tmp/tdjson-android
-          install -m 0644 "/tmp/tdjson-android/${{ matrix.abi }}/libtdjson.so" \
-            "android/app/src/main/jniLibs/${{ matrix.abi }}/libtdjson.so"
-          ls -lh "android/app/src/main/jniLibs/${{ matrix.abi }}/libtdjson.so"
+      - name: Install pinned tdjson (${{ matrix.abi }})
+        run: scripts/build-tdjson-android.sh "${{ matrix.abi }}"
 
       - name: Flutter dependencies
         run: flutter pub get
@@ -303,9 +234,11 @@ jobs:
           STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        if: ${{ env.KEYSTORE_B64 != '' }}
         run: |
-          echo "$KEYSTORE_B64" | base64 -d > android/app/upload-keystore.jks
+          : "${KEYSTORE_B64:?set ANDROID_KEYSTORE_BASE64 in repository secrets}"
+          : "${STORE_PASSWORD:?set ANDROID_KEYSTORE_PASSWORD in repository secrets}"
+          : "${KEY_ALIAS:?set ANDROID_KEY_ALIAS in repository secrets}"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > android/app/upload-keystore.jks
           cat > android/key.properties <<EOF
           storePassword=$STORE_PASSWORD
           keyPassword=${KEY_PASSWORD:-$STORE_PASSWORD}
@@ -320,7 +253,7 @@ jobs:
           flutter build apk --release --split-per-abi \
             --target-platform ${{ matrix.target }} \
             --build-name="${{ needs.prepare.outputs.app_version }}" \
-            --build-number="${{ needs.prepare.outputs.build_stamp }}" \
+            --build-number="${{ needs.prepare.outputs.android_version_code }}" \
             --dart-define="GIT_COMMIT=${{ needs.prepare.outputs.short_sha }}" \
             --dart-define="CI_BUILD_STAMP=${{ needs.prepare.outputs.build_stamp }}" \
             --dart-define="SENTRY_DSN=$SENTRY_DSN"
@@ -333,12 +266,38 @@ jobs:
             analyzer="$(command -v apkanalyzer)"
           fi
           actual_version_code="$("$analyzer" manifest version-code "$apk")"
-          expected_version_code="${{ needs.prepare.outputs.build_stamp }}"
+          expected_version_code="${{ needs.prepare.outputs.android_version_code }}"
           if [ "$actual_version_code" != "$expected_version_code" ]; then
             echo "Expected APK version code $expected_version_code, got $actual_version_code" >&2
             exit 1
           fi
           echo "APK version code: $actual_version_code"
+
+      - name: Verify APK signing certificate
+        run: |
+          apk="build/app/outputs/flutter-apk/app-${{ matrix.abi }}-release.apk"
+          apksigner="$(
+            find "$ANDROID_HOME/build-tools" -type f -name apksigner -perm -u+x \
+              | sort -V \
+              | tail -n 1
+          )"
+          test -x "$apksigner"
+          # Build Tools 36 reports "Signer #1" while Build Tools 37 reports
+          # per-scheme labels such as "V2 Signer:" for the same certificate.
+          signer_output="$("$apksigner" verify --print-certs "$apk")"
+          signer_digests="$(printf '%s\n' "$signer_output" \
+            | awk -F': ' '
+                /^(Signer #[0-9]+|V[0-9.]+ Signer( #[0-9]+)?:) certificate SHA-256 digest:/ {
+                  print tolower($NF)
+                }
+              ' \
+            | sort -u)"
+          expected_signer="645a22f43d59b67969da5d3d3e3092d70927746198e2cb76ecd6f02a80b51305"
+          if [ "$signer_digests" != "$expected_signer" ]; then
+            echo "APK must have exactly the expected release signing certificate" >&2
+            exit 1
+          fi
+          echo "APK signing certificate verified"
 
       - name: Verify APK native ABI contents
         run: |
@@ -360,269 +319,19 @@ jobs:
         run: |
           mkdir -p dist
           cp "build/app/outputs/flutter-apk/app-${{ matrix.abi }}-release.apk" \
-            "dist/mithka-${{ needs.prepare.outputs.artifact_label }}-${{ matrix.abi }}-vc${{ needs.prepare.outputs.build_stamp }}-release.apk"
-
-      - name: Patch and re-sign ${{ matrix.abi }} compatibility APK (+2000 version code)
-        id: compatibility_apk
-        if: needs.prepare.outputs.produce_compat_apk == 'true'
-        continue-on-error: true
-        env:
-          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        run: |
-          standard_apk="dist/mithka-${{ needs.prepare.outputs.artifact_label }}-${{ matrix.abi }}-vc${{ needs.prepare.outputs.build_stamp }}-release.apk"
-          compat_apk="dist/mithka-${{ needs.prepare.outputs.artifact_label }}-${{ matrix.abi }}-vc${{ needs.prepare.outputs.compat_build_stamp }}-compat-release.apk"
-          compat_work="$RUNNER_TEMP/mithka-compat-${{ matrix.abi }}"
-          unsigned_apk="$compat_work/compat-unsigned.apk"
-          aligned_apk="$compat_work/compat-aligned.apk"
-          mkdir -p "$compat_work"
-
-          # AndroidManifest.xml is binary AXML. Patch only its typed
-          # android:versionCode value, rewrite the ZIP container without the old
-          # signatures, then align and sign it with the same key as the standard
-          # APK. Dart, native libraries, resources, and assets are not rebuilt.
-          python3 - \
-            "$standard_apk" \
-            "$unsigned_apk" \
-            "${{ needs.prepare.outputs.build_stamp }}" \
-            "${{ needs.prepare.outputs.compat_build_stamp }}" <<'PY'
-          import struct
-          import sys
-          import zipfile
-
-          source_path, output_path, expected_raw, replacement_raw = sys.argv[1:]
-          expected = int(expected_raw)
-          replacement = int(replacement_raw)
-          if not (0 < expected <= 2_100_000_000):
-              raise SystemExit(f"Invalid source version code: {expected}")
-          if replacement != expected + 2000 or replacement > 2_100_000_000:
-              raise SystemExit(
-                  f"Invalid compatibility version code: {replacement} (source {expected})"
-              )
-
-          RES_XML_TYPE = 0x0003
-          RES_XML_RESOURCE_MAP_TYPE = 0x0180
-          RES_XML_START_ELEMENT_TYPE = 0x0102
-          VERSION_CODE_RESOURCE_ID = 0x0101021B
-          NO_INDEX = 0xFFFFFFFF
-          INTEGER_TYPES = {0x10, 0x11}
-
-          def chunk_header(data: bytearray, offset: int) -> tuple[int, int, int]:
-              if offset < 0 or offset + 8 > len(data):
-                  raise SystemExit(f"Truncated AXML chunk header at {offset}")
-              chunk_type, header_size, chunk_size = struct.unpack_from(
-                  "<HHI", data, offset
-              )
-              if header_size < 8 or chunk_size < header_size:
-                  raise SystemExit(f"Invalid AXML chunk at {offset}")
-              return chunk_type, header_size, chunk_size
-
-          def is_v1_signature(name: str) -> bool:
-              upper = name.upper()
-              if not upper.startswith("META-INF/"):
-                  return False
-              leaf = upper.rsplit("/", 1)[-1]
-              return leaf == "MANIFEST.MF" or leaf.endswith(
-                  (".SF", ".RSA", ".DSA", ".EC")
-              )
-
-          with zipfile.ZipFile(source_path, "r") as source_apk:
-              manifest = bytearray(source_apk.read("AndroidManifest.xml"))
-              root_type, root_header_size, root_size = chunk_header(manifest, 0)
-              if root_type != RES_XML_TYPE or root_size > len(manifest):
-                  raise SystemExit("AndroidManifest.xml is not a valid binary AXML file")
-
-              resource_ids: list[int] = []
-              patched = 0
-              offset = root_header_size
-              while offset < root_size:
-                  chunk_type, header_size, chunk_size = chunk_header(manifest, offset)
-                  chunk_end = offset + chunk_size
-                  if chunk_end > root_size:
-                      raise SystemExit(f"AXML chunk at {offset} extends past the root")
-
-                  if chunk_type == RES_XML_RESOURCE_MAP_TYPE:
-                      payload_size = chunk_size - header_size
-                      if payload_size % 4:
-                          raise SystemExit("Invalid AXML resource map size")
-                      resource_ids = list(
-                          struct.unpack_from(
-                              f"<{payload_size // 4}I", manifest, offset + header_size
-                          )
-                      )
-                  elif chunk_type == RES_XML_START_ELEMENT_TYPE:
-                      extension = offset + header_size
-                      if extension + 20 > chunk_end:
-                          raise SystemExit("Truncated AXML start-element extension")
-                      attribute_start, attribute_size, attribute_count = struct.unpack_from(
-                          "<HHH", manifest, extension + 8
-                      )
-                      if attribute_size < 20:
-                          raise SystemExit("Invalid AXML attribute size")
-                      attributes = extension + attribute_start
-                      if attributes + attribute_size * attribute_count > chunk_end:
-                          raise SystemExit("AXML attributes extend past their chunk")
-
-                      for index in range(attribute_count):
-                          attribute = attributes + index * attribute_size
-                          name_index = struct.unpack_from("<I", manifest, attribute + 4)[0]
-                          if (
-                              name_index >= len(resource_ids)
-                              or resource_ids[name_index] != VERSION_CODE_RESOURCE_ID
-                          ):
-                              continue
-
-                          raw_value = struct.unpack_from("<I", manifest, attribute + 8)[0]
-                          value_size = struct.unpack_from("<H", manifest, attribute + 12)[0]
-                          value_type = manifest[attribute + 15]
-                          current = struct.unpack_from("<I", manifest, attribute + 16)[0]
-                          if raw_value != NO_INDEX or value_size != 8:
-                              raise SystemExit("Unexpected encoded android:versionCode value")
-                          if value_type not in INTEGER_TYPES:
-                              raise SystemExit("android:versionCode is not an integer")
-                          if current != expected:
-                              raise SystemExit(
-                                  f"Expected version code {expected}, found {current}"
-                              )
-                          struct.pack_into("<I", manifest, attribute + 16, replacement)
-                          patched += 1
-
-                  offset = chunk_end
-
-              if patched != 1:
-                  raise SystemExit(
-                      f"Expected one android:versionCode attribute, patched {patched}"
-                  )
-
-              with zipfile.ZipFile(
-                  output_path, "w", allowZip64=True, strict_timestamps=False
-              ) as output_apk:
-                  output_apk.comment = source_apk.comment
-                  for entry in source_apk.infolist():
-                      if is_v1_signature(entry.filename):
-                          continue
-                      payload = (
-                          manifest
-                          if entry.filename == "AndroidManifest.xml"
-                          else source_apk.read(entry.filename)
-                      )
-                      output_apk.writestr(entry, payload)
-
-          print(f"Patched version code {expected} -> {replacement}")
-          PY
-
-          build_tools="$(
-            find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d \
-              | grep -E '/[0-9]+(\.[0-9]+){2}$' \
-              | sort -V \
-              | tail -1 \
-              || true
-          )"
-          if [ -z "$build_tools" ]; then
-            build_tools="$(
-              find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d \
-                | sort -V \
-                | tail -1
-            )"
-          fi
-          zipalign="$build_tools/zipalign"
-          apksigner="$build_tools/apksigner"
-          test -x "$zipalign"
-          test -x "$apksigner"
-          "$zipalign" -f 4 "$unsigned_apk" "$aligned_apk"
-
-          if [ -s android/app/upload-keystore.jks ]; then
-            test -n "$STORE_PASSWORD"
-            test -n "$KEY_ALIAS"
-            signing_keystore="android/app/upload-keystore.jks"
-            signing_alias="$KEY_ALIAS"
-            export APKSIGNER_STORE_PASSWORD="$STORE_PASSWORD"
-            export APKSIGNER_KEY_PASSWORD="${KEY_PASSWORD:-$STORE_PASSWORD}"
-          else
-            signing_keystore="${ANDROID_USER_HOME:-$HOME/.android}/debug.keystore"
-            signing_alias="androiddebugkey"
-            export APKSIGNER_STORE_PASSWORD="android"
-            export APKSIGNER_KEY_PASSWORD="android"
-          fi
-          test -s "$signing_keystore"
-
-          "$apksigner" sign \
-            --ks "$signing_keystore" \
-            --ks-key-alias "$signing_alias" \
-            --ks-pass env:APKSIGNER_STORE_PASSWORD \
-            --key-pass env:APKSIGNER_KEY_PASSWORD \
-            --out "$compat_apk" \
-            "$aligned_apk"
-          "$apksigner" verify --verbose --print-certs "$compat_apk"
-
-          analyzer="$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer"
-          if [ ! -x "$analyzer" ]; then
-            analyzer="$(command -v apkanalyzer)"
-          fi
-          actual_version_code="$("$analyzer" manifest version-code "$compat_apk")"
-          expected_version_code="${{ needs.prepare.outputs.compat_build_stamp }}"
-          if [ "$actual_version_code" != "$expected_version_code" ]; then
-            echo "Expected compatibility APK version code $expected_version_code, got $actual_version_code" >&2
-            exit 1
-          fi
-
-          bad_entries="$(
-            zipinfo -1 "$compat_apk" \
-              | grep '^lib/' \
-              | grep -v "^lib/${{ matrix.abi }}/" \
-              || true
-          )"
-          if [ -n "$bad_entries" ]; then
-            echo "Compatibility APK contains native libraries outside ${{ matrix.abi }}:" >&2
-            echo "$bad_entries" >&2
-            exit 1
-          fi
-
-          standard_cert="$(
-            "$apksigner" verify --print-certs "$standard_apk" \
-              | awk -F': ' '/certificate SHA-256 digest:/ { print $NF; exit }'
-          )"
-          compat_cert="$(
-            "$apksigner" verify --print-certs "$compat_apk" \
-              | awk -F': ' '/certificate SHA-256 digest:/ { print $NF; exit }'
-          )"
-          test -n "$standard_cert"
-          test "$compat_cert" = "$standard_cert"
-          echo "Compatibility APK version code: $actual_version_code"
-          echo "Compatibility APK re-signed with the standard APK certificate: $compat_cert"
-
-      - name: Upload compatibility APK artifact
-        id: compatibility_upload
-        if: needs.prepare.outputs.produce_compat_apk == 'true' && steps.compatibility_apk.outcome == 'success'
-        continue-on-error: true
-        uses: actions/upload-artifact@v6
-        with:
-          name: apk-compat-${{ matrix.abi }}-${{ needs.prepare.outputs.release_date }}-${{ needs.prepare.outputs.compat_build_stamp }}
-          path: dist/mithka-${{ needs.prepare.outputs.artifact_label }}-${{ matrix.abi }}-vc${{ needs.prepare.outputs.compat_build_stamp }}-compat-release.apk
-          if-no-files-found: error
+            "dist/mithka-${{ needs.prepare.outputs.app_version }}-${{ matrix.abi }}.apk"
 
       - name: Upload standard APK artifact
-        if: needs.prepare.outputs.produce_compat_apk != 'true' || steps.compatibility_apk.outcome == 'failure' || steps.compatibility_upload.outcome == 'failure'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
-          name: apk-standard-${{ matrix.abi }}-${{ needs.prepare.outputs.release_date }}-${{ needs.prepare.outputs.build_stamp }}
-          path: dist/mithka-${{ needs.prepare.outputs.artifact_label }}-${{ matrix.abi }}-vc${{ needs.prepare.outputs.build_stamp }}-release.apk
+          name: apk-${{ needs.prepare.outputs.app_version }}-${{ matrix.abi }}
+          path: dist/mithka-${{ needs.prepare.outputs.app_version }}-${{ matrix.abi }}.apk
           if-no-files-found: error
-
-      - name: Report compatibility APK publication failure
-        if: needs.prepare.outputs.produce_compat_apk == 'true' && (steps.compatibility_apk.outcome == 'failure' || steps.compatibility_upload.outcome == 'failure')
-        run: |
-          echo "::warning::Compatibility APK publication failed for ${{ matrix.abi }}; the standard APK was uploaded and will still be released."
-          echo "### Compatibility APK publication warning" >> "$GITHUB_STEP_SUMMARY"
-          echo "The ${{ matrix.abi }} compatibility APK failed to publish, but the standard APK was uploaded and will still be released." >> "$GITHUB_STEP_SUMMARY"
 
   build-desktop:
     name: Build ${{ matrix.label }}
     needs: prepare
     runs-on: ${{ matrix.os }}
-    env:
-      FVP_DEPS_URL: https://github.com/wang-bin/mdk-sdk/releases/download/v0.36.0
     strategy:
       fail-fast: false
       matrix:
@@ -633,89 +342,91 @@ jobs:
             architecture: x64
             library: libtdjson.so
             archive_extension: tar.gz
+            flutter_source: archive
+          - platform: linux
+            label: Linux arm64
+            os: ubuntu-24.04-arm
+            architecture: arm64
+            library: libtdjson.so
+            archive_extension: tar.gz
+            flutter_source: git
           - platform: macos
             label: macOS universal
             os: macos-15
             architecture: universal
             library: libtdjson.dylib
             archive_extension: zip
+            flutter_source: archive
           - platform: windows
             label: Windows x64
             os: windows-2022
             architecture: x64
             library: tdjson.dll
             archive_extension: zip
+            flutter_source: archive
+          - platform: windows
+            label: Windows arm64
+            os: windows-11-arm
+            architecture: arm64
+            library: tdjson.dll
+            archive_extension: zip
+            flutter_source: git
     steps:
-      - uses: actions/checkout@v5
-
-      - name: Check out pinned Mithka TDLib patches
-        uses: actions/checkout@v5
-        with:
-          repository: iebb/mithka-tdjson
-          ref: ${{ env.TDJSON_RELEASE_TAG }}
-          path: .tdlib-helper
-
-      - name: Normalize Windows TDLib patch line endings
-        if: matrix.platform == 'windows'
-        shell: bash
-        run: sed -i 's/\r$//' .tdlib-helper/patches/*.patch
+      - uses: actions/checkout@v7
 
       - uses: subosito/flutter-action@v2
+        if: matrix.flutter_source == 'archive'
         with:
-          flutter-version: '3.44.2'
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
+
+      - name: Install Flutter on an arm64 host
+        if: matrix.flutter_source == 'git'
+        shell: bash
+        run: |
+          # Flutter publishes no arm64 SDK archive for Linux or Windows, so the
+          # release archive cannot be used here. A git checkout bootstraps the
+          # Dart SDK for the host architecture on first run, and Flutter targets
+          # the architecture of its own Dart executable — which is what makes
+          # these builds arm64 rather than emulated x64.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            flutter_home='/c/flutter'
+            path_entry='C:\flutter\bin'
+          else
+            flutter_home="$HOME/flutter"
+            path_entry="$flutter_home/bin"
+          fi
+          git clone --depth 1 --branch "$FLUTTER_VERSION" \
+            --config advice.detachedHead=false \
+            https://github.com/flutter/flutter.git "$flutter_home"
+          "$flutter_home/bin/flutter" --version
+          echo "$path_entry" >> "$GITHUB_PATH"
 
       - name: Install Linux build dependencies
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            clang cmake gperf libavcodec-dev libavformat-dev libavutil-dev \
+            clang cmake libavcodec-dev libavformat-dev libavutil-dev \
             libcurl4-openssl-dev libgtk-3-dev libjpeg-dev liblzma-dev \
-            libsecret-1-dev libssl-dev libswscale-dev ninja-build pkg-config \
-            zlib1g-dev
+            libkeybinder-3.0-dev libsecret-1-dev libswscale-dev libpulse0 \
+            libgirepository1.0-dev librsvg2-dev patchelf \
+            desktop-file-utils ninja-build pkg-config xvfb xdotool
 
-      - name: Install macOS build dependencies
-        if: matrix.platform == 'macos'
-        run: brew install cmake ninja
-
-      - name: Install Windows native dependencies
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install `
-            gperf:x64-windows openssl:x64-windows-static zlib:x64-windows-static
-          $gperfTools = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\tools\gperf"
-          if (-not (Test-Path "$gperfTools\gperf.exe")) {
-            throw "vcpkg did not install gperf.exe"
-          }
-          $gperfTools | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Restore desktop TDLib cache
-        id: tdlib_cache
-        uses: actions/cache/restore@v5
+      - name: Cache desktop tdjson
+        uses: actions/cache@v6
         with:
-          path: .tdlib-build/desktop-${{ matrix.platform }}
-          key: tdjson-${{ matrix.platform }}-${{ matrix.architecture }}-${{ env.TDJSON_RELEASE_TAG }}-${{ hashFiles('scripts/build-tdjson-desktop.sh') }}
+          path: native-libs/${{ matrix.library }}
+          key: tdjson-desktop-${{ runner.os }}-${{ matrix.platform }}-${{ matrix.architecture }}-${{ hashFiles('scripts/tdjson-manifest.json') }}
 
-      - name: Build patched desktop TDLib
+      - name: Install pinned desktop tdjson
         shell: bash
-        env:
-          NATIVE_HELPER_ROOT: .tdlib-helper
-          TD_COMMIT: ${{ env.TDJSON_UPSTREAM_SHA }}
-          TD_BUILD_JOBS: '2'
         run: |
           scripts/build-tdjson-desktop.sh \
             "${{ matrix.platform }}" \
-            "native-libs/${{ matrix.library }}"
-
-      - name: Save desktop TDLib cache
-        if: steps.tdlib_cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: .tdlib-build/desktop-${{ matrix.platform }}
-          key: tdjson-${{ matrix.platform }}-${{ matrix.architecture }}-${{ env.TDJSON_RELEASE_TAG }}-${{ hashFiles('scripts/build-tdjson-desktop.sh') }}
+            "native-libs/${{ matrix.library }}" \
+            "${{ matrix.architecture }}"
 
       - name: Enable Swift Package Manager for macOS
         if: matrix.platform == 'macos'
@@ -745,6 +456,7 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: |
           flutter build linux --release \
+            --target-platform="linux-${{ matrix.architecture }}" \
             --build-name="${{ needs.prepare.outputs.app_version }}" \
             --build-number="${{ needs.prepare.outputs.build_stamp }}" \
             --dart-define="GIT_COMMIT=${{ needs.prepare.outputs.short_sha }}" \
@@ -763,13 +475,39 @@ jobs:
             --dart-define="CI_BUILD_STAMP=${{ needs.prepare.outputs.build_stamp }}" \
             --dart-define="SENTRY_DSN=$SENTRY_DSN"
 
+      - name: Drop Firebase from the Windows arm64 build
+        if: matrix.platform == 'windows' && matrix.architecture == 'arm64'
+        shell: bash
+        run: |
+          # Google ships the Firebase C++ SDK for Windows as x86 and x64 static
+          # libraries only — the archive contains no ARM64 at all — so an ARM64
+          # link fails on unresolved firebase::App symbols. Nothing is lost:
+          # Mithka initialises Firebase only when the mithka/firebase_configuration
+          # channel answers, and that channel is implemented on Android and iOS
+          # alone, so on Windows the plugin registers and is then never used.
+          python3 scripts/drop-windows-plugin.py firebase_core \
+            --reason 'Firebase publishes no Windows ARM64 binaries'
+          # Flutter writes the plugin registrant and the CMake plugin list
+          # during pub get, so both have to be regenerated from the plugin set
+          # this leaves behind; the build itself will not redo it.
+          flutter pub get
+          for generated in windows/flutter/generated_plugin_registrant.cc \
+                           windows/flutter/generated_plugins.cmake; do
+            if grep -qi firebase "$generated"; then
+              echo "$generated still registers Firebase" >&2
+              exit 1
+            fi
+          done
+
       - name: Build Windows release
         if: matrix.platform == 'windows'
         shell: pwsh
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: |
-          flutter build windows --release `
+          # --no-pub keeps pub from re-resolving over the plugin set this job
+          # settled on; the dependencies step above already fetched them.
+          flutter build windows --release --no-pub `
             --build-name="${{ needs.prepare.outputs.app_version }}" `
             --build-number="${{ needs.prepare.outputs.build_stamp }}" `
             --dart-define="GIT_COMMIT=${{ needs.prepare.outputs.short_sha }}" `
@@ -779,7 +517,7 @@ jobs:
       - name: Package Linux release
         if: matrix.platform == 'linux'
         run: |
-          bundle="build/linux/x64/release/bundle"
+          bundle="build/linux/${{ matrix.architecture }}/release/bundle"
           install -m 0755 native-libs/libtdjson.so "$bundle/lib/libtdjson.so"
           nm -D "$bundle/lib/libtdjson.so" | grep ' td_create_client_id$'
           if ldd "$bundle/lib/libtdjson.so" | grep -q 'not found'; then
@@ -789,8 +527,22 @@ jobs:
           mkdir -p dist/package/Mithka
           cp -R "$bundle/." dist/package/Mithka/
           tar -C dist/package -czf \
-            "dist/mithka-${{ needs.prepare.outputs.artifact_label }}-linux-x64.tar.gz" \
+            "dist/mithka-${{ needs.prepare.outputs.artifact_label }}-linux-${{ matrix.architecture }}.tar.gz" \
             Mithka
+
+      - name: Build Linux AppImage
+        if: matrix.platform == 'linux'
+        run: |
+          scripts/build-linux-appimage.sh \
+            "${{ matrix.architecture }}" \
+            "build/linux/${{ matrix.architecture }}/release/bundle" \
+            "dist/mithka-${{ needs.prepare.outputs.artifact_label }}-linux-${{ matrix.architecture }}.AppImage"
+
+      - name: Verify Linux AppImage launch
+        if: matrix.platform == 'linux'
+        run: |
+          scripts/test-linux-appimage.sh \
+            "dist/mithka-${{ needs.prepare.outputs.artifact_label }}-linux-${{ matrix.architecture }}.AppImage"
 
       - name: Package macOS release
         if: matrix.platform == 'macos'
@@ -816,7 +568,7 @@ jobs:
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
-          $bundle = "build\windows\x64\runner\Release"
+          $bundle = "build\windows\${{ matrix.architecture }}\runner\Release"
           Copy-Item "native-libs\tdjson.dll" "$bundle\tdjson.dll"
           Add-Type -TypeDefinition @'
           using System;
@@ -850,13 +602,39 @@ jobs:
           New-Item -ItemType Directory -Force dist\package | Out-Null
           Copy-Item $bundle dist\package\Mithka -Recurse
           Compress-Archive -Path dist\package\Mithka `
-            -DestinationPath "dist\mithka-${{ needs.prepare.outputs.artifact_label }}-windows-x64.zip"
+            -DestinationPath "dist\mithka-${{ needs.prepare.outputs.artifact_label }}-windows-${{ matrix.architecture }}.zip"
+
+          $installer = & scripts\build-windows-installer.ps1 `
+            -Architecture "${{ matrix.architecture }}" `
+            -BuildDirectory $bundle `
+            -OutputDirectory dist `
+            -Version "${{ needs.prepare.outputs.app_version }}" `
+            -ArtifactLabel "${{ needs.prepare.outputs.artifact_label }}"
+          if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
+            throw "Windows installer was not created: $installer"
+          }
 
       - name: Upload desktop artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
-          name: desktop-${{ matrix.platform }}-${{ needs.prepare.outputs.release_date }}
+          name: desktop-${{ matrix.platform }}-${{ matrix.architecture }}-${{ needs.prepare.outputs.release_date }}
           path: dist/mithka-${{ needs.prepare.outputs.artifact_label }}-${{ matrix.platform }}-${{ matrix.architecture }}.${{ matrix.archive_extension }}
+          if-no-files-found: error
+
+      - name: Upload Windows installer artifact
+        if: matrix.platform == 'windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: installer-windows-${{ matrix.architecture }}-${{ needs.prepare.outputs.release_date }}
+          path: dist/mithka-${{ needs.prepare.outputs.artifact_label }}-windows-${{ matrix.architecture }}-setup.exe
+          if-no-files-found: error
+
+      - name: Upload Linux AppImage artifact
+        if: matrix.platform == 'linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: appimage-linux-${{ matrix.architecture }}-${{ needs.prepare.outputs.release_date }}
+          path: dist/mithka-${{ needs.prepare.outputs.artifact_label }}-linux-${{ matrix.architecture }}.AppImage
           if-no-files-found: error
 
   release:
@@ -865,57 +643,47 @@ jobs:
     needs: [prepare, build, build-desktop]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Download all release packages
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: release-assets
           merge-multiple: true
 
       - name: Verify and list artifacts
         env:
-          PRODUCE_COMPAT_APK: ${{ needs.prepare.outputs.produce_compat_apk }}
+          APP_VERSION: ${{ needs.prepare.outputs.app_version }}
         run: |
           ls -lhR release-assets
-          standard_apk_count="$(
-            find release-assets -maxdepth 1 -type f \
-              -name '*-release.apk' ! -name '*-compat-release.apk' \
+          apk_count="$(
+            find release-assets -maxdepth 1 -type f -name 'mithka-*.apk' \
               | wc -l \
               | tr -d ' '
           )"
-          compat_apk_count="$(
-            find release-assets -maxdepth 1 -type f -name '*-compat-release.apk' \
-              | wc -l \
-              | tr -d ' '
-          )"
-          total_apk_count=$((standard_apk_count + compat_apk_count))
-          if [ "$total_apk_count" -ne 2 ]; then
-            echo "Expected one published APK per ABI, found $total_apk_count" >&2
+          if [ "$apk_count" -ne 2 ]; then
+            echo "Expected one published APK per ABI, found $apk_count" >&2
             exit 1
           fi
           for abi in arm64-v8a armeabi-v7a; do
-            abi_apk_count="$(
-              find release-assets -maxdepth 1 -type f -name "*-${abi}-vc*-release.apk" \
-                | wc -l \
-                | tr -d ' '
-            )"
-            if [ "$abi_apk_count" -ne 1 ]; then
-              echo "Expected exactly one published $abi APK, found $abi_apk_count" >&2
+            apk="release-assets/mithka-${APP_VERSION}-${abi}.apk"
+            if [ ! -f "$apk" ]; then
+              echo "Missing expected $abi APK: $apk" >&2
               exit 1
             fi
           done
-          if [ "$PRODUCE_COMPAT_APK" != "true" ] && \
-            { [ "$standard_apk_count" -ne 2 ] || [ "$compat_apk_count" -ne 0 ]; }; then
-            echo "Only standard APKs may be published from 2026-08-01 UTC" >&2
-            exit 1
-          fi
           for desktop_asset in \
             '*-windows-x64.zip' \
+            '*-windows-arm64.zip' \
+            '*-windows-x64-setup.exe' \
+            '*-windows-arm64-setup.exe' \
             '*-macos-universal.zip' \
-            '*-linux-x64.tar.gz'; do
+            '*-linux-x64.tar.gz' \
+            '*-linux-arm64.tar.gz' \
+            '*-linux-x64.AppImage' \
+            '*-linux-arm64.AppImage'; do
             desktop_asset_count="$(
               find release-assets -maxdepth 1 -type f -name "$desktop_asset" \
                 | wc -l \
@@ -926,10 +694,7 @@ jobs:
               exit 1
             fi
           done
-          echo "STANDARD_APK_COUNT=$standard_apk_count" >> "$GITHUB_ENV"
-          echo "COMPAT_APK_COUNT=$compat_apk_count" >> "$GITHUB_ENV"
-          echo "Standard APKs: $standard_apk_count"
-          echo "Compatibility APKs: $compat_apk_count"
+          echo "APKs: $apk_count"
 
       - name: Create release tag
         env:
@@ -940,6 +705,16 @@ jobs:
           fi
           git tag -f "$RELEASE_TAG" "$GITHUB_SHA"
           git push --force origin "$RELEASE_TAG"
+
+      - name: Set up Node.js for Copilot CLI
+        if: needs.prepare.outputs.prerelease == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install Copilot CLI
+        if: needs.prepare.outputs.prerelease == 'true'
+        run: npm install --global @github/copilot
 
       - name: Generate release notes
         env:
@@ -975,53 +750,60 @@ jobs:
               | awk '!/^Subject: chore: sync nightly /' \
               > changes.txt
 
-            git log --reverse --no-merges \
-              --format='- %s ([%h]('"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"'/commit/%H))' \
-              "$change_range" -- . ':(exclude).github/**' \
-              | grep -v '^- chore: sync nightly ' \
-              > fallback-items.txt \
-              || true
             {
               echo "## Changes"
               echo "### English"
-              if [ -s fallback-items.txt ]; then
-                cat fallback-items.txt
-              else
-                echo "- Maintenance and reliability improvements."
-              fi
+              echo "- Maintenance and reliability improvements; see the full changelog for details."
               echo
               echo "### 中文"
               echo "- 维护和可靠性改进；详细内容请参阅完整变更记录。"
             } > change-summary.md
 
-            jq -n --rawfile changes changes.txt '{
-              model: "openai/gpt-4.1",
-              messages: [
-                {
-                  role: "system",
-                  content: "Write concise bilingual Markdown release notes for app users using only facts in the supplied git history. Use exactly this structure: ## Changes, then ### English with 1 to 6 English bullet points, then ### 中文 with faithful Simplified Chinese translations of the same bullet points in the same order. Combine related commits and make every bullet a distinct user-visible change. Focus on features, fixes, reliability, privacy, and performance. Do not invent or repeat changes. Omit tests, implementation details, commit hashes, generated version bumps, and CI-only changes. If there are no user-visible changes, use one maintenance and reliability bullet in each language. Do not add an introduction or conclusion."
-                },
-                { role: "user", content: $changes }
-              ],
-              temperature: 0,
-              max_tokens: 900
-            }' > model-request.json
+            summary_prompt="$(
+              jq -nr --rawfile changes changes.txt '
+                "Write concise bilingual release notes for app users using only facts in the supplied git history. " +
+                "Return only one JSON object with exactly two properties: english and chinese. " +
+                "Each property must be an array containing 1 to 6 paired strings in the same order, with each Chinese item a faithful Simplified Chinese translation of the corresponding English item. " +
+                "Combine related commits and make every item a distinct user-visible change. Focus on features, fixes, reliability, privacy, and performance. " +
+                "Do not invent or repeat changes. Omit tests, implementation details, commit hashes, generated version bumps, and CI-only changes. " +
+                "If there are no user-visible changes, use one maintenance and reliability item in each language. " +
+                "Do not include Markdown, headings, bullet markers, commit hashes, or URLs in the array values.\n\nGit history:\n" +
+                $changes
+              '
+            )"
 
-            if model_response="$(
-              curl -fsS --retry 1 --retry-all-errors \
-                --connect-timeout 10 --max-time 30 \
-                https://models.github.ai/inference/chat/completions \
-                -H "Authorization: Bearer $GITHUB_TOKEN" \
-                -H 'Content-Type: application/json' \
-                --data-binary @model-request.json
-            )" && model_notes="$(
-              jq -er '.choices[0].message.content | select(startswith("## Changes") and contains("### English") and contains("### 中文"))' \
-                <<< "$model_response"
-            )"; then
-              printf '%s\n' "$model_notes" > change-summary.md
-              echo "Generated bilingual nightly release notes with GitHub Models"
+            if model_content="$(
+              copilot -p "$summary_prompt" \
+                --silent \
+                --model=auto \
+                --no-ask-user \
+                --no-auto-update \
+                --no-remote \
+                --disable-builtin-mcps \
+                --deny-tool='memory,read,shell,url,write'
+            )" && printf '%s\n' "$model_content" | \
+              jq -er '
+                select(
+                    (.english | type) == "array" and
+                    (.chinese | type) == "array" and
+                    (.english | length) >= 1 and
+                    (.english | length) <= 6 and
+                    (.english | length) == (.chinese | length) and
+                    all(.english[]; type == "string" and length > 0) and
+                    all(.chinese[]; type == "string" and length > 0)
+                  )
+              ' > model-notes.json; then
+              {
+                echo "## Changes"
+                echo "### English"
+                jq -r '.english[] | "- " + .' model-notes.json
+                echo
+                echo "### 中文"
+                jq -r '.chinese[] | "- " + .' model-notes.json
+              } > change-summary.md
+              echo "Generated bilingual nightly release notes with GitHub Copilot"
             else
-              echo "GitHub Models unavailable; using bilingual fallback release notes" >&2
+              echo "GitHub Copilot unavailable or returned invalid notes; using paired bilingual fallback release notes" >&2
             fi
           fi
 
@@ -1047,7 +829,7 @@ jobs:
             exit 0
           fi
           gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' \
-            | grep -E '^mithka-.*\.(apk|zip|tar\.gz)$' \
+            | grep -E '^mithka-.*\.(apk|exe|zip|tar\.gz|AppImage)$' \
             | while read -r asset; do
                 gh release delete-asset "$RELEASE_TAG" "$asset" --yes
               done

@@ -98,141 +98,134 @@ class _ChatWallpaperColorViewState extends State<ChatWallpaperColorView> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    return ColoredBox(
-      color: c.groupedBackground,
-      child: Column(
+    return SettingsPageScaffold(
+      title: widget.colorOnly
+          ? AppStringKeys.chatWallpaperColor
+          : AppStringKeys.chatWallpaperColorTitle,
+      onBack: () => Navigator.of(context).pop(),
+      bottomNavigationBar: _saveBar(c),
+      child: SettingsListView(
         children: [
-          NavHeader(
-            title: widget.colorOnly
-                ? AppStringKeys.chatWallpaperColor
-                : AppStringKeys.chatWallpaperColorTitle,
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(14, 14, 14, 18),
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(18),
-                  child: SizedBox(
-                    height: 230,
-                    child: ChatWallpaperBackground(
-                      wallpaper: widget.controller.resolvedWallpaper(_result),
-                      fallbackColor: c.chatBackground,
-                      brightness: widget.dark
-                          ? Brightness.dark
-                          : Brightness.light,
-                      child: const Center(
-                        child: AppIcon(
-                          HeroAppIcons.palette,
-                          size: 44,
-                          color: Color(0xCCFFFFFF),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                _label(AppStringKeys.chatWallpaperColor),
-                const SizedBox(height: 10),
-                _colorStops(),
-                const SizedBox(height: 12),
-                _slider(
-                  value: _color.hue / 360,
-                  painter: const _HueTrackPainter(),
-                  onChanged: (value) => setState(
-                    () => _colors[_selectedColor] = _color.withHue(value * 360),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _slider(
-                  value: _color.saturation,
-                  painter: _SaturationTrackPainter(_color.withSaturation(1)),
-                  onChanged: (value) => setState(
-                    () =>
-                        _colors[_selectedColor] = _color.withSaturation(value),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _slider(
-                  value: _color.value,
-                  painter: _ValueTrackPainter(_color.withValue(1)),
-                  onChanged: (value) => setState(
-                    () => _colors[_selectedColor] = _color.withValue(value),
-                  ),
-                ),
-                if (!widget.colorOnly) ...[
-                  const SizedBox(height: 22),
-                  _label(AppStringKeys.chatWallpaperPattern),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    height: 92,
-                    child: _loadingPatterns
-                        ? const Center(child: _ColorSpinner())
-                        : ListView.separated(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: _patterns.length + 1,
-                            separatorBuilder: (_, _) =>
-                                const SizedBox(width: 9),
-                            itemBuilder: (context, index) {
-                              if (index == 0) return _noPatternChoice();
-                              return _patternChoice(_patterns[index - 1]);
-                            },
-                          ),
-                  ),
-                  if (_pattern != null) ...[
-                    const SizedBox(height: 20),
-                    _label(AppStringKeys.chatWallpaperIntensity),
-                    const SizedBox(height: 9),
-                    _slider(
-                      value: _intensity / 100,
-                      painter: _PlainTrackPainter(c.linkBlue),
-                      onChanged: (value) =>
-                          setState(() => _intensity = (value * 100).round()),
-                    ),
-                    const SizedBox(height: 16),
-                    _effectToggle(
-                      AppStringKeys.chatWallpaperMotion,
-                      HeroAppIcons.rotate,
-                      _moving,
-                      () => setState(() => _moving = !_moving),
-                    ),
-                  ],
-                ],
-              ],
-            ),
-          ),
-          ColoredBox(
-            color: c.card,
-            child: SafeArea(
-              top: false,
-              minimum: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => Navigator.of(context).pop(_result),
-                child: Container(
-                  height: 48,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: c.linkBlue,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Text(
-                    AppStringKeys.accentColorPickerSave.l10n(context),
-                    style: TextStyle(
-                      color: c.onAccent,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                    ),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+            child: SizedBox(
+              height: 230,
+              child: ChatWallpaperBackground(
+                wallpaper: widget.controller.resolvedWallpaper(_result),
+                fallbackColor: c.chatBackground,
+                brightness: widget.dark ? Brightness.dark : Brightness.light,
+                child: const Center(
+                  child: AppIcon(
+                    HeroAppIcons.palette,
+                    size: 44,
+                    color: Color(0xCCFFFFFF),
                   ),
                 ),
               ),
             ),
           ),
+          const SizedBox(height: 18),
+          _label(AppStringKeys.chatWallpaperColor),
+          const SizedBox(height: 10),
+          _colorStops(),
+          const SizedBox(height: 12),
+          _slider(
+            value: _color.hue / 360,
+            painter: const _HueTrackPainter(),
+            onChanged: (value) => setState(
+              () => _colors[_selectedColor] = _color.withHue(value * 360),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _slider(
+            value: _color.saturation,
+            painter: _SaturationTrackPainter(_color.withSaturation(1)),
+            onChanged: (value) => setState(
+              () => _colors[_selectedColor] = _color.withSaturation(value),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _slider(
+            value: _color.value,
+            painter: _ValueTrackPainter(_color.withValue(1)),
+            onChanged: (value) => setState(
+              () => _colors[_selectedColor] = _color.withValue(value),
+            ),
+          ),
+          if (!widget.colorOnly) ...[
+            const SizedBox(height: 22),
+            _label(AppStringKeys.chatWallpaperPattern),
+            const SizedBox(height: 10),
+            SizedBox(
+              height: 92,
+              child: _loadingPatterns
+                  ? const Center(child: _ColorSpinner())
+                  : ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _patterns.length + 1,
+                      separatorBuilder: (_, _) => const SizedBox(width: 9),
+                      itemBuilder: (context, index) {
+                        if (index == 0) return _noPatternChoice();
+                        return _patternChoice(_patterns[index - 1]);
+                      },
+                    ),
+            ),
+            if (_pattern != null) ...[
+              const SizedBox(height: 20),
+              _label(AppStringKeys.chatWallpaperIntensity),
+              const SizedBox(height: 9),
+              _slider(
+                value: _intensity / 100,
+                painter: _PlainTrackPainter(c.linkBlue),
+                onChanged: (value) =>
+                    setState(() => _intensity = (value * 100).round()),
+              ),
+              const SizedBox(height: 16),
+              _effectToggle(
+                AppStringKeys.chatWallpaperMotion,
+                HeroAppIcons.rotate,
+                _moving,
+                () => setState(() => _moving = !_moving),
+              ),
+            ],
+          ],
         ],
       ),
     );
   }
+
+  Widget _saveBar(AppColors colors) => ColoredBox(
+    color: colors.card,
+    child: SafeArea(
+      top: false,
+      minimum: const EdgeInsets.fromLTRB(
+        AppSpacing.xl,
+        AppSpacing.md + AppSpacing.xxs,
+        AppSpacing.xl,
+        AppSpacing.md + AppSpacing.xxs,
+      ),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => Navigator.of(context).pop(_result),
+        child: Container(
+          height: 48,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: colors.linkBlue,
+            borderRadius: BorderRadius.circular(AppRadius.card),
+          ),
+          child: Text(
+            AppStringKeys.accentColorPickerSave.l10n(context),
+            style: TextStyle(
+              color: colors.onAccent,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 
   Widget _label(String key) => Text(
     key.l10n(context),
@@ -360,7 +353,7 @@ class _ChatWallpaperColorViewState extends State<ChatWallpaperColorView> {
         decoration: BoxDecoration(
           color: c.card,
           border: Border.all(color: c.divider),
-          borderRadius: BorderRadius.circular(11),
+          borderRadius: BorderRadius.circular(AppRadius.card),
         ),
         child: AppIcon(icon, size: 17, color: c.linkBlue),
       ),
@@ -381,9 +374,12 @@ class _ChatWallpaperColorViewState extends State<ChatWallpaperColorView> {
         padding: EdgeInsets.all(selected ? 3 : 1),
         decoration: BoxDecoration(
           color: selected ? c.linkBlue : c.divider,
-          borderRadius: BorderRadius.circular(13),
+          borderRadius: BorderRadius.circular(AppRadius.card),
         ),
-        child: ClipRRect(borderRadius: BorderRadius.circular(10), child: child),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadius.control),
+          child: child,
+        ),
       ),
     );
   }
@@ -404,7 +400,7 @@ class _ChatWallpaperColorViewState extends State<ChatWallpaperColorView> {
         decoration: BoxDecoration(
           color: selected ? c.linkBlue.withValues(alpha: 0.13) : c.card,
           border: Border.all(color: selected ? c.linkBlue : c.divider),
-          borderRadius: BorderRadius.circular(13),
+          borderRadius: BorderRadius.circular(AppRadius.card),
         ),
         child: Row(
           children: [
@@ -463,7 +459,7 @@ class _WallpaperValueSlider extends StatelessWidget {
                 top: 9,
                 bottom: 9,
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(AppRadius.md),
                   child: CustomPaint(painter: painter),
                 ),
               ),

@@ -3,12 +3,14 @@ import 'dart:io' show Platform;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 
 import '../components/app_icons.dart';
 import '../components/photo_avatar.dart';
 import '../theme/app_motion.dart';
+import '../theme/app_theme.dart';
 import 'group_call_controller.dart';
 
 class GroupCallScreen extends StatefulWidget {
@@ -21,22 +23,6 @@ class GroupCallScreen extends StatefulWidget {
 }
 
 class _GroupCallScreenState extends State<GroupCallScreen> {
-  Timer? _ticker;
-
-  @override
-  void initState() {
-    super.initState();
-    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() {});
-    });
-  }
-
-  @override
-  void dispose() {
-    _ticker?.cancel();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
     final session = widget.controller.session;
@@ -60,7 +46,7 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
                         ? _joiningState(session)
                         : _participantGrid(participants, hasVideo: hasVideo),
                   ),
-                  _duration(session),
+                  _GroupCallDuration(startedAt: session.startedAt),
                   const SizedBox(height: 14),
                   _controls(),
                   const SizedBox(height: 24),
@@ -82,11 +68,16 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
       fit: StackFit.expand,
       children: [
         if (photo != null)
-          ImageFiltered(
-            imageFilter: ImageFilter.blur(sigmaX: 42, sigmaY: 42),
-            child: Transform.scale(
-              scale: 1.18,
-              child: TDImage(photo: photo, cornerRadius: 0),
+          // Boundary outside the filter: every participant update repaints this
+          // screen, and without it the full-viewport gaussian is rastered again
+          // on each one instead of being re-composited.
+          RepaintBoundary(
+            child: ImageFiltered(
+              imageFilter: ImageFilter.blur(sigmaX: 42, sigmaY: 42),
+              child: Transform.scale(
+                scale: 1.18,
+                child: TDImage(photo: photo, cornerRadius: 0),
+              ),
             ),
           )
         else
@@ -236,6 +227,10 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
 
     final columns = participants.length <= 2 ? 1 : 2;
     return GridView.builder(
+      // Roughly one tile row. A tile scrolled just off-screen keeps its platform
+      // view instead of destroying the EGL renderer — rebuilding one costs tens
+      // of milliseconds and drops every frame for that endpoint until it lands.
+      scrollCacheExtent: const ScrollCacheExtent.pixels(260),
       padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: columns,
@@ -258,6 +253,9 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
       compactVoiceTile: compactVoiceTile,
     );
     return DragTarget<String>(
+      // Without a key the grid matches tiles by index, so a reorder leaves the
+      // platform view bound to the previous participant's video endpoint.
+      key: ValueKey(participant.key),
       onWillAcceptWithDetails: (details) => details.data != participant.key,
       onAcceptWithDetails: (details) {
         widget.controller.moveParticipant(details.data, participant.key);
@@ -265,7 +263,7 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
       builder: (context, candidates, _) => AnimatedContainer(
         duration: const Duration(milliseconds: 140),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(AppRadius.lg),
           border: candidates.isEmpty
               ? null
               : Border.all(color: Colors.white, width: 2),
@@ -280,26 +278,6 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
           child: tile,
         ),
       ),
-    );
-  }
-
-  Widget _duration(ActiveGroupCall session) {
-    final startedAt = session.startedAt;
-    final seconds = startedAt == null
-        ? 0
-        : DateTime.now().difference(startedAt).inSeconds.clamp(0, 359999);
-    final hours = seconds ~/ 3600;
-    final minutes = (seconds % 3600) ~/ 60;
-    final remainder = seconds % 60;
-    final text = hours > 0
-        ? '${hours.toString().padLeft(2, '0')}:'
-              '${minutes.toString().padLeft(2, '0')}:'
-              '${remainder.toString().padLeft(2, '0')}'
-        : '${minutes.toString().padLeft(2, '0')}:'
-              '${remainder.toString().padLeft(2, '0')}';
-    return Text(
-      text,
-      style: const TextStyle(color: Colors.white, fontSize: 17),
     );
   }
 
@@ -388,6 +366,70 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
   }
 }
 
+/// Elapsed call time, ticking on its own. Owning the timer here is what keeps
+/// the 1 Hz tick from rebuilding the whole screen — the participant getter, the
+/// backdrop and every video tile in the grid — once a second for the whole call.
+class _GroupCallDuration extends StatefulWidget {
+  const _GroupCallDuration({required this.startedAt});
+
+  final DateTime? startedAt;
+
+  @override
+  State<_GroupCallDuration> createState() => _GroupCallDurationState();
+}
+
+class _GroupCallDurationState extends State<_GroupCallDuration> {
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncTicker();
+  }
+
+  @override
+  void didUpdateWidget(covariant _GroupCallDuration oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.startedAt != widget.startedAt) _syncTicker();
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  void _syncTicker() {
+    _ticker?.cancel();
+    _ticker = null;
+    if (widget.startedAt == null) return;
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final startedAt = widget.startedAt;
+    final seconds = startedAt == null
+        ? 0
+        : DateTime.now().difference(startedAt).inSeconds.clamp(0, 359999);
+    final hours = seconds ~/ 3600;
+    final minutes = (seconds % 3600) ~/ 60;
+    final remainder = seconds % 60;
+    final text = hours > 0
+        ? '${hours.toString().padLeft(2, '0')}:'
+              '${minutes.toString().padLeft(2, '0')}:'
+              '${remainder.toString().padLeft(2, '0')}'
+        : '${minutes.toString().padLeft(2, '0')}:'
+              '${remainder.toString().padLeft(2, '0')}';
+    return Text(
+      text,
+      style: const TextStyle(color: Colors.white, fontSize: 17),
+    );
+  }
+}
+
 class _ParticipantTile extends StatelessWidget {
   const _ParticipantTile({
     required this.participant,
@@ -408,7 +450,7 @@ class _ParticipantTile extends StatelessWidget {
         ? 'group:local'
         : 'group:${participant.videoEndpointId}';
     return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(AppRadius.lg),
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -468,7 +510,7 @@ class _ParticipantTile extends StatelessWidget {
         color: compactVoiceTile
             ? Colors.transparent
             : Colors.black.withValues(alpha: 0.18),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -557,7 +599,7 @@ class _GlassButton extends StatelessWidget {
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.28),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(AppRadius.card),
           ),
           child: AppIcon(icon, size: 23, color: Colors.white),
         ),
@@ -590,7 +632,7 @@ class _SquareCallButton extends StatelessWidget {
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: background,
-          borderRadius: BorderRadius.circular(21),
+          borderRadius: BorderRadius.circular(AppRadius.xl),
         ),
         child: AppIcon(icon, size: 29, color: foreground),
       ),

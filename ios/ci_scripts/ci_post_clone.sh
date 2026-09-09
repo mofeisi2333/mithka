@@ -18,14 +18,10 @@
 #   FIREBASE_IOS_GOOGLESERVICE_INFO_PLIST_B64
 #                      base64 of ios/Runner/GoogleService-Info.plist
 # Optional:
-#   TDJSON_XCFRAMEWORK_URL   override the prebuilt-framework download (see default below)
 #   TGVOIP_WEBRTC_XCFRAMEWORK_URL
 #                      override the pinned official Telegram iOS group-call XCFramework
 #   TGVOIP_WEBRTC_XCFRAMEWORK_SHA256
 #                      SHA-256 for the TgVoip override
-#   REVIEW_RELAY             legacy real-phone OTP relay URL and phone hash:
-#                            https://relay.example|sha256(normalized-phone-digits)
-#                            Pseudo-account sessions use the built-in scoped dispenser.
 #   SENTRY_AUTH_TOKEN        upload iOS dSYMs to Sentry when set
 #   SENTRY_ORG               Sentry org slug for dSYM upload; defaults to nekoko
 #   SENTRY_PROJECT           Sentry project slug for dSYM upload; defaults to mithka
@@ -34,17 +30,20 @@
 #
 # The prebuilt tdjson.xcframework is hosted in the sibling mithka-tdjson repo
 # rather than rebuilt here, because building TDLib + OpenSSL for iOS takes
-# ~40 min. The default URL is pinned so Xcode Cloud cannot pick a stale latest
-# artifact without the Mithka session string backup symbols.
+# ~40 min. scripts/build-tdjson-ios.sh resolves the repository-pinned manifest,
+# verifies the archive and installed framework, and never follows "latest".
 
 set -e
 
 FLUTTER_VERSION="3.44.2"
-TDJSON_RELEASE_TAG="tdlib-1.8.66-1b08c83bc078-rebuild-29623073124-1"
-TDJSON_URL="${TDJSON_XCFRAMEWORK_URL:-https://github.com/iebb/mithka-tdjson/releases/download/${TDJSON_RELEASE_TAG}/tdjson-ios.xcframework.zip}"
+COCOAPODS_VERSION="1.17.0"
 TGVOIP_RELEASE_TAG="tgvoip-telegram-ios-6e370e06d147"
 TGVOIP_URL="${TGVOIP_WEBRTC_XCFRAMEWORK_URL:-https://github.com/iebb/mithka-tdjson/releases/download/${TGVOIP_RELEASE_TAG}/tgvoip-ios.xcframework.zip}"
 TGVOIP_SHA256="${TGVOIP_WEBRTC_XCFRAMEWORK_SHA256:-a1da44189af3802fcc0900696c5cdc549ffc2e53c5a2a0bab713a208aefe2737}"
+SQLITE3_VERSION="3.5.2"
+SQLITE3_IOS_ARM64_ASSET="libsqlite3.arm64.ios.dylib"
+SQLITE3_IOS_ARM64_SHA256="f1bc69a4304a21e472c15f849c34ae46539483cfa7ce901f54175c6d6cc17991"
+SQLITE3_IOS_ARM64_URL="https://github.com/simolus3/sqlite3.dart/releases/download/sqlite3-${SQLITE3_VERSION}/${SQLITE3_IOS_ARM64_ASSET}"
 CURL_RETRY_FLAGS="-fL --retry 5 --retry-delay 2 --connect-timeout 20"
 if curl --help all 2>/dev/null | grep -q -- '--retry-all-errors'; then
   CURL_RETRY_FLAGS="$CURL_RETRY_FLAGS --retry-all-errors"
@@ -67,6 +66,21 @@ retry() {
     n=$((n + 1))
     delay=$((delay * 2))
   done
+}
+
+ensure_cocoapods() {
+  installed_version="$(pod --version 2>/dev/null || true)"
+  if [ "$installed_version" != "$COCOAPODS_VERSION" ]; then
+    echo "▸ installing CocoaPods $COCOAPODS_VERSION"
+    retry 3 10 sudo gem install cocoapods -v "$COCOAPODS_VERSION" --no-document
+    hash -r
+    installed_version="$(pod --version 2>/dev/null || true)"
+  fi
+  if [ "$installed_version" != "$COCOAPODS_VERSION" ]; then
+    echo "error: expected CocoaPods $COCOAPODS_VERSION, found ${installed_version:-missing}" >&2
+    exit 1
+  fi
+  echo "▸ using CocoaPods $installed_version"
 }
 
 pod_install_with_retry() {
@@ -113,8 +127,7 @@ flutter_build_ios_config_with_retry() {
       --build-number="$APP_BUILD_NUMBER" \
       --dart-define="GIT_COMMIT=$GIT_COMMIT" \
       --dart-define="SENTRY_DSN=${SENTRY_DSN:-}" \
-      --dart-define="SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-production}" \
-      --dart-define="REVIEW_RELAY=${REVIEW_RELAY:-}"; then
+      --dart-define="SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-production}"; then
       return 0
     fi
     status=$?
@@ -128,6 +141,59 @@ flutter_build_ios_config_with_retry() {
     n=$((n + 1))
     delay=$((delay * 2))
   done
+}
+
+prefetch_sqlite3_ios_arm64() {
+  locked_version="$(
+    awk '
+      $0 == "  sqlite3:" { in_sqlite3 = 1; next }
+      in_sqlite3 && $1 == "version:" {
+        gsub(/"/, "", $2)
+        print $2
+        exit
+      }
+      in_sqlite3 && /^  [[:alnum:]_]/ { exit }
+    ' pubspec.lock
+  )"
+  if [ "$locked_version" != "$SQLITE3_VERSION" ]; then
+    echo "error: sqlite3 lock version $locked_version does not match pinned iOS binary $SQLITE3_VERSION" >&2
+    return 1
+  fi
+
+  cache_key="$(printf '%s' "$SQLITE3_IOS_ARM64_SHA256" | cut -c 1-8)"
+  cache_dir="$REPO/.dart_tool/hooks_runner/shared/sqlite3/build/download-${cache_key}"
+  output="$cache_dir/libsqlite3.dylib"
+  tmp="${output}.tmp.$$"
+  mkdir -p "$cache_dir"
+
+  if [ -f "$output" ] &&
+    printf '%s  %s\n' "$SQLITE3_IOS_ARM64_SHA256" "$output" |
+      shasum -a 256 -c - >/dev/null 2>&1; then
+    echo "▸ using cached sqlite3 $SQLITE3_VERSION iOS arm64 binary"
+    return 0
+  fi
+
+  echo "▸ downloading sqlite3 $SQLITE3_VERSION iOS arm64 binary"
+  rm -f "$tmp"
+  # shellcheck disable=SC2086 # CURL_RETRY_FLAGS is intentionally split.
+  if ! retry 3 5 curl $CURL_RETRY_FLAGS --max-time 120 "$SQLITE3_IOS_ARM64_URL" -o "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if ! printf '%s  %s\n' "$SQLITE3_IOS_ARM64_SHA256" "$tmp" |
+    shasum -a 256 -c -; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if ! mv "$tmp" "$output"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if ! printf '%s  %s\n' "$SQLITE3_IOS_ARM64_SHA256" "$output" |
+    shasum -a 256 -c -; then
+    rm -f "$output"
+    return 1
+  fi
 }
 
 decode_base64_to_file() {
@@ -152,24 +218,28 @@ GIT_COMMIT="$(git rev-parse --short HEAD)"
 echo "▸ git commit: $GIT_COMMIT"
 
 # Xcode Cloud runs xcodebuild after this script and can otherwise keep using
-# stale Flutter values from the checked-in project. Keep the major/minor version
-# from pubspec.yaml but force the iOS patch component to zero. Android nightlies
-# can therefore advance independently (for example 0.8.2 becomes 0.8.0 on iOS).
+# stale Flutter values from the checked-in project, so pin both the version and
+# the build number from pubspec.yaml.
 RAW_VERSION="$(awk '/^version:/ { print $2; exit }' pubspec.yaml)"
 test -n "$RAW_VERSION"
 APP_BUILD_NAME="${RAW_VERSION%%+*}"
-APP_BUILD_NUMBER="${RAW_VERSION#*+}"
-if [ "$APP_BUILD_NUMBER" = "$RAW_VERSION" ] || [ -z "$APP_BUILD_NUMBER" ]; then
-  APP_BUILD_NUMBER=1
+SOURCE_BUILD_NUMBER="${RAW_VERSION#*+}"
+if [ "$SOURCE_BUILD_NUMBER" = "$RAW_VERSION" ] || [ -z "$SOURCE_BUILD_NUMBER" ]; then
+  SOURCE_BUILD_NUMBER=1
 fi
-XCODE_BUILD_NAME="$(
-  printf '%s\n' "$APP_BUILD_NAME" |
-    awk -F. 'NF == 3 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ { print $1 "." $2 ".0" }'
-)"
-if [ -z "$XCODE_BUILD_NAME" ]; then
-  echo "error: expected a numeric X.Y.Z version in pubspec.yaml, got $APP_BUILD_NAME" >&2
-  exit 1
-fi
+APP_BUILD_NUMBER="${CI_BUILD_NUMBER:-$SOURCE_BUILD_NUMBER}"
+case "$APP_BUILD_NUMBER" in
+  ''|*[!0-9]*)
+    echo "error: expected a numeric iOS build number, got $APP_BUILD_NUMBER" >&2
+    exit 1
+    ;;
+esac
+# The same marketing train macOS uploads on: a nightly collapses onto X.Y.0 so
+# App Store Connect sees one train whose builds differ by build number, rather
+# than a version per night it would have to review from scratch. A release
+# keeps the exact patch it is named for.
+XCODE_BUILD_NAME="$(sh "$REPO/scripts/apple_marketing_version.sh" \
+  "$APP_BUILD_NAME" "${CI_BRANCH:-${GITHUB_REF_NAME:-}}")"
 echo "▸ iOS app version: $XCODE_BUILD_NAME+$APP_BUILD_NUMBER (source: $APP_BUILD_NAME)"
 python3 - <<PY
 from pathlib import Path
@@ -188,6 +258,7 @@ if ! command -v flutter >/dev/null 2>&1; then
   export PATH="$HOME/flutter/bin:$PATH"
 fi
 flutter --version
+ensure_cocoapods
 
 # --- Telegram credentials → lib/config/secrets.dart ------------------------
 : "${TELEGRAM_API_ID:?set TELEGRAM_API_ID in the Xcode Cloud workflow environment}"
@@ -214,16 +285,9 @@ else
   exit 1
 fi
 
-# --- Native TDLib framework (git-ignored; prebuilt on a public release) ------
-echo "▸ downloading tdjson.xcframework"
-mkdir -p ios/tdjson
-rm -rf ios/tdjson/tdjson.xcframework /tmp/tdjson.zip
-# shellcheck disable=SC2086 # CURL_RETRY_FLAGS is intentionally split.
-retry 4 5 curl $CURL_RETRY_FLAGS "$TDJSON_URL" -o /tmp/tdjson.zip
-unzip -q -o /tmp/tdjson.zip -d ios/tdjson
-ls -d ios/tdjson/tdjson.xcframework
-"$REPO/scripts/wrap-tdjson-xcframework.sh" ios/tdjson/tdjson.xcframework
-"$REPO/scripts/check-tdjson-session-symbols.sh" ios/tdjson/tdjson.xcframework
+# --- Native TDLib framework (git-ignored; manifest-pinned release artifact) --
+echo "▸ preparing pinned tdjson.xcframework"
+"$REPO/scripts/build-tdjson-ios.sh"
 
 echo "▸ downloading TgVoipWebrtc.xcframework"
 rm -rf ios/LocalPods/tgvoip/TgVoipWebrtc.xcframework /tmp/tgvoip.zip
@@ -243,6 +307,7 @@ echo "▸ generating Flutter iOS build inputs"
 flutter config --enable-swift-package-manager
 flutter precache --ios
 flutter pub get
+prefetch_sqlite3_ios_arm64
 flutter_build_ios_config_with_retry
 python3 - <<PY >> ios/Flutter/Generated.xcconfig
 import os
@@ -255,10 +320,6 @@ print("SENTRY_ENVIRONMENT=" + environment.replace("\\n", "").replace("\\r", ""))
 PY
 
 # --- CocoaPods --------------------------------------------------------------
-if ! command -v pod >/dev/null 2>&1; then
-  echo "▸ installing CocoaPods"
-  retry 3 10 brew install cocoapods || retry 3 10 sudo gem install cocoapods
-fi
 echo "▸ pod install"
 cd ios
 # Xcode Cloud can restore or leave behind a stale Pods sandbox. The archive

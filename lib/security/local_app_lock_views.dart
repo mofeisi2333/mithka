@@ -88,37 +88,136 @@ class LocalAppLockGate extends StatefulWidget {
   State<LocalAppLockGate> createState() => _LocalAppLockGateState();
 }
 
-class _LocalAppLockGateState extends State<LocalAppLockGate> {
+class _LocalAppLockGateState extends State<LocalAppLockGate>
+    with WidgetsBindingObserver {
   int? _automaticBiometricEpoch;
+  int? _pendingAutomaticBiometricEpoch;
+
+  bool get _foreground {
+    final state = WidgetsBinding.instance.lifecycleState;
+    return state == null || state == AppLifecycleState.resumed;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) setState(() {});
+  }
+
+  Future<void> _authenticateAutomatically(
+    LocalAppLockController controller,
+    int epoch,
+  ) async {
+    try {
+      if (!mounted ||
+          !controller.locked ||
+          controller.lockEpoch != epoch ||
+          !_foreground) {
+        return;
+      }
+      _automaticBiometricEpoch = epoch;
+      await controller.authenticateBiometric(
+        localizedReason: AppStringKeys.appLockBiometricReason.l10n(context),
+      );
+    } finally {
+      if (mounted && _pendingAutomaticBiometricEpoch == epoch) {
+        setState(() => _pendingAutomaticBiometricEpoch = null);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final controller = context.watch<LocalAppLockController>();
     if (!controller.locked) return const SizedBox.shrink();
-    if (controller.biometricEnabled &&
+    if (controller.storageUnavailable) {
+      return _AppLockStorageUnavailableView(controller: controller);
+    }
+    final epoch = controller.lockEpoch;
+    final tryBiometricFirst =
+        controller.biometricEnabled &&
         controller.biometricAvailable &&
-        _automaticBiometricEpoch != controller.lockEpoch) {
-      _automaticBiometricEpoch = controller.lockEpoch;
+        _automaticBiometricEpoch != epoch;
+    if (tryBiometricFirst &&
+        _pendingAutomaticBiometricEpoch != epoch &&
+        !controller.authenticatingBiometrics &&
+        _foreground) {
+      _pendingAutomaticBiometricEpoch = epoch;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !controller.locked) return;
-        unawaited(
-          controller.authenticateBiometric(
-            localizedReason: AppStringKeys.appLockBiometricReason.l10n(context),
-          ),
-        );
+        unawaited(_authenticateAutomatically(controller, epoch));
       });
     }
     return _AppUnlockView(
-      key: ValueKey(controller.lockEpoch),
+      key: ValueKey(epoch),
       controller: controller,
+      biometricPending:
+          tryBiometricFirst ||
+          _pendingAutomaticBiometricEpoch == epoch ||
+          controller.authenticatingBiometrics,
+    );
+  }
+}
+
+class _AppLockStorageUnavailableView extends StatelessWidget {
+  const _AppLockStorageUnavailableView({required this.controller});
+
+  final LocalAppLockController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = _AppLockPalette.of(context);
+    return _AppLockBackdrop(
+      child: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    AppStringKeys.appLockSetupFailed.l10n(context),
+                    textAlign: TextAlign.center,
+                    style: AppTextStyle.title(palette.foreground),
+                  ),
+                  const SizedBox(height: 18),
+                  SettingsHeaderAction(
+                    label: AppStringKeys.aiSummaryRetry,
+                    enabled: !controller.readingStorage,
+                    working: controller.readingStorage,
+                    onTap: () => unawaited(controller.reloadFromStorage()),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
 
 class _AppUnlockView extends StatelessWidget {
-  const _AppUnlockView({super.key, required this.controller});
+  const _AppUnlockView({
+    super.key,
+    required this.controller,
+    required this.biometricPending,
+  });
 
   final LocalAppLockController controller;
+  final bool biometricPending;
 
   @override
   Widget build(BuildContext context) {
@@ -137,6 +236,7 @@ class _AppUnlockView extends StatelessWidget {
                 : AppStringKeys.appLockDrawGesture,
             leading: const _ActiveAccountLockAvatar(),
             lockScreenStyle: true,
+            biometricPending: biometricPending,
             biometricKind: controller.biometricKind,
             showBiometric:
                 controller.biometricEnabled && controller.biometricAvailable,
@@ -315,6 +415,18 @@ class _AppLockSettingsViewState extends State<AppLockSettingsView> {
     ),
   );
 
+  Future<AppLockAutoLockOption?> _chooseAutoLock({
+    required AppLockAutoLockOption current,
+  }) => showAppModalSheet<AppLockAutoLockOption>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    barrierColor: const Color(0x99000000),
+    builder: (sheetContext) => _AutoLockChooser(
+      current: current,
+      onSelected: (value) => Navigator.of(sheetContext).pop(value),
+    ),
+  );
+
   Future<bool> _openSetup(AppLockCredentialType type) async =>
       await Navigator.of(context).push<bool>(
         MaterialPageRoute(
@@ -381,108 +493,125 @@ class _AppLockSettingsViewState extends State<AppLockSettingsView> {
     }
   }
 
+  Future<void> _changeAutoLock(AppLockAutoLockOption current) async {
+    if (_busy) return;
+    final option = await _chooseAutoLock(current: current);
+    if (!mounted || option == null) return;
+    setState(() => _busy = true);
+    try {
+      await context.read<LocalAppLockController>().setAutoLockOption(option);
+    } catch (_) {
+      if (mounted) showToast(context, AppStringKeys.appLockSetupFailed);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     final controller = context.watch<LocalAppLockController>();
     final type = controller.credentialType;
     final biometricName = _biometricName(controller.biometricKind);
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
+    final destructive = Theme.of(context).colorScheme.error;
+    return SettingsPageScaffold(
+      title: AppStringKeys.appLockTitle,
+      onBack: () => Navigator.of(context).pop(),
+      child: SettingsListView(
         children: [
-          NavHeader(
-            title: AppStringKeys.appLockTitle,
-            onBack: () => Navigator.of(context).pop(),
+          SettingsCard.rows(
+            rows: [
+              SettingsSwitchRow(
+                title: AppStringKeys.appLockEnabled,
+                value: controller.enabled,
+                enabled: !_busy,
+                leading: const SettingsLeadingIcon(icon: HeroAppIcons.lock),
+                onChanged: _toggleLock,
+              ),
+            ],
           ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(12, 14, 12, 24),
-              children: [
-                _SettingsCard(
-                  children: [
-                    _AppLockSettingsRow(
-                      icon: HeroAppIcons.lock,
-                      title: AppStringKeys.appLockEnabled,
-                      trailing: IgnorePointer(
-                        child: AppSwitch(
-                          value: controller.enabled,
-                          enabled: !_busy,
-                          onChanged: _toggleLock,
-                        ),
-                      ),
-                      onTap: _busy
-                          ? null
-                          : () => _toggleLock(!controller.enabled),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                const _SettingsHint(text: AppStringKeys.appLockDescription),
-                if (controller.enabled) ...[
-                  const SizedBox(height: 18),
-                  _SettingsCard(
-                    children: [
-                      _AppLockSettingsRow(
-                        icon: type == AppLockCredentialType.pin
-                            ? HeroAppIcons.key
-                            : HeroAppIcons.grip,
-                        title: AppStringKeys.appLockUnlockMethod,
-                        value: type == AppLockCredentialType.pin
-                            ? AppStringKeys.appLockPin
-                            : AppStringKeys.appLockGesture,
-                        onTap: _busy ? null : _changeCredential,
-                        showChevron: true,
-                      ),
-                      const InsetDivider(leadingInset: 54),
-                      _AppLockSettingsRow(
-                        icon: HeroAppIcons.arrowsRotate,
-                        title: type == AppLockCredentialType.pin
-                            ? AppStringKeys.appLockChangePin
-                            : AppStringKeys.appLockResetGesture,
-                        onTap: _busy ? null : _changeCredential,
-                        showChevron: true,
-                      ),
-                    ],
+          const SettingsNote(text: AppStringKeys.appLockDescription),
+          if (controller.enabled) ...[
+            const SizedBox(height: AppSpacing.xl),
+            SettingsCard.rows(
+              rows: [
+                SettingsRow(
+                  leading: SettingsLeadingIcon(
+                    icon: type == AppLockCredentialType.pin
+                        ? HeroAppIcons.key
+                        : HeroAppIcons.grip,
                   ),
-                  if (controller.biometricAvailable) ...[
-                    const SizedBox(height: 14),
-                    _SettingsCard(
-                      children: [
-                        _AppLockSettingsRow(
-                          icon: _biometricIcon(controller.biometricKind),
-                          title: AppStrings.t(
-                            AppStringKeys.appLockUseBiometric,
-                            {'value1': AppStrings.t(biometricName)},
-                          ),
-                          trailing: IgnorePointer(
-                            child: AppSwitch(
-                              value: controller.biometricEnabled,
-                              enabled: !_busy,
-                              onChanged: _toggleBiometric,
-                            ),
-                          ),
-                          onTap: _busy
-                              ? null
-                              : () => _toggleBiometric(
-                                  !controller.biometricEnabled,
-                                ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    _SettingsHint(
-                      text: AppStrings.t(
-                        AppStringKeys.appLockBiometricDescription,
-                        {'value1': AppStrings.t(biometricName)},
-                      ),
-                      alreadyLocalized: true,
-                    ),
-                  ],
-                ],
+                  title: AppStringKeys.appLockUnlockMethod,
+                  value: type == AppLockCredentialType.pin
+                      ? AppStringKeys.appLockPin
+                      : AppStringKeys.appLockGesture,
+                  enabled: !_busy,
+                  onTap: _changeCredential,
+                ),
+                SettingsRow(
+                  leading: const SettingsLeadingIcon(
+                    icon: HeroAppIcons.arrowsRotate,
+                  ),
+                  title: type == AppLockCredentialType.pin
+                      ? AppStringKeys.appLockChangePin
+                      : AppStringKeys.appLockResetGesture,
+                  enabled: !_busy,
+                  onTap: _changeCredential,
+                ),
               ],
             ),
-          ),
+            if (controller.biometricAvailable) ...[
+              const SizedBox(height: AppSpacing.xl),
+              SettingsCard.rows(
+                rows: [
+                  SettingsSwitchRow(
+                    leading: SettingsLeadingIcon(
+                      icon: _biometricIcon(controller.biometricKind),
+                    ),
+                    title: AppStrings.t(AppStringKeys.appLockUseBiometric, {
+                      'value1': AppStrings.t(biometricName),
+                    }),
+                    value: controller.biometricEnabled,
+                    enabled: !_busy,
+                    onChanged: _toggleBiometric,
+                  ),
+                ],
+              ),
+              SettingsNote(
+                text: AppStrings.t(AppStringKeys.appLockBiometricDescription, {
+                  'value1': AppStrings.t(biometricName),
+                }),
+              ),
+            ],
+            const SizedBox(height: AppSpacing.xl),
+            SettingsCard.rows(
+              rows: [
+                SettingsRow(
+                  leading: const SettingsLeadingIcon(icon: HeroAppIcons.clock),
+                  title: AppStringKeys.appLockAutoLock,
+                  value: _autoLockLabel(controller.autoLockOption),
+                  enabled: !_busy,
+                  onTap: () => _changeAutoLock(controller.autoLockOption),
+                ),
+              ],
+            ),
+            const SettingsNote(text: AppStringKeys.appLockAutoLockDescription),
+            const SizedBox(height: AppSpacing.xl),
+            SettingsCard.rows(
+              rows: [
+                SettingsRow(
+                  leading: SettingsLeadingIcon(
+                    icon: HeroAppIcons.lock,
+                    color: destructive,
+                  ),
+                  title: AppStringKeys.appLockDisable,
+                  titleColor: destructive,
+                  enabled: !_busy,
+                  showChevron: false,
+                  onTap: () => _toggleLock(false),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -529,7 +658,6 @@ class _AppLockCredentialSetupViewState
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     final confirm = _firstCredential != null;
     final methodName = widget.type == AppLockCredentialType.pin
         ? AppStringKeys.appLockPin
@@ -542,26 +670,17 @@ class _AppLockCredentialSetupViewState
       (AppLockCredentialType.gesture, true) =>
         AppStringKeys.appLockConfirmGesture,
     };
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
-        children: [
-          NavHeader(
-            title: methodName,
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: SafeArea(
-              top: false,
-              child: _CredentialChallenge(
-                type: widget.type,
-                title: methodName,
-                prompt: prompt,
-                onSubmit: _submit,
-              ),
-            ),
-          ),
-        ],
+    return SettingsPageScaffold(
+      title: methodName,
+      onBack: () => Navigator.of(context).pop(),
+      child: SafeArea(
+        top: false,
+        child: _CredentialChallenge(
+          type: widget.type,
+          title: methodName,
+          prompt: prompt,
+          onSubmit: _submit,
+        ),
       ),
     );
   }
@@ -572,63 +691,49 @@ class AppLockCredentialVerificationView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.colors;
     final controller = context.watch<LocalAppLockController>();
     final type = controller.credentialType;
     if (type == null) return const SizedBox.shrink();
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
-        children: [
-          NavHeader(
-            title: AppStringKeys.appLockVerifyTitle,
-            onBack: () => Navigator.of(context).pop(false),
-          ),
-          Expanded(
-            child: SafeArea(
-              top: false,
-              child: _CredentialChallenge(
-                type: type,
-                title: AppStringKeys.appLockVerifyTitle,
-                prompt: type == AppLockCredentialType.pin
-                    ? AppStringKeys.appLockEnterPin
-                    : AppStringKeys.appLockDrawGesture,
-                biometricKind: controller.biometricKind,
-                showBiometric:
-                    controller.biometricEnabled &&
-                    controller.biometricAvailable,
-                onSubmit: (credential) async {
-                  final accepted = await controller.verifyCredential(
-                    credential,
+    return SettingsPageScaffold(
+      title: AppStringKeys.appLockVerifyTitle,
+      onBack: () => Navigator.of(context).pop(false),
+      child: SafeArea(
+        top: false,
+        child: _CredentialChallenge(
+          type: type,
+          title: AppStringKeys.appLockVerifyTitle,
+          prompt: type == AppLockCredentialType.pin
+              ? AppStringKeys.appLockEnterPin
+              : AppStringKeys.appLockDrawGesture,
+          biometricKind: controller.biometricKind,
+          showBiometric:
+              controller.biometricEnabled && controller.biometricAvailable,
+          onSubmit: (credential) async {
+            final accepted = await controller.verifyCredential(credential);
+            if (accepted && context.mounted) {
+              Navigator.of(context).pop(true);
+            }
+            return accepted
+                ? const _ChallengeResult.complete()
+                : _ChallengeResult.rejected(
+                    type == AppLockCredentialType.pin
+                        ? AppStringKeys.appLockWrongPin
+                        : AppStringKeys.appLockWrongGesture,
                   );
-                  if (accepted && context.mounted) {
-                    Navigator.of(context).pop(true);
-                  }
-                  return accepted
-                      ? const _ChallengeResult.complete()
-                      : _ChallengeResult.rejected(
-                          type == AppLockCredentialType.pin
-                              ? AppStringKeys.appLockWrongPin
-                              : AppStringKeys.appLockWrongGesture,
-                        );
-                },
-                onBiometric: () async {
-                  final result = await controller.authenticateBiometric(
-                    localizedReason: AppStringKeys.appLockBiometricReason.l10n(
-                      context,
-                    ),
-                    unlockOnSuccess: false,
-                  );
-                  if (result == AppLockBiometricResult.success &&
-                      context.mounted) {
-                    Navigator.of(context).pop(true);
-                  }
-                  return _biometricError(result);
-                },
+          },
+          onBiometric: () async {
+            final result = await controller.authenticateBiometric(
+              localizedReason: AppStringKeys.appLockBiometricReason.l10n(
+                context,
               ),
-            ),
-          ),
-        ],
+              unlockOnSuccess: false,
+            );
+            if (result == AppLockBiometricResult.success && context.mounted) {
+              Navigator.of(context).pop(true);
+            }
+            return _biometricError(result);
+          },
+        ),
       ),
     );
   }
@@ -645,6 +750,7 @@ class _CredentialChallenge extends StatefulWidget {
     this.biometricKind = AppLockBiometricKind.generic,
     this.onBiometric,
     this.lockScreenStyle = false,
+    this.biometricPending = false,
   });
 
   final AppLockCredentialType type;
@@ -656,6 +762,7 @@ class _CredentialChallenge extends StatefulWidget {
   final Future<_ChallengeResult> Function(String credential) onSubmit;
   final Future<String?> Function()? onBiometric;
   final bool lockScreenStyle;
+  final bool biometricPending;
 
   @override
   State<_CredentialChallenge> createState() => _CredentialChallengeState();
@@ -701,7 +808,8 @@ class _CredentialChallengeState extends State<_CredentialChallenge> {
   KeyEventResult _handleKeyboardInput(FocusNode node, KeyEvent event) {
     if (widget.type != AppLockCredentialType.pin ||
         event is! KeyDownEvent ||
-        _busy) {
+        _busy ||
+        widget.biometricPending) {
       return KeyEventResult.ignored;
     }
 
@@ -721,7 +829,9 @@ class _CredentialChallengeState extends State<_CredentialChallenge> {
   }
 
   Widget _withKeyboardInput(Widget child) {
-    if (widget.type != AppLockCredentialType.pin) return child;
+    if (widget.type != AppLockCredentialType.pin || widget.biometricPending) {
+      return child;
+    }
     return Focus(
       focusNode: _keyboardFocusNode,
       autofocus: true,
@@ -731,7 +841,7 @@ class _CredentialChallengeState extends State<_CredentialChallenge> {
   }
 
   Future<void> _submit(String credential) async {
-    if (_busy) return;
+    if (_busy || widget.biometricPending) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -747,7 +857,11 @@ class _CredentialChallengeState extends State<_CredentialChallenge> {
   }
 
   void _addDigit(int digit) {
-    if (_busy || _pin.length >= LocalAppLockController.pinLength) return;
+    if (_busy ||
+        widget.biometricPending ||
+        _pin.length >= LocalAppLockController.pinLength) {
+      return;
+    }
     unawaited(HapticFeedback.selectionClick());
     setState(() {
       _error = null;
@@ -760,7 +874,7 @@ class _CredentialChallengeState extends State<_CredentialChallenge> {
   }
 
   void _deleteDigit() {
-    if (_busy || _pin.isEmpty) return;
+    if (_busy || widget.biometricPending || _pin.isEmpty) return;
     unawaited(HapticFeedback.selectionClick());
     setState(() {
       _error = null;
@@ -869,6 +983,9 @@ class _CredentialChallengeState extends State<_CredentialChallenge> {
       final height = math.max(constraints.maxHeight, 700.0);
       final topSpacing = math.max(40.0, height * 0.055);
       final patternSize = math.min(constraints.maxWidth + 19, 480.0);
+      final prompt = widget.biometricPending
+          ? _biometricUnlockName(widget.biometricKind)
+          : _error ?? widget.prompt;
       return SingleChildScrollView(
         child: SizedBox(
           width: constraints.maxWidth,
@@ -883,11 +1000,11 @@ class _CredentialChallengeState extends State<_CredentialChallenge> {
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 140),
                   child: Text(
-                    (_error ?? widget.prompt).l10n(context),
-                    key: ValueKey(_error ?? widget.prompt),
+                    prompt.l10n(context),
+                    key: ValueKey(prompt),
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: _error == null
+                      color: _error == null || widget.biometricPending
                           ? palette.foreground
                           : palette.error,
                       fontSize: 18,
@@ -901,7 +1018,13 @@ class _CredentialChallengeState extends State<_CredentialChallenge> {
                       ? 38
                       : 28,
                 ),
-                if (widget.type == AppLockCredentialType.pin) ...[
+                if (widget.biometricPending)
+                  AppIcon(
+                    _biometricIcon(widget.biometricKind),
+                    size: 48,
+                    color: palette.foreground,
+                  )
+                else if (widget.type == AppLockCredentialType.pin) ...[
                   _PinDots(
                     count: _pin.length,
                     error: _error != null,
@@ -934,7 +1057,7 @@ class _CredentialChallengeState extends State<_CredentialChallenge> {
                     ),
                   ),
                 const Spacer(),
-                if (widget.showBiometric)
+                if (widget.showBiometric && !widget.biometricPending)
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
@@ -1520,7 +1643,7 @@ class _MethodChooser extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(18, 20, 18, 12),
         decoration: BoxDecoration(
           color: c.card,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(AppRadius.lg),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1561,6 +1684,59 @@ class _MethodChooser extends StatelessWidget {
   }
 }
 
+class _AutoLockChooser extends StatelessWidget {
+  const _AutoLockChooser({required this.current, required this.onSelected});
+
+  final AppLockAutoLockOption current;
+  final ValueChanged<AppLockAutoLockOption> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return SafeArea(
+      top: false,
+      child: Container(
+        margin: const EdgeInsets.all(12),
+        padding: const EdgeInsets.fromLTRB(18, 20, 18, 12),
+        decoration: BoxDecoration(
+          color: c.card,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              AppStringKeys.appLockAutoLock.l10n(context),
+              style: AppTextStyle.title(
+                c.textPrimary,
+                weight: AppTextWeight.semibold,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              AppStringKeys.appLockAutoLockDescription.l10n(context),
+              style: AppTextStyle.body(c.textSecondary),
+            ),
+            const SizedBox(height: 14),
+            for (final option in AppLockAutoLockOption.values) ...[
+              _MethodChoice(
+                icon: HeroAppIcons.clock,
+                title: _autoLockLabel(option),
+                detail: null,
+                selected: current == option,
+                onTap: () => onSelected(option),
+              ),
+              if (option != AppLockAutoLockOption.values.last)
+                const SizedBox(height: 8),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _MethodChoice extends StatelessWidget {
   const _MethodChoice({
     required this.icon,
@@ -1572,7 +1748,7 @@ class _MethodChoice extends StatelessWidget {
 
   final AppIconData icon;
   final String title;
-  final String detail;
+  final String? detail;
   final bool selected;
   final VoidCallback onTap;
 
@@ -1606,11 +1782,13 @@ class _MethodChoice extends StatelessWidget {
                     title.l10n(context),
                     style: AppTextStyle.title(c.textPrimary),
                   ),
-                  const SizedBox(height: 3),
-                  Text(
-                    detail.l10n(context),
-                    style: AppTextStyle.footnote(c.textSecondary),
-                  ),
+                  if (detail != null) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      detail!.l10n(context),
+                      style: AppTextStyle.footnote(c.textSecondary),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -1623,100 +1801,13 @@ class _MethodChoice extends StatelessWidget {
   }
 }
 
-class _SettingsCard extends StatelessWidget {
-  const _SettingsCard({required this.children});
-
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    decoration: BoxDecoration(
-      color: context.colors.card,
-      borderRadius: BorderRadius.circular(12),
-    ),
-    clipBehavior: Clip.antiAlias,
-    child: Column(children: children),
-  );
-}
-
-class _AppLockSettingsRow extends StatelessWidget {
-  const _AppLockSettingsRow({
-    required this.icon,
-    required this.title,
-    this.value,
-    this.trailing,
-    this.onTap,
-    this.showChevron = false,
-  });
-
-  final AppIconData icon;
-  final String title;
-  final String? value;
-  final Widget? trailing;
-  final VoidCallback? onTap;
-  final bool showChevron;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: SizedBox(
-        height: 58,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              AppIcon(icon, size: 21, color: c.linkBlue),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Text(
-                  title.l10n(context),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTextStyle.bodyLarge(c.textPrimary),
-                ),
-              ),
-              if (value != null) ...[
-                const SizedBox(width: 10),
-                Text(
-                  value!.l10n(context),
-                  style: AppTextStyle.callout(c.textSecondary),
-                ),
-              ],
-              if (trailing != null) ...[const SizedBox(width: 12), trailing!],
-              if (showChevron) ...[
-                const SizedBox(width: 7),
-                AppIcon(
-                  HeroAppIcons.chevronRight,
-                  size: 14,
-                  color: c.textTertiary,
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SettingsHint extends StatelessWidget {
-  const _SettingsHint({required this.text, this.alreadyLocalized = false});
-
-  final String text;
-  final bool alreadyLocalized;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 16),
-    child: Text(
-      alreadyLocalized ? text : text.l10n(context),
-      style: AppTextStyle.footnote(context.colors.textTertiary),
-    ),
-  );
-}
+String _autoLockLabel(AppLockAutoLockOption option) => switch (option) {
+  AppLockAutoLockOption.disabled => AppStringKeys.appLockAutoLockDisabled,
+  AppLockAutoLockOption.oneMinute => AppStringKeys.appLockAutoLockOneMinute,
+  AppLockAutoLockOption.fiveMinutes => AppStringKeys.appLockAutoLockFiveMinutes,
+  AppLockAutoLockOption.oneHour => AppStringKeys.appLockAutoLockOneHour,
+  AppLockAutoLockOption.fiveHours => AppStringKeys.appLockAutoLockFiveHours,
+};
 
 @immutable
 class _ChallengeResult {

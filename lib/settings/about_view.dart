@@ -15,15 +15,17 @@ import '../app/app_version.dart';
 import '../app/telemetry_config.dart';
 import '../chat/link_handler.dart';
 import '../components/app_icons.dart';
-import '../components/desktop_content_constraint.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
+import '../update/update_checker.dart';
 import 'developer_mode_controller.dart';
 import 'feedback_report_view.dart';
 
 class AboutView extends StatefulWidget {
-  const AboutView({super.key});
+  const AboutView({super.key, this.showBackButton = true});
+
+  final bool showBackButton;
 
   @override
   State<AboutView> createState() => _AboutViewState();
@@ -36,6 +38,37 @@ class _AboutViewState extends State<AboutView> {
   late final Future<AppVersion> _versionFuture = AppVersion.load();
   int _versionTapCount = 0;
   DateTime? _lastVersionTapAt;
+  bool _checking = false;
+  UpdateCheckOutcome? _updateOutcome;
+
+  /// Trailing text on the update row: the last outcome, or nothing yet.
+  String _updateStatusLabel() {
+    if (_checking) return AppStrings.t(AppStringKeys.aboutCheckingForUpdates);
+    return switch (_updateOutcome) {
+      null => '',
+      UpdateCheckOutcome.upToDate => AppStrings.t(AppStringKeys.aboutUpToDate),
+      UpdateCheckOutcome.unavailable => AppStrings.t(
+        AppStringKeys.aboutUpdateCheckFailed,
+      ),
+      // checkNow already offered the download; the row just records it.
+      UpdateCheckOutcome.updateAvailable => AppStrings.t(
+        AppStringKeys.aboutDownloadUpdate,
+      ),
+    };
+  }
+
+  Future<void> _checkForUpdates() async {
+    setState(() {
+      _checking = true;
+      _updateOutcome = null;
+    });
+    final outcome = await UpdateChecker.checkNow(context);
+    if (!mounted) return;
+    setState(() {
+      _checking = false;
+      _updateOutcome = outcome;
+    });
+  }
 
   Future<void> _handleVersionTap() async {
     final now = DateTime.now();
@@ -58,203 +91,119 @@ class _AboutViewState extends State<AboutView> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.aboutTitle),
+      showBackButton: widget.showBackButton,
+      onBack: () => Navigator.of(context).pop(),
+      child: SettingsListView(
         children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.aboutTitle),
-            onBack: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: DesktopContentConstraint(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(12, 32, 12, 24),
-                children: [
-                  Center(
-                    child: Column(
-                      children: [
-                        Container(
-                          width: 84,
-                          height: 84,
-                          decoration: BoxDecoration(
-                            gradient: AppTheme.brandGradient,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: const Padding(
-                            padding: EdgeInsets.all(10),
-                            child: Image(
-                              image: AssetImage('assets/penguin.png'),
-                              fit: BoxFit.contain,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-                        Text(
-                          'Mithka',
+          Center(
+            child: Column(
+              children: [
+                Container(
+                  width: 84,
+                  height: 84,
+                  decoration: BoxDecoration(
+                    gradient: AppTheme.brandGradient,
+                    borderRadius: BorderRadius.circular(AppRadius.xl),
+                  ),
+                  child: const Padding(
+                    padding: EdgeInsets.all(10),
+                    child: Image(
+                      image: AssetImage('assets/penguin.png'),
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'Mithka',
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w600,
+                    color: c.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => unawaited(_handleVersionTap()),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    child: FutureBuilder<AppVersion>(
+                      future: _versionFuture,
+                      builder: (context, snapshot) {
+                        final version = snapshot.data?.display ?? '...';
+                        return Text(
+                          AppStrings.t(AppStringKeys.aboutVersion, {
+                            'value1': version,
+                          }),
                           style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: c.textPrimary,
+                            fontSize: 13,
+                            color: c.textSecondary,
                           ),
-                        ),
-                        const SizedBox(height: 4),
-                        GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () => unawaited(_handleVersionTap()),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
-                            ),
-                            child: FutureBuilder<AppVersion>(
-                              future: _versionFuture,
-                              builder: (context, snapshot) {
-                                final version = snapshot.data?.display ?? '...';
-                                return Text(
-                                  AppStrings.t(AppStringKeys.aboutVersion, {
-                                    'value1': version,
-                                  }),
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: c.textSecondary,
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                      ],
+                        );
+                      },
                     ),
                   ),
-                  const SizedBox(height: 30),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: c.card,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Column(
-                      children: [
-                        if (sentryEnabled) ...[
-                          _AboutLinkRow(
-                            icon: HeroAppIcons.comments.data,
-                            title: AppStrings.t(
-                              AppStringKeys.aboutReportProblem,
-                            ),
-                            value: AppStrings.t(
-                              AppStringKeys.aboutReportProblemDetail,
-                            ),
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                settings: const RouteSettings(
-                                  name: '/settings/feedback',
-                                ),
-                                builder: (_) => const FeedbackReportView(),
-                              ),
-                            ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.only(left: 48),
-                            child: Divider(height: 1, color: c.divider),
-                          ),
-                        ],
-                        _AboutLinkRow(
-                          icon: HeroAppIcons.globe.data,
-                          title: AppStrings.t(AppStringKeys.aboutWebsite),
-                          value: 'mithka.ieb.app',
-                          onTap: () => openLink(context, _websiteUrl),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(left: 48),
-                          child: Divider(height: 1, color: c.divider),
-                        ),
-                        _AboutLinkRow(
-                          icon: HeroAppIcons.solidPaperPlane.data,
-                          title: AppStrings.t(
-                            AppStringKeys.aboutTelegramChannel,
-                          ),
-                          value: 't.me/mithka',
-                          onTap: () => openLink(context, _channelUrl),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(left: 48),
-                          child: Divider(height: 1, color: c.divider),
-                        ),
-                        _AboutLinkRow(
-                          icon: HeroAppIcons.code.data,
-                          title: 'GitHub',
-                          value: 'github.com/iebb/mithka',
-                          onTap: () => openLink(context, _githubUrl),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AboutLinkRow extends StatelessWidget {
-  const _AboutLinkRow({
-    required this.icon,
-    required this.title,
-    required this.value,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String title;
-  final String value;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: SizedBox(
-        height: 52,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              Icon(icon, size: 20, color: AppTheme.brand),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 16, color: c.textPrimary),
+          const SizedBox(height: 30),
+          SettingsCard.rows(
+            rows: [
+              if (UpdateChecker.supportsManualCheck) ...[
+                SettingsRow(
+                  leading: const SettingsLeadingIcon(
+                    icon: HeroAppIcons.download,
+                  ),
+                  title: AppStrings.t(AppStringKeys.aboutCheckForUpdates),
+                  value: _updateStatusLabel(),
+                  onTap: _checking ? null : () => unawaited(_checkForUpdates()),
                 ),
-              ),
-              const SizedBox(width: 12),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 140),
-                child: Text(
-                  value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.right,
-                  style: TextStyle(fontSize: 14, color: c.textSecondary),
+              ],
+              if (sentryEnabled) ...[
+                SettingsRow(
+                  leading: const SettingsLeadingIcon(
+                    icon: HeroAppIcons.comments,
+                  ),
+                  title: AppStrings.t(AppStringKeys.aboutReportProblem),
+                  value: AppStrings.t(AppStringKeys.aboutReportProblemDetail),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      settings: const RouteSettings(name: '/settings/feedback'),
+                      builder: (_) => const FeedbackReportView(),
+                    ),
+                  ),
                 ),
+              ],
+              SettingsRow(
+                leading: const SettingsLeadingIcon(icon: HeroAppIcons.globe),
+                title: AppStrings.t(AppStringKeys.aboutWebsite),
+                value: 'mithka.ieb.app',
+                onTap: () => openLink(context, _websiteUrl),
               ),
-              const SizedBox(width: 6),
-              AppIcon(
-                HeroAppIcons.chevronRight,
-                size: 14,
-                color: c.textTertiary,
+              SettingsRow(
+                leading: const SettingsLeadingIcon(
+                  icon: HeroAppIcons.solidPaperPlane,
+                ),
+                title: AppStrings.t(AppStringKeys.aboutTelegramChannel),
+                value: 't.me/mithka',
+                onTap: () => openLink(context, _channelUrl),
+              ),
+              SettingsRow(
+                leading: const SettingsLeadingIcon(icon: HeroAppIcons.code),
+                title: 'GitHub',
+                value: 'github.com/iebb/mithka',
+                onTap: () => openLink(context, _githubUrl),
               ),
             ],
           ),
-        ),
+        ],
       ),
     );
   }

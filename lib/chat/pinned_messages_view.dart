@@ -5,20 +5,21 @@
 //  TDLib's searchMessagesFilterPinned and can jump back to the original message.
 //
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 
-import '../app/app_navigator.dart';
+import '../app/ipad_window_chrome.dart';
+import '../app/primary_chat_launcher.dart';
 import '../components/app_icons.dart';
 import '../components/photo_avatar.dart';
-import '../l10n/telegram_language_controller.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import '../theme/date_text.dart';
-import 'chat_view.dart';
-import 'full_image_viewer.dart';
+import 'image_preview.dart';
 import 'video_playback_queue.dart';
 import 'video_player_view.dart';
 
@@ -38,6 +39,7 @@ class PinnedMessagesView extends StatefulWidget {
 
 class _PinnedMessagesViewState extends State<PinnedMessagesView> {
   final TdClient _client = TdClient.shared;
+  late final int _accountSlot;
   final Map<int, String> _names = {};
   final Map<int, TdFileRef?> _photos = {};
   bool _loading = true;
@@ -46,13 +48,14 @@ class _PinnedMessagesViewState extends State<PinnedMessagesView> {
   @override
   void initState() {
     super.initState();
+    _accountSlot = _client.activeSlot;
     _load();
   }
 
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final res = await _client.query({
+      final res = await _client.queryForSlot({
         '@type': 'searchChatMessages',
         'chat_id': widget.chatId,
         'query': '',
@@ -61,7 +64,7 @@ class _PinnedMessagesViewState extends State<PinnedMessagesView> {
         'offset': 0,
         'limit': 100,
         'filter': {'@type': 'searchMessagesFilterPinned'},
-      });
+      }, _accountSlot);
       final list = res.objects('messages') ?? const <Map<String, dynamic>>[];
       final parsed = list
           .map(TDParse.message)
@@ -85,11 +88,17 @@ class _PinnedMessagesViewState extends State<PinnedMessagesView> {
     if (id == null || _names.containsKey(id)) return;
     try {
       if (id > 0) {
-        final user = await _client.query({'@type': 'getUser', 'user_id': id});
+        final user = await _client.queryForSlot({
+          '@type': 'getUser',
+          'user_id': id,
+        }, _accountSlot);
         _names[id] = TDParse.userName(user);
         _photos[id] = TDParse.smallPhoto(user.obj('profile_photo'));
       } else {
-        final chat = await _client.query({'@type': 'getChat', 'chat_id': id});
+        final chat = await _client.queryForSlot({
+          '@type': 'getChat',
+          'chat_id': id,
+        }, _accountSlot);
         _names[id] = chat.str('title') ?? widget.title;
         _photos[id] = TDParse.smallPhoto(chat.obj('photo'));
       }
@@ -116,7 +125,11 @@ class _PinnedMessagesViewState extends State<PinnedMessagesView> {
   Widget _header() {
     final c = context.colors;
     return Container(
-      padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
+      padding: EdgeInsets.only(
+        top:
+            MediaQuery.of(context).padding.top +
+            iPadWindowChromeInsetOf(context),
+      ),
       decoration: BoxDecoration(
         color: c.navBar,
         border: Border(bottom: BorderSide(color: c.divider, width: 0.5)),
@@ -142,7 +155,7 @@ class _PinnedMessagesViewState extends State<PinnedMessagesView> {
               ),
             ),
             Text(
-              telegramText(AppStringKeys.chatInfoPinnedHighlights),
+              AppStrings.t(AppStringKeys.chatInfoPinnedHighlights),
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
@@ -169,7 +182,7 @@ class _PinnedMessagesViewState extends State<PinnedMessagesView> {
     if (_items.isEmpty) {
       return Center(
         child: Text(
-          telegramText(AppStringKeys.pinnedMessagesEmpty),
+          AppStrings.t(AppStringKeys.pinnedMessagesEmpty),
           style: TextStyle(fontSize: 14, color: c.textSecondary),
         ),
       );
@@ -194,13 +207,12 @@ class _PinnedMessagesViewState extends State<PinnedMessagesView> {
     final photo = senderId == null ? null : _photos[senderId];
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () => Navigator.of(context).push(
-        AppChatPageRoute<void>(
-          builder: (_) => ChatView(
-            chatId: widget.chatId,
-            title: widget.title,
-            initialMessageId: message.id,
-          ),
+      onTap: () => unawaited(
+        openChatFromCurrentWindow(
+          context,
+          chatId: widget.chatId,
+          title: widget.title,
+          initialMessageId: message.id,
         ),
       ),
       child: Container(
@@ -208,7 +220,7 @@ class _PinnedMessagesViewState extends State<PinnedMessagesView> {
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
         decoration: BoxDecoration(
           color: c.card,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(AppRadius.control),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -233,7 +245,7 @@ class _PinnedMessagesViewState extends State<PinnedMessagesView> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        telegramText(AppStringKeys.pinnedMessagesSentBy, {
+                        AppStrings.t(AppStringKeys.pinnedMessagesSentBy, {
                           'value1': DateText.listLabel(message.date),
                         }),
                         style: TextStyle(fontSize: 13, color: c.textTertiary),
@@ -306,7 +318,7 @@ class _PinnedMessagesViewState extends State<PinnedMessagesView> {
     }
 
     final text = message.text.trim().isEmpty
-        ? telegramText(AppStringKeys.chatSearchMessageResultLabel)
+        ? AppStrings.t(AppStringKeys.chatSearchMessageResultLabel)
         : message.text.replaceAll('\n', ' ');
     return Text(
       text,
@@ -346,18 +358,13 @@ class _PinnedMessagesViewState extends State<PinnedMessagesView> {
       Navigator.of(context).push(
         MaterialPageRoute(
           fullscreenDialog: true,
-          builder: (_) => VideoPlaylistPlayerView(queue: _videoQueue(message)),
+          builder: (_) => VideoOnDemandPlayerView(queue: _videoQueue(message)),
         ),
       );
       return;
     }
     if (message.image == null) return;
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) => FullImageViewer(items: [message.image!]),
-      ),
-    );
+    unawaited(openImagePreview(context, items: [message.image!]));
   }
 
   VideoPlaybackQueue _videoQueue(ChatMessage current) {
@@ -369,9 +376,11 @@ class _PinnedMessagesViewState extends State<PinnedMessagesView> {
         for (final message in videos)
           VideoPlaybackItem(
             video: message.video!,
+            accountSlot: _accountSlot,
             thumb: message.image,
             width: message.imageWidth,
             height: message.imageHeight,
+            durationSeconds: message.videoDuration,
             sourceChatId: widget.chatId,
             messageId: message.id,
             title: _caption(message) ?? widget.title,

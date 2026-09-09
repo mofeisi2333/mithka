@@ -159,6 +159,8 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
       builder: (sheetContext) => StatefulBuilder(
         builder: (context, setSheetState) {
           final c = context.colors;
+          final coverCachePx = (40 * MediaQuery.devicePixelRatioOf(context))
+              .ceil();
           return SafeArea(
             top: false,
             child: Container(
@@ -180,7 +182,7 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
                     style: TextStyle(
                       color: c.textPrimary,
                       fontSize: 18,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -199,18 +201,19 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       decoration: BoxDecoration(
                         color: c.card,
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(AppRadius.card),
                       ),
                       child: Row(
                         children: [
                           if (coverPath != null)
                             ClipRRect(
-                              borderRadius: BorderRadius.circular(7),
+                              borderRadius: BorderRadius.circular(AppRadius.md),
                               child: Image.file(
                                 File(coverPath!),
                                 width: 40,
                                 height: 40,
                                 fit: BoxFit.cover,
+                                cacheWidth: coverCachePx,
                               ),
                             )
                           else
@@ -257,7 +260,7 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
                         AppStringKeys.mediaSendPreviewStartTimestampSeconds,
                       ),
                       border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(AppRadius.card),
                         borderSide: BorderSide.none,
                       ),
                     ),
@@ -307,7 +310,7 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
                         color: AppTheme.brand,
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(AppRadius.card),
                       ),
                       child: Text(
                         AppStrings.t(AppStringKeys.composerFormatApply),
@@ -411,6 +414,8 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
 
   Widget _selectedMedia(AppColors c) {
     final attachment = _attachments[_selectedIndex];
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final cachePx = (MediaQuery.sizeOf(context).width * dpr).ceil();
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Stack(
@@ -425,8 +430,13 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
                   : null,
               child: Center(
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: _preview(c, attachment, fit: BoxFit.contain),
+                  borderRadius: BorderRadius.circular(AppRadius.control),
+                  child: _preview(
+                    c,
+                    attachment,
+                    fit: BoxFit.contain,
+                    cacheWidth: cachePx,
+                  ),
                 ),
               ),
             ),
@@ -484,14 +494,14 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
       key: key,
       semanticLabel: semanticLabel,
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(AppRadius.control),
       child: Container(
         width: 38,
         height: 38,
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: const Color(0xA6000000),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(AppRadius.control),
         ),
         child: AppIcon(icon, size: 20, color: color),
       ),
@@ -539,7 +549,7 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
       semanticLabel: label,
       onTap: onTap,
       onLongPress: onLongPress,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(AppRadius.control),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Text(
@@ -556,6 +566,7 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
   }
 
   Widget _thumbnailStrip(AppColors c) {
+    final tileCachePx = (72 * MediaQuery.devicePixelRatioOf(context)).ceil();
     return SizedBox(
       height: 88,
       child: ReorderableListView.builder(
@@ -587,21 +598,26 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
                     AppStrings.t(AppStringKeys.composerImage),
                 selected: selected,
                 onTap: () => setState(() => _selectedIndex = index),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(AppRadius.control),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 140),
                   width: 72,
                   padding: const EdgeInsets.all(2),
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(AppRadius.control),
                     border: Border.all(
                       color: selected ? AppTheme.brand : Colors.transparent,
                       width: 2,
                     ),
                   ),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(5),
-                    child: _preview(c, attachment, fit: BoxFit.cover),
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                    child: _preview(
+                      c,
+                      attachment,
+                      fit: BoxFit.cover,
+                      cacheWidth: tileCachePx,
+                    ),
                   ),
                 ),
               ),
@@ -627,7 +643,7 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
       semanticLabel: AppStrings.t(AppStringKeys.composerSendAsFile),
       toggled: _sendAsFile,
       onTap: () => setState(() => _sendAsFile = !_sendAsFile),
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(AppRadius.card),
       child: Container(
         margin: const EdgeInsets.fromLTRB(12, 6, 12, 2),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -635,7 +651,7 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
           color: _sendAsFile
               ? AppTheme.brand.withValues(alpha: 0.12)
               : c.searchFill,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppRadius.card),
           border: Border.all(
             color: _sendAsFile
                 ? AppTheme.brand.withValues(alpha: 0.42)
@@ -722,10 +738,14 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
     );
   }
 
+  /// [cacheWidth] is the display box in device pixels — a camera-roll original
+  /// otherwise decodes at full sensor resolution into a 72px filmstrip tile.
+  /// Width only, so the decode keeps the source aspect ratio.
   Widget _preview(
     AppColors c,
     OutgoingAttachment attachment, {
     required BoxFit fit,
+    required int cacheWidth,
   }) {
     final bytes = attachment.previewBytes;
     final image = bytes != null && bytes.isNotEmpty
@@ -734,12 +754,14 @@ class _MediaSendPreviewViewState extends State<MediaSendPreviewView> {
             fit: fit,
             width: double.infinity,
             height: double.infinity,
+            cacheWidth: cacheWidth,
           )
         : Image.file(
             File(attachment.path),
             fit: fit,
             width: double.infinity,
             height: double.infinity,
+            cacheWidth: cacheWidth,
             errorBuilder: (_, _, _) => _fallback(c, attachment),
           );
     if (attachment.kind != OutgoingAttachmentKind.video) return image;

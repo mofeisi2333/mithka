@@ -108,6 +108,7 @@ class _AppPressRippleState extends State<AppPressRipple>
   }
 
   void _hideRipple() {
+    if (!mounted) return;
     final generation = _generation;
     if (AppMotion.isReduced(context)) {
       _opacityController.value = 0;
@@ -125,6 +126,12 @@ class _AppPressRippleState extends State<AppPressRipple>
   @override
   Widget build(BuildContext context) {
     final origin = _origin;
+    // A square-cornered wrapper with no ripple has nothing to clip, but the
+    // rasteriser still pushes a rounded-rect clip layer per instance — and the
+    // chat list wraps every row in one. Clip.none skips the layer while keeping
+    // the wrapper in the tree, so the child's element identity survives a press.
+    final hasNothingToClip =
+        origin == null && widget.borderRadius == BorderRadius.zero;
     return Listener(
       behavior: HitTestBehavior.translucent,
       onPointerDown: _handlePointerDown,
@@ -133,7 +140,7 @@ class _AppPressRippleState extends State<AppPressRipple>
       onPointerCancel: _handlePointerEnd,
       child: ClipRRect(
         borderRadius: widget.borderRadius,
-        clipBehavior: Clip.hardEdge,
+        clipBehavior: hasNothingToClip ? Clip.none : Clip.hardEdge,
         child: Stack(
           fit: StackFit.passthrough,
           children: [

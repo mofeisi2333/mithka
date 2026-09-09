@@ -176,6 +176,136 @@ void main() {
     },
   );
 
+  test('captured entry unread range has a stable upper message bound', () {
+    expect(
+      isCapturedEntryUnreadMessage(
+        messageId: 100,
+        lastReadInboxId: 100,
+        latestMessageId: 105,
+      ),
+      isFalse,
+    );
+    expect(
+      isCapturedEntryUnreadMessage(
+        messageId: 101,
+        lastReadInboxId: 100,
+        latestMessageId: 105,
+      ),
+      isTrue,
+    );
+    expect(
+      isCapturedEntryUnreadMessage(
+        messageId: 105,
+        lastReadInboxId: 100,
+        latestMessageId: 105,
+      ),
+      isTrue,
+    );
+    expect(
+      isCapturedEntryUnreadMessage(
+        messageId: 106,
+        lastReadInboxId: 100,
+        latestMessageId: 105,
+      ),
+      isFalse,
+    );
+  });
+
+  test('captured unread divider survives live read updates', () {
+    const capturedUnreadCount = 2;
+    const capturedLastReadInboxId = 100;
+    const capturedLatestMessageId = 102;
+
+    expect(
+      isCapturedUnreadDividerMessage(
+        entryUnreadCount: capturedUnreadCount,
+        firstUnreadMessageId: 101,
+        messageId: 101,
+        isIncoming: true,
+        isService: false,
+        lastReadInboxId: capturedLastReadInboxId,
+        latestMessageId: capturedLatestMessageId,
+      ),
+      isTrue,
+    );
+
+    // Rendering the visible unread messages can settle TDLib's live state to
+    // zero and advance its live boundary. The captured entry boundary remains
+    // the divider source for the lifetime of this chat view.
+    const liveUnreadCountAfterView = 0;
+    const liveLastReadInboxIdAfterView = 102;
+    expect(liveUnreadCountAfterView, 0);
+    expect(liveLastReadInboxIdAfterView, capturedLatestMessageId);
+    expect(
+      isCapturedUnreadDividerMessage(
+        entryUnreadCount: capturedUnreadCount,
+        firstUnreadMessageId: 101,
+        messageId: 101,
+        isIncoming: true,
+        isService: false,
+        lastReadInboxId: capturedLastReadInboxId,
+        latestMessageId: capturedLatestMessageId,
+      ),
+      isTrue,
+    );
+  });
+
+  test('captured unread divider marks only the first incoming unread row', () {
+    expect(
+      isCapturedUnreadDividerMessage(
+        entryUnreadCount: 2,
+        firstUnreadMessageId: 101,
+        messageId: 102,
+        isIncoming: true,
+        isService: false,
+        lastReadInboxId: 100,
+        latestMessageId: 102,
+      ),
+      isFalse,
+    );
+    expect(
+      isCapturedUnreadDividerMessage(
+        entryUnreadCount: 2,
+        firstUnreadMessageId: 101,
+        messageId: 101,
+        isIncoming: false,
+        isService: false,
+        lastReadInboxId: 100,
+        latestMessageId: 102,
+      ),
+      isFalse,
+    );
+    expect(
+      isCapturedUnreadDividerMessage(
+        entryUnreadCount: 2,
+        firstUnreadMessageId: 101,
+        messageId: 103,
+        isIncoming: true,
+        isService: false,
+        lastReadInboxId: 100,
+        latestMessageId: 102,
+      ),
+      isFalse,
+    );
+  });
+
+  test('entry upper bound prefers known latest with loaded fallback', () {
+    expect(
+      resolveCapturedEntryLatestMessageId(
+        knownLatestMessageId: 105,
+        loadedLatestMessageId: 104,
+      ),
+      105,
+    );
+    expect(
+      resolveCapturedEntryLatestMessageId(
+        knownLatestMessageId: 0,
+        loadedLatestMessageId: 104,
+      ),
+      104,
+    );
+  });
+
   test('initial unread count decreases as messages become visible', () {
     final progress = ChatUnreadProgress();
 
@@ -184,6 +314,79 @@ void main() {
     expect(progress.remaining(entryUnreadCount: 5), 4);
     expect(progress.markVisible(messageId: 11, initialUnread: true), isTrue);
     expect(progress.remaining(entryUnreadCount: 5), 3);
+  });
+
+  test(
+    'opening at the unread viewport reports visible messages without scrolling',
+    () {
+      final progress = ChatUnreadProgress();
+
+      final first = progress.observeVisibleIncoming(
+        messageId: 101,
+        initialUnread: true,
+      );
+      final second = progress.observeVisibleIncoming(
+        messageId: 102,
+        initialUnread: true,
+      );
+
+      expect(first.shouldReportViewed, isTrue);
+      expect(first.unreadCountChanged, isTrue);
+      expect(second.shouldReportViewed, isTrue);
+      expect(second.unreadCountChanged, isTrue);
+      expect(progress.badgeCount(entryUnreadCount: 2), 0);
+
+      final measuredAgain = progress.observeVisibleIncoming(
+        messageId: 101,
+        initialUnread: true,
+      );
+      expect(measuredAgain.shouldReportViewed, isFalse);
+      expect(measuredAgain.unreadCountChanged, isFalse);
+    },
+  );
+
+  test('entry badge keeps only genuinely offscreen unread messages', () {
+    final progress = ChatUnreadProgress();
+
+    progress.observeVisibleIncoming(messageId: 101, initialUnread: true);
+    progress.observeVisibleIncoming(messageId: 102, initialUnread: true);
+
+    expect(progress.initialRemaining(entryUnreadCount: 5), 3);
+    expect(progress.badgeCount(entryUnreadCount: 5), 3);
+  });
+
+  test('auto-followed post-entry arrival does not consume initial unread', () {
+    const lastReadInboxId = 100;
+    const entryLatestMessageId = 102;
+    final progress = ChatUnreadProgress();
+
+    progress.observeVisibleIncoming(
+      messageId: 101,
+      initialUnread: isCapturedEntryUnreadMessage(
+        messageId: 101,
+        lastReadInboxId: lastReadInboxId,
+        latestMessageId: entryLatestMessageId,
+      ),
+    );
+    expect(progress.initialRemaining(entryUnreadCount: 2), 1);
+
+    // Auto-follow clears the live badge before the next post-layout
+    // visibility sweep observes the newly appended message.
+    progress.addLiveMessage(103);
+    progress.clearLiveMessages();
+    final arrival = progress.observeVisibleIncoming(
+      messageId: 103,
+      initialUnread: isCapturedEntryUnreadMessage(
+        messageId: 103,
+        lastReadInboxId: lastReadInboxId,
+        latestMessageId: entryLatestMessageId,
+      ),
+    );
+
+    expect(arrival.shouldReportViewed, isTrue);
+    expect(arrival.unreadCountChanged, isFalse);
+    expect(progress.initialRemaining(entryUnreadCount: 2), 1);
+    expect(progress.badgeCount(entryUnreadCount: 2), 1);
   });
 
   test('live read updates do not double-decrement entry unread progress', () {

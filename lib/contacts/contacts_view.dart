@@ -13,12 +13,15 @@ import 'package:mithka/l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
 
 import '../app/app_navigator.dart';
+import '../app/ipad_window_chrome.dart';
+import '../app/primary_chat_launcher.dart';
 import '../chat/chat_view.dart';
 import '../components/app_icons.dart';
 import '../components/app_interactive_surface.dart';
 import '../components/drawer_controller.dart' as dc;
 import '../components/photo_avatar.dart';
 import '../components/ui_components.dart';
+import '../profile/adaptive_profile_launcher.dart';
 import '../profile/profile_detail_view.dart';
 import '../tdlib/chat_membership.dart';
 import '../tdlib/json_helpers.dart';
@@ -28,8 +31,14 @@ import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import 'add_people_view.dart';
 
-bool contactMatchesQuery(Contact contact, String rawQuery) {
-  final query = rawQuery.trim().toLowerCase().replaceFirst(RegExp(r'^@+'), '');
+bool contactMatchesQuery(Contact contact, String rawQuery) => _contactMatches(
+  contact,
+  rawQuery.trim().toLowerCase().replaceFirst(RegExp(r'^@+'), ''),
+);
+
+/// Takes the already-normalised query so the tab filters normalise once per
+/// build instead of once per row.
+bool _contactMatches(Contact contact, String query) {
   if (query.isEmpty) return true;
   return contact.name.toLowerCase().contains(query) ||
       contact.usernames.any(
@@ -38,10 +47,102 @@ bool contactMatchesQuery(Contact contact, String rawQuery) {
       (contact.username?.toLowerCase().contains(query) ?? false);
 }
 
+/// Contact-list row that follows the chat-list density in native desktop
+/// sidebars while retaining the established touch layout elsewhere.
+class ContactRowView extends StatelessWidget {
+  const ContactRowView({
+    super.key,
+    required this.contact,
+    required this.onTap,
+    this.desktopCompact = false,
+  });
+
+  final Contact contact;
+  final VoidCallback onTap;
+  final bool desktopCompact;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final rowHeight = desktopCompact
+        ? AppMetric.chatListRowHeight()
+        : AppMetric.listRowHeight;
+    final avatarSize = desktopCompact ? AppMetric.chatListAvatarSize() : 44.0;
+    final titleFontSize = desktopCompact
+        ? AppTextSize.chatListTitle()
+        : AppTextSize.bodyLarge;
+    final statusFontSize = desktopCompact
+        ? AppTextSize.chatListPreview()
+        : AppTextSize.footnote;
+
+    return AppInteractiveSurface(
+      semanticLabel: contact.name,
+      semanticValue: contact.statusText.isEmpty
+          ? null
+          : contact.statusText.l10n(context),
+      onTap: onTap,
+      child: SizedBox(
+        height: rowHeight,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
+          child: Row(
+            children: [
+              PhotoAvatar(
+                title: contact.name,
+                photo: contact.photo,
+                size: avatarSize,
+                showOnlineDot: contact.isOnline,
+              ),
+              const SizedBox(width: AppSpacing.lg),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      contact.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: titleFontSize,
+                        fontWeight: desktopCompact
+                            ? AppTextWeight.medium
+                            : null,
+                        color: c.textPrimary,
+                      ),
+                    ),
+                    if (contact.statusText.isNotEmpty) ...[
+                      SizedBox(height: desktopCompact ? AppSpacing.xs : 3),
+                      Text(
+                        contact.statusText.l10n(context),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: statusFontSize,
+                          color: c.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class ContactsView extends StatefulWidget {
-  const ContactsView({super.key, this.onOpenDetail});
+  const ContactsView({
+    super.key,
+    this.onOpenDetail,
+    this.desktopSidebar = false,
+  });
 
   final ValueChanged<Widget>? onOpenDetail;
+  final bool desktopSidebar;
 
   @override
   State<ContactsView> createState() => _ContactsViewState();
@@ -107,43 +208,43 @@ class _ContactsViewState extends State<ContactsView> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final query = _searchController.text;
-    final contacts = _vm.contacts
-        .where((contact) => contactMatchesQuery(contact, query))
-        .toList(growable: false);
-    final bots = _vm.bots
-        .where((contact) => contactMatchesQuery(contact, query))
-        .toList(growable: false);
-    final groups = _vm.groups
-        .where(
-          (chat) =>
-              query.trim().isEmpty ||
-              chat.title.toLowerCase().contains(query.trim().toLowerCase()),
-        )
-        .toList(growable: false);
-    final channels = _vm.channels
-        .where(
-          (chat) =>
-              query.trim().isEmpty ||
-              chat.title.toLowerCase().contains(query.trim().toLowerCase()),
-        )
-        .toList(growable: false);
+    final query = _searchController.text.trim().toLowerCase();
+    final contactQuery = query.replaceFirst(RegExp(r'^@+'), '');
     return Container(
       color: c.groupedBackground,
       child: Column(
         children: [
-          _header(),
+          if (!widget.desktopSidebar) _header(),
           Expanded(
-            child: ListView(
-              padding: EdgeInsets.zero,
-              children: [
-                _searchPill(),
-                _tabs(),
+            // Only the selected tab is filtered, and its rows are built lazily.
+            // The indexes are network-sized — 300 contacts, every joined group
+            // and channel — and the old Column inflated all of them on every
+            // keystroke and every view-model notification.
+            child: CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: widget.desktopSidebar
+                      ? _desktopToolbar()
+                      : _searchPill(),
+                ),
+                SliverToBoxAdapter(child: _tabs()),
                 switch (_tab) {
-                  0 => _contactList(contacts, loading: _vm.contactsLoading),
-                  1 => _chatList(groups, loading: _vm.chatsLoading),
-                  2 => _chatList(channels, loading: _vm.chatsLoading),
-                  _ => _contactList(bots, loading: _vm.contactsLoading),
+                  0 => _contactSliver(
+                    _filterContacts(_vm.contacts, contactQuery),
+                    loading: _vm.contactsLoading,
+                  ),
+                  1 => _chatSliver(
+                    _filterChats(_vm.groups, query),
+                    loading: _vm.chatsLoading,
+                  ),
+                  2 => _chatSliver(
+                    _filterChats(_vm.channels, query),
+                    loading: _vm.chatsLoading,
+                  ),
+                  _ => _contactSliver(
+                    _filterContacts(_vm.bots, contactQuery),
+                    loading: _vm.contactsLoading,
+                  ),
                 },
               ],
             ),
@@ -153,11 +254,27 @@ class _ContactsViewState extends State<ContactsView> {
     );
   }
 
+  List<Contact> _filterContacts(List<Contact> source, String query) => source
+      .where((contact) => _contactMatches(contact, query))
+      .toList(growable: false);
+
+  List<ChatSummary> _filterChats(List<ChatSummary> source, String query) =>
+      query.isEmpty
+      ? source
+      : source
+            .where((chat) => chat.title.toLowerCase().contains(query))
+            .toList(growable: false);
+
   Widget _header() {
     final c = context.colors;
     return Container(
+      key: const ValueKey('contacts-root-header'),
       color: c.listHeaderTint,
-      padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
+      padding: EdgeInsets.only(
+        top:
+            MediaQuery.of(context).padding.top +
+            iPadWindowChromeInsetOf(context),
+      ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
@@ -181,7 +298,7 @@ class _ContactsViewState extends State<ContactsView> {
             AppInteractiveSurface(
               semanticLabel: AppStringKeys.addPeopleFindPeople.l10n(context),
               onTap: _showAddMenu,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(AppRadius.control),
               child: Padding(
                 padding: const EdgeInsets.all(8),
                 child: AppIcon(
@@ -198,57 +315,97 @@ class _ContactsViewState extends State<ContactsView> {
   }
 
   Widget _searchPill() {
-    final c = context.colors;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-      child: Container(
-        height: 36,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(
-          color: c.searchFill,
-          borderRadius: BorderRadius.circular(9),
-        ),
-        child: Row(
-          children: [
-            AppIcon(
-              HeroAppIcons.magnifyingGlass,
-              size: 16,
-              color: c.textTertiary,
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: TextField(
-                controller: _searchController,
-                textInputAction: TextInputAction.search,
-                onChanged: (_) => setState(() {}),
-                style: TextStyle(fontSize: 14, color: c.textPrimary),
-                decoration: InputDecoration(
-                  isCollapsed: true,
-                  border: InputBorder.none,
-                  hintText: AppStringKeys.topicChatSearch.l10n(context),
-                  hintStyle: TextStyle(fontSize: 14, color: c.textTertiary),
+      child: _searchField(),
+    );
+  }
+
+  Widget _desktopToolbar() {
+    final c = context.colors;
+    return Padding(
+      key: const ValueKey('contacts-desktop-toolbar'),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+      child: Row(
+        children: [
+          Expanded(child: _searchField()),
+          const SizedBox(width: 8),
+          AppInteractiveSurface(
+            key: const ValueKey('contacts-desktop-add-action'),
+            semanticLabel: AppStringKeys.addPeopleFindPeople.l10n(context),
+            onTap: _showAddMenu,
+            borderRadius: BorderRadius.circular(AppRadius.control),
+            child: Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: c.searchFill,
+                borderRadius: BorderRadius.circular(AppRadius.control),
+              ),
+              child: Center(
+                child: AppIcon(
+                  HeroAppIcons.userPlus,
+                  size: 20,
+                  color: c.textPrimary,
                 ),
               ),
             ),
-            if (_searchController.text.isNotEmpty)
-              AppInteractiveSurface(
-                semanticLabel: AppStringKeys.countryPickerCancel.l10n(context),
-                onTap: () {
-                  _searchController.clear();
-                  setState(() {});
-                },
-                borderRadius: BorderRadius.circular(9),
-                child: Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: AppIcon(
-                    HeroAppIcons.xmark,
-                    size: 14,
-                    color: c.textTertiary,
-                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _searchField() {
+    final c = context.colors;
+    return Container(
+      key: const ValueKey('contacts-search-field'),
+      height: 36,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: c.searchFill,
+        borderRadius: BorderRadius.circular(AppRadius.control),
+      ),
+      child: Row(
+        children: [
+          AppIcon(
+            HeroAppIcons.magnifyingGlass,
+            size: 16,
+            color: c.textTertiary,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              textInputAction: TextInputAction.search,
+              onChanged: (_) => setState(() {}),
+              style: TextStyle(fontSize: 14, color: c.textPrimary),
+              decoration: InputDecoration(
+                isCollapsed: true,
+                border: InputBorder.none,
+                hintText: AppStringKeys.topicChatSearch.l10n(context),
+                hintStyle: TextStyle(fontSize: 14, color: c.textTertiary),
+              ),
+            ),
+          ),
+          if (_searchController.text.isNotEmpty)
+            AppInteractiveSurface(
+              semanticLabel: AppStringKeys.countryPickerCancel.l10n(context),
+              onTap: () {
+                _searchController.clear();
+                setState(() {});
+              },
+              borderRadius: BorderRadius.circular(AppRadius.control),
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: AppIcon(
+                  HeroAppIcons.xmark,
+                  size: 14,
+                  color: c.textTertiary,
                 ),
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -261,7 +418,14 @@ class _ContactsViewState extends State<ContactsView> {
       AppStringKeys.tabChannels,
       AppStringKeys.chatsSearchBots,
     ];
+    const desktopIcons = <AppIconData>[
+      HeroAppIcons.users,
+      HeroAppIcons.comments,
+      HeroAppIcons.towerBroadcast,
+      HeroAppIcons.cpuChip,
+    ];
     return Container(
+      key: const ValueKey('contacts-tabs'),
       margin: const EdgeInsets.only(top: 4),
       decoration: BoxDecoration(
         color: c.card,
@@ -271,43 +435,85 @@ class _ContactsViewState extends State<ContactsView> {
         children: [
           for (var i = 0; i < labels.length; i++)
             Expanded(
-              child: AppInteractiveSurface(
-                semanticLabel: labels[i].l10n(context),
-                selected: _tab == i,
-                onTap: () => setState(() => _tab = i),
-                child: SizedBox(
-                  height: 50,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      Text(
-                        labels[i].l10n(context),
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: _tab == i
-                              ? FontWeight.w600
-                              : FontWeight.w500,
-                          color: c.textPrimary,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 180),
-                        width: _tab == i ? 44 : 0,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: AppTheme.brand,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+              child: _contactTab(
+                index: i,
+                label: labels[i].l10n(context),
+                desktopIcon: desktopIcons[i],
               ),
             ),
         ],
       ),
     );
+  }
+
+  Widget _contactTab({
+    required int index,
+    required String label,
+    required AppIconData desktopIcon,
+  }) {
+    final c = context.colors;
+    final selected = _tab == index;
+    final surface = AppInteractiveSurface(
+      key: ValueKey('contacts-tab-$index'),
+      semanticLabel: label,
+      selected: selected,
+      onTap: () => setState(() => _tab = index),
+      child: SizedBox(
+        height: 50,
+        child: Column(
+          children: [
+            Expanded(
+              child: Center(
+                child: widget.desktopSidebar
+                    ? SizedBox(
+                        key: ValueKey('contacts-tab-icon-hit-$index'),
+                        width: 36,
+                        height: 36,
+                        child: Center(
+                          child: AppIcon(
+                            desktopIcon,
+                            key: ValueKey('contacts-tab-icon-$index'),
+                            size: 22,
+                            color: selected ? AppTheme.brand : c.textSecondary,
+                          ),
+                        ),
+                      )
+                    : Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Text(
+                          label,
+                          key: ValueKey('contacts-tab-label-$index'),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: selected
+                                ? FontWeight.w600
+                                : FontWeight.w500,
+                            color: c.textPrimary,
+                          ),
+                        ),
+                      ),
+              ),
+            ),
+            AnimatedContainer(
+              key: ValueKey('contacts-tab-indicator-$index'),
+              duration: const Duration(milliseconds: 180),
+              width: selected ? (widget.desktopSidebar ? 32 : 44) : 0,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppTheme.brand,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (!widget.desktopSidebar) return surface;
+    return Tooltip(message: label, excludeFromSemantics: true, child: surface);
   }
 
   Widget _card(List<Widget> children) {
@@ -322,132 +528,154 @@ class _ContactsViewState extends State<ContactsView> {
     );
   }
 
-  Widget _contactList(List<Contact> contacts, {required bool loading}) {
-    final c = context.colors;
-    if (contacts.isEmpty) {
-      return _stateCard(
-        loading: loading,
-        emptyText: _tab == 3
-            ? AppStringKeys.contactsNoBots
-            : AppStringKeys.contactsNoContacts,
-      );
-    }
-    return _card([
-      for (final contact in contacts) ...[
-        AppInteractiveSurface(
-          semanticLabel: contact.name,
-          semanticValue: contact.statusText.isEmpty
-              ? null
-              : contact.statusText.l10n(context),
-          onTap: () => _openDetail(
-            ProfileDetailView(
-              userId: contact.id,
-              name: contact.name,
-              showBackButton: widget.onOpenDetail == null,
+  /// The card is a flat colour behind the rows, so a virtualised list only has
+  /// to repeat it per row instead of wrapping the whole (unbounded) column.
+  Widget _rowCard(BuildContext context, Widget row, {required bool last}) {
+    return ColoredBox(
+      color: context.colors.card,
+      child: last
+          ? row
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [row, const InsetDivider(leadingInset: 70)],
             ),
-          ),
-          child: SizedBox(
-            height: 64,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              child: Row(
-                children: [
-                  PhotoAvatar(
-                    title: contact.name,
-                    photo: contact.photo,
-                    size: 44,
-                    showOnlineDot: contact.isOnline,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          contact.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 16, color: c.textPrimary),
-                        ),
-                        if (contact.statusText.isNotEmpty) ...[
-                          const SizedBox(height: 3),
-                          Text(
-                            contact.statusText.l10n(context),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: c.textSecondary,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-        if (contact != contacts.last) const InsetDivider(leadingInset: 70),
-      ],
-    ]);
+    );
   }
 
-  Widget _chatList(List<ChatSummary> chats, {required bool loading}) {
-    final c = context.colors;
-    final circleGroups = context.watch<ThemeController>().circularGroupAvatars;
-    if (chats.isEmpty) {
-      return _stateCard(
-        loading: loading,
-        emptyText: _tab == 2
-            ? AppStringKeys.contactsNoChannels
-            : AppStringKeys.contactsNoGroupChats,
+  Widget _contactSliver(List<Contact> contacts, {required bool loading}) {
+    if (contacts.isEmpty) {
+      return SliverToBoxAdapter(
+        child: _stateCard(
+          loading: loading,
+          emptyText: _tab == 3
+              ? AppStringKeys.contactsNoBots
+              : AppStringKeys.contactsNoContacts,
+        ),
       );
     }
-    return _card([
-      for (final group in chats) ...[
-        AppInteractiveSurface(
-          semanticLabel: group.title,
-          onTap: () => _openDetail(
-            ChatView(
-              chatId: group.id,
-              title: group.title,
-              showBackButton: widget.onOpenDetail == null,
-              showHeaderDivider: widget.onOpenDetail == null,
-            ),
-            outsideTabs: true,
-          ),
-          child: SizedBox(
-            height: 64,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              child: Row(
-                children: [
-                  PhotoAvatar(
-                    title: group.title,
-                    photo: group.photo,
-                    size: 44,
-                    square: !circleGroups,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      group.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 16, color: c.textPrimary),
+    return SliverPadding(
+      padding: const EdgeInsets.only(bottom: 24),
+      sliver: SliverList.builder(
+        itemCount: contacts.length,
+        itemBuilder: (context, index) {
+          final contact = contacts[index];
+          return _rowCard(
+            context,
+            ContactRowView(
+              contact: contact,
+              desktopCompact: widget.desktopSidebar,
+              onTap: () => unawaited(
+                openAdaptiveUserProfile(
+                  context,
+                  userId: contact.id,
+                  name: contact.name,
+                  // The contacts tab owns a detail pane; a window would leave it
+                  // showing its "select a contact" placeholder.
+                  preferInlinePane: widget.onOpenDetail != null,
+                  openFallback: () => _openDetail(
+                    ProfileDetailView(
+                      userId: contact.id,
+                      name: contact.name,
+                      showBackButton: widget.onOpenDetail == null,
                     ),
                   ),
-                ],
+                ),
               ),
             ),
-          ),
+            last: index == contacts.length - 1,
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _chatSliver(List<ChatSummary> chats, {required bool loading}) {
+    final c = context.colors;
+    final circleGroups = context.watch<ThemeController>().circularGroupAvatars;
+    final rowHeight = widget.desktopSidebar
+        ? AppMetric.chatListRowHeight()
+        : AppMetric.listRowHeight;
+    final avatarSize = widget.desktopSidebar
+        ? AppMetric.chatListAvatarSize()
+        : 44.0;
+    final titleFontSize = widget.desktopSidebar
+        ? AppTextSize.chatListTitle()
+        : AppTextSize.bodyLarge;
+    if (chats.isEmpty) {
+      return SliverToBoxAdapter(
+        child: _stateCard(
+          loading: loading,
+          emptyText: _tab == 2
+              ? AppStringKeys.contactsNoChannels
+              : AppStringKeys.contactsNoGroupChats,
         ),
-        if (group != chats.last) const InsetDivider(leadingInset: 70),
-      ],
-    ]);
+      );
+    }
+    return SliverPadding(
+      padding: const EdgeInsets.only(bottom: 24),
+      sliver: SliverList.builder(
+        itemCount: chats.length,
+        itemBuilder: (context, index) {
+          final group = chats[index];
+          return _rowCard(
+            context,
+            AppInteractiveSurface(
+              semanticLabel: group.title,
+              onTap: () => unawaited(
+                openChatFromCurrentWindow(
+                  context,
+                  chatId: group.id,
+                  title: group.title,
+                  openFallback: () async => _openDetail(
+                    ChatView(
+                      chatId: group.id,
+                      title: group.title,
+                      showBackButton: widget.onOpenDetail == null,
+                      showHeaderDivider: widget.onOpenDetail == null,
+                    ),
+                    outsideTabs: true,
+                  ),
+                ),
+              ),
+              child: SizedBox(
+                height: rowHeight,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.xl,
+                  ),
+                  child: Row(
+                    children: [
+                      PhotoAvatar(
+                        title: group.title,
+                        photo: group.photo,
+                        size: avatarSize,
+                        square: !circleGroups,
+                      ),
+                      const SizedBox(width: AppSpacing.lg),
+                      Expanded(
+                        child: Text(
+                          group.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: titleFontSize,
+                            fontWeight: widget.desktopSidebar
+                                ? AppTextWeight.medium
+                                : null,
+                            color: c.textPrimary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            last: index == chats.length - 1,
+          );
+        },
+      ),
+    );
   }
 
   Widget _stateCard({required bool loading, required String emptyText}) {
@@ -497,7 +725,9 @@ class ContactsViewModel extends ChangeNotifier {
   final Set<int> _resolvingBots = {};
   final Set<String> _loadingChatLists = {};
   final Set<String> _exhaustedChatLists = {};
+  final Set<int> _hydratedChats = {};
   StreamSubscription<Map<String, dynamic>>? _subscription;
+  Timer? _refreshTimer;
   bool _disposed = false;
   static const _pageSize = 100;
   static const _prefetchPasses = 8;
@@ -606,12 +836,18 @@ class ContactsViewModel extends ChangeNotifier {
       final ids = res.int64Array('chat_ids') ?? const <int>[];
       for (final id in ids) {
         if (_disposed) return;
+        // getChats has no offset, so every pass returns the ids the previous
+        // pass already hydrated. Live edits arrive through _subscribe. Marked
+        // only once getChat has actually answered, or a chat whose fetch fails
+        // once would be skipped by every later pass and never appear at all.
+        if (_hydratedChats.contains(id)) continue;
         try {
           final chat = await TdClient.shared.query({
             '@type': 'getChat',
             'chat_id': id,
           });
           if (_disposed) return;
+          _hydratedChats.add(id);
           await _ingestChat(chat);
         } catch (_) {}
       }
@@ -630,7 +866,7 @@ class ContactsViewModel extends ChangeNotifier {
         await _prefetchChatList(list);
       }
       chatsLoading = false;
-      _safeNotify();
+      _flushChatLists();
     });
   }
 
@@ -643,7 +879,9 @@ class ContactsViewModel extends ChangeNotifier {
         passes < _prefetchPasses) {
       passes += 1;
       final loaded = await _loadChatList(list, _pageSize);
-      await _hydrateChatList(list, _pageSize);
+      // Ask for everything loaded so far — with a flat _pageSize the chats past
+      // list position 100 were never ingested at all.
+      await _hydrateChatList(list, _pageSize * (passes + 1));
       if (_disposed || !loaded) break;
       await Future<void>.delayed(const Duration(milliseconds: 20));
     }
@@ -715,8 +953,7 @@ class ContactsViewModel extends ChangeNotifier {
     changed = _groupIndex.remove(id) != null || changed;
     changed = _channelIndex.remove(id) != null || changed;
     if (!changed) return;
-    _refreshChatLists();
-    _safeNotify();
+    _scheduleChatListRefresh();
   }
 
   void _ingest(ChatSummary summary) {
@@ -728,15 +965,36 @@ class ContactsViewModel extends ChangeNotifier {
       default:
         return;
     }
+    _scheduleChatListRefresh();
+  }
+
+  /// The prefetch ingests hundreds of chats one at a time; sorting both lists
+  /// and rebuilding the tab per chat was the bulk of its cost. Coalesce.
+  void _scheduleChatListRefresh() {
+    if (_disposed || _refreshTimer != null) return;
+    _refreshTimer = Timer(const Duration(milliseconds: 80), _flushChatLists);
+  }
+
+  void _flushChatLists() {
+    _refreshTimer?.cancel();
+    _refreshTimer = null;
+    if (_disposed) return;
     _refreshChatLists();
     _safeNotify();
   }
 
   void _refreshChatLists() {
-    groups = _groupIndex.values.toList()
-      ..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
-    channels = _channelIndex.values.toList()
-      ..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+    groups = _sortedByTitle(_groupIndex.values);
+    channels = _sortedByTitle(_channelIndex.values);
+  }
+
+  /// Decorate-sort-undecorate: the old comparator lowercased both titles on
+  /// every comparison, i.e. O(n log n) string allocations per refresh.
+  List<ChatSummary> _sortedByTitle(Iterable<ChatSummary> chats) {
+    final keyed = [
+      for (final chat in chats) (key: chat.title.toLowerCase(), chat: chat),
+    ]..sort((a, b) => a.key.compareTo(b.key));
+    return [for (final entry in keyed) entry.chat];
   }
 
   void _resolveBot(int userId) {
@@ -773,6 +1031,7 @@ class ContactsViewModel extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _refreshTimer?.cancel();
     _subscription?.cancel();
     super.dispose();
   }

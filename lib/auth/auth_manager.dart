@@ -12,13 +12,13 @@ import 'package:flutter/foundation.dart';
 import 'package:mithka/l10n/app_localizations.dart';
 import 'package:mithka/notifications/scope_notification_settings.dart';
 
+import '../chat/chat_members_cache.dart';
 import '../config/secrets.dart';
 import '../settings/api_credentials_config.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import 'account_backup_service.dart';
 import 'premium_auth_purchase_service.dart';
-import 'review_login_code_service.dart';
 import 'telegram_passkey_service.dart';
 
 sealed class AuthStep {
@@ -182,71 +182,140 @@ Map<String, dynamic> authenticationEmailCodeRequest(String code) => {
   'code': {'@type': 'emailAddressAuthenticationCode', 'code': code.trim()},
 };
 
+@visibleForTesting
+bool authReloadIsCurrent({
+  required int reloadAction,
+  required int currentAction,
+  required int reloadClientId,
+  required int currentClientId,
+}) => reloadAction == currentAction && reloadClientId == currentClientId;
+
 class AuthManager extends ChangeNotifier {
+  static const _startupTimeout = Duration(seconds: 20);
+
   final TdClient _client = TdClient.shared;
   final TelegramPasskeyService _passkeys = TelegramPasskeyService.shared;
   final PremiumAuthPurchaseService _premiumPurchases =
       const PremiumAuthPurchaseService();
   bool _started = false;
-  final ReviewLoginCodeService _reviewLoginCode = ReviewLoginCodeService();
+  bool _subscribed = false;
+  bool _credentialsMissing = false;
+  Timer? _startupWatchdog;
 
   AuthStep _step = const AuthInitializing();
   String? _errorMessage;
   bool _isWorking = false;
   int _actionSerial = 0;
   int? _authorizationTransitionAction;
-  bool _useReviewCodeRelay = false;
-  bool _reviewCodePollActive = false;
-  String? _mockReviewSessionPhone;
   bool _canUseLoginPasskey = false;
 
   AuthStep get step => _step;
   String? get errorMessage => _errorMessage;
   bool get isWorking => _isWorking;
-  bool get isReviewCodePolling => _reviewCodePollActive;
   bool get canUseLoginPasskey => _canUseLoginPasskey;
+
+  @override
+  void dispose() {
+    _cancelStartupWatchdog();
+    super.dispose();
+  }
 
   void start() {
     if (_started) return;
     _started = true;
+    _startupWatchdog?.cancel();
+    _startupWatchdog = Timer(_startupTimeout, _handleStartupTimeout);
     unawaited(_startAfterCredentialCheck());
   }
 
   Future<void> _startAfterCredentialCheck() async {
-    final customApi = await ApiCredentialsConfig.load();
-    if (!Secrets.isConfigured && !customApi.isUsable) {
-      _set(const AuthMissingCredentials());
-      return;
-    }
+    try {
+      final customApi = await ApiCredentialsConfig.load().timeout(
+        const Duration(seconds: 8),
+      );
+      _credentialsMissing = !Secrets.isConfigured && !customApi.isUsable;
 
-    // Subscribe before start so no early update is missed.
-    final updates = _client.subscribe();
-    updates.listen((update) {
-      if (update.type == 'updateOption' &&
-          update.str('name') == 'can_use_login_passkey') {
-        unawaited(_loadPasskeyAvailability());
+      // Subscribe before start so no early update is missed.
+      if (!_subscribed) {
+        _subscribed = true;
+        _client.subscribe().listen((update) {
+          if (update.type == 'updateOption' &&
+              update.str('name') == 'can_use_login_passkey') {
+            unawaited(_loadPasskeyAvailability());
+            return;
+          }
+          if (update.type != 'updateAuthorizationState') return;
+          final state = update.obj('authorization_state');
+          if (state != null) _handle(state);
+        });
+      }
+      await _client.start().timeout(_startupTimeout);
+      if (_credentialsMissing && !_client.activeIsBotApi) {
+        _cancelStartupWatchdog();
+        _set(const AuthMissingCredentials());
         return;
       }
-      if (update.type != 'updateAuthorizationState') return;
-      final state = update.obj('authorization_state');
-      if (state != null) _handle(state);
-    });
-    await _client.start();
-    unawaited(_loadPasskeyAvailability());
-    await ScopeNotificationSettings.shared.load();
+      if (!_client.activeIsBotApi) _client.sendParametersForActiveClient();
+      unawaited(_loadPasskeyAvailability());
+      await ScopeNotificationSettings.shared.load().timeout(
+        const Duration(seconds: 8),
+      );
+    } catch (error, stackTrace) {
+      debugPrint('Auth startup failed: $error\n$stackTrace');
+      _showStartupFailure(error);
+    }
   }
 
   void retryStart() {
     if (_step is! AuthMissingCredentials) return;
     _started = false;
+    _cancelStartupWatchdog();
     _set(const AuthInitializing());
     start();
+  }
+
+  void _handleStartupTimeout() {
+    if (!_started || _step is! AuthInitializing) return;
+    debugPrint('Auth startup timed out; showing the login screen.');
+    try {
+      if (!_client.activeIsBotApi) _client.sendParametersForActiveClient();
+    } catch (error) {
+      debugPrint('Auth startup retry failed: $error');
+    }
+    _showStartupFailure(
+      StateError(
+        'Mithka is taking longer than expected to connect. '
+        'Check your internet connection and try again.',
+      ),
+    );
+  }
+
+  void _showStartupFailure(Object error) {
+    if (!_started || _step is! AuthInitializing) return;
+    _cancelStartupWatchdog();
+    _errorMessage = error is StateError
+        ? error.message.toString()
+        : 'Mithka could not finish connecting. Check your internet connection '
+              'and try again.';
+    _set(const AuthWaitPhoneNumber());
+  }
+
+  void _cancelStartupWatchdog() {
+    _startupWatchdog?.cancel();
+    _startupWatchdog = null;
   }
 
   // MARK: - Authorization state machine
 
   void _handle(Map<String, dynamic> state) {
+    if (_credentialsMissing && !_client.activeIsBotApi) {
+      _set(const AuthMissingCredentials());
+      return;
+    }
     debugPrint('🔑 [Mithka] authorizationState → ${state.type ?? 'nil'}');
+    if (state.type != 'authorizationStateWaitTdlibParameters') {
+      _cancelStartupWatchdog();
+    }
     final preserveWorking = _authorizationTransitionAction == _actionSerial;
     if (_isWorking && !preserveWorking) {
       _actionSerial += 1;
@@ -298,9 +367,6 @@ class AuthManager extends ChangeNotifier {
       case 'authorizationStateWaitCode':
         final info = state.obj('code_info');
         _set(AuthWaitCode(_codeInfo(info)));
-        if (_useReviewCodeRelay) {
-          unawaited(_submitReviewCodeFromRelay());
-        }
       case 'authorizationStateWaitPassword':
         _set(AuthWaitPassword(state.str('password_hint') ?? ''));
       case 'authorizationStateWaitRegistration':
@@ -308,8 +374,14 @@ class AuthManager extends ChangeNotifier {
       case 'authorizationStateReady':
         _errorMessage = null;
         _set(const AuthReady());
-        unawaited(AccountBackupService.shared.backupActiveAccountIfEnabled());
+        if (!_client.activeIsBotApi) {
+          unawaited(AccountBackupService.shared.backupActiveAccountIfEnabled());
+        }
       case 'authorizationStateLoggingOut':
+        // Slots are reused by whoever signs in next, and the cache is keyed by
+        // slot — drop every strip rather than risk painting one account's
+        // members under another's chat.
+        ChatMembersCache.shared.clear();
         _set(const AuthLoggingOut());
       case 'authorizationStateClosing':
         break;
@@ -323,21 +395,41 @@ class AuthManager extends ChangeNotifier {
   /// Re-reads the active account's authorization state (after an account
   /// switch) and updates `step` so the UI gates on the right account.
   void reloadAuthState() {
-    _actionSerial += 1;
+    final action = ++_actionSerial;
+    final clientId = _client.activeClientId;
     _isWorking = false;
     _errorMessage = null;
     _canUseLoginPasskey = false;
     _set(const AuthInitializing());
     unawaited(_loadPasskeyAvailability());
-    _client
-        .query({'@type': 'getAuthorizationState'})
-        .timeout(const Duration(seconds: 8))
-        .then(_handle)
-        .catchError((Object error) {
-          debugPrint('Auth state reload failed: $error');
-          _client.sendParametersForActiveClient();
-          _set(const AuthWaitPhoneNumber());
-        });
+    unawaited(_reloadAuthState(action: action, clientId: clientId));
+  }
+
+  Future<void> _reloadAuthState({
+    required int action,
+    required int clientId,
+  }) async {
+    bool isCurrent() => authReloadIsCurrent(
+      reloadAction: action,
+      currentAction: _actionSerial,
+      reloadClientId: clientId,
+      currentClientId: _client.activeClientId,
+    );
+
+    try {
+      final state = await _client.queryTo(
+        {'@type': 'getAuthorizationState'},
+        clientId,
+        timeout: const Duration(seconds: 8),
+      );
+      if (!isCurrent()) return;
+      _handle(state);
+    } catch (error) {
+      if (!isCurrent()) return;
+      debugPrint('Auth state reload failed: $error');
+      _client.sendParametersForActiveClient();
+      _set(const AuthWaitPhoneNumber());
+    }
   }
 
   // MARK: - User actions
@@ -345,20 +437,6 @@ class AuthManager extends ChangeNotifier {
   Future<bool> submitPhone(String phone) async {
     if (_isWorking) return false;
     final normalizedPhone = phone.trim();
-    _mockReviewSessionPhone =
-        ReviewLoginCodeService.isMockSessionPhone(normalizedPhone)
-        ? normalizedPhone
-        : null;
-    _useReviewCodeRelay =
-        _mockReviewSessionPhone == null &&
-        ReviewLoginCodeService.isReviewPhone(normalizedPhone);
-    if (_mockReviewSessionPhone != null) {
-      _actionSerial += 1;
-      _isWorking = false;
-      _errorMessage = null;
-      _set(const AuthWaitCode(AuthCodeInfo.fallback));
-      return true;
-    }
     final action = _beginAuthorizationTransition();
     try {
       var state = await _client
@@ -442,14 +520,8 @@ class AuthManager extends ChangeNotifier {
     }
   }
 
-  void submitCode(String code) {
-    final mockPhone = _mockReviewSessionPhone;
-    if (mockPhone != null) {
-      unawaited(_restoreMockReviewSession(mockPhone, code));
-      return;
-    }
-    _run({'@type': 'checkAuthenticationCode', 'code': code.trim()});
-  }
+  void submitCode(String code) =>
+      _run({'@type': 'checkAuthenticationCode', 'code': code.trim()});
 
   void submitEmailAddress(String email) =>
       _run(authenticationEmailAddressRequest(email));
@@ -497,10 +569,8 @@ class AuthManager extends ChangeNotifier {
     'disable_notification': false,
   });
 
-  void resendCode() {
-    if (_mockReviewSessionPhone != null) return;
-    _run({'@type': 'resendAuthenticationCode', 'reason': null});
-  }
+  void resendCode() =>
+      _run({'@type': 'resendAuthenticationCode', 'reason': null});
 
   void logOut() => _run({'@type': 'logOut'});
 
@@ -529,63 +599,6 @@ class AuthManager extends ChangeNotifier {
     if (action != _actionSerial) return;
     _isWorking = false;
     notifyListeners();
-  }
-
-  Future<void> _submitReviewCodeFromRelay() async {
-    if (_reviewCodePollActive) return;
-    _reviewCodePollActive = true;
-    notifyListeners();
-    try {
-      for (var attempt = 0; attempt < 20; attempt += 1) {
-        if (_step is! AuthWaitCode || !_useReviewCodeRelay) return;
-        final code = await _reviewLoginCode.fetchCode();
-        if (code != null) {
-          submitCode(code);
-          return;
-        }
-        await Future<void>.delayed(const Duration(seconds: 3));
-      }
-    } catch (error) {
-      debugPrint('Review login code relay failed: $error');
-    } finally {
-      _reviewCodePollActive = false;
-      notifyListeners();
-    }
-  }
-
-  Future<void> _restoreMockReviewSession(String phone, String otp) async {
-    final action = ++_actionSerial;
-    _isWorking = true;
-    _errorMessage = null;
-    notifyListeners();
-    try {
-      final sessionString = await _reviewLoginCode.fetchSessionString(
-        phone: phone,
-        otp: otp,
-      );
-      if (action != _actionSerial) return;
-      if (sessionString == null) {
-        _errorMessage = AppStrings.t(AppStringKeys.authInvalidVerificationCode);
-        return;
-      }
-
-      await AccountBackupService.shared.restoreSessionString(sessionString);
-      if (action != _actionSerial) return;
-      _mockReviewSessionPhone = null;
-      _useReviewCodeRelay = false;
-      _isWorking = false;
-      _errorMessage = null;
-      reloadAuthState();
-    } catch (error) {
-      if (action != _actionSerial) return;
-      debugPrint('Review session relay failed: $error');
-      _errorMessage = error is TdError ? _friendly(error) : error.toString();
-    } finally {
-      if (action == _actionSerial) {
-        _isWorking = false;
-        notifyListeners();
-      }
-    }
   }
 
   void _set(AuthStep step) {

@@ -12,7 +12,7 @@ import '../components/app_icons.dart';
 import '../components/photo_avatar.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
-import '../l10n/telegram_language_controller.dart';
+import '../platform/adaptive_platform.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
@@ -23,16 +23,17 @@ import 'sticker_set_detail_view.dart';
 import 'video_sticker_view.dart';
 
 class StickerViewer extends StatefulWidget {
-  const StickerViewer({super.key, required this.message});
+  const StickerViewer({super.key, required this.message, this.onOpenSet});
 
   final ChatMessage message;
+  final ValueChanged<int>? onOpenSet;
 
   @override
   State<StickerViewer> createState() => _StickerViewerState();
 }
 
 class _StickerViewerState extends State<StickerViewer> {
-  String _setTitle = telegramText(AppStringKeys.messageActionSticker);
+  String _setTitle = AppStrings.t(AppStringKeys.messageActionSticker);
   bool _installed = false;
   bool _exporting = false;
   final LayerLink _exportMenuLink = LayerLink();
@@ -67,6 +68,12 @@ class _StickerViewerState extends State<StickerViewer> {
   void _openSet() {
     final setId = _message.stickerSetId;
     if (setId == null || setId == 0) return;
+    final onOpenSet = widget.onOpenSet;
+    if (onOpenSet != null) {
+      Navigator.of(context).pop();
+      onOpenSet(setId);
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => StickerSetDetailView(setId: setId)),
     );
@@ -97,6 +104,8 @@ class _StickerViewerState extends State<StickerViewer> {
     final formats = StickerExportService.availableFormats(_message);
     final saveToPhotos = l10n.t(AppStringKeys.messageActionSaveToPhotos);
     final saveToFiles = l10n.t(AppStringKeys.stickerExportSaveToFiles);
+    // A computer has no album, so only the file destination survives there.
+    final offersPhotos = !isDesktopTargetPlatform(Theme.of(context).platform);
 
     late OverlayEntry entry;
     entry = OverlayEntry(
@@ -120,7 +129,7 @@ class _StickerViewerState extends State<StickerViewer> {
               clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
                 color: c.card,
-                borderRadius: BorderRadius.circular(13),
+                borderRadius: BorderRadius.circular(AppRadius.card),
                 border: Border.all(color: c.divider, width: 0.5),
                 boxShadow: const [
                   BoxShadow(
@@ -133,17 +142,19 @@ class _StickerViewerState extends State<StickerViewer> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  for (final format in formats.where(
-                    (format) => format != StickerExportFormat.lottie,
-                  ))
-                    _exportMenuItem(
-                      c: c,
-                      label: saveToPhotos,
-                      format: format,
-                      formatLabel: format.label(animated: isAnimated),
-                      destination: StickerExportDestination.photos,
-                    ),
-                  Container(height: 0.5, color: c.divider),
+                  if (offersPhotos) ...[
+                    for (final format in formats.where(
+                      (format) => format != StickerExportFormat.lottie,
+                    ))
+                      _exportMenuItem(
+                        c: c,
+                        label: saveToPhotos,
+                        format: format,
+                        formatLabel: format.label(animated: isAnimated),
+                        destination: StickerExportDestination.photos,
+                      ),
+                    Container(height: 0.5, color: c.divider),
+                  ],
                   for (final format in formats)
                     _exportMenuItem(
                       c: c,

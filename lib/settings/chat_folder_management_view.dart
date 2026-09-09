@@ -2,23 +2,31 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 
 import '../chat/chat_picker_view.dart';
+import '../chats/chat_folder_tag_controller.dart';
 import '../components/app_confirm_dialog.dart';
 import '../components/app_icons.dart';
 import '../components/toast.dart';
 import '../components/ui_components.dart';
 import '../l10n/app_localizations.dart';
+import '../platform/adaptive_platform.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import '../theme/app_theme.dart';
 import 'chat_folder_service.dart';
 
+/// Stand-in title for a chat whose real title has not been resolved yet.
+String _chatFallbackTitle(int id) =>
+    AppStrings.t(AppStringKeys.chatFolderManagementChatValue1, {'value1': id});
+
 class ChatFolderManagementView extends StatefulWidget {
-  const ChatFolderManagementView({super.key, this.service});
+  const ChatFolderManagementView({super.key, this.service, this.updates});
 
   final ChatFolderService? service;
+  final Stream<Map<String, dynamic>>? updates;
 
   @override
   State<ChatFolderManagementView> createState() =>
@@ -31,18 +39,22 @@ class _ChatFolderManagementViewState extends State<ChatFolderManagementView> {
   List<ChatFolderRecord> _folders = const [];
   List<RecommendedFolder> _recommended = const [];
   bool _loading = true;
-  bool _tagsEnabled = false;
   int _mainListPosition = 0;
   int _generation = 0;
+
+  /// Null only in a harness with no provider above it; the toggle then simply
+  /// has nowhere to write.
+  ChatFolderTagController? get _tags =>
+      context.read<ChatFolderTagController?>();
+  bool get _tagsEnabled => _tags?.enabled ?? false;
 
   @override
   void initState() {
     super.initState();
-    if (widget.service == null) {
-      _updates = TdClient.shared.subscribe().listen((update) {
-        if (update.type == 'updateChatFolders') _load(update);
-      });
-    }
+    final updates =
+        widget.updates ??
+        (widget.service == null ? TdClient.shared.subscribe() : null);
+    _updates = updates?.listen(_handleUpdate);
     _load(
       widget.service == null
           ? TdClient.shared.latestChatFoldersUpdate
@@ -54,6 +66,13 @@ class _ChatFolderManagementViewState extends State<ChatFolderManagementView> {
   void dispose() {
     _updates?.cancel();
     super.dispose();
+  }
+
+  void _handleUpdate(Map<String, dynamic> update) {
+    if (update.type == 'updateChatFolders') {
+      unawaited(_load(update));
+      return;
+    }
   }
 
   Future<void> _load(Map<String, dynamic>? update) async {
@@ -68,7 +87,6 @@ class _ChatFolderManagementViewState extends State<ChatFolderManagementView> {
       setState(() {
         _folders = values[0] as List<ChatFolderRecord>;
         _recommended = values[1] as List<RecommendedFolder>;
-        _tagsEnabled = update?.boolean('are_tags_enabled') ?? _tagsEnabled;
         _mainListPosition =
             update?.integer('main_chat_list_position') ?? _mainListPosition;
         _loading = false;
@@ -232,128 +250,106 @@ class _ChatFolderManagementViewState extends State<ChatFolderManagementView> {
     return entries;
   }
 
-  Future<void> _toggleTags(bool enabled) async {
-    final previous = _tagsEnabled;
-    setState(() => _tagsEnabled = enabled);
-    try {
-      await _service.toggleTags(enabled);
-    } catch (error) {
-      if (!mounted) return;
-      setState(() => _tagsEnabled = previous);
-      showToast(
-        context,
-        AppStrings.t(
-          AppStringKeys.chatFolderManagementCouldnTChangeFolderTagsValue1,
-          {'value1': error},
-        ),
-      );
-    }
-  }
+  /// 文件夹标签 is a Premium setting on the server, so the controller writes it
+  /// there only for a Premium account and keeps everyone else's choice on this
+  /// device. Drawing the tags is local either way.
+  Future<void> _toggleTags(bool enabled) async => _tags?.setEnabled(enabled);
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
+    // The switch follows the controller, so a change made anywhere — here, or
+    // a Premium account's own server update — lands on this row.
+    final tagsEnabled =
+        context.watch<ChatFolderTagController?>()?.enabled ?? false;
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.appearanceChatFolders),
+      onBack: () => Navigator.of(context).pop(),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          NavHeader(
-            title: AppStrings.t(AppStringKeys.appearanceChatFolders),
-            onBack: () => Navigator.of(context).pop(),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _loading ? null : _refresh,
-                  child: const Padding(
-                    padding: EdgeInsets.all(AppSpacing.xs),
-                    child: AppIcon(HeroAppIcons.arrowsRotate, size: 21),
-                  ),
-                ),
-                GestureDetector(
-                  key: const ValueKey('folder-create'),
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _loading ? null : _create,
-                  child: Padding(
-                    padding: const EdgeInsets.all(AppSpacing.xs),
-                    child: AppIcon(
-                      HeroAppIcons.plus,
-                      size: 24,
-                      color: _loading ? c.textTertiary : AppTheme.brand,
-                    ),
-                  ),
-                ),
-              ],
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _loading ? null : _refresh,
+            child: const Padding(
+              padding: EdgeInsets.all(AppSpacing.xs),
+              child: AppIcon(HeroAppIcons.arrowsRotate, size: 21),
             ),
           ),
-          Expanded(
-            child: _loading && _folders.isEmpty
-                ? const Center(child: AppActivityIndicator())
-                : ListView(
-                    padding: const EdgeInsets.fromLTRB(
-                      AppSpacing.lg,
-                      AppSpacing.xl,
-                      AppSpacing.lg,
-                      AppSpacing.section,
-                    ),
-                    children: [
-                      _sectionTitle('Folders', key: const ValueKey('title')),
-                      _folderOrderCard(),
-                      const SizedBox(
-                        key: ValueKey('gap-tags'),
-                        height: AppSpacing.xl,
-                      ),
-                      _sectionTitle(
-                        'Folder tags',
-                        key: const ValueKey('tags-title'),
-                      ),
-                      _card(
-                        key: const ValueKey('folder-tags'),
-                        children: [
-                          _switchRow(
-                            'Show folder tags in the chat list',
-                            _tagsEnabled,
-                            _toggleTags,
-                          ),
-                        ],
-                      ),
-                      if (_recommended.isNotEmpty) ...[
-                        const SizedBox(
-                          key: ValueKey('gap-recommended'),
-                          height: AppSpacing.xl,
-                        ),
-                        _sectionTitle(
-                          'Recommended',
-                          key: const ValueKey('recommended-title'),
-                        ),
-                        _card(
-                          key: const ValueKey('recommended-list'),
-                          children: [
-                            for (var i = 0; i < _recommended.length; i++) ...[
-                              if (i > 0) _divider(),
-                              _recommendedRow(_recommended[i]),
-                            ],
-                          ],
-                        ),
-                      ],
-                    ],
-                  ),
+          GestureDetector(
+            key: const ValueKey('folder-create'),
+            behavior: HitTestBehavior.opaque,
+            onTap: _loading ? null : _create,
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.xs),
+              child: AppIcon(
+                HeroAppIcons.plus,
+                size: 24,
+                color: _loading ? c.textTertiary : AppTheme.brand,
+              ),
+            ),
           ),
         ],
       ),
+      child: _loading && _folders.isEmpty
+          ? const Center(child: AppActivityIndicator())
+          : SettingsListView(
+              children: [
+                _sectionTitle(
+                  AppStrings.t(AppStringKeys.chatFolderManagementFolders),
+                  key: const ValueKey('title'),
+                ),
+                _folderOrderCard(),
+                const SizedBox(
+                  key: ValueKey('gap-tags'),
+                  height: AppSpacing.xl,
+                ),
+                _sectionTitle(
+                  AppStrings.t(AppStringKeys.chatFolderManagementFolderTags),
+                  key: const ValueKey('tags-title'),
+                ),
+                _card(
+                  key: const ValueKey('folder-tags'),
+                  children: [
+                    _switchRow(
+                      AppStrings.t(
+                        AppStringKeys
+                            .chatFolderManagementShowFolderTagsInChatList,
+                      ),
+                      tagsEnabled,
+                      _toggleTags,
+                    ),
+                  ],
+                ),
+                if (_recommended.isNotEmpty) ...[
+                  const SizedBox(
+                    key: ValueKey('gap-recommended'),
+                    height: AppSpacing.xl,
+                  ),
+                  _sectionTitle(
+                    AppStrings.t(AppStringKeys.chatFolderManagementRecommended),
+                    key: const ValueKey('recommended-title'),
+                  ),
+                  _card(
+                    key: const ValueKey('recommended-list'),
+                    children: [
+                      for (var i = 0; i < _recommended.length; i++) ...[
+                        if (i > 0) _divider(),
+                        _recommendedRow(_recommended[i]),
+                      ],
+                    ],
+                  ),
+                ],
+              ],
+            ),
     );
   }
 
   Widget _folderOrderCard() {
     final entries = _orderedEntries();
-    return Container(
+    return SettingsPanel(
       key: const ValueKey('folder-list'),
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: context.colors.card,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
+      clipBehavior: Clip.antiAlias,
       child: ReorderableListView(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
@@ -373,11 +369,42 @@ class _ChatFolderManagementViewState extends State<ChatFolderManagementView> {
     );
   }
 
+  /// The grip that starts a reorder. It leads the row — the thing you grab
+  /// sits where you reach for it, ahead of the folder it moves — and draws as
+  /// three bars, the drag-handle glyph, rather than the 2x2 squares it used to
+  /// borrow, which read as a menu button.
+  Widget _dragHandle(int index) => ReorderableDragStartListener(
+    index: index,
+    child: const Padding(
+      // Vertical padding keeps the grab target a comfortable size on the
+      // compact desktop row, where the row itself is only 42 tall.
+      padding: EdgeInsets.fromLTRB(
+        0,
+        AppSpacing.sm,
+        AppSpacing.md,
+        AppSpacing.sm,
+      ),
+      child: AppIcon(HeroAppIcons.bars, size: 19, color: Color(0xFF9CA3AF)),
+    ),
+  );
+
+  /// The inset [SettingsRow] applies, so these hand-rolled rows line up with
+  /// the settings rows elsewhere on the page while still spanning the card.
+  static EdgeInsets get _rowInset => EdgeInsets.only(
+    left: isDesktopTargetPlatform()
+        ? AppSpacing.lg
+        : AppMetric.settingsLeadingInset,
+    right: isDesktopTargetPlatform()
+        ? AppSpacing.lg
+        : AppMetric.settingsTrailingInset,
+  );
+
   Widget _mainListRow(int index, {required bool showDivider}) {
     final c = context.colors;
     return Container(
       key: const ValueKey('folder-main-list'),
-      height: 62,
+      height: SettingsRow.resolveHeight(),
+      padding: _rowInset,
       decoration: BoxDecoration(
         border: showDivider
             ? Border(bottom: BorderSide(color: c.divider, width: 0.5))
@@ -385,23 +412,13 @@ class _ChatFolderManagementViewState extends State<ChatFolderManagementView> {
       ),
       child: Row(
         children: [
+          _dragHandle(index),
           AppIcon(HeroAppIcons.inbox, size: 23, color: AppTheme.brand),
           const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Text(
               AppStrings.t(AppStringKeys.chatFolderManagementAllChats),
               style: AppTextStyle.bodyLarge(c.textPrimary),
-            ),
-          ),
-          ReorderableDragStartListener(
-            index: index,
-            child: const Padding(
-              padding: EdgeInsets.all(AppSpacing.sm),
-              child: AppIcon(
-                HeroAppIcons.grip,
-                size: 19,
-                color: Color(0xFF9CA3AF),
-              ),
             ),
           ),
         ],
@@ -417,7 +434,8 @@ class _ChatFolderManagementViewState extends State<ChatFolderManagementView> {
     final c = context.colors;
     return Container(
       key: ValueKey('folder-${folder.id}'),
-      height: 62,
+      height: SettingsRow.resolveHeight(),
+      padding: _rowInset,
       decoration: BoxDecoration(
         border: showDivider
             ? Border(bottom: BorderSide(color: c.divider, width: 0.5))
@@ -425,6 +443,7 @@ class _ChatFolderManagementViewState extends State<ChatFolderManagementView> {
       ),
       child: Row(
         children: [
+          _dragHandle(index),
           AppIcon(HeroAppIcons.folder, size: 23, color: AppTheme.brand),
           const SizedBox(width: AppSpacing.md),
           Expanded(
@@ -451,27 +470,11 @@ class _ChatFolderManagementViewState extends State<ChatFolderManagementView> {
             behavior: HitTestBehavior.opaque,
             onTap: () => _delete(folder),
             child: const Padding(
-              padding: EdgeInsets.all(AppSpacing.sm),
+              padding: EdgeInsets.only(left: AppSpacing.sm),
               child: AppIcon(
                 HeroAppIcons.trash,
                 size: 19,
                 color: Color(0xFFFF3B30),
-              ),
-            ),
-          ),
-          ReorderableDragStartListener(
-            index: index,
-            child: const Padding(
-              padding: EdgeInsets.fromLTRB(
-                AppSpacing.xs,
-                AppSpacing.sm,
-                0,
-                AppSpacing.sm,
-              ),
-              child: AppIcon(
-                HeroAppIcons.grip,
-                size: 19,
-                color: Color(0xFF9CA3AF),
               ),
             ),
           ),
@@ -485,8 +488,9 @@ class _ChatFolderManagementViewState extends State<ChatFolderManagementView> {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () => _create(recommendation: folder),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+      child: Container(
+        constraints: BoxConstraints(minHeight: SettingsRow.resolveHeight()),
+        padding: _rowInset.copyWith(top: AppSpacing.sm, bottom: AppSpacing.sm),
         child: Row(
           children: [
             AppIcon(HeroAppIcons.plus, size: 21, color: AppTheme.brand),
@@ -515,39 +519,22 @@ class _ChatFolderManagementViewState extends State<ChatFolderManagementView> {
     );
   }
 
-  Widget _switchRow(String label, bool value, ValueChanged<bool> onChanged) {
-    final c = context.colors;
-    return SizedBox(
-      height: 56,
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(label, style: AppTextStyle.bodyLarge(c.textPrimary)),
-          ),
-          AppSwitch(value: value, onChanged: onChanged),
-        ],
-      ),
-    );
-  }
+  Widget _switchRow(String label, bool value, ValueChanged<bool> onChanged) =>
+      SettingsSwitchRow(
+        title: label,
+        value: value,
+        leading: const SettingsLeadingIcon(icon: HeroAppIcons.hashtag),
+        onChanged: onChanged,
+      );
 
-  Widget _sectionTitle(String text, {required Key key}) => Padding(
-    key: key,
-    padding: const EdgeInsets.only(left: AppSpacing.md, bottom: AppSpacing.sm),
-    child: Text(
-      text,
-      style: AppTextStyle.footnote(context.colors.textTertiary),
-    ),
-  );
+  Widget _sectionTitle(String text, {required Key key}) =>
+      SettingsSectionHeader.text(text, key: key);
 
-  Widget _card({required Key key, required List<Widget> children}) => Container(
-    key: key,
-    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-    decoration: BoxDecoration(
-      color: context.colors.card,
-      borderRadius: BorderRadius.circular(AppRadius.card),
-    ),
-    child: Column(children: children),
-  );
+  /// No horizontal padding: a settings row draws its own leading and trailing
+  /// insets and its tap surface has to reach the card's edges. Padding here
+  /// left the highlight floating in the middle of the card.
+  Widget _card({required Key key, required List<Widget> children}) =>
+      SettingsCard(key: key, children: children);
 
   Widget _divider() => Container(height: 0.5, color: context.colors.divider);
 }
@@ -615,14 +602,19 @@ class _ChatFolderEditorViewState extends State<ChatFolderEditorView> {
       ..._draft.excludedChatIds,
       ..._draft.pinnedChatIds,
     };
-    for (final id in ids) {
+
+    Future<void> resolve(int id) async {
       try {
         final chat = await widget.service.getChat(id);
-        _chatTitles[id] = chat.str('title') ?? 'Chat $id';
+        _chatTitles[id] = chat.str('title') ?? _chatFallbackTitle(id);
       } catch (_) {
-        _chatTitles[id] = 'Chat $id';
+        _chatTitles[id] = _chatFallbackTitle(id);
       }
     }
+
+    // Serializing these left every row on its numeric fallback title until the
+    // last of N round trips landed.
+    await Future.wait([for (final id in ids) resolve(id)]);
     if (mounted) setState(() {});
   }
 
@@ -644,7 +636,11 @@ class _ChatFolderEditorViewState extends State<ChatFolderEditorView> {
     final result = await Navigator.of(context).push<ChatSummary>(
       MaterialPageRoute(
         builder: (_) => ChatPickerView(
-          title: included ? 'Add included chat' : 'Add excluded chat',
+          title: AppStrings.t(
+            included
+                ? AppStringKeys.chatFolderManagementAddIncludedChat
+                : AppStringKeys.chatFolderManagementAddExcludedChat,
+          ),
         ),
       ),
     );
@@ -735,171 +731,194 @@ class _ChatFolderEditorViewState extends State<ChatFolderEditorView> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
+    return SettingsPageScaffold(
+      title: AppStrings.t(
+        widget.folderId == null
+            ? AppStringKeys.chatFolderManagementNewFolder
+            : AppStringKeys.chatFolderManagementEditFolder,
+      ),
+      onBack: () => Navigator.of(context).pop(),
+      trailing: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _save,
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.xs),
+          child: Text(
+            AppStrings.t(AppStringKeys.accentColorPickerSave),
+            style: AppTextStyle.bodyLarge(
+              AppTheme.brand,
+              weight: AppTextWeight.semibold,
+            ),
+          ),
+        ),
+      ),
+      child: SettingsListView(
         children: [
-          NavHeader(
-            title: widget.folderId == null ? 'New folder' : 'Edit folder',
-            onBack: () => Navigator.of(context).pop(),
-            trailing: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: _save,
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.xs),
-                child: Text(
-                  AppStrings.t(AppStringKeys.accentColorPickerSave),
-                  style: AppTextStyle.bodyLarge(
-                    AppTheme.brand,
-                    weight: AppTextWeight.semibold,
-                  ),
-                ),
+          _section(AppStrings.t(AppStringKeys.chatFolderManagementSectionName)),
+          _card([
+            TextField(
+              key: const ValueKey('folder-name'),
+              controller: _title,
+              maxLength: 12,
+              style: AppTextStyle.bodyLarge(c.textPrimary),
+              decoration: InputDecoration(
+                border: InputBorder.none,
+                hintText: AppStrings.t(AppStringKeys.chatInfoFolderNameLabel),
+                counterText: '',
               ),
             ),
-          ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.xl,
-                AppSpacing.lg,
-                AppSpacing.section,
-              ),
-              children: [
-                _section('Name'),
-                _card([
-                  TextField(
-                    key: const ValueKey('folder-name'),
-                    controller: _title,
-                    maxLength: 12,
-                    style: AppTextStyle.bodyLarge(c.textPrimary),
-                    decoration: InputDecoration(
-                      border: InputBorder.none,
-                      hintText: AppStrings.t(
-                        AppStringKeys.chatInfoFolderNameLabel,
-                      ),
-                      counterText: '',
-                    ),
-                  ),
-                ]),
-                const SizedBox(height: AppSpacing.xl),
-                _section('Icon'),
-                _card([
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      vertical: AppSpacing.md,
-                    ),
-                    child: Wrap(
-                      spacing: AppSpacing.sm,
-                      runSpacing: AppSpacing.sm,
-                      children: [
-                        for (final entry in _folderIcons)
-                          _iconChoice(entry.$1, entry.$2),
-                      ],
-                    ),
-                  ),
-                ]),
-                const SizedBox(height: AppSpacing.xl),
-                _section('Tag color'),
-                _card([
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      vertical: AppSpacing.md,
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        _colorChoice(-1, c.textTertiary),
-                        for (var id = 0; id < _folderColors.length; id++)
-                          _colorChoice(id, _folderColors[id]),
-                      ],
-                    ),
-                  ),
-                ]),
-                const SizedBox(height: AppSpacing.xl),
-                _section('Include'),
-                _card([
-                  _toggle('Contacts', _draft.includeContacts, (value) {
-                    setState(
-                      () => _draft = _draft.copyWith(includeContacts: value),
-                    );
-                  }),
-                  _divider(),
-                  _toggle('Non-contacts', _draft.includeNonContacts, (value) {
-                    setState(
-                      () => _draft = _draft.copyWith(includeNonContacts: value),
-                    );
-                  }),
-                  _divider(),
-                  _toggle('Groups', _draft.includeGroups, (value) {
-                    setState(
-                      () => _draft = _draft.copyWith(includeGroups: value),
-                    );
-                  }),
-                  _divider(),
-                  _toggle('Channels', _draft.includeChannels, (value) {
-                    setState(
-                      () => _draft = _draft.copyWith(includeChannels: value),
-                    );
-                  }),
-                  _divider(),
-                  _toggle('Bots', _draft.includeBots, (value) {
-                    setState(
-                      () => _draft = _draft.copyWith(includeBots: value),
-                    );
-                  }),
-                  for (final id in _sortedIds(_draft.includedChatIds)) ...[
-                    _divider(),
-                    _chatRow(id, included: true),
-                  ],
-                  _divider(),
-                  _actionRow(
-                    'Add chat',
-                    HeroAppIcons.plus,
-                    () => _pickChat(included: true),
-                  ),
-                ]),
-                const SizedBox(height: AppSpacing.xl),
-                _section('Exclude'),
-                _card([
-                  _toggle('Muted chats', _draft.excludeMuted, (value) {
-                    setState(
-                      () => _draft = _draft.copyWith(excludeMuted: value),
-                    );
-                  }),
-                  _divider(),
-                  _toggle('Read chats', _draft.excludeRead, (value) {
-                    setState(
-                      () => _draft = _draft.copyWith(excludeRead: value),
-                    );
-                  }),
-                  _divider(),
-                  _toggle('Archived chats', _draft.excludeArchived, (value) {
-                    setState(
-                      () => _draft = _draft.copyWith(excludeArchived: value),
-                    );
-                  }),
-                  for (final id in _sortedIds(_draft.excludedChatIds)) ...[
-                    _divider(),
-                    _chatRow(id, included: false),
-                  ],
-                  _divider(),
-                  _actionRow(
-                    'Add chat',
-                    HeroAppIcons.plus,
-                    () => _pickChat(included: false),
-                  ),
-                ]),
-                if (widget.folderId != null) ...[
-                  const SizedBox(height: AppSpacing.xl),
-                  _section('Sharing'),
-                  _card([
-                    _actionRow('Invite links', HeroAppIcons.link, _openLinks),
-                  ]),
+          ]),
+          const SizedBox(height: AppSpacing.xl),
+          _section(AppStrings.t(AppStringKeys.chatFolderManagementSectionIcon)),
+          _card([
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+              child: Wrap(
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.sm,
+                children: [
+                  for (final entry in _folderIcons)
+                    _iconChoice(entry.$1, entry.$2),
                 ],
-              ],
+              ),
             ),
+          ]),
+          const SizedBox(height: AppSpacing.xl),
+          _section(
+            AppStrings.t(AppStringKeys.chatFolderManagementSectionTagColor),
           ),
+          _card([
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _colorChoice(-1, c.textTertiary),
+                  for (var id = 0; id < _folderColors.length; id++)
+                    _colorChoice(id, _folderColors[id]),
+                ],
+              ),
+            ),
+          ]),
+          const SizedBox(height: AppSpacing.xl),
+          _section(
+            AppStrings.t(AppStringKeys.chatFolderManagementSectionInclude),
+          ),
+          _card([
+            _toggle(
+              AppStrings.t(AppStringKeys.chatFolderManagementIncludeContacts),
+              _draft.includeContacts,
+              (value) {
+                setState(
+                  () => _draft = _draft.copyWith(includeContacts: value),
+                );
+              },
+            ),
+            _divider(),
+            _toggle(
+              AppStrings.t(
+                AppStringKeys.chatFolderManagementIncludeNonContacts,
+              ),
+              _draft.includeNonContacts,
+              (value) {
+                setState(
+                  () => _draft = _draft.copyWith(includeNonContacts: value),
+                );
+              },
+            ),
+            _divider(),
+            _toggle(
+              AppStrings.t(AppStringKeys.chatFolderManagementIncludeGroups),
+              _draft.includeGroups,
+              (value) {
+                setState(() => _draft = _draft.copyWith(includeGroups: value));
+              },
+            ),
+            _divider(),
+            _toggle(
+              AppStrings.t(AppStringKeys.chatFolderManagementIncludeChannels),
+              _draft.includeChannels,
+              (value) {
+                setState(
+                  () => _draft = _draft.copyWith(includeChannels: value),
+                );
+              },
+            ),
+            _divider(),
+            _toggle(
+              AppStrings.t(AppStringKeys.chatFolderManagementIncludeBots),
+              _draft.includeBots,
+              (value) {
+                setState(() => _draft = _draft.copyWith(includeBots: value));
+              },
+            ),
+            for (final id in _sortedIds(_draft.includedChatIds)) ...[
+              _divider(),
+              _chatRow(id, included: true),
+            ],
+            _divider(),
+            _actionRow(
+              AppStrings.t(AppStringKeys.chatFolderManagementAddChat),
+              HeroAppIcons.plus,
+              () => _pickChat(included: true),
+            ),
+          ]),
+          const SizedBox(height: AppSpacing.xl),
+          _section(
+            AppStrings.t(AppStringKeys.chatFolderManagementSectionExclude),
+          ),
+          _card([
+            _toggle(
+              AppStrings.t(AppStringKeys.chatFolderManagementExcludeMutedChats),
+              _draft.excludeMuted,
+              (value) {
+                setState(() => _draft = _draft.copyWith(excludeMuted: value));
+              },
+            ),
+            _divider(),
+            _toggle(
+              AppStrings.t(AppStringKeys.chatFolderManagementExcludeReadChats),
+              _draft.excludeRead,
+              (value) {
+                setState(() => _draft = _draft.copyWith(excludeRead: value));
+              },
+            ),
+            _divider(),
+            _toggle(
+              AppStrings.t(
+                AppStringKeys.chatFolderManagementExcludeArchivedChats,
+              ),
+              _draft.excludeArchived,
+              (value) {
+                setState(
+                  () => _draft = _draft.copyWith(excludeArchived: value),
+                );
+              },
+            ),
+            for (final id in _sortedIds(_draft.excludedChatIds)) ...[
+              _divider(),
+              _chatRow(id, included: false),
+            ],
+            _divider(),
+            _actionRow(
+              AppStrings.t(AppStringKeys.chatFolderManagementAddChat),
+              HeroAppIcons.plus,
+              () => _pickChat(included: false),
+            ),
+          ]),
+          if (widget.folderId != null) ...[
+            const SizedBox(height: AppSpacing.xl),
+            _section(
+              AppStrings.t(AppStringKeys.chatFolderManagementSectionSharing),
+            ),
+            _card([
+              _actionRow(
+                AppStrings.t(AppStringKeys.chatFolderManagementInviteLinksRow),
+                HeroAppIcons.link,
+                _openLinks,
+              ),
+            ]),
+          ],
         ],
       ),
     );
@@ -913,7 +932,7 @@ class _ChatFolderEditorViewState extends State<ChatFolderEditorView> {
         children: [
           Expanded(
             child: Text(
-              _chatTitles[id] ?? 'Chat $id',
+              _chatTitles[id] ?? _chatFallbackTitle(id),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: AppTextStyle.bodyLarge(c.textPrimary),
@@ -985,7 +1004,7 @@ class _ChatFolderEditorViewState extends State<ChatFolderEditorView> {
             color: selected ? AppTheme.brand : c.divider,
             width: selected ? 1.5 : 1,
           ),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppRadius.card),
         ),
         child: AppIcon(
           icon,
@@ -1052,12 +1071,8 @@ class _ChatFolderEditorViewState extends State<ChatFolderEditorView> {
     ),
   );
 
-  Widget _card(List<Widget> children) => Container(
+  Widget _card(List<Widget> children) => SettingsPanel(
     padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-    decoration: BoxDecoration(
-      color: context.colors.card,
-      borderRadius: BorderRadius.circular(AppRadius.card),
-    ),
     child: Column(children: children),
   );
 
@@ -1186,50 +1201,38 @@ class _ChatFolderInviteLinksViewState extends State<ChatFolderInviteLinksView> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
-        children: [
-          NavHeader(
-            title: AppStrings.t(
-              AppStringKeys.chatFolderManagementFolderInviteLinks,
-            ),
-            onBack: () => Navigator.of(context).pop(),
-            trailing: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: _loading ? null : _create,
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.xs),
-                child: AppIcon(
-                  HeroAppIcons.plus,
-                  size: 24,
-                  color: _loading ? c.textTertiary : AppTheme.brand,
-                ),
-              ),
-            ),
+    return SettingsPageScaffold(
+      title: AppStrings.t(AppStringKeys.chatFolderManagementFolderInviteLinks),
+      onBack: () => Navigator.of(context).pop(),
+      trailing: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _loading ? null : _create,
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.xs),
+          child: AppIcon(
+            HeroAppIcons.plus,
+            size: 24,
+            color: _loading ? c.textTertiary : AppTheme.brand,
           ),
-          Expanded(
-            child: _loading
-                ? const Center(child: AppActivityIndicator())
-                : _links.isEmpty
-                ? Center(
-                    child: Text(
-                      AppStrings.t(
-                        AppStringKeys.chatFolderManagementNoInviteLinksYet,
-                      ),
-                      style: AppTextStyle.body(c.textSecondary),
-                    ),
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.all(AppSpacing.lg),
-                    itemCount: _links.length,
-                    separatorBuilder: (_, _) =>
-                        const SizedBox(height: AppSpacing.sm),
-                    itemBuilder: (_, index) => _linkRow(_links[index]),
-                  ),
-          ),
-        ],
+        ),
       ),
+      child: _loading
+          ? const Center(child: AppActivityIndicator())
+          : _links.isEmpty
+          ? Center(
+              child: Text(
+                AppStrings.t(
+                  AppStringKeys.chatFolderManagementNoInviteLinksYet,
+                ),
+                style: AppTextStyle.body(c.textSecondary),
+              ),
+            )
+          : ListView.separated(
+              padding: AppInsets.screen,
+              itemCount: _links.length,
+              separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
+              itemBuilder: (_, index) => _linkRow(_links[index]),
+            ),
     );
   }
 
@@ -1238,12 +1241,8 @@ class _ChatFolderInviteLinksViewState extends State<ChatFolderInviteLinksView> {
     final link = item.str('invite_link') ?? '';
     final name = item.str('name') ?? '';
     final count = item.int64Array('chat_ids')?.length ?? 0;
-    return Container(
+    return SettingsPanel(
       padding: const EdgeInsets.all(AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
       child: Row(
         children: [
           AppIcon(HeroAppIcons.link, size: 22, color: AppTheme.brand),
@@ -1368,8 +1367,9 @@ class _ChatFolderInviteLinkEditorViewState
           widget.service
               .getChat(id)
               .then(
-                (chat) => _titles[id] = chat.str('title') ?? 'Chat $id',
-                onError: (_) => _titles[id] = 'Chat $id',
+                (chat) =>
+                    _titles[id] = chat.str('title') ?? _chatFallbackTitle(id),
+                onError: (_) => _titles[id] = _chatFallbackTitle(id),
               ),
       ]);
       if (!mounted) return;
@@ -1454,94 +1454,87 @@ class _ChatFolderInviteLinkEditorViewState
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    return Scaffold(
-      backgroundColor: c.groupedBackground,
-      body: Column(
-        children: [
-          NavHeader(
-            title: widget.inviteLink == null
-                ? 'New invite link'
-                : 'Edit invite link',
-            onBack: () => Navigator.of(context).pop(),
-            trailing: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: _loading || _saving ? null : _save,
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.xs),
-                child: _saving
-                    ? const AppActivityIndicator(size: 20)
-                    : Text(
-                        AppStrings.t(AppStringKeys.accentColorPickerSave),
-                        style: AppTextStyle.bodyLarge(
-                          _loading ? c.textTertiary : AppTheme.brand,
-                          weight: AppTextWeight.semibold,
-                        ),
-                      ),
-              ),
-            ),
-          ),
-          Expanded(
-            child: _loading
-                ? const Center(child: AppActivityIndicator())
-                : ListView(
-                    padding: const EdgeInsets.fromLTRB(
-                      AppSpacing.lg,
-                      AppSpacing.xl,
-                      AppSpacing.lg,
-                      AppSpacing.section,
-                    ),
-                    children: [
-                      _section('Name'),
-                      _card([
-                        TextField(
-                          controller: _name,
-                          maxLength: 32,
-                          style: AppTextStyle.bodyLarge(c.textPrimary),
-                          decoration: InputDecoration(
-                            border: InputBorder.none,
-                            hintText: AppStrings.t(
-                              AppStringKeys
-                                  .chatFolderManagementOptionalLinkName,
-                            ),
-                            counterText: '',
-                          ),
-                        ),
-                      ]),
-                      const SizedBox(height: AppSpacing.xl),
-                      _section('Included groups and channels'),
-                      _card(
-                        _available.isEmpty
-                            ? [
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: AppSpacing.xl,
-                                  ),
-                                  child: Text(
-                                    AppStrings.t(
-                                      AppStringKeys
-                                          .chatFolderManagementThisFolderHasNoChatsThatCanBe,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                    style: AppTextStyle.body(c.textSecondary),
-                                  ),
-                                ),
-                              ]
-                            : [
-                                for (
-                                  var index = 0;
-                                  index < _available.length;
-                                  index++
-                                ) ...[
-                                  if (index > 0) _divider(),
-                                  _chatChoice(_available[index]),
-                                ],
-                              ],
-                      ),
-                    ],
-                  ),
-          ),
-        ],
+    return SettingsPageScaffold(
+      title: AppStrings.t(
+        widget.inviteLink == null
+            ? AppStringKeys.chatFolderManagementNewInviteLink
+            : AppStringKeys.chatFolderManagementEditInviteLink,
       ),
+      onBack: () => Navigator.of(context).pop(),
+      trailing: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _loading || _saving ? null : _save,
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.xs),
+          child: _saving
+              ? const AppActivityIndicator(size: 20)
+              : Text(
+                  AppStrings.t(AppStringKeys.accentColorPickerSave),
+                  style: AppTextStyle.bodyLarge(
+                    _loading ? c.textTertiary : AppTheme.brand,
+                    weight: AppTextWeight.semibold,
+                  ),
+                ),
+        ),
+      ),
+      child: _loading
+          ? const Center(child: AppActivityIndicator())
+          : SettingsListView(
+              children: [
+                _section(
+                  AppStrings.t(AppStringKeys.chatFolderManagementSectionName),
+                ),
+                _card([
+                  TextField(
+                    controller: _name,
+                    maxLength: 32,
+                    style: AppTextStyle.bodyLarge(c.textPrimary),
+                    decoration: InputDecoration(
+                      border: InputBorder.none,
+                      hintText: AppStrings.t(
+                        AppStringKeys.chatFolderManagementOptionalLinkName,
+                      ),
+                      counterText: '',
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: AppSpacing.xl),
+                _section(
+                  AppStrings.t(
+                    AppStringKeys
+                        .chatFolderManagementSectionIncludedGroupsAndChannels,
+                  ),
+                ),
+                _card(
+                  _available.isEmpty
+                      ? [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              vertical: AppSpacing.xl,
+                            ),
+                            child: Text(
+                              AppStrings.t(
+                                AppStringKeys
+                                    .chatFolderManagementThisFolderHasNoChatsThatCanBe,
+                              ),
+                              textAlign: TextAlign.center,
+                              style: AppTextStyle.body(c.textSecondary),
+                            ),
+                          ),
+                        ]
+                      : [
+                          for (
+                            var index = 0;
+                            index < _available.length;
+                            index++
+                          ) ...[
+                            if (index > 0) _divider(),
+                            _chatChoice(_available[index]),
+                          ],
+                        ],
+                ),
+              ],
+            ),
     );
   }
 
@@ -1557,7 +1550,7 @@ class _ChatFolderInviteLinkEditorViewState
           children: [
             Expanded(
               child: Text(
-                _titles[id] ?? 'Chat $id',
+                _titles[id] ?? _chatFallbackTitle(id),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: AppTextStyle.bodyLarge(c.textPrimary),
@@ -1582,12 +1575,8 @@ class _ChatFolderInviteLinkEditorViewState
     ),
   );
 
-  Widget _card(List<Widget> children) => Container(
+  Widget _card(List<Widget> children) => SettingsPanel(
     padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-    decoration: BoxDecoration(
-      color: context.colors.card,
-      borderRadius: BorderRadius.circular(AppRadius.card),
-    ),
     child: Column(children: children),
   );
 

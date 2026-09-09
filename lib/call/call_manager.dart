@@ -14,6 +14,7 @@ import 'dart:convert';
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../tdlib/json_helpers.dart';
@@ -51,6 +52,8 @@ class ActiveCall {
   ActiveCall({
     required this.callId,
     required this.peerUserId,
+    this.accountSlot = 0,
+    this.clientId = 0,
     this.peerName = '',
     this.peerPhoto,
     required this.isOutgoing,
@@ -62,6 +65,12 @@ class ActiveCall {
   }) : systemUuid = systemUuid ?? LiveCommunicationBridge.newUuid();
   int callId;
   final int peerUserId;
+
+  /// Stable account identity captured when this call was created or received.
+  final int accountSlot;
+
+  /// Concrete TDLib client that owns [callId] and [peerUserId].
+  final int clientId;
   String peerName;
   TdFileRef? peerPhoto;
   final bool isOutgoing;
@@ -95,6 +104,7 @@ class CallManager extends ChangeNotifier {
   final CallMediaEngine _engine;
   final GroupCallController groups;
   StreamSubscription? _sub;
+  TdAccountLease? _callLease;
   bool _started = false;
   Future<void> _protocolReady = Future<void>.value();
 
@@ -133,15 +143,31 @@ class CallManager extends ChangeNotifier {
     // A call must not be created/accepted until this resolves. Otherwise a fast
     // tap can send the stale fallback protocol while the native engine is still
     // reporting its actual versions, leaving the peers unable to bring up media.
-    _protocolReady = _loadProtocol();
+    // Asking the engine for its protocol is what dlopens libntgcalls.so (~20 MB
+    // of WebRTC), so it waits for a gap in the scheduler rather than competing
+    // with the rest of the launch for I/O — create/accept still await it.
+    _protocolReady = _warmProtocol();
     // Outbound media signaling → TDLib. (v3/v4 calls negotiate WebRTC over this.)
     _engine.onSignalingData = _sendSignaling;
-    _sub = _client.subscribe().listen((update) {
+    _sub = _client.subscribeAll().listen((update) {
+      final clientId = update.integer('@client_id');
+      if (clientId == null) return;
       switch (update.type) {
         case 'updateCall':
           final c = update.obj('call');
-          if (c != null) _handle(c);
+          final accountSlot = _client.slotForClient(clientId);
+          if (c != null && accountSlot != null) {
+            _handle(c, accountSlot: accountSlot, clientId: clientId);
+          }
         case 'updateNewCallSignalingData':
+          final active = call;
+          if (active == null || active.clientId != clientId) return;
+          final signalingCallId = update.integer('call_id');
+          if (signalingCallId != null &&
+              active.callId != 0 &&
+              signalingCallId != active.callId) {
+            return;
+          }
           // Inbound media signaling → the engine. `data` is base64 in TDLib JSON.
           final d = update.str('data');
           if (d != null) {
@@ -154,13 +180,13 @@ class CallManager extends ChangeNotifier {
   }
 
   void _sendSignaling(Uint8List data) {
-    final callId = call?.callId;
-    if (callId == null || callId == 0) return;
-    _client.send({
+    final active = call;
+    if (active == null || active.callId == 0 || active.clientId == 0) return;
+    _client.sendTo({
       '@type': 'sendCallSignalingData',
-      'call_id': callId,
+      'call_id': active.callId,
       'data': base64.encode(data),
-    });
+    }, active.clientId);
   }
 
   void _ignoreSystemError(Future<void> operation) {
@@ -170,6 +196,7 @@ class CallManager extends ChangeNotifier {
   @override
   void dispose() {
     _sub?.cancel();
+    unawaited(_releaseCallLease());
     groups.removeListener(_groupCallChanged);
     groups.dispose();
     super.dispose();
@@ -182,19 +209,25 @@ class CallManager extends ChangeNotifier {
   CallStartResult startCall(int userId, bool isVideo) {
     if (!supportsMediaCalls) return CallStartResult.unsupported;
     if (call != null || groups.session != null) return CallStartResult.busy;
+    final accountSlot = _client.activeSlot;
+    final lease = _client.retainAccountSlot(accountSlot);
+    if (lease == null) return CallStartResult.busy;
     isMuted = false;
     isSpeaker = false;
     isVideoEnabled = isVideo;
+    _callLease = lease;
     call = ActiveCall(
       callId: 0,
       peerUserId: userId,
+      accountSlot: accountSlot,
+      clientId: lease.clientId,
       isOutgoing: true,
       isVideo: isVideo,
       phase: CallPhase.requesting,
     );
     notifyListeners();
     unawaited(_ensureSystemConversation(call!));
-    _resolvePeer(userId);
+    _resolvePeer(call!);
     unawaited(_createCall(call!));
     return CallStartResult.started;
   }
@@ -240,6 +273,21 @@ class CallManager extends ChangeNotifier {
     return true;
   }
 
+  /// Loads the protocol in a gap in the scheduler, with a timed backstop.
+  /// An idle task is declined for as long as any transient frame callback is
+  /// pending, so on a screen that animates without stopping it can sit in the
+  /// queue for a long time — and `_createCall`/`_acceptCall` await this future,
+  /// so the wait has to be bounded. Whichever arm arrives first performs the
+  /// load; the other joins the same one rather than querying twice.
+  Future<void> _warmProtocol() {
+    Future<void>? load;
+    Future<void> loadOnce() => load ??= _loadProtocol();
+    return Future.any<void>([
+      SchedulerBinding.instance.scheduleTask<void>(loadOnce, Priority.idle),
+      Future<void>.delayed(const Duration(seconds: 3), loadOnce),
+    ]);
+  }
+
   Future<void> _loadProtocol() async {
     Map<String, dynamic>? protocol;
     try {
@@ -275,12 +323,12 @@ class CallManager extends ChangeNotifier {
       _engine.setVideoEnabled(true, front: useFrontCamera);
     }
     try {
-      await _client.query({
+      await _client.queryTo({
         '@type': 'createCall',
         'user_id': requestedCall.peerUserId,
         'protocol': _callProtocol,
         'is_video': requestedCall.isVideo,
-      });
+      }, requestedCall.clientId);
     } catch (error, stackTrace) {
       debugPrint('Failed to create Telegram call: $error\n$stackTrace');
       if (identical(call, requestedCall)) _end(reportSystem: true);
@@ -297,11 +345,11 @@ class CallManager extends ChangeNotifier {
       _engine.setVideoEnabled(true, front: useFrontCamera);
     }
     try {
-      await _client.query({
+      await _client.queryTo({
         '@type': 'acceptCall',
         'call_id': requestedCall.callId,
         'protocol': _callProtocol,
-      });
+      }, requestedCall.clientId);
     } catch (error, stackTrace) {
       debugPrint('Failed to accept Telegram call: $error\n$stackTrace');
       if (identical(call, requestedCall)) _end(reportSystem: true);
@@ -335,7 +383,7 @@ class CallManager extends ChangeNotifier {
 
     if (callId != 0) {
       _client
-          .query({
+          .queryTo({
             '@type': 'discardCall',
             'call_id': callId,
             'is_disconnected': false,
@@ -343,7 +391,7 @@ class CallManager extends ChangeNotifier {
             'duration': duration,
             'is_video': isVideo,
             'connection_id': 0,
-          })
+          }, current.clientId)
           .catchError((_) => <String, dynamic>{});
     }
     _engine.stop();
@@ -404,13 +452,23 @@ class CallManager extends ChangeNotifier {
 
   // MARK: - Update handling
 
-  void _handle(Map<String, dynamic> tdCall) {
+  void _handle(
+    Map<String, dynamic> tdCall, {
+    required int accountSlot,
+    required int clientId,
+  }) {
     final callId = tdCall.integer('id');
     if (callId == null) return;
     final peerUserId = tdCall.int64('user_id') ?? 0;
     final isOutgoing = tdCall.boolean('is_outgoing') ?? false;
     final isVideo = tdCall.boolean('is_video') ?? false;
     final state = tdCall.obj('state');
+    final current = call;
+    if (current != null) {
+      if (current.clientId != clientId) return;
+      if (current.callId != 0 && current.callId != callId) return;
+      if (current.callId == 0 && current.isOutgoing != isOutgoing) return;
+    }
     debugPrint(
       '📞 TDLib call id=$callId state=${state?.type ?? "unknown"} '
       'outgoing=$isOutgoing video=$isVideo',
@@ -425,10 +483,18 @@ class CallManager extends ChangeNotifier {
             isReceived ? CallPhase.ringingOutgoing : CallPhase.requesting,
             callId,
           );
-        } else if (call?.callId != callId) {
+        } else if (call == null) {
+          final lease = _client.retainAccountSlot(accountSlot);
+          if (lease == null || lease.clientId != clientId) {
+            unawaited(lease?.release());
+            break;
+          }
+          _callLease = lease;
           call = ActiveCall(
             callId: callId,
             peerUserId: peerUserId,
+            accountSlot: accountSlot,
+            clientId: clientId,
             isOutgoing: false,
             isVideo: isVideo,
             phase: CallPhase.ringingIncoming,
@@ -438,7 +504,7 @@ class CallManager extends ChangeNotifier {
           isVideoEnabled = isVideo;
           notifyListeners();
           unawaited(_ensureSystemConversation(call!));
-          _resolvePeer(peerUserId);
+          _resolvePeer(call!);
         } else {
           _updatePhase(CallPhase.ringingIncoming, callId);
         }
@@ -476,7 +542,7 @@ class CallManager extends ChangeNotifier {
           );
           _engine.stop();
           _client
-              .query({
+              .queryTo({
                 '@type': 'discardCall',
                 'call_id': callId,
                 'is_disconnected': true,
@@ -484,7 +550,7 @@ class CallManager extends ChangeNotifier {
                 'duration': 0,
                 'is_video': active.isVideo,
                 'connection_id': 0,
-              })
+              }, active.clientId)
               .catchError((_) => <String, dynamic>{});
           active.phase = CallPhase.ending;
           notifyListeners();
@@ -566,24 +632,34 @@ class CallManager extends ChangeNotifier {
 
   void _clear() {
     call = null;
+    unawaited(_releaseCallLease());
     isMuted = false;
     isSpeaker = false;
     isVideoEnabled = false;
     notifyListeners();
   }
 
-  Future<void> _resolvePeer(int userId) async {
+  Future<void> _releaseCallLease() async {
+    final lease = _callLease;
+    _callLease = null;
+    await lease?.release();
+  }
+
+  Future<void> _resolvePeer(ActiveCall requestedCall) async {
     try {
-      final user = await _client.query({'@type': 'getUser', 'user_id': userId});
-      if (call?.peerUserId != userId) return;
-      call?.peerName = TDParse.userName(user);
-      call?.peerPhoto = TDParse.smallPhoto(user.obj('profile_photo'));
-      final active = call;
-      if (active != null) {
+      final user = await _client.queryTo({
+        '@type': 'getUser',
+        'user_id': requestedCall.peerUserId,
+      }, requestedCall.clientId);
+      if (!identical(call, requestedCall)) return;
+      requestedCall.peerName = TDParse.userName(user);
+      requestedCall.peerPhoto = TDParse.smallPhoto(user.obj('profile_photo'));
+      if (identical(call, requestedCall)) {
         _ignoreSystemError(
-          LiveCommunicationBridge.instance.updateMembers(active.systemUuid, [
-            active.peerName,
-          ]),
+          LiveCommunicationBridge.instance.updateMembers(
+            requestedCall.systemUuid,
+            [requestedCall.peerName],
+          ),
         );
       }
       notifyListeners();
